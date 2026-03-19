@@ -39,12 +39,13 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["camera", "sensor", "button"]
+ALL_PLATFORMS = ["camera", "sensor", "button", "switch"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
 # LOCAL  → LAN direct, returns Digest user/password, slow (~15s)
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
+LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early to be safe
 
 DEFAULT_OPTIONS = {
     "scan_interval":    60,    # coordinator tick interval (seconds)
@@ -82,8 +83,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=timedelta(seconds=int(opts.get("scan_interval", 60))),
         )
-        # Persists live-stream proxy info between coordinator refreshes
+        # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
         self._live_connections: dict[str, dict] = {}
+        self._live_opened_at:   dict[str, float] = {}   # timestamp when session was opened
         # Per-type last-fetched timestamps (0 = never → fetch immediately)
         self._last_status: float = 0.0
         self._last_events: float = 0.0
@@ -158,6 +160,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         opts    = self.options
         now     = time.monotonic()
+
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
         do_events = (now - self._last_events) >= int(opts.get("interval_events", 60))
 
@@ -331,6 +334,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
+                                self._live_opened_at[cam_id]   = time.monotonic()
                                 await self.async_request_refresh()
                                 return result
                             elif resp.status == 401:

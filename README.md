@@ -50,9 +50,9 @@ of Bosch's software was distributed. Only network protocol observations were use
 | 🕐 Last event timestamp | `sensor` | ✅ enabled |
 | 📊 Events today count | `sensor` | ✅ enabled |
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
-| 📡 Open Live Stream button | `button` | ✅ enabled |
+| 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
 | 💾 Auto-download events to folder | background | ❌ optional |
-| 🎥 **Live stream — 30fps H.264 + AAC audio** | `camera` | ✅ via Open Live Stream |
+| 🎥 **Live stream — 30fps H.264 + AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
@@ -98,47 +98,28 @@ Restart HA so it picks up the new custom component.
 
 Go to **Settings → Integrations → + Add Integration** and search for **"Bosch Smart Home Camera"**.
 
-### 4. Enter your Bearer Token
+### 4. Log in with your Bosch account
 
-The integration will ask for a Bearer Token. See the next section on how to get it.
+The integration uses OAuth2 (Bosch SingleKey ID). During setup, you will see a login URL — open it in your browser, log in, then paste the redirect URL back into the integration.
+
+The integration saves your refresh token and renews it silently in the background. No manual token copy-paste needed.
 
 ---
 
-## Getting the Bearer Token
+## Authentication
 
-The Bosch cloud API uses a JWT Bearer token (OAuth2 PKCE flow, issued by Bosch's Keycloak server).
+The integration uses **OAuth2 PKCE** with your Bosch SingleKey ID (the same account you use for the Bosch Smart Home Camera app).
 
-### Recommended: get_token.py (automatic)
+**Setup flow:**
+1. During configuration, a login URL is shown — copy it and open it in your browser
+2. Log in with your Bosch SingleKey ID
+3. Your browser will show a **404 page** — this is expected and normal
+4. Copy the full URL from the browser address bar (starts with `https://www.bosch.com/boschcam?code=...`)
+5. Paste that URL back into the integration dialog
 
-Use the `get_token.py` script from the [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python):
+After first login, the integration saves a long-lived **refresh token** and renews the access token silently in the background. No manual action needed day-to-day.
 
-```bash
-python3 get_token.py           # first run → browser login → saves refresh_token
-python3 get_token.py --refresh # silent renewal (no browser)
-python3 get_token.py --show    # show current token + expiry
-```
-
-First run opens your browser for a one-time Bosch SingleKey ID login and saves a long-lived
-`refresh_token` to `bosch_config.json`. All subsequent runs renew silently — no browser needed.
-
-Copy the `bearer_token` value from `bosch_config.json` into the integration's configuration.
-
-**Token lifetime:** ~1 hour. When cameras stop updating, run `python3 get_token.py --refresh`
-and paste the new token in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
-
-### Fallback: mitmproxy capture
-
-If the automatic flow is unavailable, capture a token from the Bosch Smart Home Camera app:
-
-```bash
-pip3 install mitmproxy
-mitmdump --listen-host YOUR_MAC_IP --listen-port 8890
-```
-
-On your iPhone: **Settings → WiFi → your network → Configure Proxy → Manual**
-(Server: `YOUR_MAC_IP`, Port: `8890`), visit `http://mitm.it` to install the CA cert,
-then force-close and reopen the **Bosch Smart Home Camera** app. Copy the
-`Authorization: Bearer eyJ...` value from the terminal output.
+If the refresh token expires (rare, after months of inactivity), go to **Settings → Integrations → Bosch Smart Home Camera → Configure → Force new browser login**.
 
 ---
 
@@ -148,13 +129,15 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| Bearer Token | Paste a fresh token here (leave blank to keep current) | — |
-| Scan interval | How often to refresh snapshots (seconds) | 30 |
+| Coordinator tick interval | How often the integration wakes up (seconds) | 60 |
+| Camera status check interval | How often to ping ONLINE/OFFLINE (seconds) | 300 |
+| Events fetch interval | How often to check for new motion events (seconds) | 300 |
 | Enable snapshots | Show camera entities with latest JPEG | ✅ |
 | Enable sensors | Show status / last event / events-today sensors | ✅ |
-| Enable buttons | Show Refresh Snapshot + Open Live Stream buttons | ✅ |
+| Enable buttons | Show Refresh Snapshot button + Live Stream switch | ✅ |
 | Auto-download events | Download all event JPEGs and MP4 clips to a local folder | ❌ |
 | Download path | Local path for auto-downloaded events (e.g. `/config/bosch_events`) | — |
+| Force new browser login | Re-run OAuth2 login if refresh token expired | — |
 
 ---
 
@@ -186,7 +169,7 @@ For each discovered camera (example: camera named "Outdoor"):
 | `sensor.bosch_outdoor_last_event` | sensor | Timestamp of latest motion event |
 | `sensor.bosch_outdoor_events_today` | sensor | Number of events today |
 | `button.bosch_outdoor_refresh_snapshot` | button | Force immediate refresh |
-| `button.bosch_outdoor_open_live_stream` | button | Try live RTSP connection |
+| `switch.bosch_outdoor_live_stream` | switch | Live stream ON/OFF |
 
 All entities share a single HA device (grouped in the device view).
 
@@ -219,7 +202,9 @@ Suggested path: `/config/bosch_events` (accessible via HA file editor / Samba sh
 
 ### Live Stream — How It Works
 
-The live proxy is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
+Turn ON the **Live Stream switch** for a camera to open a live proxy connection.
+
+The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
 
 Response includes `urls[0]` = `proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`.
 
@@ -230,17 +215,20 @@ Response includes `urls[0]` = `proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`
 | `42090` | HTTP | `snap.jpg` — current JPEG snapshot, no auth needed |
 | `443` | RTSP/1.0 over TLS (`rtsps://`) | Full 30fps H.264 1920×1080 + AAC-LC 16kHz audio |
 
-The "Open Live Stream" button opens this connection and provides:
-- `live_proxy`: `https://proxy-NN:42090/{hash}/snap.jpg` — current image (~1.5s latency)
-- `live_rtsps`: `rtsps://proxy-NN:443/{hash}/rtsp_tunnel?inst=1&enableaudio=1&...` — full stream
+When the switch is ON, the camera entity exposes:
+- `rtsps_url` attribute: `rtsps://proxy-NN:443/{hash}/rtsp_tunnel?inst=1&enableaudio=1&...` — full stream
+- `proxy_snap_url` attribute: `https://proxy-NN:42090/{hash}/snap.jpg` — current image
 
 The `stream_source` is set to the `rtsps://` URL. HA's stream component (ffmpeg backend)
 can open this if TLS verification can be disabled for Bosch's private CA.
 
+**The live stream stays active** as long as the switch is ON. Turn it OFF to close the session.
+
 > **Note:** If HA's stream component cannot open `rtsps://` (TLS verify issues),
 > use the Python CLI tool's `live` command which uses `ffplay -tls_verify 0`.
 
-Sessions expire after ~60 seconds. Press "Open Live Stream" again to renew.
+> **Tip:** Add a **Camera card** in the Lovelace dashboard, select the camera entity,
+> and click the live button in the card to start streaming.
 
 ---
 
@@ -279,7 +267,8 @@ rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
   → Open with: ffplay -rtsp_transport tcp -tls_verify 0 -i "rtsps://..."
 ```
 
-Proxy sessions expire after ~60 seconds. Open a new `PUT /connection` to get a fresh session.
+Proxy sessions expire after ~60 seconds on the Bosch side. The integration automatically
+re-opens the connection when the switch is toggled ON again.
 
 ---
 
