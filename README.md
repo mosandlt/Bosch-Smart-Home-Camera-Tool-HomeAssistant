@@ -37,8 +37,9 @@ express or implied.
 | 📊 Events today count | `sensor` | ✅ enabled |
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
+| 🔇 Audio switch (muted by default) | `switch` | ✅ enabled |
 | 💾 Auto-download events to folder | background | ❌ optional |
-| 🎥 **Live stream — 30fps H.264 + AAC audio** | `camera` | ✅ via Live Stream switch |
+| 🎥 **Live stream — 30fps H.264 + optional AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
 | 🃏 **Custom Lovelace card** | `bosch-camera-card` | ✅ separate JS file |
 
@@ -80,7 +81,11 @@ All features are individually toggleable in **Settings → Integrations → Bosc
       manifest.json
       strings.json
       services.yaml
-      icon.png
+      brand/
+        icon.png
+        icon@2x.png
+        dark_icon.png
+        dark_icon@2x.png
 ```
 
 2. Restart Home Assistant
@@ -244,6 +249,7 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_events_today` | sensor | Number of events today |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
+| `switch.bosch_garten_audio` | switch | Audio ON/OFF (default: OFF — muted) |
 
 ### Camera streaming state
 
@@ -308,10 +314,133 @@ The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"typ
 
 **Session lifetime:** The Bosch proxy session lasts ~60 seconds. If the switch stays ON, the integration maintains the session. Turn the switch OFF to close the session immediately.
 
-> **Note on rtsps:// in HA:** HA's built-in stream component (ffmpeg backend) may not be able to
-> open `rtsps://` with Bosch's private CA certificate. If the live video feed does not appear in
-> the HA picture card, use the Python CLI tool's `live` command with `ffplay -tls_verify 0` instead.
-> The `snap.jpg` proxy (near-real-time JPEG) always works and is used by the Bosch Camera Card.
+> **Live video with audio in HA:** When the Live Stream switch is ON, the integration registers
+> the `rtsps://` stream in HA's built-in **go2rtc** bridge with `#insecure` to bypass Bosch's
+> private CA certificate. HA's camera card will then play **30fps H.264 via WebRTC**
+> directly in the browser — no extra software needed.
+>
+> **Audio is OFF by default** — turn on the **Audio switch** (`switch.bosch_garten_audio`) to add
+> AAC-LC 16kHz mono audio. If already streaming, the switch re-opens the connection automatically
+> so the change takes effect immediately.
+>
+> If the live stream does not appear: verify that go2rtc is running (HA 2023.4+ includes it by
+> default), then turn the switch OFF and ON again to re-register the stream.
+> The `snap.jpg` proxy (near-real-time JPEG) always works and is used by the Bosch Camera Card
+> for the thumbnail image.
+
+---
+
+## Example Automations
+
+### 1 — Notify on motion detection
+
+Send a mobile push notification with a camera snapshot when a new motion event is detected.
+
+```yaml
+alias: "Bosch Garten — Motion notification"
+trigger:
+  - platform: state
+    entity_id: sensor.bosch_garten_last_event
+action:
+  - service: notify.mobile_app_your_phone
+    data:
+      title: "Motion detected — Garten"
+      message: "New motion event at {{ states('sensor.bosch_garten_last_event') }}"
+      data:
+        image: /api/camera_proxy/camera.bosch_garten
+```
+
+---
+
+### 2 — Auto start live stream on motion, stop after 5 minutes
+
+Automatically opens the live proxy connection when motion is detected and closes it 5 minutes later.
+
+```yaml
+alias: "Bosch Garten — Auto live stream on motion"
+trigger:
+  - platform: state
+    entity_id: sensor.bosch_garten_last_event
+action:
+  - service: switch.turn_on
+    target:
+      entity_id: switch.bosch_garten_live_stream
+  - delay: "00:05:00"
+  - service: switch.turn_off
+    target:
+      entity_id: switch.bosch_garten_live_stream
+mode: restart   # restart timer if motion fires again before 5 min
+```
+
+---
+
+### 3 — Turn off live stream when nobody is home
+
+Stop live streams automatically when everyone leaves home (presence detection).
+
+```yaml
+alias: "Bosch — Stop streams when leaving"
+trigger:
+  - platform: state
+    entity_id: zone.home
+    to: "0"
+action:
+  - service: switch.turn_off
+    target:
+      entity_id:
+        - switch.bosch_garten_live_stream
+        - switch.bosch_kamera_live_stream
+```
+
+---
+
+### 4 — Daily snapshot refresh (keep thumbnails fresh overnight)
+
+Force a snapshot refresh every morning so the card always shows today's image even without motion.
+
+```yaml
+alias: "Bosch — Morning snapshot refresh"
+trigger:
+  - platform: time
+    at: "07:00:00"
+action:
+  - service: bosch_shc_camera.trigger_snapshot
+```
+
+---
+
+### 5 — Alert when camera goes OFFLINE
+
+Get notified if a camera loses connection.
+
+```yaml
+alias: "Bosch Garten — Camera offline alert"
+trigger:
+  - platform: state
+    entity_id: sensor.bosch_garten_status
+    to: "OFFLINE"
+    for: "00:05:00"   # only alert if offline for 5+ min (avoid flapping)
+action:
+  - service: notify.mobile_app_your_phone
+    data:
+      title: "Camera offline"
+      message: "Bosch Garten is OFFLINE. Check your network or the Bosch Smart Home app."
+```
+
+---
+
+### 6 — Auto-download events (via HA script)
+
+If auto-download is not enabled in the integration options, trigger a refresh via script:
+
+```yaml
+alias: "Bosch — Refresh all cameras every 5 minutes"
+trigger:
+  - platform: time_pattern
+    minutes: "/5"
+action:
+  - service: bosch_shc_camera.trigger_snapshot
+```
 
 ---
 
@@ -327,11 +456,20 @@ Suggested path: `/config/bosch_events` (accessible via HA file editor / Samba sh
 
 ---
 
-## Icon not showing in Settings → Integrations
+## Icon in Settings → Integrations
 
-HA loads integration brand icons from the official `brands.home-assistant.io` CDN — not from the local `icon.png` file in `custom_components/`. Custom integrations not submitted to the [HA brands repository](https://github.com/home-assistant/brands) will show "icon not available".
+The integration icon is served from the `custom_components/bosch_shc_camera/brand/` folder. HA's brands API checks this directory automatically for custom integrations (HA 2023.9+).
 
-**To fix:** Submit a PR to `https://github.com/home-assistant/brands` with the integration icon (folder: `custom_integrations/bosch_shc_camera/`). The `icon.png` is already in the correct format in this repo.
+All required variants are included:
+
+| File | Size |
+|------|------|
+| `brand/icon.png` | 256 × 256 (light background) |
+| `brand/icon@2x.png` | 512 × 512 (high-DPI light) |
+| `brand/dark_icon.png` | 256 × 256 (dark mode) |
+| `brand/dark_icon@2x.png` | 512 × 512 (high-DPI dark) |
+
+If the icon still shows "not available" after installing: do a **full HA restart** (not just a reload) to clear the internal `has_branding` cache.
 
 ---
 

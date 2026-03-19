@@ -86,6 +86,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
         self._live_connections: dict[str, dict] = {}
         self._live_opened_at:   dict[str, float] = {}   # timestamp when session was opened
+        # Per-camera audio setting — True = audio on (default), False = muted
+        self._audio_enabled:    dict[str, bool]  = {}
         # Per-type last-fetched timestamps (0 = never → fetch immediately)
         self._last_status: float = 0.0
         self._last_events: float = 0.0
@@ -318,9 +320,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     proxy_host_path = urls[0]
                                     result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
                                     rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
+                                    audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                        "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=1{audio_param}&fmtp=1&maxSessionDuration=60"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 elif result.get("hash"):
@@ -328,13 +331,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
                                     pp = result.get("proxyPort", 42090)
                                     result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
+                                    audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                        "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=1{audio_param}&fmtp=1&maxSessionDuration=60"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
                                 self._live_opened_at[cam_id]   = time.monotonic()
+                                # Register stream in go2rtc with TLS verification
+                                # disabled so HA's camera card can show live video+audio.
+                                rtsps_url = result.get("rtspsUrl", "")
+                                if rtsps_url:
+                                    await self._register_go2rtc_stream(cam_id, rtsps_url)
                                 await self.async_request_refresh()
                                 return result
                             elif resp.status == 401:
@@ -356,6 +365,116 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         _LOGGER.warning("Could not open live connection for %s — all types failed", cam_id)
         return None
+
+    # ── go2rtc integration ────────────────────────────────────────────────────
+    async def async_fetch_live_snapshot(self, cam_id: str) -> bytes | None:
+        """Open a temporary REMOTE live connection to fetch a fresh snap.jpg.
+
+        Does NOT register the connection in _live_connections — the live stream
+        switch stays OFF. Used by background image refresh so cameras always
+        show a current image rather than a (possibly expired) event snapshot.
+        """
+        token = self.token
+        if not token:
+            return None
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(
+                    url, json={"type": "REMOTE"}, headers=headers
+                ) as resp:
+                    if resp.status not in (200, 201):
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: PUT /connection → HTTP %d for %s",
+                            resp.status, cam_id,
+                        )
+                        return None
+                    import json as _json
+                    result = _json.loads(await resp.text())
+                    urls = result.get("urls", [])
+                    if not urls:
+                        return None
+                    proxy_url = f"https://{urls[0]}/snap.jpg"
+
+            async with async_timeout.timeout(10):
+                async with session.get(proxy_url) as snap_resp:
+                    ct = snap_resp.headers.get("Content-Type", "")
+                    if snap_resp.status == 200 and "image" in ct:
+                        data = await snap_resp.read()
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
+                        )
+                        return data
+                    _LOGGER.debug(
+                        "fetch_live_snapshot: snap.jpg → HTTP %d for %s",
+                        snap_resp.status, cam_id,
+                    )
+                    return None
+
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
+            return None
+        finally:
+            await session.close()
+
+    async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
+        """Register the Bosch rtsps:// stream in go2rtc with TLS verify disabled.
+
+        go2rtc is HA's built-in RTSP→WebRTC bridge (port 1984 locally).
+        Appending #insecure to the URL tells go2rtc to skip TLS verification,
+        which is required for Bosch's private CA certificate.
+
+        Once registered, HA's camera card can display live 30fps H.264 + AAC audio
+        via WebRTC or HLS directly from the go2rtc bridge.
+
+        The stream is registered under the camera entity unique_id so HA's stream
+        component can find it automatically.
+        """
+        # go2rtc stream name must match what HA's stream component uses.
+        # HA registers streams under the camera entity unique_id.
+        stream_name = f"bosch_shc_cam_{cam_id.lower()}"
+        # Append #insecure to skip TLS certificate verification
+        go2rtc_src = f"{rtsps_url}#insecure=1"
+
+        try:
+            async with async_timeout.timeout(5):
+                async with aiohttp.ClientSession() as s:
+                    # go2rtc API: PUT /api/streams?src=URL&name=STREAM_NAME
+                    resp = await s.put(
+                        f"http://localhost:1984/api/streams",
+                        params={"src": go2rtc_src, "name": stream_name},
+                    )
+                    _LOGGER.debug(
+                        "go2rtc stream '%s' registered → HTTP %d (src: %s)",
+                        stream_name, resp.status, go2rtc_src[:80],
+                    )
+        except asyncio.TimeoutError:
+            _LOGGER.debug("go2rtc API not reachable (timeout) — live stream only via snap.jpg")
+        except aiohttp.ClientError as err:
+            _LOGGER.debug("go2rtc API not reachable (%s) — live stream only via snap.jpg", err)
+
+    async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
+        """Remove the camera stream from go2rtc when the live session ends."""
+        stream_name = f"bosch_shc_cam_{cam_id.lower()}"
+        try:
+            async with async_timeout.timeout(3):
+                async with aiohttp.ClientSession() as s:
+                    await s.delete(
+                        f"http://localhost:1984/api/streams",
+                        params={"name": stream_name},
+                    )
+                    _LOGGER.debug("go2rtc stream '%s' removed", stream_name)
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            pass  # go2rtc may not be running — silently ignore
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────
     def _sync_download(self, data: dict, token: str, download_path: str) -> None:

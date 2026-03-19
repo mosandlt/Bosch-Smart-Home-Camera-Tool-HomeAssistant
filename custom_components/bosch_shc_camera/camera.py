@@ -18,6 +18,7 @@ If HA cannot open rtsps://, use ffplay from the Python CLI tool instead.
 
 import asyncio
 import logging
+import time
 
 import aiohttp
 import async_timeout
@@ -32,6 +33,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DOMAIN, CLOUD_API, get_options
 
 _LOGGER = logging.getLogger(__name__)
+
+IMAGE_REFRESH_INTERVAL = 1800  # seconds between background image refreshes (30 min)
 
 
 async def async_setup_entry(
@@ -60,8 +63,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     • Exposes stream_source (RTSP) once a live connection has been established
     • Device groups with sensor and button entities on the same HA device
     • Camera state is "streaming" when live proxy is active, "idle" otherwise
+    • Image is refreshed on startup, on stream stop, and every 30 minutes
     """
 
+    # Set as class attribute so no parent __init__ can reset it
     _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
@@ -76,6 +81,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._cam_id = cam_id
         self._entry  = entry
         self._cached_image: bytes | None = None
+        self._force_image_refresh: bool = False  # bypasses HA image cache once
+        self._last_image_fetch: float = 0.0      # monotonic timestamp of last fetch
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         title = info.get("title", cam_id)
@@ -85,6 +92,65 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._model = info.get("hardwareVersion", "CAMERA")
         self._fw    = info.get("firmwareVersion", "")
         self._mac   = info.get("macAddress", "")
+
+    # ── Startup ───────────────────────────────────────────────────────────────
+    async def async_added_to_hass(self) -> None:
+        """Called when entity is added to HA — kick off initial image fetch."""
+        await super().async_added_to_hass()
+        self._was_streaming = False
+        # Fetch a real image shortly after startup (let coordinator settle first).
+        # Sets _force_image_refresh so HA's internal image cache is bypassed.
+        self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
+
+    def _handle_coordinator_update(self) -> None:
+        """Detect streaming → idle transitions and trigger background 30-min refresh."""
+        is_now_streaming = self.is_streaming
+
+        # Stream just stopped → grab a fresh event snapshot immediately
+        if getattr(self, "_was_streaming", False) and not is_now_streaming:
+            self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
+
+        # Background 30-min refresh (even when nobody has the page open)
+        elif not is_now_streaming:
+            now = time.monotonic()
+            if now - self._last_image_fetch >= IMAGE_REFRESH_INTERVAL:
+                self.hass.async_create_task(self._async_trigger_image_refresh(delay=0))
+
+        self._was_streaming = is_now_streaming
+        super()._handle_coordinator_update()
+
+    async def _async_trigger_image_refresh(self, delay: float = 0) -> None:
+        """Fetch a fresh image and force HA's camera proxy to serve it.
+
+        Tries a temporary live connection (snap.jpg) first — this gives a
+        current view of the camera regardless of when motion last occurred.
+        Falls back to event snapshots if the live connection fails.
+
+        Sets _force_image_refresh=True so that frame_interval returns 0.1 s,
+        causing HA's image cache to expire on the very next proxy request.
+        After the fetch, frame_interval reverts to its normal value.
+        """
+        if delay:
+            await asyncio.sleep(delay)
+        self._force_image_refresh = True
+        try:
+            # Prefer a fresh live snapshot (temp connection, stream stays OFF)
+            image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+            if not image:
+                # Fall back to event snapshots
+                image = await self.async_camera_image()
+            if image:
+                self._cached_image = image
+                self._last_image_fetch = time.monotonic()
+                _LOGGER.debug(
+                    "%s: background image refresh — %d bytes",
+                    self._attr_name, len(image),
+                )
+                self.async_write_ha_state()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("%s: image refresh failed: %s", self._attr_name, err)
+        finally:
+            self._force_image_refresh = False
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @property
@@ -105,6 +171,19 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     @property
     def is_recording(self) -> bool:
         return False
+
+    @property
+    def frame_interval(self) -> float:
+        """How often (seconds) HA requests a fresh image from this camera.
+
+        When _force_image_refresh is set: 0.1 s — forces immediate cache expiry
+        so HA's next proxy request fetches the new snapshot right away.
+        When streaming: 3 s — near-live refresh from the proxy snap.jpg.
+        When idle:      1800 s (30 min) — latest event snapshot is enough.
+        """
+        if getattr(self, "_force_image_refresh", False):
+            return 0.1
+        return 3.0 if self.is_streaming else 1800.0
 
     @property
     def _token(self) -> str:
@@ -155,22 +234,26 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         }
 
     # ── Live stream ───────────────────────────────────────────────────────────
-    @property
-    def stream_source(self) -> str | None:
-        """
-        Return rtsps:// URL if a live proxy connection has been opened.
-        Stream: H.264 1920×1080 30fps + AAC-LC 16kHz mono audio.
-        URL format: rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
-                      ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+    async def stream_source(self) -> str | None:
+        """Return rtsps:// URL when a live proxy connection has been opened.
 
-        To open: press the "Open Live Stream" button or call the service
-        bosch_shc_camera.open_live_connection with the camera_id.
+        HA 2026.x calls this as a coroutine during WebRTC provider detection.
+        Returns None when no live session is active (switch is OFF).
 
-        Note: HA's stream component must be able to open rtsps:// with TLS verify disabled.
-        If HA's ffmpeg cannot do this, the stream will not appear in the Lovelace card.
+        The #insecure fragment tells go2rtc to skip TLS certificate verification,
+        which is required for Bosch's private CA (self-signed certificate).
+
+        Audio is included only when the Audio switch is ON (default: OFF).
+        Stream: H.264 1920×1080 30fps + optional AAC-LC 16kHz mono via rtsps://:443
         """
         live = self._cam_data.get("live", {})
-        return live.get("rtspsUrl") or live.get("rtspUrl") or None
+        url = live.get("rtspsUrl") or live.get("rtspUrl") or None
+        if not url:
+            return None
+        # Strip audio param if audio switch is OFF (default)
+        if not self.coordinator._audio_enabled.get(self._cam_id, False):
+            url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
+        return f"{url}#insecure"
 
     # ── Snapshot image ────────────────────────────────────────────────────────
     async def async_camera_image(
@@ -199,6 +282,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                         ct = resp.headers.get("Content-Type", "")
                         if resp.status == 200 and "image" in ct:
                             self._cached_image = await resp.read()
+                            self._last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: live proxy snapshot %d bytes",
                                 self._attr_name, len(self._cached_image),
@@ -226,6 +310,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                     async with session.get(img_url, headers=headers_bearer) as resp:
                         if resp.status == 200:
                             self._cached_image = await resp.read()
+                            self._last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: event snapshot %d bytes @ %s",
                                 self._attr_name,
@@ -239,9 +324,16 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                 self._attr_name,
                             )
                             return self._cached_image
+                        else:
+                            # e.g. 403/404/410 = expired URL — try next event
+                            _LOGGER.debug(
+                                "%s: event snapshot HTTP %d @ %s — trying next",
+                                self._attr_name,
+                                resp.status,
+                                ev.get("timestamp", "")[:19],
+                            )
             except (asyncio.TimeoutError, aiohttp.ClientError) as err:
                 _LOGGER.debug("%s: event snapshot error: %s", self._attr_name, err)
-            break  # only try the first event
 
         # Return last cached image if all methods failed
         return self._cached_image
