@@ -2,9 +2,10 @@
 
 Creates two button entities per camera:
   • {Name} Refresh Snapshot  — forces an immediate coordinator refresh
-  • {Name} Open Live Stream  — tries PUT /connection with all known enum values;
-                               on success the camera entity's stream_source becomes available
-                               and HA can render the RTSP stream live.
+  • {Name} Open Live Stream  — opens PUT /connection with type "REMOTE";
+                               on success the camera entity's stream_source becomes
+                               rtsps://proxy-NN:443/{hash}/rtsp_tunnel (30fps H.264+AAC)
+                               and HA can render a live video stream.
 """
 
 import logging
@@ -87,16 +88,16 @@ class BoschRefreshSnapshotButton(_BoschButtonBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschOpenLiveStreamButton(_BoschButtonBase):
-    """Button: try to open a live proxy connection for this camera.
+    """Button: open a live proxy connection for this camera.
 
     On success:
-      • The camera entity's stream_source property returns the RTSP URL
+      • The camera entity's stream_source returns the rtsps:// URL
+      • Stream: H.264 1920×1080 30fps + AAC-LC audio
       • HA's stream component handles HLS conversion for the Lovelace card
-      • The RTSP URL is also shown in the camera entity's extra_state_attributes
+      • The rtsps:// URL is also shown in the camera entity's extra_state_attributes
 
-    On failure (ConnectionType enum still unknown):
-      • A warning is logged with mitmproxy capture instructions
-      • No error is raised — the button is safe to press at any time
+    Note: HA's stream component must support rtsps:// (RTSP/1.0 over TLS with
+    TLS verification disabled for Bosch's private CA).
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -106,7 +107,7 @@ class BoschOpenLiveStreamButton(_BoschButtonBase):
         self._attr_icon      = "mdi:video-wireless"
 
     async def async_press(self) -> None:
-        """Try PUT /connection — cycles through all known ConnectionType enum values."""
+        """Open PUT /connection REMOTE → get proxy URL + rtsps:// stream URL."""
         _LOGGER.info(
             "Attempting live stream connection for %s (%s)",
             self._cam_title,
@@ -114,19 +115,16 @@ class BoschOpenLiveStreamButton(_BoschButtonBase):
         )
         result = await self.coordinator.try_live_connection(self._cam_id)
         if result:
-            rtsp = result.get("rtspUrl", "")
+            rtsps = result.get("rtspsUrl", result.get("rtspUrl", ""))
             proxy = result.get("proxyUrl", "")
             _LOGGER.info(
-                "Live stream established for %s — RTSP: %s  Proxy: %s",
+                "Live stream established for %s — rtsps: %s  snap: %s",
                 self._cam_title,
-                rtsp,
+                rtsps,
                 proxy,
             )
         else:
             _LOGGER.warning(
-                "Live stream unavailable for %s. "
-                "To find the ConnectionType enum: run mitmproxy → open Bosch Smart Home "
-                "Camera app → tap Live View → look for '📤 Request JSON: {\"type\": \"...\"}' "
-                "in the terminal → update LIVE_TYPE_CANDIDATES in __init__.py.",
+                "Live stream unavailable for %s. Check token validity.",
                 self._cam_title,
             )

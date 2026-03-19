@@ -52,8 +52,8 @@ of Bosch's software was distributed. Only network protocol observations were use
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Open Live Stream button | `button` | ✅ enabled |
 | 💾 Auto-download events to folder | background | ❌ optional |
-| 🎥 Live view (~1 fps, snap.jpg polling) | `camera` | ✅ via Open Live Stream |
-| True RTSP stream | — | ⚠️ proprietary tunnel |
+| 🎥 **Live stream — 30fps H.264 + AAC audio** | `camera` | ✅ via Open Live Stream |
+| 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
 
@@ -159,8 +159,8 @@ service: bosch_shc_camera.open_live_connection
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # your camera UUID
 ```
-On success, the camera entity's `stream_source` attribute is set to the RTSP URL
-and HA renders a live video feed in the Lovelace camera card.
+On success, the camera entity's `stream_source` attribute is set to the `rtsps://` URL
+and HA renders a live video feed (30fps H.264 + AAC audio) in the Lovelace camera card.
 
 ---
 
@@ -202,23 +202,34 @@ Suggested path: `/config/bosch_events` (accessible via HA file editor / Samba sh
 | Motion detection events | ✅ Via cloud API |
 | Video clips (MP4) | ✅ Via cloud API |
 | Status (ONLINE/OFFLINE) | ✅ Working |
-| **Live view (~1 fps)** | ✅ Working via snap.jpg polling |
+| **Live snapshot (current image)** | ✅ Via snap.jpg proxy (port 42090) |
+| **Live stream 30fps H.264 + AAC** | ✅ Via rtsps:// port 443 |
 | Local network access | ⚠️ Fragile (breaks camera connection) |
-| True RTSP stream | ⚠️ Proprietary tunnel, not openable by HA |
 
-### Live View Status
+### Live Stream — How It Works
 
 The live proxy is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
-This returns a cloud proxy URL (`proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`).
 
-The proxy's `snap.jpg` endpoint returns a fresh **1920×1080 JPEG** of the current camera view
-with no authentication required (the session hash acts as the credential). Sessions last ~60 seconds.
+Response includes `urls[0]` = `proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`.
 
-The "Open Live Stream" button opens this connection and refreshes the camera entity's snapshot
-continuously, giving ~1 fps live view in the HA Lovelace camera card.
+**Two ports are available on the proxy:**
 
-True RTSP streaming (`rtsp://proxy-NN.../rtsp_tunnel`) uses a proprietary RTSP-over-HTTPS
-tunnel that standard players (including HA's stream component) cannot open.
+| Port | Protocol | What it serves |
+|------|----------|---------------|
+| `42090` | HTTP | `snap.jpg` — current JPEG snapshot, no auth needed |
+| `443` | RTSP/1.0 over TLS (`rtsps://`) | Full 30fps H.264 1920×1080 + AAC-LC 16kHz audio |
+
+The "Open Live Stream" button opens this connection and provides:
+- `live_proxy`: `https://proxy-NN:42090/{hash}/snap.jpg` — current image (~1.5s latency)
+- `live_rtsps`: `rtsps://proxy-NN:443/{hash}/rtsp_tunnel?inst=1&enableaudio=1&...` — full stream
+
+The `stream_source` is set to the `rtsps://` URL. HA's stream component (ffmpeg backend)
+can open this if TLS verification can be disabled for Bosch's private CA.
+
+> **Note:** If HA's stream component cannot open `rtsps://` (TLS verify issues),
+> use the Python CLI tool's `live` command which uses `ffplay -tls_verify 0`.
+
+Sessions expire after ~60 seconds. Press "Open Live Stream" again to renew.
 
 ---
 
@@ -246,11 +257,15 @@ GET  /v11/contracts?locale=de_DE               → contract info
 ### Live Proxy Endpoints (after PUT /connection)
 
 ```
+# Port 42090 — HTTP only
 https://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/snap.jpg
   → Current camera image (1920×1080 JPEG, no auth needed — hash = credential)
 
-rtsp://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
-  → RTSP stream (proprietary tunnel, not openable with standard players)
+# Port 443 — RTSP/1.0 over TLS  ✅ WORKING
+rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
+  ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+  → Full 30fps H.264 1920×1080 + AAC-LC 16kHz mono audio
+  → Open with: ffplay -rtsp_transport tcp -tls_verify 0 -i "rtsps://..."
 ```
 
 Proxy sessions expire after ~60 seconds. Open a new `PUT /connection` to get a fresh session.

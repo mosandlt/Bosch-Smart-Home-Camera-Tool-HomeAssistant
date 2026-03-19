@@ -6,10 +6,10 @@ via the Bosch Cloud API (residential.cbs.boschsecurity.com).
 Features (all toggleable in Options):
   • Camera snapshot entities  — latest motion-triggered JPEG per camera
   • Status + event sensors    — ONLINE/OFFLINE, last event timestamp, events-today count
-  • Snapshot trigger buttons  — force immediate refresh; "Try Live Stream" button
+  • Snapshot trigger buttons  — force immediate refresh; "Open Live Stream" button
   • Auto-download             — background download of all event files to a local folder
-  • Live stream               — streams RTSP via HA stream component once ConnectionType
-                                 enum is captured via mitmproxy
+  • Live stream               — full 30fps H.264 1920×1080 + AAC audio via rtsps://:443
+                                 ConnectionType "REMOTE" → proxy-NN:443/{hash}/rtsp_tunnel
 
 Installation:
   1. Copy bosch_shc_camera/ to /config/custom_components/
@@ -40,13 +40,10 @@ CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = ["camera", "sensor", "button"]
 
-# ConnectionType enum candidates (Java enum, exact value unknown until mitmproxy capture)
-LIVE_TYPE_CANDIDATES = [
-    "LIVEVIEW", "LIVE", "LIVE_VIEW", "STREAM", "STREAMING",
-    "MJPEG", "RTSP", "HLS", "PROXY", "CLOUD", "APP", "REMOTE",
-    "REMOTE_ACCESS", "REMOTE_VIEW", "CLOUD_PROXY", "WEBRTC",
-    "PLAYBACK", "CAMERA", "VIDEO", "VIEW",
-]
+# ConnectionType enum — confirmed working value: "REMOTE"
+# REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
+# LOCAL  → LAN direct, returns Digest user/password, slow (~15s)
+LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
 
 DEFAULT_OPTIONS = {
     "scan_interval":          30,
@@ -183,10 +180,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     # ── Live stream ───────────────────────────────────────────────────────────
     async def try_live_connection(self, cam_id: str) -> dict | None:
         """
-        Try PUT /v11/video_inputs/{id}/connection with all known enum candidates.
-        On success stores proxy URL + RTSP URL in self._live_connections[cam_id]
-        and triggers a coordinator refresh so camera entity picks up stream_source.
-        Returns the response dict, or None if all candidates failed.
+        Open a live proxy connection via PUT /v11/video_inputs/{id}/connection.
+        Uses "REMOTE" (confirmed working) → cloud proxy, fast (~1.5s).
+        On success stores:
+          - proxyUrl:  https://proxy-NN:42090/{hash}/snap.jpg  (current image, no auth)
+          - rtspsUrl:  rtsps://proxy-NN:443/{hash}/rtsp_tunnel?... (30fps H.264+AAC audio)
+        Returns the enriched response dict, or None on failure.
         """
         token = self.token
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -208,18 +207,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             _LOGGER.info(
                                 "Live connection opened! type=%s → %s", type_val, result
                             )
-                            # Build known URL patterns from hash if URLs not returned directly
-                            if result.get("hash") and not result.get("rtspUrl"):
+                            # Build URLs from the 'urls' array in the response
+                            # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
+                            urls = result.get("urls", [])
+                            if urls:
+                                proxy_host_path = urls[0]  # e.g. "proxy-20.live.cbs.boschsecurity.com:42090/abc123"
+                                # snap.jpg on port 42090 — no auth needed
+                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
+                                # rtsps:// on port 443 — full 30fps H.264 + AAC audio
+                                # Replace :42090 with :443 and use rtsps:// scheme
+                                rtsps_host_path = proxy_host_path.replace(":42090", ":443")
+                                result["rtspsUrl"] = (
+                                    f"rtsps://{rtsps_host_path}/rtsp_tunnel"
+                                    "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                )
+                                # Keep rtspUrl for backwards compatibility (points to rtsps)
+                                result["rtspUrl"] = result["rtspsUrl"]
+                            elif result.get("hash"):
+                                # Fallback: reconstruct from hash field
                                 h  = result["hash"]
                                 ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
                                 pp = result.get("proxyPort", 42090)
-                                result["rtspUrl"]  = (
-                                    f"rtsp://{ph}:{pp}/{h}/rtsp_tunnel"
-                                    "?inst=2&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
+                                result["rtspsUrl"] = (
+                                    f"rtsps://{ph}:443/{h}/rtsp_tunnel"
+                                    "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
                                 )
-                                result["proxyUrl"] = (
-                                    f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
-                                )
+                                result["rtspUrl"] = result["rtspsUrl"]
                             self._live_connections[cam_id] = result
                             await self.async_request_refresh()
                             return result
@@ -229,11 +243,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 pass
 
-        _LOGGER.warning(
-            "Could not open live connection for %s — ConnectionType enum still unknown. "
-            "Capture it via mitmproxy: open the Bosch Smart Home Camera app and tap Live View.",
-            cam_id,
-        )
+        _LOGGER.warning("Could not open live connection for %s", cam_id)
         return None
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────

@@ -5,7 +5,15 @@ Images are the latest motion-triggered event snapshots from the cloud API.
 
 If a live proxy connection has been opened (via the "Open Live Stream" button
 or the bosch_shc_camera.open_live_connection service), the entity exposes
-a stream_source (RTSP URL) so HA can render a live video stream.
+a stream_source (rtsps:// URL on port 443) for full 30fps H.264 + AAC audio.
+
+Stream URL format:
+  rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
+    ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+
+Note: HA's stream component must support rtsps:// (RTSP over TLS).
+The stream requires -tls_verify 0 / insecure TLS (Bosch private CA).
+If HA cannot open rtsps://, use ffplay from the Python CLI tool instead.
 """
 
 import asyncio
@@ -114,29 +122,36 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         events   = cam_data.get("events", [])
         latest   = events[0] if events else {}
         live     = cam_data.get("live", {})
+        rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
         return {
-            "camera_id":  self._cam_id,
-            "status":     cam_data.get("status", "UNKNOWN"),
-            "last_event": latest.get("timestamp", "")[:19],
-            "event_type": latest.get("eventType", ""),
-            "model":      self._model,
-            "firmware":   self._fw,
-            "mac":        self._mac,
-            "live_rtsp":  live.get("rtspUrl", ""),
-            "live_proxy": live.get("proxyUrl", ""),
+            "camera_id":   self._cam_id,
+            "status":      cam_data.get("status", "UNKNOWN"),
+            "last_event":  latest.get("timestamp", "")[:19],
+            "event_type":  latest.get("eventType", ""),
+            "model":       self._model,
+            "firmware":    self._fw,
+            "mac":         self._mac,
+            "live_rtsps":  rtsps_url,
+            "live_proxy":  live.get("proxyUrl", ""),
         }
 
     # ── Live stream ───────────────────────────────────────────────────────────
     @property
     def stream_source(self) -> str | None:
         """
-        Return RTSP URL if a live proxy connection has been opened.
-        HA's stream component will handle HLS conversion for the frontend.
+        Return rtsps:// URL if a live proxy connection has been opened.
+        Stream: H.264 1920×1080 30fps + AAC-LC 16kHz mono audio.
+        URL format: rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
+                      ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+
         To open: press the "Open Live Stream" button or call the service
         bosch_shc_camera.open_live_connection with the camera_id.
+
+        Note: HA's stream component must be able to open rtsps:// with TLS verify disabled.
+        If HA's ffmpeg cannot do this, the stream will not appear in the Lovelace card.
         """
         live = self._cam_data.get("live", {})
-        return live.get("rtspUrl") or None
+        return live.get("rtspsUrl") or live.get("rtspUrl") or None
 
     # ── Snapshot image ────────────────────────────────────────────────────────
     async def async_camera_image(
