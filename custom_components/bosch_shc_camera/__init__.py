@@ -30,7 +30,7 @@ import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_get_clientsession, async_create_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -242,7 +242,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Returns the enriched response dict, or None on failure.
         """
         token = self.token
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        if not token:
+            _LOGGER.warning("try_live_connection: no token available")
+            return None
+
+        # Use a dedicated session with SSL verification disabled.
+        # async_get_clientsession(verify_ssl=False) shares a session but the
+        # verify_ssl flag may not apply to all requests in newer HA versions.
+        # async_create_clientsession creates a fresh session we fully control.
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
@@ -250,54 +260,67 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
-        for type_val in LIVE_TYPE_CANDIDATES:
-            try:
-                async with async_timeout.timeout(10):
-                    async with session.put(
-                        url, json={"type": type_val}, headers=headers
-                    ) as resp:
-                        if resp.status in (200, 201):
-                            result = await resp.json()
-                            _LOGGER.info(
-                                "Live connection opened! type=%s → %s", type_val, result
+        try:
+            for type_val in LIVE_TYPE_CANDIDATES:
+                try:
+                    async with async_timeout.timeout(10):
+                        async with session.put(
+                            url, json={"type": type_val}, headers=headers
+                        ) as resp:
+                            body = await resp.text()
+                            _LOGGER.debug(
+                                "PUT /connection type=%s → HTTP %d: %s",
+                                type_val, resp.status, body[:200],
                             )
-                            # Build URLs from the 'urls' array in the response
-                            # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
-                            urls = result.get("urls", [])
-                            if urls:
-                                proxy_host_path = urls[0]  # e.g. "proxy-20.live.cbs.boschsecurity.com:42090/abc123"
-                                # snap.jpg on port 42090 — no auth needed
-                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
-                                # rtsps:// on port 443 — full 30fps H.264 + AAC audio
-                                # Replace :42090 with :443 and use rtsps:// scheme
-                                rtsps_host_path = proxy_host_path.replace(":42090", ":443")
-                                result["rtspsUrl"] = (
-                                    f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                    "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                            if resp.status in (200, 201):
+                                import json as _json
+                                result = _json.loads(body)
+                                _LOGGER.info(
+                                    "Live connection opened! type=%s → %s", type_val, result
                                 )
-                                # Keep rtspUrl for backwards compatibility (points to rtsps)
-                                result["rtspUrl"] = result["rtspsUrl"]
-                            elif result.get("hash"):
-                                # Fallback: reconstruct from hash field
-                                h  = result["hash"]
-                                ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
-                                pp = result.get("proxyPort", 42090)
-                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
-                                result["rtspsUrl"] = (
-                                    f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                    "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                # Build URLs from the 'urls' array in the response
+                                # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
+                                urls = result.get("urls", [])
+                                if urls:
+                                    proxy_host_path = urls[0]
+                                    result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
+                                    rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
+                                    result["rtspsUrl"] = (
+                                        f"rtsps://{rtsps_host_path}/rtsp_tunnel"
+                                        "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                    )
+                                    result["rtspUrl"] = result["rtspsUrl"]
+                                elif result.get("hash"):
+                                    h  = result["hash"]
+                                    ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
+                                    pp = result.get("proxyPort", 42090)
+                                    result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
+                                    result["rtspsUrl"] = (
+                                        f"rtsps://{ph}:443/{h}/rtsp_tunnel"
+                                        "?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                    )
+                                    result["rtspUrl"] = result["rtspsUrl"]
+                                self._live_connections[cam_id] = result
+                                await self.async_request_refresh()
+                                return result
+                            elif resp.status == 401:
+                                _LOGGER.warning(
+                                    "try_live_connection: token expired (401) for %s", cam_id
                                 )
-                                result["rtspUrl"] = result["rtspsUrl"]
-                            self._live_connections[cam_id] = result
-                            await self.async_request_refresh()
-                            return result
-                        elif resp.status == 401:
-                            _LOGGER.warning("Token expired during live connection attempt")
-                            return None
-            except (asyncio.TimeoutError, aiohttp.ClientError):
-                pass
+                                return None
+                            else:
+                                _LOGGER.warning(
+                                    "try_live_connection: HTTP %d for type=%s: %s",
+                                    resp.status, type_val, body[:200],
+                                )
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("try_live_connection: timeout for type=%s", type_val)
+                except aiohttp.ClientError as err:
+                    _LOGGER.warning("try_live_connection: connection error for type=%s: %s", type_val, err)
+        finally:
+            await session.close()
 
-        _LOGGER.warning("Could not open live connection for %s", cam_id)
+        _LOGGER.warning("Could not open live connection for %s — all types failed", cam_id)
         return None
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────
