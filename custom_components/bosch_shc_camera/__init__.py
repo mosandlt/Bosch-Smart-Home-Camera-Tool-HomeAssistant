@@ -88,8 +88,45 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return self._entry.data.get("bearer_token", "")
 
     @property
+    def refresh_token(self) -> str:
+        return self._entry.data.get("refresh_token", "")
+
+    @property
     def options(self) -> dict:
         return get_options(self._entry)
+
+    # ── Token renewal ─────────────────────────────────────────────────────────
+    async def _ensure_valid_token(self) -> str:
+        """
+        Return a valid bearer token.
+        If the current token is expired (401), try silent renewal via refresh_token.
+        Updates the config entry data with the new tokens if renewed.
+        """
+        from .config_flow import _do_refresh
+        token = self.token
+        refresh = self.refresh_token
+        if not token and not refresh:
+            raise UpdateFailed("Not authenticated — add the integration again to log in")
+        if not refresh:
+            return token  # No refresh token — use whatever we have
+        # Try to renew silently
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        tokens = await _do_refresh(session, refresh)
+        if tokens:
+            new_access  = tokens.get("access_token", token)
+            new_refresh = tokens.get("refresh_token", refresh)
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={
+                    **self._entry.data,
+                    "bearer_token":  new_access,
+                    "refresh_token": new_refresh,
+                },
+            )
+            _LOGGER.debug("Bearer token renewed silently via refresh_token")
+            return new_access
+        _LOGGER.warning("Silent token renewal failed — using existing token")
+        return token
 
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
@@ -103,8 +140,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
           }
         """
         token = self.token
-        if not token:
-            raise UpdateFailed("No bearer token configured — add it in integration options")
+        if not token and not self.refresh_token:
+            raise UpdateFailed("Not authenticated — re-add the integration to log in")
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -116,12 +153,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     f"{CLOUD_API}/v11/video_inputs", headers=headers
                 ) as resp:
                     if resp.status == 401:
-                        raise UpdateFailed(
-                            "Bearer token expired — update via Settings → Integrations → Configure"
-                        )
-                    if resp.status != 200:
+                        # Token expired — try silent renewal
+                        _LOGGER.info("Token expired (401) — attempting silent renewal")
+                        token = await self._ensure_valid_token()
+                        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+                    elif resp.status != 200:
                         raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
-                    cam_list = await resp.json()
+                    else:
+                        cam_list = await resp.json()
+
+            # Retry after renewal if we got a 401
+            if resp.status == 401:
+                async with async_timeout.timeout(15):
+                    async with session.get(
+                        f"{CLOUD_API}/v11/video_inputs", headers=headers
+                    ) as resp2:
+                        if resp2.status == 401:
+                            raise UpdateFailed(
+                                "Token expired and renewal failed — go to Settings → Integrations → "
+                                "Bosch Smart Home Camera → Configure → Force new browser login"
+                            )
+                        if resp2.status != 200:
+                            raise UpdateFailed(f"Camera list returned HTTP {resp2.status}")
+                        cam_list = await resp2.json()
 
             data: dict = {}
 
