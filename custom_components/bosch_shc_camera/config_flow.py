@@ -1,13 +1,13 @@
 """Config flow for Bosch Smart Home Camera integration.
 
-Setup flow:
-  Step "user"  — Shows the Bosch login URL as plain text; user opens it and logs in
-  Step "auth"  — User pastes the redirect URL (https://www.bosch.com/boschcam?code=...)
-               — Exchanges code for access_token + refresh_token → creates entry
+Setup flow (two steps):
+  Step "user" — shows login URL as a read-only text field + instructions
+  Step "auth" — user pastes the redirect URL, tokens are exchanged
 
 Options flow:
-  Step "init"    — Feature toggles + scan interval
-  Step "relogin" — Same as user+auth flow, triggered by "Force re-login" checkbox
+  Step "init"          — feature toggles
+  Step "relogin_show"  — shows login URL as read-only field
+  Step "relogin_paste" — paste redirect URL
 
 OAuth2 details:
   Issuer:       smarthome.authz.bosch.com/auth/realms/home_auth_provider
@@ -140,32 +140,31 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """
-        Step 1: Generate PKCE pair, show the Bosch login URL.
-        No input fields — user just reads the URL, opens it, then clicks Submit.
+        Step 1: Show the login URL as a pre-filled text field.
+        User copies it, opens it in a browser, then clicks Submit.
+        We regenerate PKCE on every visit so the URL is always fresh.
         """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        # Always regenerate on each visit so the URL is fresh
         self._verifier, challenge = _pkce_pair()
         state          = secrets.token_urlsafe(16)
         self._auth_url = _build_auth_url(challenge, state)
 
         if user_input is not None:
-            # User clicked Submit → go to paste step
+            # User clicked Submit after opening the URL → go to paste step
             return await self.async_step_auth()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({}),   # no input — just show description + Submit
-            description_placeholders={"auth_url": self._auth_url},
+            # Show URL as a pre-filled (but editable) text field so it always renders
+            data_schema=vol.Schema({
+                vol.Optional("login_url", default=self._auth_url): str,
+            }),
         )
 
     async def async_step_auth(self, user_input=None):
-        """
-        Step 2: User pastes the redirect URL from the browser.
-        Exchanges the auth code for tokens and creates the config entry.
-        """
+        """Step 2: Paste the redirect URL, exchange code for tokens."""
         errors = {}
 
         if user_input is not None:
@@ -205,7 +204,7 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
-    """Handle options: re-login + feature toggles."""
+    """Handle options: feature toggles + optional re-login."""
 
     def __init__(self, config_entry) -> None:
         self._config_entry  = config_entry
@@ -214,7 +213,6 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
         self._pending_options: dict = {}
 
     async def async_step_init(self, user_input=None):
-        """Main options page."""
         opts = dict(DEFAULT_OPTIONS)
         opts.update(self._config_entry.options)
 
@@ -227,10 +225,9 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     user_input[k] = bool(user_input[k])
 
             if force_relogin:
-                self._pending_options = user_input
+                self._pending_options  = user_input
                 self._verifier, challenge = _pkce_pair()
-                state          = secrets.token_urlsafe(16)
-                self._auth_url = _build_auth_url(challenge, state)
+                self._auth_url = _build_auth_url(challenge, secrets.token_urlsafe(16))
                 return await self.async_step_relogin_show()
 
             return self.async_create_entry(title="", data=user_input)
@@ -266,20 +263,20 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={
-                "token_status": "Token auto-renews via saved refresh token" if has_refresh
-                                else "No refresh token — check Force re-login to re-authenticate",
+                "token_status": "active (auto-renews)" if has_refresh else "no refresh token",
             },
         )
 
     async def async_step_relogin_show(self, user_input=None):
-        """Show the Bosch login URL (no input), then proceed to paste step."""
+        """Show login URL as a pre-filled text field."""
         if user_input is not None:
             return await self.async_step_relogin_paste()
 
         return self.async_show_form(
             step_id="relogin_show",
-            data_schema=vol.Schema({}),
-            description_placeholders={"auth_url": self._auth_url},
+            data_schema=vol.Schema({
+                vol.Optional("login_url", default=self._auth_url): str,
+            }),
         )
 
     async def async_step_relogin_paste(self, user_input=None):
