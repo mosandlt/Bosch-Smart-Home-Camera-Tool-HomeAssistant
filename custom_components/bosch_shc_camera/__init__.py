@@ -88,6 +88,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._live_opened_at:   dict[str, float] = {}   # timestamp when session was opened
         # Per-camera audio setting — True = audio on (default), False = muted
         self._audio_enabled:    dict[str, bool]  = {}
+        # Camera entity references — registered on entity setup, used by button/service
+        self._camera_entities: dict = {}
         # Per-type last-fetched timestamps (0 = never → fetch immediately)
         self._last_status: float = 0.0
         self._last_events: float = 0.0
@@ -561,10 +563,12 @@ def _register_services(hass: HomeAssistant) -> None:
     """Register HA services (skip if already registered)."""
 
     async def handle_trigger_snapshot(call: ServiceCall) -> None:
-        """Force an immediate refresh for all cameras."""
+        """Force an immediate refresh for all cameras (data + images)."""
         for edata in hass.data.get(DOMAIN, {}).values():
             if coord := edata.get("coordinator"):
                 await coord.async_request_refresh()
+                for cam_id, cam in coord._camera_entities.items():
+                    hass.async_create_task(cam._async_trigger_image_refresh(delay=1))
 
     async def handle_open_live_connection(call: ServiceCall) -> None:
         """Try to open a live proxy connection for a specific camera."""

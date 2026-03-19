@@ -98,9 +98,15 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         """Called when entity is added to HA — kick off initial image fetch."""
         await super().async_added_to_hass()
         self._was_streaming = False
+        # Register with coordinator so button/service can trigger image refresh
+        self.coordinator._camera_entities[self._cam_id] = self
         # Fetch a real image shortly after startup (let coordinator settle first).
-        # Sets _force_image_refresh so HA's internal image cache is bypassed.
         self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Called when entity is removed — unregister from coordinator."""
+        self.coordinator._camera_entities.pop(self._cam_id, None)
+        await super().async_will_remove_from_hass()
 
     def _handle_coordinator_update(self) -> None:
         """Detect streaming → idle transitions and trigger background 30-min refresh."""
