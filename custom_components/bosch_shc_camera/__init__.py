@@ -23,6 +23,7 @@ No user data is hardcoded. All configuration via the HA UI.
 import asyncio
 import logging
 import os
+import time
 from datetime import timedelta
 
 import aiohttp
@@ -46,7 +47,9 @@ ALL_PLATFORMS = ["camera", "sensor", "button"]
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
 
 DEFAULT_OPTIONS = {
-    "scan_interval":          30,
+    "scan_interval":    60,    # coordinator tick interval (seconds)
+    "interval_status":  300,   # ping camera status every 5 minutes
+    "interval_events":  300,   # fetch new events every 5 minutes
     "enable_snapshots":       True,
     "enable_sensors":         True,
     "enable_snapshot_button": True,
@@ -77,10 +80,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=int(opts.get("scan_interval", 30))),
+            update_interval=timedelta(seconds=int(opts.get("scan_interval", 60))),
         )
         # Persists live-stream proxy info between coordinator refreshes
         self._live_connections: dict[str, dict] = {}
+        # Per-type last-fetched timestamps (0 = never → fetch immediately)
+        self._last_status: float = 0.0
+        self._last_events: float = 0.0
+        # Cached data for types that are not re-fetched this tick
+        self._cached_status: dict[str, str] = {}
+        self._cached_events: dict[str, list] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -131,29 +140,37 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
         """
+        Coordinator tick — runs every scan_interval seconds.
+        Each data type (status, events) is only re-fetched when its own
+        interval has elapsed, reducing unnecessary API traffic.
+
         Returns dict keyed by cam_id:
           {
-            "info":   {...},        # from GET /v11/video_inputs
-            "status": "ONLINE",     # from GET /v11/video_inputs/{id}/ping
-            "events": [...],        # from GET /v11/events?videoInputId={id}&limit=20
-            "live":   {...},        # cached proxy info from PUT /connection
+            "info":   {...},    # from GET /v11/video_inputs (every tick)
+            "status": "ONLINE", # from ping — only when interval_status elapsed
+            "events": [...],    # from events API — only when interval_events elapsed
+            "live":   {...},    # cached proxy info from PUT /connection
           }
         """
         token = self.token
         if not token and not self.refresh_token:
             raise UpdateFailed("Not authenticated — re-add the integration to log in")
 
+        opts    = self.options
+        now     = time.monotonic()
+        do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
+        do_events = (now - self._last_events) >= int(opts.get("interval_events", 60))
+
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
         try:
-            # ── 1. List cameras ───────────────────────────────────────────────
+            # ── 1. List cameras (every tick — lightweight, needed for entity list) ──
             async with async_timeout.timeout(15):
                 async with session.get(
                     f"{CLOUD_API}/v11/video_inputs", headers=headers
                 ) as resp:
                     if resp.status == 401:
-                        # Token expired — try silent renewal
                         _LOGGER.info("Token expired (401) — attempting silent renewal")
                         token = await self._ensure_valid_token()
                         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -184,29 +201,37 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if not cam_id:
                     continue
 
-                # ── 2. Ping status ────────────────────────────────────────────
-                status = "UNKNOWN"
-                try:
-                    async with async_timeout.timeout(8):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
-                            headers=headers,
-                        ) as r:
-                            if r.status == 200:
-                                status = (await r.text()).strip().strip('"')
-                except Exception:
-                    pass
+                # ── 2. Ping status — only when interval_status elapsed ─────────
+                if do_status:
+                    status = "UNKNOWN"
+                    try:
+                        async with async_timeout.timeout(8):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    status = (await r.text()).strip().strip('"')
+                    except Exception as err:
+                        _LOGGER.debug("Ping error for %s: %s", cam_id, err)
+                    self._cached_status[cam_id] = status
+                else:
+                    status = self._cached_status.get(cam_id, "UNKNOWN")
 
-                # ── 3. Latest events ──────────────────────────────────────────
-                events: list = []
-                try:
-                    url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-                    async with async_timeout.timeout(15):
-                        async with session.get(url, headers=headers) as r:
-                            if r.status == 200:
-                                events = await r.json()
-                except Exception as err:
-                    _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+                # ── 3. Events — only when interval_events elapsed ─────────────
+                if do_events:
+                    events: list = []
+                    try:
+                        url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
+                        async with async_timeout.timeout(15):
+                            async with session.get(url, headers=headers) as r:
+                                if r.status == 200:
+                                    events = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+                    self._cached_events[cam_id] = events
+                else:
+                    events = self._cached_events.get(cam_id, [])
 
                 data[cam_id] = {
                     "info":   cam,
@@ -215,9 +240,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "live":   self._live_connections.get(cam_id, {}),
                 }
 
+            # Update timestamps only after successful fetches
+            if do_status:
+                self._last_status = now
+            if do_events:
+                self._last_events = now
+
             # ── 4. Auto-download new event files ──────────────────────────────
-            opts = self.options
-            if opts.get("enable_auto_download") and opts.get("download_path"):
+            if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
                 await self.hass.async_add_executor_job(
                     self._sync_download, data, token, opts["download_path"]
                 )

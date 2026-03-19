@@ -239,7 +239,15 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(
                     "scan_interval",
-                    default=int(opts.get("scan_interval", 30)),
+                    default=int(opts.get("scan_interval", 60)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
+                vol.Optional(
+                    "interval_status",
+                    default=int(opts.get("interval_status", 300)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
+                vol.Optional(
+                    "interval_events",
+                    default=int(opts.get("interval_events", 300)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
                 vol.Optional(
                     "enable_snapshots",

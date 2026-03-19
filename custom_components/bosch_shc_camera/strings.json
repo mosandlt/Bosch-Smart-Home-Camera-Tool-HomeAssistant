@@ -32,7 +32,9 @@
         "title": "Bosch Camera — Options",
         "description": "**Token status:** {token_status}\n\nThe integration automatically renews the token in the background using the saved refresh token — no manual action needed.",
         "data": {
-          "scan_interval":          "Snapshot refresh interval (seconds, 10–3600)",
+          "scan_interval":          "Coordinator tick interval (seconds) — how often the integration wakes up",
+          "interval_status":        "Camera status check interval (seconds) — how often to ping ONLINE/OFFLINE",
+          "interval_events":        "Events fetch interval (seconds) — how often to check for new motion events",
           "enable_snapshots":       "Enable camera snapshot entities (latest motion JPEG)",
           "enable_sensors":         "Enable sensors (Status / Last Event / Events Today)",
           "enable_snapshot_button": "Enable buttons (Refresh Snapshot / Open Live Stream)",
