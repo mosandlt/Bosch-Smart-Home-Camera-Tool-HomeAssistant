@@ -61,6 +61,17 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 
 ## Installation
 
+### HACS (Recommended)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mosandlt&repository=Bosch-Smart-Home-Camera-Tool-HomeAssistant&category=integration)
+
+1. Click the button above, or in HACS go to **Integrations → + Explore & Download Repositories** and search for **"Bosch Smart Home Camera"**
+2. Download the integration
+3. Restart Home Assistant
+4. Go to **Settings → Integrations → + Add Integration** and search for **"Bosch Smart Home Camera"**
+
+### Manual
+
 ### 1. Copy the integration
 
 Copy the `bosch_shc_camera` folder into your Home Assistant `custom_components` directory:
