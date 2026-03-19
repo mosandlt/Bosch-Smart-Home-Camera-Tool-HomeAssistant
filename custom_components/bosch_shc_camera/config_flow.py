@@ -1,16 +1,13 @@
 """Config flow for Bosch Smart Home Camera integration.
 
-Setup flow (no existing refresh_token):
-  Step 1 — "auth" — Shows the Bosch login URL, user logs in, pastes redirect URL
-  Step 2 — Exchanges auth code for access_token + refresh_token → creates entry
+Setup flow:
+  Step "user"  — Shows the Bosch login URL as plain text; user opens it and logs in
+  Step "auth"  — User pastes the redirect URL (https://www.bosch.com/boschcam?code=...)
+               — Exchanges code for access_token + refresh_token → creates entry
 
-Setup flow (refresh_token already stored in entry data):
-  → Silent renewal via refresh_token, no browser needed
-
-Options flow (Settings → Integrations → Configure):
-  • Force re-login  — clear refresh_token and repeat browser flow
-  • Scan interval   — how often to refresh snapshots (seconds)
-  • Feature toggles
+Options flow:
+  Step "init"    — Feature toggles + scan interval
+  Step "relogin" — Same as user+auth flow, triggered by "Force re-login" checkbox
 
 OAuth2 details:
   Issuer:       smarthome.authz.bosch.com/auth/realms/home_auth_provider
@@ -83,7 +80,7 @@ def _extract_code(redirect_url: str) -> str | None:
     return codes[0] if codes else None
 
 
-# ── Token exchange / refresh ───────────────────────────────────────────────────
+# ── Token exchange / refresh ──────────────────────────────────────────────────
 
 async def _exchange_code(session, code: str, verifier: str) -> dict | None:
     """Exchange auth code for access_token + refresh_token."""
@@ -131,21 +128,6 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
     return None
 
 
-async def _validate_token(hass, token: str) -> bool:
-    """Quick check: does this token work against /v11/video_inputs?"""
-    session = async_get_clientsession(hass, verify_ssl=False)
-    try:
-        async with async_timeout.timeout(10):
-            async with session.get(
-                f"{CLOUD_API}/v11/video_inputs",
-                headers={"Authorization": f"Bearer {token}"},
-                ssl=False,
-            ) as resp:
-                return resp.status == 200
-    except Exception:
-        return False
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the initial setup flow — OAuth2 PKCE browser login."""
@@ -154,24 +136,36 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._verifier: str = ""
-        self._challenge: str = ""
-        self._state: str = ""
         self._auth_url: str = ""
 
     async def async_step_user(self, user_input=None):
-        """Entry point — generate PKCE pair and show login URL."""
+        """
+        Step 1: Generate PKCE pair, show the Bosch login URL.
+        No input fields — user just reads the URL, opens it, then clicks Submit.
+        """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        # Generate PKCE pair and auth URL
-        self._verifier, self._challenge = _pkce_pair()
-        self._state    = secrets.token_urlsafe(16)
-        self._auth_url = _build_auth_url(self._challenge, self._state)
+        # Always regenerate on each visit so the URL is fresh
+        self._verifier, challenge = _pkce_pair()
+        state          = secrets.token_urlsafe(16)
+        self._auth_url = _build_auth_url(challenge, state)
 
-        return await self.async_step_auth()
+        if user_input is not None:
+            # User clicked Submit → go to paste step
+            return await self.async_step_auth()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({}),   # no input — just show description + Submit
+            description_placeholders={"auth_url": self._auth_url},
+        )
 
     async def async_step_auth(self, user_input=None):
-        """Show login URL and wait for the user to paste the redirect URL."""
+        """
+        Step 2: User pastes the redirect URL from the browser.
+        Exchanges the auth code for tokens and creates the config entry.
+        """
         errors = {}
 
         if user_input is not None:
@@ -184,22 +178,16 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 session = async_get_clientsession(self.hass, verify_ssl=False)
                 tokens  = await _exchange_code(session, code, self._verifier)
 
-                if not tokens:
+                if not tokens or not tokens.get("access_token"):
                     errors["redirect_url"] = "token_exchange_failed"
                 else:
-                    access  = tokens.get("access_token", "")
-                    refresh = tokens.get("refresh_token", "")
-
-                    if not access:
-                        errors["redirect_url"] = "token_exchange_failed"
-                    else:
-                        return self.async_create_entry(
-                            title="Bosch Smart Home Camera",
-                            data={
-                                "bearer_token":  access,
-                                "refresh_token": refresh,
-                            },
-                        )
+                    return self.async_create_entry(
+                        title="Bosch Smart Home Camera",
+                        data={
+                            "bearer_token":  tokens["access_token"],
+                            "refresh_token": tokens.get("refresh_token", ""),
+                        },
+                    )
 
         return self.async_show_form(
             step_id="auth",
@@ -207,9 +195,6 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("redirect_url"): str,
             }),
             errors=errors,
-            description_placeholders={
-                "auth_url": self._auth_url,
-            },
         )
 
     @staticmethod
@@ -223,44 +208,34 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
     """Handle options: re-login + feature toggles."""
 
     def __init__(self, config_entry) -> None:
-        self._config_entry = config_entry
+        self._config_entry  = config_entry
         self._verifier: str = ""
-        self._challenge: str = ""
-        self._state: str = ""
         self._auth_url: str = ""
+        self._pending_options: dict = {}
 
     async def async_step_init(self, user_input=None):
         """Main options page."""
-        errors = {}
         opts = dict(DEFAULT_OPTIONS)
         opts.update(self._config_entry.options)
 
         if user_input is not None:
             force_relogin = user_input.pop("force_relogin", False)
 
-            if force_relogin:
-                # Start browser login flow from options
-                self._verifier, self._challenge = _pkce_pair()
-                self._state    = secrets.token_urlsafe(16)
-                self._auth_url = _build_auth_url(self._challenge, self._state)
-                # Save the other options first so they survive the relogin step
-                self._pending_options = user_input
-                return await self.async_step_relogin()
-
-            # Save options as-is
             for k in ["enable_snapshots", "enable_sensors",
                       "enable_snapshot_button", "enable_auto_download"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
+            if force_relogin:
+                self._pending_options = user_input
+                self._verifier, challenge = _pkce_pair()
+                state          = secrets.token_urlsafe(16)
+                self._auth_url = _build_auth_url(challenge, state)
+                return await self.async_step_relogin_show()
+
             return self.async_create_entry(title="", data=user_input)
 
-        return self._show_options_form(opts, errors)
-
-    def _show_options_form(self, opts, errors):
-        refresh_token = self._config_entry.data.get("refresh_token", "")
-        relogin_desc  = "Re-login required (no refresh token saved)" if not refresh_token else "Force new browser login (refresh token already saved — usually not needed)"
-
+        has_refresh = bool(self._config_entry.data.get("refresh_token", ""))
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
@@ -268,40 +243,47 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "scan_interval",
                     default=int(opts.get("scan_interval", 30)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
-
                 vol.Optional(
                     "enable_snapshots",
                     default=bool(opts.get("enable_snapshots", True)),
                 ): bool,
-
                 vol.Optional(
                     "enable_sensors",
                     default=bool(opts.get("enable_sensors", True)),
                 ): bool,
-
                 vol.Optional(
                     "enable_snapshot_button",
                     default=bool(opts.get("enable_snapshot_button", True)),
                 ): bool,
-
                 vol.Optional(
                     "enable_auto_download",
                     default=bool(opts.get("enable_auto_download", False)),
                 ): bool,
-
                 vol.Optional(
                     "download_path",
                     default=str(opts.get("download_path", "")),
                 ): str,
-
                 vol.Optional("force_relogin", default=False): bool,
             }),
-            errors=errors,
-            description_placeholders={"relogin_desc": relogin_desc},
+            description_placeholders={
+                "token_status": "Token auto-renews via saved refresh token" if has_refresh
+                                else "No refresh token — check Force re-login to re-authenticate",
+            },
         )
 
-    async def async_step_relogin(self, user_input=None):
-        """Re-login step from options — same as initial auth step."""
+    async def async_step_relogin_show(self, user_input=None):
+        """Show the Bosch login URL (no input), then proceed to paste step."""
+        if user_input is not None:
+            return await self.async_step_relogin_paste()
+
+        return self.async_show_form(
+            step_id="relogin_show",
+            data_schema=vol.Schema({}),
+            description_placeholders={"auth_url": self._auth_url},
+        )
+
+    async def async_step_relogin_paste(self, user_input=None):
+        """Paste the redirect URL and exchange for new tokens."""
         errors = {}
 
         if user_input is not None:
@@ -314,36 +296,24 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 session = async_get_clientsession(self.hass, verify_ssl=False)
                 tokens  = await _exchange_code(session, code, self._verifier)
 
-                if not tokens:
+                if not tokens or not tokens.get("access_token"):
                     errors["redirect_url"] = "token_exchange_failed"
                 else:
-                    access  = tokens.get("access_token", "")
-                    refresh = tokens.get("refresh_token", "")
-                    if access:
-                        self.hass.config_entries.async_update_entry(
-                            self._config_entry,
-                            data={
-                                **self._config_entry.data,
-                                "bearer_token":  access,
-                                "refresh_token": refresh,
-                            },
-                        )
-                        _LOGGER.info("Token re-authenticated successfully")
-                        pending = getattr(self, "_pending_options", {})
-                        for k in ["enable_snapshots", "enable_sensors",
-                                  "enable_snapshot_button", "enable_auto_download"]:
-                            if k in pending:
-                                pending[k] = bool(pending[k])
-                        return self.async_create_entry(title="", data=pending)
-                    errors["redirect_url"] = "token_exchange_failed"
+                    self.hass.config_entries.async_update_entry(
+                        self._config_entry,
+                        data={
+                            **self._config_entry.data,
+                            "bearer_token":  tokens["access_token"],
+                            "refresh_token": tokens.get("refresh_token", ""),
+                        },
+                    )
+                    _LOGGER.info("Token re-authenticated successfully")
+                    return self.async_create_entry(title="", data=self._pending_options)
 
         return self.async_show_form(
-            step_id="relogin",
+            step_id="relogin_paste",
             data_schema=vol.Schema({
                 vol.Required("redirect_url"): str,
             }),
             errors=errors,
-            description_placeholders={
-                "auth_url": self._auth_url,
-            },
         )
