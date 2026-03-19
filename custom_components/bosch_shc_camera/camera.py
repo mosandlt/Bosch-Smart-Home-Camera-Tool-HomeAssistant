@@ -161,10 +161,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         Return the best available JPEG snapshot, tried in order:
 
         1. Cloud proxy live snap  — if a live connection has been opened
-           (proxy-NN.live.cbs.boschsecurity.com snap.jpg, requires HcsoB cookie)
-        2. Local camera snap.jpg  — if local_ip + credentials are configured
-           (HTTP Digest auth, 1920×1080, only when camera is on local LAN)
-        3. Latest event snapshot  — most recent motion-triggered image (cloud events API)
+           (proxy-NN.live.cbs.boschsecurity.com snap.jpg, no auth needed)
+           Updated every coordinator tick while live switch is ON.
+        2. Latest event snapshot  — most recent motion-triggered image (cloud events API)
            Always available, but only refreshes on motion.
         """
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -172,16 +171,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
 
         # ── 1. Cloud proxy live snapshot ─────────────────────────────────────
-        live = self._cam_data.get("live", {})
+        live = self.coordinator._live_connections.get(self._cam_id, {})
         proxy_url = live.get("proxyUrl", "")
         if proxy_url:
-            cookie = live.get("cookie", "")
-            hdrs   = dict(headers_bearer)
-            if cookie:
-                hdrs["Cookie"] = f"HcsoB={cookie}" if "=" not in cookie else cookie
             try:
                 async with async_timeout.timeout(10):
-                    async with session.get(proxy_url, headers=hdrs) as resp:
+                    async with session.get(proxy_url) as resp:
                         ct = resp.headers.get("Content-Type", "")
                         if resp.status == 200 and "image" in ct:
                             self._cached_image = await resp.read()
@@ -191,39 +186,17 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                             )
                             return self._cached_image
                         elif resp.status in (401, 403, 404):
-                            # Proxy session expired — clear it
+                            # Proxy session expired — clear it so switch turns OFF
                             _LOGGER.debug(
                                 "%s: proxy snapshot %d — clearing live connection",
                                 self._attr_name, resp.status,
                             )
                             self.coordinator._live_connections.pop(self._cam_id, None)
+                            self.coordinator._live_opened_at.pop(self._cam_id, None)
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 pass
 
-        # ── 2. Local camera snap.jpg (Digest auth) ────────────────────────────
-        # Credentials stored in coordinator options or passed via extra config.
-        # Only attempted if local_ip is configured.
-        local_ip   = self._cam_data.get("info", {}).get("localIp", "")
-        local_user = self._cam_data.get("info", {}).get("localUsername", "")
-        local_pass = self._cam_data.get("info", {}).get("localPassword", "")
-        if local_ip and local_user and local_pass:
-            local_url = f"https://{local_ip}/snap.jpg"
-            try:
-                # Digest auth requires sync requests — run in executor
-                img_data = await self.hass.async_add_executor_job(
-                    _fetch_local_snap, local_url, local_user, local_pass
-                )
-                if img_data:
-                    self._cached_image = img_data
-                    _LOGGER.debug(
-                        "%s: local snap %d bytes from %s",
-                        self._attr_name, len(img_data), local_ip,
-                    )
-                    return self._cached_image
-            except Exception as err:
-                _LOGGER.debug("%s: local snap error: %s", self._attr_name, err)
-
-        # ── 3. Latest event snapshot (motion-triggered) ───────────────────────
+        # ── 2. Latest event snapshot (motion-triggered) ───────────────────────
         events = self._cam_data.get("events", [])
         for ev in events:
             img_url = ev.get("imageUrl")
@@ -253,23 +226,3 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
         # Return last cached image if all methods failed
         return self._cached_image
-
-
-def _fetch_local_snap(url: str, username: str, password: str) -> bytes | None:
-    """Synchronous helper for local camera Digest auth (runs in executor)."""
-    import requests as _requests
-    from requests.auth import HTTPDigestAuth
-    import urllib3
-    urllib3.disable_warnings()
-    try:
-        r = _requests.get(
-            url,
-            auth=HTTPDigestAuth(username, password),
-            timeout=8,
-            verify=False,
-        )
-        if r.status_code == 200 and r.headers.get("Content-Type", "").startswith("image"):
-            return r.content
-    except Exception:
-        pass
-    return None
