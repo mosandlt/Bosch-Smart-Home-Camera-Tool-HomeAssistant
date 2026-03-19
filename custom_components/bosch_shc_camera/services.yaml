@@ -1,0 +1,28 @@
+trigger_snapshot:
+  name: Trigger Snapshot Refresh
+  description: >
+    Force an immediate snapshot refresh for all Bosch Smart Home cameras.
+    Useful to get an up-to-date image on demand without waiting for the next
+    scheduled poll interval.
+  fields: {}
+
+open_live_connection:
+  name: Open Live Stream Connection
+  description: >
+    Try to establish a live proxy stream connection for a specific Bosch camera.
+    Cycles through all known ConnectionType enum values until one succeeds.
+    On success, the camera entity's stream_source attribute is populated with the
+    RTSP URL and HA's stream component can render a live video feed.
+    On failure, check the HA log for mitmproxy capture instructions to find
+    the correct ConnectionType enum value.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: >
+        The cloud ID of the camera.
+        Find it in the camera entity's extra_state_attributes.
+        Example: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+      required: true
+      example: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+      selector:
+        text:

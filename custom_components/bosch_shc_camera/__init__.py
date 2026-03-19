@@ -1,0 +1,341 @@
+"""Bosch Smart Home Camera — Home Assistant Custom Integration.
+
+Provides camera, sensor and button entities for all Bosch Smart Home cameras
+via the Bosch Cloud API (residential.cbs.boschsecurity.com).
+
+Features (all toggleable in Options):
+  • Camera snapshot entities  — latest motion-triggered JPEG per camera
+  • Status + event sensors    — ONLINE/OFFLINE, last event timestamp, events-today count
+  • Snapshot trigger buttons  — force immediate refresh; "Try Live Stream" button
+  • Auto-download             — background download of all event files to a local folder
+  • Live stream               — streams RTSP via HA stream component once ConnectionType
+                                 enum is captured via mitmproxy
+
+Installation:
+  1. Copy bosch_shc_camera/ to /config/custom_components/
+  2. Restart Home Assistant
+  3. Settings → Integrations → Add → "Bosch Smart Home Camera"
+  4. Enter Bearer token
+
+No user data is hardcoded. All configuration via the HA UI.
+"""
+
+import asyncio
+import logging
+import os
+from datetime import timedelta
+
+import aiohttp
+import async_timeout
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+_LOGGER = logging.getLogger(__name__)
+
+DOMAIN     = "bosch_shc_camera"
+CLOUD_API  = "https://residential.cbs.boschsecurity.com"
+
+ALL_PLATFORMS = ["camera", "sensor", "button"]
+
+# ConnectionType enum candidates (Java enum, exact value unknown until mitmproxy capture)
+LIVE_TYPE_CANDIDATES = [
+    "LIVEVIEW", "LIVE", "LIVE_VIEW", "STREAM", "STREAMING",
+    "MJPEG", "RTSP", "HLS", "PROXY", "CLOUD", "APP", "REMOTE",
+    "REMOTE_ACCESS", "REMOTE_VIEW", "CLOUD_PROXY", "WEBRTC",
+    "PLAYBACK", "CAMERA", "VIDEO", "VIEW",
+]
+
+DEFAULT_OPTIONS = {
+    "scan_interval":          30,
+    "enable_snapshots":       True,
+    "enable_sensors":         True,
+    "enable_snapshot_button": True,
+    "enable_auto_download":   False,
+    "download_path":          "",
+}
+
+
+def get_options(entry: ConfigEntry) -> dict:
+    """Return entry options merged with defaults."""
+    opts = dict(DEFAULT_OPTIONS)
+    opts.update(entry.options)
+    return opts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschCameraCoordinator(DataUpdateCoordinator):
+    """
+    Shared coordinator — fetches all camera data once per scan_interval.
+    All entity types (camera, sensor, button) read from coordinator.data
+    rather than making independent API calls.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._entry = entry
+        opts = get_options(entry)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=int(opts.get("scan_interval", 30))),
+        )
+        # Persists live-stream proxy info between coordinator refreshes
+        self._live_connections: dict[str, dict] = {}
+
+    # ── Properties ────────────────────────────────────────────────────────────
+    @property
+    def token(self) -> str:
+        return self._entry.data.get("bearer_token", "")
+
+    @property
+    def options(self) -> dict:
+        return get_options(self._entry)
+
+    # ── Main update ───────────────────────────────────────────────────────────
+    async def _async_update_data(self) -> dict:
+        """
+        Returns dict keyed by cam_id:
+          {
+            "info":   {...},        # from GET /v11/video_inputs
+            "status": "ONLINE",     # from GET /v11/video_inputs/{id}/ping
+            "events": [...],        # from GET /v11/events?videoInputId={id}&limit=20
+            "live":   {...},        # cached proxy info from PUT /connection
+          }
+        """
+        token = self.token
+        if not token:
+            raise UpdateFailed("No bearer token configured — add it in integration options")
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+        try:
+            # ── 1. List cameras ───────────────────────────────────────────────
+            async with async_timeout.timeout(15):
+                async with session.get(
+                    f"{CLOUD_API}/v11/video_inputs", headers=headers
+                ) as resp:
+                    if resp.status == 401:
+                        raise UpdateFailed(
+                            "Bearer token expired — update via Settings → Integrations → Configure"
+                        )
+                    if resp.status != 200:
+                        raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
+                    cam_list = await resp.json()
+
+            data: dict = {}
+
+            for cam in cam_list:
+                cam_id = cam.get("id", "")
+                if not cam_id:
+                    continue
+
+                # ── 2. Ping status ────────────────────────────────────────────
+                status = "UNKNOWN"
+                try:
+                    async with async_timeout.timeout(8):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
+                            headers=headers,
+                        ) as r:
+                            if r.status == 200:
+                                status = (await r.text()).strip().strip('"')
+                except Exception:
+                    pass
+
+                # ── 3. Latest events ──────────────────────────────────────────
+                events: list = []
+                try:
+                    url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
+                    async with async_timeout.timeout(15):
+                        async with session.get(url, headers=headers) as r:
+                            if r.status == 200:
+                                events = await r.json()
+                except Exception as err:
+                    _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+
+                data[cam_id] = {
+                    "info":   cam,
+                    "status": status,
+                    "events": events,
+                    "live":   self._live_connections.get(cam_id, {}),
+                }
+
+            # ── 4. Auto-download new event files ──────────────────────────────
+            opts = self.options
+            if opts.get("enable_auto_download") and opts.get("download_path"):
+                await self.hass.async_add_executor_job(
+                    self._sync_download, data, token, opts["download_path"]
+                )
+
+            return data
+
+        except UpdateFailed:
+            raise
+        except asyncio.TimeoutError:
+            raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Network error: {err}")
+
+    # ── Live stream ───────────────────────────────────────────────────────────
+    async def try_live_connection(self, cam_id: str) -> dict | None:
+        """
+        Try PUT /v11/video_inputs/{id}/connection with all known enum candidates.
+        On success stores proxy URL + RTSP URL in self._live_connections[cam_id]
+        and triggers a coordinator refresh so camera entity picks up stream_source.
+        Returns the response dict, or None if all candidates failed.
+        """
+        token = self.token
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+
+        for type_val in LIVE_TYPE_CANDIDATES:
+            try:
+                async with async_timeout.timeout(10):
+                    async with session.put(
+                        url, json={"type": type_val}, headers=headers
+                    ) as resp:
+                        if resp.status in (200, 201):
+                            result = await resp.json()
+                            _LOGGER.info(
+                                "Live connection opened! type=%s → %s", type_val, result
+                            )
+                            # Build known URL patterns from hash if URLs not returned directly
+                            if result.get("hash") and not result.get("rtspUrl"):
+                                h  = result["hash"]
+                                ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
+                                pp = result.get("proxyPort", 42090)
+                                result["rtspUrl"]  = (
+                                    f"rtsp://{ph}:{pp}/{h}/rtsp_tunnel"
+                                    "?inst=2&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                                )
+                                result["proxyUrl"] = (
+                                    f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
+                                )
+                            self._live_connections[cam_id] = result
+                            await self.async_request_refresh()
+                            return result
+                        elif resp.status == 401:
+                            _LOGGER.warning("Token expired during live connection attempt")
+                            return None
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                pass
+
+        _LOGGER.warning(
+            "Could not open live connection for %s — ConnectionType enum still unknown. "
+            "Capture it via mitmproxy: open the Bosch Smart Home Camera app and tap Live View.",
+            cam_id,
+        )
+        return None
+
+    # ── Auto-download (runs in executor thread) ───────────────────────────────
+    def _sync_download(self, data: dict, token: str, download_path: str) -> None:
+        """Download new event files to download_path/{camera_name}/."""
+        import requests  # sync requests — only used in executor
+        import urllib3
+        urllib3.disable_warnings()
+
+        session = requests.Session()
+        session.headers["Authorization"] = f"Bearer {token}"
+        session.verify = False
+
+        for cam_id, cam_data in data.items():
+            cam_name = cam_data["info"].get("title", cam_id)
+            folder   = os.path.join(download_path, cam_name)
+            os.makedirs(folder, exist_ok=True)
+
+            for ev in cam_data.get("events", []):
+                self._download_one(session, ev, folder, "jpg", ev.get("imageUrl"))
+                if ev.get("videoClipUploadStatus") == "Done":
+                    self._download_one(session, ev, folder, "mp4", ev.get("videoClipUrl"))
+
+    @staticmethod
+    def _download_one(
+        session, ev: dict, folder: str, ext: str, url: str | None
+    ) -> None:
+        if not url:
+            return
+        ts    = ev.get("timestamp", "")[:19].replace(":", "-").replace("T", "_")
+        etype = ev.get("eventType", "EVENT")
+        ev_id = ev.get("id", "")[:8]
+        path  = os.path.join(folder, f"{ts}_{etype}_{ev_id}.{ext}")
+        if os.path.exists(path):
+            return
+        try:
+            r = session.get(url, timeout=60, stream=True)
+            if r.status_code == 200:
+                with open(path, "wb") as f:
+                    for chunk in r.iter_content(65536):
+                        f.write(chunk)
+                _LOGGER.debug("Downloaded: %s", os.path.basename(path))
+        except Exception as err:
+            _LOGGER.warning("Download failed for %s: %s", os.path.basename(path), err)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    hass.data.setdefault(DOMAIN, {})
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    hass.data.setdefault(DOMAIN, {})
+
+    coordinator = BoschCameraCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
+
+    await hass.config_entries.async_forward_entry_setups(entry, ALL_PLATFORMS)
+
+    # Reload integration when options change (e.g. scan_interval updated)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    # Register services (idempotent)
+    _register_services(hass)
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
+    if unloaded:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return unloaded
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when options are changed."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    """Register HA services (skip if already registered)."""
+
+    async def handle_trigger_snapshot(call: ServiceCall) -> None:
+        """Force an immediate refresh for all cameras."""
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                await coord.async_request_refresh()
+
+    async def handle_open_live_connection(call: ServiceCall) -> None:
+        """Try to open a live proxy connection for a specific camera."""
+        cam_id = call.data.get("camera_id", "")
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                result = await coord.try_live_connection(cam_id)
+                if result:
+                    _LOGGER.info("Live connection established: %s", result)
+
+    if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
+        hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
+    if not hass.services.has_service(DOMAIN, "open_live_connection"):
+        hass.services.async_register(DOMAIN, "open_live_connection", handle_open_live_connection)

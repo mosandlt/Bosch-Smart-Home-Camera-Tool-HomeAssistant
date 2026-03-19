@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bosch Smart Home Camera",
+        "description": "Enter your Bearer token from the Bosch Smart Home Camera app.\n\nHow to get the token:\n1. Install mitmproxy: pip3 install mitmproxy\n2. Run: mitmdump --listen-host YOUR_IP --listen-port 8890\n3. Set your iPhone WiFi proxy → Manual → YOUR_IP:8890\n4. Visit http://mitm.it on the phone → install CA cert → enable Certificate Trust\n5. Force-close and reopen the Bosch Smart Home Camera app\n6. Copy the Bearer token from the terminal output\n\nThe token expires every ~1 hour. Refresh it anytime via Settings → Integrations → Bosch Smart Home Camera → Configure.",
+        "data": {
+          "bearer_token": "Bearer Token"
+        }
+      }
+    },
+    "error": {
+      "token_expired":    "Token expired or invalid. Capture a fresh token from the Bosch app.",
+      "cannot_connect":   "Cannot connect to the Bosch cloud API. Check your internet connection.",
+      "timeout":          "Connection timed out. Try again.",
+      "connection_error": "Network error. Check your internet connection."
+    },
+    "abort": {
+      "already_configured": "Bosch Smart Home Camera is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bosch Camera — Options",
+        "description": "Configure features and optionally refresh your Bearer token.\nLeave the token field blank to keep the existing token.",
+        "data": {
+          "bearer_token":          "Bearer Token (leave blank to keep current)",
+          "scan_interval":         "Snapshot refresh interval (seconds, 10–3600)",
+          "enable_snapshots":      "Enable camera snapshot entities",
+          "enable_sensors":        "Enable status & event sensors (Status / Last Event / Events Today)",
+          "enable_snapshot_button":"Enable control buttons (Refresh Snapshot / Open Live Stream)",
+          "enable_auto_download":  "Auto-download all event files in background",
+          "download_path":         "Download path (e.g. /config/bosch_events or /media/bosch)"
+        }
+      }
+    },
+    "error": {
+      "token_expired":  "Token is still expired. Capture a fresh token from the Bosch app.",
+      "cannot_connect": "Cannot connect to the Bosch cloud API."
+    }
+  },
+  "services": {
+    "trigger_snapshot": {
+      "name":        "Trigger Snapshot Refresh",
+      "description": "Force an immediate snapshot refresh for all Bosch cameras."
+    },
+    "open_live_connection": {
+      "name":        "Open Live Connection",
+      "description": "Try to establish a live stream proxy connection for a Bosch camera.",
+      "fields": {
+        "camera_id": {
+          "name":        "Camera ID",
+          "description": "Cloud ID of the camera (e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+        }
+      }
+    }
+  }
+}

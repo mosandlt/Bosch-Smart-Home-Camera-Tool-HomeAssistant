@@ -1,0 +1,15 @@
+# Home Assistant configuration.yaml — Bosch SHC Camera integration
+#
+# Prerequisites:
+# 1. Copy custom_components/bosch_shc_camera/ to /config/custom_components/
+# 2. Add your bearer token below (or store in secrets.yaml)
+# 3. Restart Home Assistant
+#
+# Bearer token is captured via mitmproxy — expires ~1h.
+# Update regularly by running mitmproxy and opening the Bosch app.
+
+bosch_shc_camera:
+  bearer_token: !secret bosch_bearer_token
+
+# In secrets.yaml add:
+# bosch_bearer_token: "eyJhbGciOiJSUzI1NiIsInR5cCIgOi..."

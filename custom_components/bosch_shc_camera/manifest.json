@@ -1,0 +1,13 @@
+{
+  "domain":            "bosch_shc_camera",
+  "name":              "Bosch Smart Home Camera",
+  "documentation":     "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool",
+  "issue_tracker":     "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool/issues",
+  "dependencies":      [],
+  "codeowners":        ["@mosandlt"],
+  "requirements":      ["requests>=2.28.0"],
+  "iot_class":         "cloud_polling",
+  "config_flow":       true,
+  "integration_type":  "hub",
+  "version":           "1.0.0"
+}
