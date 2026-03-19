@@ -1,8 +1,10 @@
 # Bosch Smart Home Camera — Home Assistant Custom Integration
 
 Adds your Bosch Smart Home cameras (CAMERA_EYES, CAMERA_360) as fully featured entities in Home Assistant.
+Includes a custom **Lovelace card** with live streaming state, controls, and event info.
 
-> **No official API support exists for camera images.** This integration uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Home Camera iOS/Android app.
+> **No official API support exists.** This integration uses the reverse-engineered Bosch Cloud API,
+> discovered via mitmproxy traffic analysis of the official Bosch Smart Home Camera iOS/Android app.
 
 ---
 
@@ -16,28 +18,12 @@ of Robert Bosch GmbH.**
 
 This integration communicates with a reverse-engineered, undocumented, and unofficial
 API. The author(s) provide this software **"as is", without warranty of any kind**,
-express or implied, including but not limited to warranties of merchantability,
-fitness for a particular purpose, or non-infringement.
+express or implied.
 
 **By using this software, you agree that:**
-
 - You use it entirely **at your own risk**.
-- The author(s) shall not be held liable for any direct, indirect, incidental,
-  special, or consequential damages arising from the use of, or inability to use,
-  this software — including but not limited to data loss, service disruption,
-  account suspension, or device damage.
-- The API may be changed, restricted, or shut down by Bosch at any time without
-  notice, which may render this integration non-functional.
-- You are solely responsible for ensuring your use complies with Bosch's Terms of
-  Service and any applicable laws in your jurisdiction.
-- All rights and any legal recourse are expressly disclaimed by the author(s).
-  Any use of this software is entirely your own responsibility.
-
-**Reverse engineering notice:** The API was discovered solely for the purpose of
-achieving interoperability with the user's own devices and data, which is explicitly
-permitted under **§ 69e of the German Copyright Act (UrhG)** and **Article 6 of
-EU Directive 2009/24/EC** on the legal protection of computer programs. No copy
-of Bosch's software was distributed. Only network protocol observations were used.
+- The API may be changed, restricted, or shut down by Bosch at any time without notice.
+- Reverse engineering was performed solely for interoperability under **§ 69e UrhG** and **EU Directive 2009/24/EC**.
 
 ---
 
@@ -54,6 +40,11 @@ of Bosch's software was distributed. Only network protocol observations were use
 | 💾 Auto-download events to folder | background | ❌ optional |
 | 🎥 **Live stream — 30fps H.264 + AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
+| 🃏 **Custom Lovelace card** | `bosch-camera-card` | ✅ separate JS file |
+
+**Camera state** — `camera.bosch_garten` shows:
+- `idle` — no live stream active
+- `streaming` — live proxy connection is open (switch ON)
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
 
@@ -61,7 +52,9 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 
 ## Installation
 
-### HACS (Recommended)
+### Integration (custom component)
+
+#### HACS (Recommended)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mosandlt&repository=Bosch-Smart-Home-Camera-Tool-HomeAssistant&category=integration)
 
@@ -70,11 +63,9 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 3. Restart Home Assistant
 4. Go to **Settings → Integrations → + Add Integration** and search for **"Bosch Smart Home Camera"**
 
-### Manual
+#### Manual
 
-### 1. Copy the integration
-
-Copy the `bosch_shc_camera` folder into your Home Assistant `custom_components` directory:
+1. Copy the `bosch_shc_camera/` folder into `/config/custom_components/`:
 
 ```
 /config/
@@ -84,42 +75,142 @@ Copy the `bosch_shc_camera` folder into your Home Assistant `custom_components` 
       camera.py
       sensor.py
       button.py
+      switch.py
       config_flow.py
       manifest.json
       strings.json
       services.yaml
+      icon.png
 ```
 
-### 2. Restart Home Assistant
+2. Restart Home Assistant
+3. Go to **Settings → Integrations → + Add Integration → "Bosch Smart Home Camera"**
 
-Restart HA so it picks up the new custom component.
+---
 
-### 3. Add the integration
+## Custom Lovelace Card — Bosch Camera Card
 
-Go to **Settings → Integrations → + Add Integration** and search for **"Bosch Smart Home Camera"**.
+A dedicated Lovelace card showing the camera feed with streaming state, status, event info, and controls.
 
-### 4. Log in with your Bosch account
+### What the card shows
 
-The integration uses OAuth2 (Bosch SingleKey ID). During setup, you will see a login URL — open it in your browser, log in, then paste the redirect URL back into the integration.
+```
+┌──────────────────────────────────┐
+│ ● Garten              [streaming]│  ← status dot (green/red) + stream state badge
+│                                  │
+│  ┌────────────────────────────┐  │
+│  │                            │  │
+│  │        Camera image        │  │  ← auto-refreshed (30s idle / 3s streaming)
+│  │                            │  │
+│  │ Last: 2026-03-19 09:32  5 events today │
+│  └────────────────────────────┘  │
+│                                  │
+│  Status: ONLINE                  │
+│  Last event: 2026-03-19 09:32    │
+│  Today: 5 events                 │
+│                                  │
+│  [ 📸 Snapshot ] [ 📹 Stop Stream ]│
+└──────────────────────────────────┘
+```
 
-The integration saves your refresh token and renews it silently in the background. No manual token copy-paste needed.
+- **Status dot** — green = ONLINE, red = OFFLINE, grey = unknown
+- **Stream badge** — `idle` (grey) or `streaming` (blue, pulsing dot) — mirrors `camera.bosch_garten` state
+- **Camera image** — served via HA camera proxy (`/api/camera_proxy/`), auto-refreshed
+- **Snapshot button** — calls `bosch_shc_camera.trigger_snapshot` to force an immediate refresh
+- **Live Stream button** — toggles `switch.bosch_garten_live_stream` (ON = live proxy opens, badge turns streaming)
+
+### Installation
+
+1. **Copy the card file** to your HA `www` folder:
+   ```
+   /config/www/bosch-camera-card.js
+   ```
+
+2. **Register the resource** in HA:
+   - Go to **Settings → Dashboards → ⋮ (three dots) → Resources**
+   - Click **+ Add resource**
+   - URL: `/local/bosch-camera-card.js`
+   - Type: **JavaScript module**
+   - Click **Create**
+
+3. **Reload the browser** (hard refresh: `Ctrl+Shift+R` / `Cmd+Shift+R`)
+
+4. **Add the card** to your dashboard:
+   - Edit dashboard → **+ Add card** → search for **"Custom: Bosch Camera Card"**
+   - Or paste the YAML directly (see below)
+
+### Card YAML configuration
+
+**Minimal (entity IDs auto-derived):**
+```yaml
+type: custom:bosch-camera-card
+camera_entity: camera.bosch_garten
+```
+
+**Full config with all options:**
+```yaml
+type: custom:bosch-camera-card
+camera_entity: camera.bosch_garten
+title: Garten                          # optional — overrides entity friendly name
+refresh_interval_idle: 30              # seconds between image refreshes when idle (default: 30)
+refresh_interval_streaming: 3          # seconds between image refreshes when streaming (default: 3)
+```
+
+**With explicit entity IDs** (if auto-derived names don't match):
+```yaml
+type: custom:bosch-camera-card
+camera_entity: camera.bosch_garten
+switch_entity: switch.bosch_garten_live_stream
+status_entity: sensor.bosch_garten_status
+events_today_entity: sensor.bosch_garten_events_today
+last_event_entity: sensor.bosch_garten_last_event
+```
+
+### Entity ID derivation
+
+The card automatically derives all entity IDs from `camera_entity`:
+
+| Config | Derived entity |
+|--------|---------------|
+| `camera_entity: camera.bosch_garten` | — |
+| *(auto)* | `switch.bosch_garten_live_stream` |
+| *(auto)* | `sensor.bosch_garten_status` |
+| *(auto)* | `sensor.bosch_garten_events_today` |
+| *(auto)* | `sensor.bosch_garten_last_event` |
+
+For camera named **Kamera**: use `camera_entity: camera.bosch_kamera`.
+
+### Two-camera dashboard example
+
+```yaml
+type: grid
+columns: 2
+cards:
+  - type: custom:bosch-camera-card
+    camera_entity: camera.bosch_garten
+    title: Garten
+
+  - type: custom:bosch-camera-card
+    camera_entity: camera.bosch_kamera
+    title: Kamera
+```
 
 ---
 
 ## Authentication
 
-The integration uses **OAuth2 PKCE** with your Bosch SingleKey ID (the same account you use for the Bosch Smart Home Camera app).
+The integration uses **OAuth2 PKCE** with your Bosch SingleKey ID.
 
 **Setup flow:**
-1. During configuration, a login URL is shown — copy it and open it in your browser
+1. A login URL is shown — open it in your browser
 2. Log in with your Bosch SingleKey ID
-3. Your browser will show a **404 page** — this is expected and normal
-4. Copy the full URL from the browser address bar (starts with `https://www.bosch.com/boschcam?code=...`)
-5. Paste that URL back into the integration dialog
+3. Your browser shows a **404 page** — this is expected
+4. Copy the full URL from the address bar (starts with `https://www.bosch.com/boschcam?code=...`)
+5. Paste it back into the integration dialog
 
-After first login, the integration saves a long-lived **refresh token** and renews the access token silently in the background. No manual action needed day-to-day.
+After first login, the integration saves a **refresh token** and renews the access token silently. No daily action needed.
 
-If the refresh token expires (rare, after months of inactivity), go to **Settings → Integrations → Bosch Smart Home Camera → Configure → Force new browser login**.
+If the refresh token expires: **Settings → Integrations → Bosch Smart Home Camera → Configure → Force new browser login**.
 
 ---
 
@@ -132,103 +223,115 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**:
 | Coordinator tick interval | How often the integration wakes up (seconds) | 60 |
 | Camera status check interval | How often to ping ONLINE/OFFLINE (seconds) | 300 |
 | Events fetch interval | How often to check for new motion events (seconds) | 300 |
-| Enable snapshots | Show camera entities with latest JPEG | ✅ |
+| Enable snapshots | Show camera entities | ✅ |
 | Enable sensors | Show status / last event / events-today sensors | ✅ |
 | Enable buttons | Show Refresh Snapshot button + Live Stream switch | ✅ |
 | Auto-download events | Download all event JPEGs and MP4 clips to a local folder | ❌ |
-| Download path | Local path for auto-downloaded events (e.g. `/config/bosch_events`) | — |
+| Download path | Local path for auto-downloaded events | — |
 | Force new browser login | Re-run OAuth2 login if refresh token expired | — |
+
+---
+
+## Entities
+
+For each discovered camera (example: camera named "Garten"):
+
+| Entity ID | Type | Description |
+|-----------|------|-------------|
+| `camera.bosch_garten` | camera | Latest snapshot — state: `idle` / `streaming` |
+| `sensor.bosch_garten_status` | sensor | ONLINE / OFFLINE |
+| `sensor.bosch_garten_last_event` | sensor | Timestamp of latest motion event |
+| `sensor.bosch_garten_events_today` | sensor | Number of events today |
+| `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
+| `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
+
+### Camera streaming state
+
+`camera.bosch_garten` follows the standard HA camera state machine:
+
+| State | When | `streaming_state` attribute |
+|-------|------|-----------------------------|
+| `idle` | Live stream switch is OFF | `idle` |
+| `streaming` | Live stream switch is ON, proxy session active | `active` |
+
+Use this in automations:
+```yaml
+trigger:
+  - platform: state
+    entity_id: camera.bosch_garten
+    to: streaming
+action:
+  - service: notify.mobile_app
+    data:
+      message: "Garten camera is now streaming"
+```
 
 ---
 
 ## Services
 
 ### `bosch_shc_camera.trigger_snapshot`
-Force an immediate snapshot refresh for all cameras (same as pressing the Refresh button).
+Force an immediate refresh for all cameras (same as the Refresh button).
+```yaml
+service: bosch_shc_camera.trigger_snapshot
+```
 
 ### `bosch_shc_camera.open_live_connection`
-Try to establish a live proxy stream connection for a specific camera.
+Open a live proxy connection for a specific camera by camera ID (UUID).
 ```yaml
 service: bosch_shc_camera.open_live_connection
 data:
-  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # your camera UUID
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
-On success, the camera entity's `stream_source` attribute is set to the `rtsps://` URL
-and HA renders a live video feed (30fps H.264 + AAC audio) in the Lovelace camera card.
+> Tip: Use the **Live Stream switch** instead — it does the same and shows state in the UI.
 
 ---
 
-## Entities Created
+## Live Stream — How It Works
 
-For each discovered camera (example: camera named "Outdoor"):
+Turn ON the **Live Stream switch** (`switch.bosch_garten_live_stream`) to open a live proxy connection.
 
-| Entity ID | Type | Description |
-|-----------|------|-------------|
-| `camera.bosch_outdoor` | camera | Latest snapshot (JPEG) |
-| `sensor.bosch_outdoor_status` | sensor | ONLINE / OFFLINE |
-| `sensor.bosch_outdoor_last_event` | sensor | Timestamp of latest motion event |
-| `sensor.bosch_outdoor_events_today` | sensor | Number of events today |
-| `button.bosch_outdoor_refresh_snapshot` | button | Force immediate refresh |
-| `switch.bosch_outdoor_live_stream` | switch | Live stream ON/OFF |
+The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
 
-All entities share a single HA device (grouped in the device view).
+**Two streams available on the proxy:**
+
+| Port | Protocol | Content |
+|------|----------|---------|
+| `42090` | HTTPS | `snap.jpg` — current JPEG, no auth, ~1.5s latency |
+| `443` | `rtsps://` (RTSP over TLS) | 30fps H.264 1920×1080 + AAC-LC 16kHz audio |
+
+**When switch is ON:**
+- Camera entity state changes to `streaming`
+- Camera image refreshes from live `snap.jpg` proxy (current image, near-real-time)
+- `stream_source` attribute is set to the `rtsps://` URL for HA's stream component
+- `live_rtsps` and `live_proxy` attributes appear on the camera entity
+
+**Session lifetime:** The Bosch proxy session lasts ~60 seconds. If the switch stays ON, the integration maintains the session. Turn the switch OFF to close the session immediately.
+
+> **Note on rtsps:// in HA:** HA's built-in stream component (ffmpeg backend) may not be able to
+> open `rtsps://` with Bosch's private CA certificate. If the live video feed does not appear in
+> the HA picture card, use the Python CLI tool's `live` command with `ffplay -tls_verify 0` instead.
+> The `snap.jpg` proxy (near-real-time JPEG) always works and is used by the Bosch Camera Card.
 
 ---
 
 ## Auto-Download
 
-When enabled, the integration downloads all event files (JPEG snapshots + MP4 clips)
-to `download_path/{camera_name}/` in the background after each refresh cycle.
+When enabled, all event files (JPEG + MP4) are downloaded to `download_path/{camera_name}/` after each refresh.
 
 Files are named: `2026-03-19_09-32-08_MOVEMENT_49C3521E.jpg`
 
-Already-downloaded files are skipped — it's a smart incremental sync.
+Already-downloaded files are skipped — incremental sync.
 
 Suggested path: `/config/bosch_events` (accessible via HA file editor / Samba share)
 
 ---
 
-## Limitations
+## Icon not showing in Settings → Integrations
 
-| Feature | Status |
-|---------|--------|
-| Latest event snapshot | ✅ Working |
-| Motion detection events | ✅ Via cloud API |
-| Video clips (MP4) | ✅ Via cloud API |
-| Status (ONLINE/OFFLINE) | ✅ Working |
-| **Live snapshot (current image)** | ✅ Via snap.jpg proxy (port 42090) |
-| **Live stream 30fps H.264 + AAC** | ✅ Via rtsps:// port 443 |
-| Local network access | ⚠️ Fragile (breaks camera connection) |
+HA loads integration brand icons from the official `brands.home-assistant.io` CDN — not from the local `icon.png` file in `custom_components/`. Custom integrations not submitted to the [HA brands repository](https://github.com/home-assistant/brands) will show "icon not available".
 
-### Live Stream — How It Works
-
-Turn ON the **Live Stream switch** for a camera to open a live proxy connection.
-
-The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
-
-Response includes `urls[0]` = `proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`.
-
-**Two ports are available on the proxy:**
-
-| Port | Protocol | What it serves |
-|------|----------|---------------|
-| `42090` | HTTP | `snap.jpg` — current JPEG snapshot, no auth needed |
-| `443` | RTSP/1.0 over TLS (`rtsps://`) | Full 30fps H.264 1920×1080 + AAC-LC 16kHz audio |
-
-When the switch is ON, the camera entity exposes:
-- `rtsps_url` attribute: `rtsps://proxy-NN:443/{hash}/rtsp_tunnel?inst=1&enableaudio=1&...` — full stream
-- `proxy_snap_url` attribute: `https://proxy-NN:42090/{hash}/snap.jpg` — current image
-
-The `stream_source` is set to the `rtsps://` URL. HA's stream component (ffmpeg backend)
-can open this if TLS verification can be disabled for Bosch's private CA.
-
-**The live stream stays active** as long as the switch is ON. Turn it OFF to close the session.
-
-> **Note:** If HA's stream component cannot open `rtsps://` (TLS verify issues),
-> use the Python CLI tool's `live` command which uses `ffplay -tls_verify 0`.
-
-> **Tip:** Add a **Camera card** in the Lovelace dashboard, select the camera entity,
-> and click the live button in the card to start streaming.
+**To fix:** Submit a PR to `https://github.com/home-assistant/brands` with the integration icon (folder: `custom_integrations/bosch_shc_camera/`). The `icon.png` is already in the correct format in this repo.
 
 ---
 
@@ -239,36 +342,28 @@ Base: https://residential.cbs.boschsecurity.com
 Auth: Authorization: Bearer {token}
 SSL:  verify=False (Bosch private CA)
 
-GET  /v11/video_inputs                         → list all cameras (id, title, model, firmware, mac)
-GET  /v11/video_inputs/{id}                    → camera details
-GET  /v11/video_inputs/{id}/ping               → "ONLINE"/"OFFLINE"
-GET  /v11/video_inputs/{id}/firmware           → firmware version info
-GET  /v11/events?videoInputId={id}             → camera-specific events
-GET  /v11/events?videoInputId={id}&limit=N     → limited event list
-GET  {event.imageUrl}                          → event JPEG snapshot ✅
-GET  {event.videoClipUrl}                      → event MP4 clip ✅
-PUT  /v11/video_inputs/{id}/connection         → open live proxy ({"type": "REMOTE"})
-GET  /v11/feature_flags                        → feature flags for the account
-GET  /v11/purchases                            → subscription / purchase info
-GET  /v11/contracts?locale=de_DE               → contract info
+GET  /v11/video_inputs                          → list cameras
+GET  /v11/video_inputs/{id}/ping                → "ONLINE" / "OFFLINE"
+GET  /v11/events?videoInputId={id}&limit=20     → motion events (imageUrl + videoClipUrl)
+GET  {event.imageUrl}                           → event JPEG snapshot
+GET  {event.videoClipUrl}                       → event MP4 clip
+PUT  /v11/video_inputs/{id}/connection          → open live proxy {"type": "REMOTE"}
+GET  /v11/feature_flags                         → account feature flags
+GET  /v11/purchases                             → subscription info
+GET  /v11/contracts?locale=de_DE                → contracts
 ```
 
-### Live Proxy Endpoints (after PUT /connection)
+### Live proxy endpoints (after PUT /connection)
 
 ```
-# Port 42090 — HTTP only
 https://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/snap.jpg
-  → Current camera image (1920×1080 JPEG, no auth needed — hash = credential)
+  → Current JPEG (no auth — hash = credential)
 
-# Port 443 — RTSP/1.0 over TLS  ✅ WORKING
 rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
   ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
-  → Full 30fps H.264 1920×1080 + AAC-LC 16kHz mono audio
-  → Open with: ffplay -rtsp_transport tcp -tls_verify 0 -i "rtsps://..."
+  → 30fps H.264 1920×1080 + AAC-LC 16kHz mono
+  → Open: ffplay -rtsp_transport tcp -tls_verify 0 "rtsps://..."
 ```
-
-Proxy sessions expire after ~60 seconds on the Bosch side. The integration automatically
-re-opens the connection when the switch is toggled ON again.
 
 ---
 

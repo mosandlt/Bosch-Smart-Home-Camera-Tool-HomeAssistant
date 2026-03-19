@@ -22,7 +22,7 @@ import logging
 import aiohttp
 import async_timeout
 
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -59,7 +59,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     • Shows the latest motion-triggered JPEG snapshot (refreshed every scan_interval)
     • Exposes stream_source (RTSP) once a live connection has been established
     • Device groups with sensor and button entities on the same HA device
+    • Camera state is "streaming" when live proxy is active, "idle" otherwise
     """
+
+    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
         self,
@@ -87,6 +90,21 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     @property
     def _cam_data(self) -> dict:
         return self.coordinator.data.get(self._cam_id, {})
+
+    # ── Streaming state ───────────────────────────────────────────────────────
+    @property
+    def is_streaming(self) -> bool:
+        """True when a live proxy connection is active.
+
+        Controls the HA camera state: True → "streaming", False → "idle".
+        This reflects whether the live stream switch is ON and the proxy
+        session is still valid (not expired).
+        """
+        return self._cam_id in self.coordinator._live_connections
+
+    @property
+    def is_recording(self) -> bool:
+        return False
 
     @property
     def _token(self) -> str:
@@ -124,15 +142,16 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         live     = cam_data.get("live", {})
         rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
         return {
-            "camera_id":   self._cam_id,
-            "status":      cam_data.get("status", "UNKNOWN"),
-            "last_event":  latest.get("timestamp", "")[:19],
-            "event_type":  latest.get("eventType", ""),
-            "model":       self._model,
-            "firmware":    self._fw,
-            "mac":         self._mac,
-            "live_rtsps":  rtsps_url,
-            "live_proxy":  live.get("proxyUrl", ""),
+            "camera_id":       self._cam_id,
+            "status":          cam_data.get("status", "UNKNOWN"),
+            "streaming_state": "active" if self.is_streaming else "idle",
+            "last_event":      latest.get("timestamp", "")[:19],
+            "event_type":      latest.get("eventType", ""),
+            "model":           self._model,
+            "firmware":        self._fw,
+            "mac":             self._mac,
+            "live_rtsps":      rtsps_url,
+            "live_proxy":      live.get("proxyUrl", ""),
         }
 
     # ── Live stream ───────────────────────────────────────────────────────────

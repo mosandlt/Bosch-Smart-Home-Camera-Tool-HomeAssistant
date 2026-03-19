@@ -1,9 +1,10 @@
 """Bosch Smart Home Camera — Button Platform.
 
 Creates one button entity per camera:
-  • {Name} Refresh Snapshot  — button, forces an immediate coordinator refresh
+  • {Name} Refresh Snapshot — forces an immediate coordinator refresh (data + image)
 
-The Live Stream switch is in the switch platform (switch.py).
+The Live Stream is controlled by the switch platform (switch.py):
+  switch.bosch_garten_live_stream  →  ON = open live proxy, OFF = close
 """
 
 import logging
@@ -40,7 +41,12 @@ async def async_setup_entry(
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
-    """Button: force an immediate snapshot refresh."""
+    """Button: force an immediate coordinator refresh.
+
+    Fetches latest camera info, status, and events from the Bosch Cloud API
+    right now — without waiting for the next scheduled interval.
+    Useful after motion events or when you want a fresh snapshot immediately.
+    """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -69,5 +75,6 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
         }
 
     async def async_press(self) -> None:
+        """Force an immediate data refresh for this camera."""
         _LOGGER.debug("Snapshot refresh triggered for %s", self._cam_title)
         await self.coordinator.async_request_refresh()
