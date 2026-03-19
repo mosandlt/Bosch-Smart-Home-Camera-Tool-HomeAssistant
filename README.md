@@ -52,7 +52,8 @@ of Bosch's software was distributed. Only network protocol observations were use
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Open Live Stream button | `button` | ✅ enabled |
 | 💾 Auto-download events to folder | background | ❌ optional |
-| 🎥 Live RTSP stream | `camera` stream_source | ⚠️ pending |
+| 🎥 Live view (~1 fps, snap.jpg polling) | `camera` | ✅ via Open Live Stream |
+| True RTSP stream | — | ⚠️ proprietary tunnel |
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
 
@@ -94,42 +95,39 @@ The integration will ask for a Bearer Token. See the next section on how to get 
 
 ## Getting the Bearer Token
 
-The Bosch cloud API uses a JWT Bearer token. You need to capture it from the official Bosch Smart Home Camera app using a proxy tool.
+The Bosch cloud API uses a JWT Bearer token (OAuth2 PKCE flow, issued by Bosch's Keycloak server).
 
-### Requirements
-- A Mac or PC on the same WiFi network as your phone
-- [mitmproxy](https://mitmproxy.org/) installed (`pip3 install mitmproxy`)
+### Recommended: get_token.py (automatic)
 
-### Steps
+Use the `get_token.py` script from the [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python):
 
-**On your Mac/PC:**
 ```bash
-# Find your computer's IP address (e.g. 192.168.1.100)
-ifconfig | grep "inet "   # Mac
-ipconfig                  # Windows
-
-# Start mitmproxy
-mitmdump --listen-host YOUR_IP --listen-port 8890 2>&1 | tee /tmp/mitm_log.txt
+python3 get_token.py           # first run → browser login → saves refresh_token
+python3 get_token.py --refresh # silent renewal (no browser)
+python3 get_token.py --show    # show current token + expiry
 ```
 
-**On your iPhone (Settings → WiFi → your network → Configure Proxy):**
-1. Set Proxy to **Manual**
-2. Server: `YOUR_IP`, Port: `8890`
-3. Open Safari and go to `http://mitm.it`
-4. Tap **Apple** → install the profile
-5. Go to **Settings → General → VPN & Device Management** → trust the mitmproxy certificate
-6. **Settings → General → About → Certificate Trust Settings** → enable full trust for mitmproxy
+First run opens your browser for a one-time Bosch SingleKey ID login and saves a long-lived
+`refresh_token` to `bosch_config.json`. All subsequent runs renew silently — no browser needed.
 
-**Capture the token:**
-1. Force-close the **Bosch Smart Home Camera** app on your phone
-2. Re-open it (this triggers re-authentication)
-3. Watch the terminal — look for a line like:
-   ```
-   Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwi...
-   ```
-4. Copy everything after `Bearer ` — that's your token
+Copy the `bearer_token` value from `bosch_config.json` into the integration's configuration.
 
-**The token lasts about 1 hour.** When cameras stop updating in HA, go to **Settings → Integrations → Bosch Smart Home Camera → Configure** to enter a fresh token.
+**Token lifetime:** ~1 hour. When cameras stop updating, run `python3 get_token.py --refresh`
+and paste the new token in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
+
+### Fallback: mitmproxy capture
+
+If the automatic flow is unavailable, capture a token from the Bosch Smart Home Camera app:
+
+```bash
+pip3 install mitmproxy
+mitmdump --listen-host YOUR_MAC_IP --listen-port 8890
+```
+
+On your iPhone: **Settings → WiFi → your network → Configure Proxy → Manual**
+(Server: `YOUR_MAC_IP`, Port: `8890`), visit `http://mitm.it` to install the CA cert,
+then force-close and reopen the **Bosch Smart Home Camera** app. Copy the
+`Authorization: Bearer eyJ...` value from the terminal output.
 
 ---
 
@@ -204,24 +202,23 @@ Suggested path: `/config/bosch_events` (accessible via HA file editor / Samba sh
 | Motion detection events | ✅ Via cloud API |
 | Video clips (MP4) | ✅ Via cloud API |
 | Status (ONLINE/OFFLINE) | ✅ Working |
-| **Live view / real-time** | ⚠️ Pending (see below) |
+| **Live view (~1 fps)** | ✅ Working via snap.jpg polling |
 | Local network access | ⚠️ Fragile (breaks camera connection) |
-| RTSP stream | 🔬 Under investigation |
+| True RTSP stream | ⚠️ Proprietary tunnel, not openable by HA |
 
 ### Live View Status
 
-The app uses a cloud proxy for live streaming (`proxy-NN.live.cbs.boschsecurity.com:42090`).
-The proxy is opened via `PUT /v11/video_inputs/{id}/connection` with a `type` enum parameter.
-The exact value of this enum has not yet been discovered.
+The live proxy is opened via `PUT /v11/video_inputs/{id}/connection` with `{"type": "REMOTE"}`.
+This returns a cloud proxy URL (`proxy-NN.live.cbs.boschsecurity.com:42090/{hash}`).
 
-The "Open Live Stream" button tries 20+ candidate values automatically.
-Once the correct value is found (via mitmproxy request body capture), add it to the top
-of `LIVE_TYPE_CANDIDATES` in `__init__.py` and it will work.
+The proxy's `snap.jpg` endpoint returns a fresh **1920×1080 JPEG** of the current camera view
+with no authentication required (the session hash acts as the credential). Sessions last ~60 seconds.
 
-When live view is working, the RTSP stream URL is:
-```
-rtsp://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/rtsp_tunnel?inst=2&enableaudio=1
-```
+The "Open Live Stream" button opens this connection and refreshes the camera entity's snapshot
+continuously, giving ~1 fps live view in the HA Lovelace camera card.
+
+True RTSP streaming (`rtsp://proxy-NN.../rtsp_tunnel`) uses a proprietary RTSP-over-HTTPS
+tunnel that standard players (including HA's stream component) cannot open.
 
 ---
 
@@ -230,16 +227,33 @@ rtsp://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/rtsp_tunnel?inst=2&enabl
 ```
 Base: https://residential.cbs.boschsecurity.com
 Auth: Authorization: Bearer {token}
+SSL:  verify=False (Bosch private CA)
 
-GET  /v11/video_inputs                         → list all cameras
+GET  /v11/video_inputs                         → list all cameras (id, title, model, firmware, mac)
 GET  /v11/video_inputs/{id}                    → camera details
 GET  /v11/video_inputs/{id}/ping               → "ONLINE"/"OFFLINE"
-GET  /v11/events                               → all 400 events
+GET  /v11/video_inputs/{id}/firmware           → firmware version info
 GET  /v11/events?videoInputId={id}             → camera-specific events
-GET  /v11/events/{event_id}/snap.jpg           → event JPEG snapshot ✅
-GET  /v11/events/{event_id}/clip.mp4           → event MP4 video ✅
-PUT  /v11/video_inputs/{id}/connection         → open live stream proxy (type TBD)
+GET  /v11/events?videoInputId={id}&limit=N     → limited event list
+GET  {event.imageUrl}                          → event JPEG snapshot ✅
+GET  {event.videoClipUrl}                      → event MP4 clip ✅
+PUT  /v11/video_inputs/{id}/connection         → open live proxy ({"type": "REMOTE"})
+GET  /v11/feature_flags                        → feature flags for the account
+GET  /v11/purchases                            → subscription / purchase info
+GET  /v11/contracts?locale=de_DE               → contract info
 ```
+
+### Live Proxy Endpoints (after PUT /connection)
+
+```
+https://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/snap.jpg
+  → Current camera image (1920×1080 JPEG, no auth needed — hash = credential)
+
+rtsp://proxy-NN.live.cbs.boschsecurity.com:42090/{hash}/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+  → RTSP stream (proprietary tunnel, not openable with standard players)
+```
+
+Proxy sessions expire after ~60 seconds. Open a new `PUT /connection` to get a fresh session.
 
 ---
 
