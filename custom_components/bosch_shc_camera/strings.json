@@ -2,25 +2,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Bosch Smart Home Camera — Step 1 of 2",
-        "description": "Copy the URL below, open it in your browser, and log in with your Bosch SingleKey ID.\n\nAfter login the browser shows a 404 page — that is expected. Then click Submit.",
+        "title": "Bosch Smart Home Camera — Login (Step 1 of 2)",
+        "description": "**How to log in:**\n\n1. Copy the URL from the field below\n2. Open it in your browser (Chrome, Safari, Firefox, ...)\n3. Log in with your **Bosch SingleKey ID** (the same account you use for the Bosch Smart Home Camera app)\n4. After login, the browser shows a **404 error page** — this is completely normal and expected\n5. Copy the **full URL** from the browser address bar — it starts with `https://www.bosch.com/boschcam?code=`\n6. Come back here and click **Submit** to continue to Step 2",
         "data": {
-          "login_url": "Login URL (copy and open in browser)"
+          "login_url": "Bosch Login URL — copy this and open in your browser"
         }
       },
       "auth": {
-        "title": "Bosch Smart Home Camera — Step 2 of 2",
-        "description": "After the 404 page, copy the full URL from the browser address bar and paste it here.\n\nIt starts with: https://www.bosch.com/boschcam?code=...",
+        "title": "Bosch Smart Home Camera — Paste URL (Step 2 of 2)",
+        "description": "**Paste the redirect URL from your browser:**\n\nAfter logging in, your browser shows a 404 page. The URL in the address bar looks like:\n\n`https://www.bosch.com/boschcam?code=eyJ...long code...`\n\nCopy that **full URL** from the address bar and paste it into the field below.\n\n**Important:** The code expires after ~60 seconds — paste it quickly after logging in.",
         "data": {
-          "redirect_url": "Redirect URL (paste from browser address bar)"
+          "redirect_url": "Redirect URL (paste the full URL from the browser address bar)"
         }
       }
     },
     "error": {
-      "invalid_redirect_url":  "No auth code found. Paste the full URL from the browser address bar (starts with https://www.bosch.com/boschcam?code=...)",
-      "token_exchange_failed": "Token exchange failed — the code may have expired. Go back and try again.",
-      "cannot_connect":        "Cannot connect to Bosch servers. Check your internet connection.",
-      "timeout":               "Connection timed out. Try again."
+      "invalid_redirect_url":  "No auth code found in the URL. Make sure you paste the full URL from the browser address bar — it must start with https://www.bosch.com/boschcam?code=...",
+      "token_exchange_failed": "Login failed. The auth code may have expired (it is only valid for ~60 seconds). Please go back, copy the login URL again, log in fresh, and paste the new redirect URL immediately.",
+      "cannot_connect":        "Cannot connect to Bosch servers. Check your internet connection and try again.",
+      "timeout":               "Connection timed out. Check your internet and try again."
     },
     "abort": {
       "already_configured": "Bosch Smart Home Camera is already configured."
@@ -30,36 +30,36 @@
     "step": {
       "init": {
         "title": "Bosch Camera — Options",
-        "description": "Token status: {token_status}",
+        "description": "**Token status:** {token_status}\n\nThe integration automatically renews the token in the background using the saved refresh token — no manual action needed.",
         "data": {
           "scan_interval":          "Snapshot refresh interval (seconds, 10–3600)",
-          "enable_snapshots":       "Enable camera snapshot entities",
-          "enable_sensors":         "Enable status and event sensors",
-          "enable_snapshot_button": "Enable control buttons (Refresh Snapshot / Open Live Stream)",
-          "enable_auto_download":   "Auto-download all event files in background",
-          "download_path":          "Download path (e.g. /config/bosch_events)",
-          "force_relogin":          "Force new browser login (re-authenticate)"
+          "enable_snapshots":       "Enable camera snapshot entities (latest motion JPEG)",
+          "enable_sensors":         "Enable sensors (Status / Last Event / Events Today)",
+          "enable_snapshot_button": "Enable buttons (Refresh Snapshot / Open Live Stream)",
+          "enable_auto_download":   "Auto-download all event files (JPEG + MP4) in background",
+          "download_path":          "Download folder path (e.g. /config/bosch_events)",
+          "force_relogin":          "Force new browser login (only needed if refresh token expired)"
         }
       },
       "relogin_show": {
         "title": "Re-login — Step 1 of 2",
-        "description": "Copy the URL below, open it in your browser, and log in with your Bosch SingleKey ID.\n\nAfter login the browser shows a 404 page — that is expected. Then click Submit.",
+        "description": "**How to re-authenticate:**\n\n1. Copy the URL from the field below\n2. Open it in your browser\n3. Log in with your **Bosch SingleKey ID**\n4. The browser shows a **404 page** — this is expected\n5. Copy the **full URL** from the browser address bar\n6. Click **Submit** to continue",
         "data": {
-          "login_url": "Login URL (copy and open in browser)"
+          "login_url": "Bosch Login URL — copy this and open in your browser"
         }
       },
       "relogin_paste": {
         "title": "Re-login — Step 2 of 2",
-        "description": "After the 404 page, copy the full URL from the browser address bar and paste it here.\n\nIt starts with: https://www.bosch.com/boschcam?code=...",
+        "description": "**Paste the redirect URL from your browser:**\n\nAfter the 404 page, copy the full URL from the browser address bar (starts with `https://www.bosch.com/boschcam?code=...`) and paste it below.\n\n**Important:** The code expires after ~60 seconds — paste it quickly.",
         "data": {
-          "redirect_url": "Redirect URL (paste from browser address bar)"
+          "redirect_url": "Redirect URL (paste the full URL from the browser address bar)"
         }
       }
     },
     "error": {
-      "invalid_redirect_url":  "No auth code found. Paste the full URL from the browser address bar.",
-      "token_exchange_failed": "Token exchange failed — the code may have expired. Try again.",
-      "cannot_connect":        "Cannot connect to Bosch servers."
+      "invalid_redirect_url":  "No auth code found. Paste the full URL from the browser address bar (starts with https://www.bosch.com/boschcam?code=...).",
+      "token_exchange_failed": "Login failed — the auth code may have expired (valid ~60 seconds). Go back and try again immediately after logging in.",
+      "cannot_connect":        "Cannot connect to Bosch servers. Check your internet connection."
     }
   },
   "services": {
@@ -69,11 +69,11 @@
     },
     "open_live_connection": {
       "name":        "Open Live Connection",
-      "description": "Open a live stream proxy connection for a Bosch camera.",
+      "description": "Open a live stream proxy connection for a Bosch camera (H.264 30fps + AAC audio).",
       "fields": {
         "camera_id": {
           "name":        "Camera ID",
-          "description": "Cloud ID of the camera (e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+          "description": "Cloud UUID of the camera (find it in the camera entity attributes)"
         }
       }
     }

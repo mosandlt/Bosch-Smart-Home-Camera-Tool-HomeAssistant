@@ -141,15 +141,17 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         """
         Step 1: Show the login URL as a pre-filled text field.
-        User copies it, opens it in a browser, then clicks Submit.
-        We regenerate PKCE on every visit so the URL is always fresh.
+        PKCE pair is generated once and stored — NOT regenerated on submit.
+        User copies the URL, opens it in browser, logs in, then clicks Submit.
         """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        self._verifier, challenge = _pkce_pair()
-        state          = secrets.token_urlsafe(16)
-        self._auth_url = _build_auth_url(challenge, state)
+        # Generate PKCE pair only once (not on every call)
+        if not self._verifier:
+            self._verifier, challenge = _pkce_pair()
+            state          = secrets.token_urlsafe(16)
+            self._auth_url = _build_auth_url(challenge, state)
 
         if user_input is not None:
             # User clicked Submit after opening the URL → go to paste step
@@ -157,7 +159,6 @@ class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            # Show URL as a pre-filled (but editable) text field so it always renders
             data_schema=vol.Schema({
                 vol.Optional("login_url", default=self._auth_url): str,
             }),
@@ -268,7 +269,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_relogin_show(self, user_input=None):
-        """Show login URL as a pre-filled text field."""
+        """Show login URL as a pre-filled text field. PKCE already generated in init."""
         if user_input is not None:
             return await self.async_step_relogin_paste()
 
