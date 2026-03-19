@@ -6,6 +6,41 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES, CAMERA_360) as fully featured e
 
 ---
 
+## Disclaimer
+
+**This project is an independent, community-developed integration. It is not affiliated
+with, endorsed by, sponsored by, or in any way officially connected to Robert Bosch
+GmbH, Bosch Smart Home GmbH, or any of their subsidiaries or affiliates.
+"Bosch", "Bosch Smart Home", and related names and logos are registered trademarks
+of Robert Bosch GmbH.**
+
+This integration communicates with a reverse-engineered, undocumented, and unofficial
+API. The author(s) provide this software **"as is", without warranty of any kind**,
+express or implied, including but not limited to warranties of merchantability,
+fitness for a particular purpose, or non-infringement.
+
+**By using this software, you agree that:**
+
+- You use it entirely **at your own risk**.
+- The author(s) shall not be held liable for any direct, indirect, incidental,
+  special, or consequential damages arising from the use of, or inability to use,
+  this software — including but not limited to data loss, service disruption,
+  account suspension, or device damage.
+- The API may be changed, restricted, or shut down by Bosch at any time without
+  notice, which may render this integration non-functional.
+- You are solely responsible for ensuring your use complies with Bosch's Terms of
+  Service and any applicable laws in your jurisdiction.
+- All rights and any legal recourse are expressly disclaimed by the author(s).
+  Any use of this software is entirely your own responsibility.
+
+**Reverse engineering notice:** The API was discovered solely for the purpose of
+achieving interoperability with the user's own devices and data, which is explicitly
+permitted under **§ 69e of the German Copyright Act (UrhG)** and **Article 6 of
+EU Directive 2009/24/EC** on the legal protection of computer programs. No copy
+of Bosch's software was distributed. Only network protocol observations were used.
+
+---
+
 ## Features
 
 | Feature | Entity type | Default |
@@ -213,38 +248,3 @@ PUT  /v11/video_inputs/{id}/connection         → open live stream proxy (type 
 - [Bosch SHC API Docs Issue #63](https://github.com/BoschSmartHome/bosch-shc-api-docs/issues/63) — camera API discussion
 - [boschshcpy](https://github.com/tschamm/boschshcpy) — Python library for local SHC API
 - [homeassistant-bosch-shc](https://github.com/tschamm/homeassistant-bosch-shc) — existing HA integration (no camera images)
-
----
-
-## Disclaimer
-
-**This project is an independent, community-developed integration. It is not affiliated
-with, endorsed by, sponsored by, or in any way officially connected to Robert Bosch
-GmbH, Bosch Smart Home GmbH, or any of their subsidiaries or affiliates.
-"Bosch", "Bosch Smart Home", and related names and logos are registered trademarks
-of Robert Bosch GmbH.**
-
-This integration communicates with a reverse-engineered, undocumented, and unofficial
-API. The author(s) provide this software **"as is", without warranty of any kind**,
-express or implied, including but not limited to warranties of merchantability,
-fitness for a particular purpose, or non-infringement.
-
-**By using this software, you agree that:**
-
-- You use it entirely **at your own risk**.
-- The author(s) shall not be held liable for any direct, indirect, incidental,
-  special, or consequential damages arising from the use of, or inability to use,
-  this software — including but not limited to data loss, service disruption,
-  account suspension, or device damage.
-- The API may be changed, restricted, or shut down by Bosch at any time without
-  notice, which may render this integration non-functional.
-- You are solely responsible for ensuring your use complies with Bosch's Terms of
-  Service and any applicable laws in your jurisdiction.
-- All rights and any legal recourse are expressly disclaimed by the author(s).
-  Any use of this software is entirely your own responsibility.
-
-**Reverse engineering notice:** The API was discovered solely for the purpose of
-achieving interoperability with the user's own devices and data, which is explicitly
-permitted under **§ 69e of the German Copyright Act (UrhG)** and **Article 6 of
-EU Directive 2009/24/EC** on the legal protection of computer programs. No copy
-of Bosch's software was distributed. Only network protocol observations were used.
