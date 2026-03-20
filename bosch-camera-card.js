@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.0
+ * Version: 1.4.1
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -153,7 +153,7 @@ class BoschCameraCard extends HTMLElement {
         }
         .cam-img.hidden { opacity: 0; }
 
-        /* Fullscreen — fill entire screen with black letterbox */
+        /* Fullscreen — native API (desktop/Android) */
         .img-wrapper:fullscreen,
         .img-wrapper:-webkit-full-screen {
           background: #000;
@@ -165,6 +165,14 @@ class BoschCameraCard extends HTMLElement {
           width: 100vw; height: 100vh;
           object-fit: contain; min-height: unset;
         }
+        /* Fullscreen — CSS fallback for iOS Safari (position:fixed overlay) */
+        :host(.fs-active) {
+          position: fixed !important; inset: 0 !important;
+          z-index: 9999 !important; background: #000 !important;
+          display: flex !important; align-items: center !important; justify-content: center !important;
+        }
+        :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }
+        :host(.fs-active) .cam-img { width: 100vw; height: 100vh; object-fit: contain; min-height: unset; }
 
         /* Loading overlay */
         .loading-overlay {
@@ -347,7 +355,17 @@ class BoschCameraCard extends HTMLElement {
     if (!img || !this._hass) return;
     const camEntity = this._entities.camera;
     const token = this._hass.states[camEntity]?.attributes?.access_token || "";
-    img.src = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}`;
+    const url = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}`;
+
+    if (this._imageLoaded) {
+      // Preload so the old image stays visible until the new one is fully ready
+      const preload = new window.Image();
+      preload.onload = () => { img.src = url; };
+      preload.onerror = () => { this._setLoadingOverlay(false); };
+      preload.src = url;
+    } else {
+      img.src = url;
+    }
   }
 
   _onImageLoaded() {
@@ -440,15 +458,18 @@ class BoschCameraCard extends HTMLElement {
     }
     if (label) label.textContent = "Lädt…";
 
+    // Show transparent spinner overlay over the existing image
+    this._setLoadingOverlay(true, "Aktualisiere Bild…");
+
     // Call HA service
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
 
-    // After 4 seconds: force-refresh the image (coordinator should have new data by then)
+    // After 5 seconds: force-refresh the image (backend fast-path seeds cache in ~2s)
     setTimeout(() => {
       this._scheduleImageLoad(0);
-    }, 4000);
+    }, 5000);
 
-    // After 6 seconds: restore button
+    // After 8 seconds: restore button (overlay hides automatically on image load)
     setTimeout(() => {
       if (btn) {
         btn.disabled = false;
@@ -457,7 +478,7 @@ class BoschCameraCard extends HTMLElement {
         if (spinner) spinner.remove();
       }
       if (label) label.textContent = "Snapshot";
-    }, 6000);
+    }, 8000);
   }
 
   // ── State update ──────────────────────────────────────────────────────────
@@ -542,16 +563,46 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _requestFullscreen() {
-    // Try fullscreen on the image wrapper so controls are hidden
+    // If CSS fullscreen is already active, exit it
+    if (this.classList.contains("fs-active")) {
+      this._exitCssFullscreen();
+      return;
+    }
+    // Try native Fullscreen API first (desktop, Android Chrome)
     const wrapper = this.shadowRoot.getElementById("img-wrapper");
-    const el = wrapper || this.shadowRoot.getElementById("cam-img");
-    if (!el) return;
+    const el = wrapper || this;
+    const tryNative = () => {
+      if (el.requestFullscreen)            return el.requestFullscreen();
+      if (el.webkitRequestFullscreen)      return Promise.resolve(el.webkitRequestFullscreen());
+      if (el.mozRequestFullScreen)         return Promise.resolve(el.mozRequestFullScreen());
+      if (el.msRequestFullscreen)          return Promise.resolve(el.msRequestFullscreen());
+      return Promise.reject("no API");
+    };
     try {
-      if (el.requestFullscreen)             el.requestFullscreen();
-      else if (el.webkitRequestFullscreen)  el.webkitRequestFullscreen();
-      else if (el.mozRequestFullScreen)     el.mozRequestFullScreen();
-      else if (el.msRequestFullscreen)      el.msRequestFullscreen();
-    } catch (_) {}
+      Promise.resolve(tryNative()).catch(() => this._enterCssFullscreen());
+    } catch (_) {
+      this._enterCssFullscreen();
+    }
+  }
+
+  _enterCssFullscreen() {
+    this.classList.add("fs-active");
+    document.body.style.overflow = "hidden";
+    // Tap anywhere outside the image to exit
+    this._fsClickOut = (e) => { if (!this.contains(e.target)) this._exitCssFullscreen(); };
+    // Press Escape to exit
+    this._fsKeyDown = (e) => { if (e.key === "Escape") this._exitCssFullscreen(); };
+    setTimeout(() => {
+      document.addEventListener("click", this._fsClickOut);
+      document.addEventListener("keydown", this._fsKeyDown);
+    }, 100);
+  }
+
+  _exitCssFullscreen() {
+    this.classList.remove("fs-active");
+    document.body.style.overflow = "";
+    if (this._fsClickOut) { document.removeEventListener("click", this._fsClickOut); this._fsClickOut = null; }
+    if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
   }
 
   _callService(domain, service, data) {
