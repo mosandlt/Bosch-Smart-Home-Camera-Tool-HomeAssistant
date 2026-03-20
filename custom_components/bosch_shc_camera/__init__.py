@@ -262,14 +262,43 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if do_events:
                 self._last_events = now
 
-            # ── 4. SHC states (camera light + privacy mode) ───────────────────
+            # ── 4. Read privacy mode + light support from cloud API response ─────
+            # privacyMode and featureSupport are already in the /v11/video_inputs
+            # response — no extra request needed. Populate _shc_state_cache from
+            # cloud data so the privacy switch works without SHC configured.
+            for cam_id_key, cam_entry in data.items():
+                cam_raw = cam_entry.get("info", {})
+                privacy_str  = cam_raw.get("privacyMode", "")
+                feat_support = cam_raw.get("featureSupport", {})
+                has_light    = feat_support.get("light", False)
+                feat_status  = cam_raw.get("featureStatus", {})
+                light_on     = feat_status.get("frontIlluminatorInGeneralLightOn")
+
+                cache = self._shc_state_cache.setdefault(cam_id_key, {
+                    "device_id":    None,
+                    "camera_light": None,
+                    "privacy_mode": None,
+                    "has_light":    False,
+                })
+                # Always update privacy from cloud API (authoritative, fast, no SHC needed)
+                if privacy_str:
+                    cache["privacy_mode"] = (privacy_str.upper() == "ON")
+                cache["has_light"] = has_light
+                # Use cloud featureStatus for light state only if SHC hasn't set it yet
+                # (SHC CameraLight service is more accurate for the current LED state)
+                if light_on is not None and cache.get("camera_light") is None:
+                    cache["camera_light"] = light_on
+
+            # ── 5. SHC states (camera light current state) ────────────────────
+            # Privacy mode is now read from cloud API above (step 4).
+            # SHC is only used for camera light state + control (no cloud API found).
             if opts.get("shc_ip", "").strip():
                 try:
                     await self._async_update_shc_states(data)
                 except Exception as err:
                     _LOGGER.debug("SHC state update error: %s", err)
 
-            # ── 5. Auto-download new event files ──────────────────────────────
+            # ── 6. Auto-download new event files ──────────────────────────────
             if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
                 await self.hass.async_add_executor_job(
                     self._sync_download, data, token, opts["download_path"]
@@ -763,7 +792,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return False
 
     async def async_shc_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
-        """Enable (True) or disable (False) privacy mode via SHC API."""
+        """Enable (True) or disable (False) privacy mode via SHC API (legacy fallback)."""
         device_id = self._shc_state_cache.get(cam_id, {}).get("device_id")
         if not device_id:
             _LOGGER.warning("SHC: no device_id cached for %s — cannot set privacy mode", cam_id)
@@ -777,6 +806,56 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             self._shc_state_cache[cam_id]["privacy_mode"] = enabled
             await self.async_request_refresh()
             return True
+        return False
+
+    async def async_cloud_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
+        """Enable (True) or disable (False) privacy mode via Bosch cloud API.
+
+        Uses PUT /v11/video_inputs/{id}/privacy — no SHC local API needed.
+        Falls back to SHC API if cloud call fails and SHC is configured.
+
+        Discovery: GET/PUT /v11/video_inputs/{id}/privacy
+          Body: {"privacyMode": "ON"/"OFF", "durationInSeconds": null}
+          Response: HTTP 204 on success.
+        """
+        token = self.token
+        if not token:
+            _LOGGER.warning("cloud_set_privacy_mode: no token for %s", cam_id)
+            return False
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
+        body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(url, json=body, headers=headers) as resp:
+                    if resp.status in (200, 201, 204):
+                        self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
+                        _LOGGER.debug(
+                            "cloud_set_privacy_mode: %s → %s (HTTP %d)",
+                            cam_id, "ON" if enabled else "OFF", resp.status,
+                        )
+                        await self.async_request_refresh()
+                        return True
+                    _LOGGER.warning(
+                        "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
+                    )
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
+        finally:
+            await session.close()
+
+        # Fallback to SHC if cloud API fails and SHC is configured
+        if self.options.get("shc_ip", "").strip():
+            _LOGGER.debug("cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id)
+            return await self.async_shc_set_privacy_mode(cam_id, enabled)
         return False
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────

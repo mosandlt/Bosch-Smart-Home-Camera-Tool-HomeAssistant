@@ -38,8 +38,8 @@ express or implied.
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
 | 🔇 Audio switch (muted by default) | `switch` | ✅ enabled |
-| 💡 Camera LED light switch | `switch` | ✅ enabled (requires SHC config) |
-| 🔒 Privacy mode switch | `switch` | ✅ enabled (requires SHC config) |
+| 💡 Camera LED light switch | `switch` | ✅ enabled (requires SHC config for control) |
+| 🔒 Privacy mode switch | `switch` | ✅ enabled (cloud API — no SHC needed) |
 | 💾 Auto-download events to folder | background | ❌ optional |
 | 🎥 **Live stream — 30fps H.264 + optional AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
@@ -121,8 +121,8 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 - **Live Stream button** — toggles `switch.bosch_garten_live_stream`; starts 30fps H.264 + audio stream
 - **Fullscreen button** — native fullscreen on desktop/Android; CSS overlay fallback on iOS Safari
 - **Ton** — toggles `switch.bosch_garten_audio` (audio in live stream, default OFF)
-- **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED indicator, requires SHC local API config)
-- **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode, requires SHC local API config); when ON and no image available, shows a "Privat-Modus aktiv" placeholder
+- **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED indicator; control requires SHC local API config)
+- **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode via **Bosch cloud API** — no SHC needed); when ON and no image available, shows a "Privat-Modus aktiv" placeholder
 
 ### Installation
 
@@ -194,7 +194,7 @@ Toggle button visibility rules:
 - **Entity is `unavailable` / `unknown`** → button shown but **dimmed and disabled**
 - **Entity is `on` / `off`** → button shown, highlighted when ON
 
-This means without SHC configured, only the **Ton** button is shown (audio always works). **Licht** and **Privat** buttons appear automatically once SHC is set up.
+Without SHC configured: only **Ton** (audio) and **Privat** (privacy, cloud API) are shown. **Licht** appears once SHC is configured (or if the camera reports `featureSupport.light = true`).
 
 For camera named **Kamera**: use `camera_entity: camera.bosch_kamera`.
 
@@ -263,8 +263,8 @@ For each discovered camera (example: camera named "Garten"):
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
-| `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF (requires SHC) |
-| `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — blocks camera view (requires SHC) |
+| `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF (control requires SHC; state from cloud API) |
+| `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — cloud API, no SHC needed |
 
 ### Camera streaming state
 
@@ -327,7 +327,7 @@ The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"typ
 - `stream_source` attribute is set to the `rtsps://` URL for HA's stream component
 - `live_rtsps` and `live_proxy` attributes appear on the camera entity
 
-**Privacy Mode:** When Privacy Mode is ON, `snap.jpg` returns HTTP 200 with an empty body (0 bytes). The integration detects this and does not update the cached image. The Lovelace card shows a 🔒 "Privat-Modus aktiv" overlay instead of the camera image. When Privacy Mode is turned OFF, the card automatically fetches a fresh image.
+**Privacy Mode:** Controlled via `PUT /v11/video_inputs/{id}/privacy` (Bosch cloud API — no SHC needed). When Privacy Mode is ON, `snap.jpg` returns HTTP 200 with an empty body (0 bytes). The integration detects this and does not update the cached image. The Lovelace card shows a 🔒 "Privat-Modus aktiv" overlay instead of the camera image. When Privacy Mode is turned OFF, the card automatically fetches a fresh image. Privacy state is read directly from the `/v11/video_inputs` cloud response on every coordinator tick.
 
 **Session lifetime:** The Bosch proxy session lasts ~60 seconds. If the switch stays ON, the integration maintains the session. Turn the switch OFF to close the session immediately.
 
