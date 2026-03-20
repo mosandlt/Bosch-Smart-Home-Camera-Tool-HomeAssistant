@@ -44,7 +44,7 @@ ALL_PLATFORMS = ["camera", "sensor", "button", "switch"]
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
 # LOCAL  → LAN direct, returns Digest user/password, slow (~15s)
-LIVE_TYPE_CANDIDATES = ["REMOTE"]  # cloud proxy only — LOCAL (LAN) fallback removed
+LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]  # REMOTE (cloud) first, LOCAL (LAN) as fallback
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early to be safe
 
 DEFAULT_OPTIONS = {
