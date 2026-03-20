@@ -189,7 +189,12 @@ The card automatically derives all entity IDs from `camera_entity`:
 | *(auto)* | `sensor.bosch_garten_events_today` |
 | *(auto)* | `sensor.bosch_garten_last_event` |
 
-Toggle buttons (Ton / Licht / Privat) are automatically dimmed and disabled if the corresponding entity is `unavailable` or `unknown`.
+Toggle button visibility rules:
+- **Entity doesn't exist** (e.g. SHC not configured) → button is **hidden**
+- **Entity is `unavailable` / `unknown`** → button shown but **dimmed and disabled**
+- **Entity is `on` / `off`** → button shown, highlighted when ON
+
+This means without SHC configured, only the **Ton** button is shown (audio always works). **Licht** and **Privat** buttons appear automatically once SHC is set up.
 
 For camera named **Kamera**: use `camera_entity: camera.bosch_kamera`.
 

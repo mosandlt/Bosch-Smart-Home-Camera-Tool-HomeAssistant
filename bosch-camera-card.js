@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.5
+ * Version: 1.4.6
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -542,7 +542,9 @@ class BoschCameraCard extends HTMLElement {
     this._setLoadingOverlay(true, "Aktualisiere Bild…");
 
     // If privacy mode is ON — no live image is available, show placeholder immediately
-    const privacyOn = this._hass?.states[this._entities.privacy]?.state === "on";
+    const privStates = this._hass?.states;
+    const privacyOn  = privStates && this._entities.privacy in privStates
+                       && privStates[this._entities.privacy]?.state === "on";
     if (privacyOn) {
       if (label) label.textContent = "Snapshot";
       if (btn) { btn.disabled = false; btn.classList.remove("loading"); const sp = btn.querySelector("#snapshot-spinner"); if (sp) sp.remove(); }
@@ -719,8 +721,8 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-light",   hass.states[ents.light]);
     this._updateToggleBtn("btn-privacy", hass.states[ents.privacy]);
 
-    // Privacy placeholder — show whenever privacy is ON (regardless of image state)
-    const privacyOn  = hass.states[ents.privacy]?.state === "on";
+    // Privacy placeholder — show whenever privacy is ON (only if entity exists)
+    const privacyOn  = ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on";
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
     // Hide the spinner overlay when privacy is ON (placeholder takes over)
@@ -737,7 +739,13 @@ class BoschCameraCard extends HTMLElement {
   _updateToggleBtn(id, entityState) {
     const btn = this.shadowRoot.getElementById(id);
     if (!btn) return;
-    const state = entityState?.state;
+    // Hide entirely when entity doesn't exist in HA (e.g. SHC not configured)
+    if (entityState === undefined || entityState === null) {
+      btn.style.display = "none";
+      return;
+    }
+    btn.style.display = "";
+    const state = entityState.state;
     const unavailable = !state || state === "unavailable" || state === "unknown";
     btn.classList.toggle("on",          !unavailable && state === "on");
     btn.classList.toggle("unavailable", unavailable);
