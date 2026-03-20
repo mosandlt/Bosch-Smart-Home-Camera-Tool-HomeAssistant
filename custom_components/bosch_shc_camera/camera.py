@@ -30,7 +30,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API, get_options
+from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -141,7 +141,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._force_image_refresh = True
         try:
             # Prefer a fresh live snapshot (temp connection, stream stays OFF)
-            image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+            # Skip when streaming — opening a new PUT /connection kills the active RTSP session
+            image = None
+            if not self.is_streaming:
+                image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
             if not image:
                 # Fall back to event snapshots
                 image = await self.async_camera_image()
@@ -287,25 +290,44 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                     async with session.get(proxy_url) as resp:
                         ct = resp.headers.get("Content-Type", "")
                         if resp.status == 200 and "image" in ct:
-                            self._cached_image = await resp.read()
-                            self._last_image_fetch = time.monotonic()
-                            _LOGGER.debug(
-                                "%s: live proxy snapshot %d bytes",
-                                self._attr_name, len(self._cached_image),
-                            )
-                            return self._cached_image
+                            data = await resp.read()
+                            if data:
+                                self._cached_image = data
+                                self._last_image_fetch = time.monotonic()
+                                _LOGGER.debug(
+                                    "%s: live proxy snapshot %d bytes",
+                                    self._attr_name, len(self._cached_image),
+                                )
+                                return self._cached_image
                         elif resp.status in (401, 403, 404):
-                            # Proxy session expired — clear it so switch turns OFF
-                            _LOGGER.debug(
-                                "%s: proxy snapshot %d — clearing live connection",
-                                self._attr_name, resp.status,
-                            )
-                            self.coordinator._live_connections.pop(self._cam_id, None)
-                            self.coordinator._live_opened_at.pop(self._cam_id, None)
+                            # Only clear the session if it's old enough to have expired
+                            # naturally — avoids clearing fresh sessions for cameras
+                            # that require Digest auth for direct snap.jpg access (e.g. CAMERA_360)
+                            opened_at = self.coordinator._live_opened_at.get(self._cam_id, 0)
+                            age = time.monotonic() - opened_at
+                            if age >= LIVE_SESSION_TTL:
+                                _LOGGER.debug(
+                                    "%s: proxy snapshot %d (age %.0fs) — session expired, clearing",
+                                    self._attr_name, resp.status, age,
+                                )
+                                self.coordinator._live_connections.pop(self._cam_id, None)
+                                self.coordinator._live_opened_at.pop(self._cam_id, None)
+                            else:
+                                _LOGGER.debug(
+                                    "%s: proxy snapshot %d (age %.0fs) — keeping session (camera requires auth for snap.jpg)",
+                                    self._attr_name, resp.status, age,
+                                )
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 pass
 
-        # ── 2. Latest event snapshot (motion-triggered) ───────────────────────
+        # ── 2. Return cached image (kept fresh by 30-min background refresh) ──
+        # Background refresh stores a live snap in _cached_image every 30 minutes
+        # and after every stream stop. This is more current than event snapshots,
+        # which only update on motion and whose URLs eventually expire.
+        if self._cached_image:
+            return self._cached_image
+
+        # ── 3. Latest event snapshot (fallback — first startup before refresh runs) ──
         events = self._cam_data.get("events", [])
         for ev in events:
             img_url = ev.get("imageUrl")

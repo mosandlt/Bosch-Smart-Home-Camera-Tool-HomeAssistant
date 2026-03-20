@@ -56,6 +56,10 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_auto_download":   False,
     "download_path":          "",
+    # SHC local API — for camera light + privacy mode control
+    "shc_ip":        "",   # e.g. 192.168.20.4
+    "shc_cert_path": "",   # path to client cert PEM (e.g. /config/claude_cert.pem)
+    "shc_key_path":  "",   # path to client key PEM  (e.g. /config/claude_key.pem)
 }
 
 
@@ -96,6 +100,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         self._cached_events: dict[str, list] = {}
+        # SHC local API state cache — keyed by cam_id
+        # Each entry: {"device_id": str, "camera_light": bool|None, "privacy_mode": bool|None}
+        self._shc_state_cache: dict[str, dict] = {}
+        self._shc_devices_raw: list = []       # cached GET /smarthome/devices response
+        self._last_shc_fetch: float = 0.0      # last time SHC devices were fetched
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -253,7 +262,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if do_events:
                 self._last_events = now
 
-            # ── 4. Auto-download new event files ──────────────────────────────
+            # ── 4. SHC states (camera light + privacy mode) ───────────────────
+            if opts.get("shc_ip", "").strip():
+                try:
+                    await self._async_update_shc_states(data)
+                except Exception as err:
+                    _LOGGER.debug("SHC state update error: %s", err)
+
+            # ── 5. Auto-download new event files ──────────────────────────────
             if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
                 await self.hass.async_add_executor_job(
                     self._sync_download, data, token, opts["download_path"]
@@ -477,6 +493,146 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("go2rtc stream '%s' removed", stream_name)
         except (asyncio.TimeoutError, aiohttp.ClientError):
             pass  # go2rtc may not be running — silently ignore
+
+    # ── SHC local API (camera light + privacy mode) ───────────────────────────
+    async def _async_shc_request(
+        self, method: str, path: str, body: dict | None = None
+    ) -> dict | list | None:
+        """Make a request to the SHC local API using mutual TLS.
+
+        Returns parsed JSON on success, None on failure.
+        Requires shc_ip, shc_cert_path, shc_key_path in options.
+        """
+        import ssl
+        opts      = self.options
+        shc_ip    = opts.get("shc_ip", "").strip()
+        cert_path = opts.get("shc_cert_path", "").strip()
+        key_path  = opts.get("shc_key_path", "").strip()
+        if not shc_ip or not cert_path or not key_path:
+            return None
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode    = ssl.CERT_NONE
+            ctx.load_cert_chain(cert_path, key_path)
+        except Exception as err:
+            _LOGGER.warning("SHC TLS setup failed (check cert/key paths): %s", err)
+            return None
+
+        url     = f"https://{shc_ip}:8444/smarthome{path}"
+        headers = {"api-version": "3.2", "Content-Type": "application/json"}
+        try:
+            connector = aiohttp.TCPConnector(ssl=ctx)
+            async with aiohttp.ClientSession(connector=connector) as s:
+                async with async_timeout.timeout(10):
+                    if method == "GET":
+                        async with s.get(url, headers=headers) as r:
+                            if r.status == 200:
+                                return await r.json()
+                            _LOGGER.debug("SHC GET %s → HTTP %d", path, r.status)
+                    elif method == "PUT":
+                        async with s.put(url, json=body, headers=headers) as r:
+                            _LOGGER.debug("SHC PUT %s → HTTP %d", path, r.status)
+                            return {"status": r.status, "ok": r.status in (200, 201, 204)}
+        except asyncio.TimeoutError:
+            _LOGGER.debug("SHC request timeout: %s %s", method, path)
+        except aiohttp.ClientError as err:
+            _LOGGER.debug("SHC request error %s %s: %s", method, path, err)
+        except Exception as err:
+            _LOGGER.debug("SHC unexpected error %s %s: %s", method, path, err)
+        return None
+
+    async def _async_update_shc_states(self, data: dict) -> None:
+        """Fetch CameraLight and PrivacyMode states from SHC for each camera.
+
+        Matches SHC devices to cloud cameras by device name (title).
+        Refreshes the SHC device list at most once per 60 seconds.
+        """
+        opts = self.options
+        if not opts.get("shc_ip", "").strip():
+            return
+
+        # Re-fetch device list at most once per 60 s
+        now = time.monotonic()
+        if now - self._last_shc_fetch >= 60 or not self._shc_devices_raw:
+            devices = await self._async_shc_request("GET", "/devices")
+            if isinstance(devices, list):
+                self._shc_devices_raw = devices
+                self._last_shc_fetch  = now
+
+        shc_devices = self._shc_devices_raw
+        if not shc_devices:
+            return
+
+        for cam_id, cam in data.items():
+            title = cam.get("info", {}).get("title", "").lower().strip()
+
+            # Match SHC device by name (case-insensitive)
+            device_id = None
+            for dev in shc_devices:
+                if dev.get("name", "").lower().strip() == title:
+                    device_id = dev.get("id")
+                    break
+            if not device_id:
+                _LOGGER.debug("SHC: no device found matching camera title '%s'", title)
+                continue
+
+            entry = self._shc_state_cache.setdefault(cam_id, {
+                "device_id":    device_id,
+                "camera_light": None,
+                "privacy_mode": None,
+            })
+            entry["device_id"] = device_id
+
+            # Fetch CameraLight service state
+            svc = await self._async_shc_request(
+                "GET", f"/devices/{device_id}/services/CameraLight"
+            )
+            if isinstance(svc, dict):
+                val = svc.get("state", {}).get("value", "")
+                entry["camera_light"] = (val.upper() == "ON")
+
+            # Fetch PrivacyMode service state
+            svc = await self._async_shc_request(
+                "GET", f"/devices/{device_id}/services/PrivacyMode"
+            )
+            if isinstance(svc, dict):
+                val = svc.get("state", {}).get("value", "")
+                entry["privacy_mode"] = (val.upper() == "ENABLED")
+
+    async def async_shc_set_camera_light(self, cam_id: str, on: bool) -> bool:
+        """Turn the camera indicator LED on (True) or off (False) via SHC API."""
+        device_id = self._shc_state_cache.get(cam_id, {}).get("device_id")
+        if not device_id:
+            _LOGGER.warning("SHC: no device_id cached for %s — cannot control light", cam_id)
+            return False
+        result = await self._async_shc_request(
+            "PUT",
+            f"/devices/{device_id}/services/CameraLight/state",
+            {"@type": "cameraLightState", "value": "ON" if on else "OFF"},
+        )
+        if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
+            self._shc_state_cache[cam_id]["camera_light"] = on
+            await self.async_request_refresh()
+            return True
+        return False
+
+    async def async_shc_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
+        """Enable (True) or disable (False) privacy mode via SHC API."""
+        device_id = self._shc_state_cache.get(cam_id, {}).get("device_id")
+        if not device_id:
+            _LOGGER.warning("SHC: no device_id cached for %s — cannot set privacy mode", cam_id)
+            return False
+        result = await self._async_shc_request(
+            "PUT",
+            f"/devices/{device_id}/services/PrivacyMode/state",
+            {"@type": "privacyModeState", "value": "ENABLED" if enabled else "DISABLED"},
+        )
+        if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
+            self._shc_state_cache[cam_id]["privacy_mode"] = enabled
+            await self.async_request_refresh()
+            return True
+        return False
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────
     def _sync_download(self, data: dict, token: str, download_path: str) -> None:

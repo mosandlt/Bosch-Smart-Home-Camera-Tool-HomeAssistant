@@ -42,6 +42,10 @@ async def async_setup_entry(
     for cam_id in coordinator.data:
         entities.append(BoschLiveStreamSwitch(coordinator, cam_id, config_entry))
         entities.append(BoschAudioSwitch(coordinator, cam_id, config_entry))
+        # SHC-controlled switches (only if SHC is configured)
+        if opts.get("shc_ip", "").strip():
+            entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschPrivacyModeSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -183,3 +187,118 @@ class BoschAudioSwitch(CoordinatorEntity, SwitchEntity):
             await self.coordinator.try_live_connection(self._cam_id)
         else:
             await self.coordinator.async_request_refresh()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschCameraLightSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch: ON = camera indicator LED on, OFF = LED off.
+
+    Requires SHC local API access (shc_ip + cert paths configured in options).
+    The entity is unavailable until the SHC state has been successfully fetched.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Camera Light"
+        self._attr_unique_id = f"bosch_shc_light_{cam_id.lower()}"
+        self._attr_icon      = "mdi:led-on"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("camera_light")
+
+    @property
+    def available(self) -> bool:
+        """Available once SHC has successfully returned a state for this camera."""
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("camera_light") is not None
+        )
+
+    @property
+    def icon(self) -> str:
+        return "mdi:led-on" if self.is_on else "mdi:led-off"
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_shc_set_camera_light(self._cam_id, True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_shc_set_camera_light(self._cam_id, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch: ON = privacy mode active (camera off / shutter closed), OFF = camera active.
+
+    Requires SHC local API access (shc_ip + cert paths configured in options).
+    The entity is unavailable until the SHC state has been successfully fetched.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Privacy Mode"
+        self._attr_unique_id = f"bosch_shc_privacy_{cam_id.lower()}"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+
+    @property
+    def available(self) -> bool:
+        """Available once SHC has successfully returned a state for this camera."""
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode") is not None
+        )
+
+    @property
+    def icon(self) -> str:
+        return "mdi:eye-off" if self.is_on else "mdi:eye"
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Enable privacy mode — camera turns off / shutter closes."""
+        await self.coordinator.async_shc_set_privacy_mode(self._cam_id, True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Disable privacy mode — camera turns back on."""
+        await self.coordinator.async_shc_set_privacy_mode(self._cam_id, False)

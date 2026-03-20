@@ -269,6 +269,19 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "download_path",
                     default=str(opts.get("download_path", "")),
                 ): str,
+                # SHC local API — camera light + privacy mode
+                vol.Optional(
+                    "shc_ip",
+                    default=str(opts.get("shc_ip", "")),
+                ): str,
+                vol.Optional(
+                    "shc_cert_path",
+                    default=str(opts.get("shc_cert_path", "")),
+                ): str,
+                vol.Optional(
+                    "shc_key_path",
+                    default=str(opts.get("shc_key_path", "")),
+                ): str,
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={

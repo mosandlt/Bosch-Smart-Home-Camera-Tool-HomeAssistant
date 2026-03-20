@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.util import dt as dt_util
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -123,10 +124,12 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
             return None
         try:
             # API returns e.g. "2026-03-19T09:32:08.000Z" or "2026-03-19T09:32:08"
+            # Despite the Z suffix, Bosch timestamps are in local time —
+            # treating as UTC causes a 1-hour offset in CET/CEST timezones.
             ts_clean = ts_str[:19]  # "2026-03-19T09:32:08"
             dt = datetime.fromisoformat(ts_clean)
-            # Return as UTC-aware datetime for HA
-            return dt.replace(tzinfo=timezone.utc)
+            local_tz = dt_util.get_time_zone(self.hass.config.time_zone)
+            return dt.replace(tzinfo=local_tz or timezone.utc)
         except ValueError:
             return None
 

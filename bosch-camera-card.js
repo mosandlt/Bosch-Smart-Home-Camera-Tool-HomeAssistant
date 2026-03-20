@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.3.4
+ * Version: 1.3.6
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -208,8 +208,9 @@ class BoschCameraCard extends HTMLElement {
         .btn:disabled { opacity: .5; cursor: default; }
         .btn-snapshot { background: rgba(99,99,102,.2); color: var(--primary-text-color, #e5e5ea); }
         .btn-snapshot.loading { background: rgba(99,99,102,.35); }
-        .btn-stream  { background: rgba(10,132,255,.18); color: #0a84ff; }
+        .btn-stream    { background: rgba(10,132,255,.18); color: #0a84ff; }
         .btn-stream.active { background: rgba(255,69,58,.18); color: #ff453a; }
+        .btn-fullscreen { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; }
         .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
         .btn-spinner {
           width: 14px; height: 14px;
@@ -233,8 +234,8 @@ class BoschCameraCard extends HTMLElement {
           </div>
         </div>
 
-        <div class="img-wrapper">
-          <img class="cam-img hidden" id="cam-img" alt="Camera" />
+        <div class="img-wrapper" id="img-wrapper">
+          <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
@@ -275,6 +276,11 @@ class BoschCameraCard extends HTMLElement {
             </svg>
             <span id="btn-stream-label">Live Stream</span>
           </button>
+          <button class="btn btn-fullscreen" id="btn-fullscreen" title="Vollbild">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+            </svg>
+          </button>
         </div>
       </ha-card>
     `;
@@ -284,12 +290,18 @@ class BoschCameraCard extends HTMLElement {
     img.addEventListener("load", () => this._onImageLoaded());
     img.addEventListener("error", () => this._onImageError());
 
+    // Click on image → fullscreen
+    img.addEventListener("click", () => this._requestFullscreen());
+
     // Buttons
     this.shadowRoot.getElementById("btn-snapshot").addEventListener("click", () =>
       this._onSnapshotClick()
     );
     this.shadowRoot.getElementById("btn-stream").addEventListener("click", () =>
       this._toggleStream()
+    );
+    this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
+      this._requestFullscreen()
     );
 
     // Load the first image immediately
@@ -469,6 +481,19 @@ class BoschCameraCard extends HTMLElement {
   _toggleStream() {
     const isOn  = this._isStreaming();
     this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });
+  }
+
+  _requestFullscreen() {
+    // Try fullscreen on the image wrapper so controls are hidden
+    const wrapper = this.shadowRoot.getElementById("img-wrapper");
+    const el = wrapper || this.shadowRoot.getElementById("cam-img");
+    if (!el) return;
+    try {
+      if (el.requestFullscreen)             el.requestFullscreen();
+      else if (el.webkitRequestFullscreen)  el.webkitRequestFullscreen();
+      else if (el.mozRequestFullScreen)     el.mozRequestFullScreen();
+      else if (el.msRequestFullscreen)      el.msRequestFullscreen();
+    } catch (_) {}
   }
 
   _callService(domain, service, data) {
