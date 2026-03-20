@@ -107,7 +107,7 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 ┌──────────────────────────────────┐
 │ ● Garten              [streaming]│  ← status dot + stream badge
 │  ┌────────────────────────────┐  │
-│  │        Camera image        │  │  ← auto-refreshed (30s idle / 3s streaming)
+│  │   Live video / snapshot    │  │  ← HLS video (Stream+Ton ON) or snapshot polling
 │  │ Last: 2026-03-19 09:32  5 events │
 │  └────────────────────────────┘  │
 │  Status: ONLINE  Last event: …   │
@@ -118,13 +118,18 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 - **Status dot** — green = ONLINE, red = OFFLINE, grey = unknown
 - **Stream badge** — `idle` (grey) or `streaming` (blue, pulsing dot)
-- **Camera image** — served via HA camera proxy, auto-refreshed; shows cached image instantly on load
-- **Snapshot button** — triggers a live image refresh; polls for the new image and displays it automatically (no fixed delay)
-- **Live Stream button** — toggles `switch.bosch_garten_live_stream`; starts 30fps H.264 + audio stream
+- **Camera image / live video:**
+  - **Stream OFF** → snapshot image, auto-refreshed every **5 minutes** (configurable)
+  - **Stream ON + Ton OFF** → snapshot polling every **2 seconds** (near-real-time, no audio)
+  - **Stream ON + Ton ON** → **live HLS video with audio** — 30fps H.264 + AAC. Chrome/Firefox use hls.js; Safari/iOS use native HLS
+  - First load instantly shows the **last cached image** from localStorage (persists across iOS app restarts)
+  - Retries up to 5× on first load if the backend is still starting up
+- **Snapshot button** — triggers a live image refresh; polls for the new image and displays it automatically
+- **Live Stream button** — toggles `switch.bosch_garten_live_stream`; UI updates instantly (optimistic state)
 - **Fullscreen button** — native fullscreen on desktop/Android; CSS overlay fallback on iOS Safari
-- **Ton** — toggles `switch.bosch_garten_audio` (audio in live stream, default OFF)
+- **Ton** — toggles `switch.bosch_garten_audio`; when stream is active, switches between snapshot polling (OFF) and live HLS video with audio (ON)
 - **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED indicator; control requires SHC local API config)
-- **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode via **Bosch cloud API** — no SHC needed); when ON and no image available, shows a "Privat-Modus aktiv" placeholder
+- **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode via **Bosch cloud API** — no SHC needed); when ON, shows a "Privat-Modus aktiv" placeholder; card fetches a fresh image automatically when turned OFF
 
 ### Installation
 
@@ -159,9 +164,13 @@ camera_entity: camera.bosch_garten
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 title: Garten                          # optional — overrides entity friendly name
-refresh_interval_idle: 30              # seconds between image refreshes when idle (default: 30)
-refresh_interval_streaming: 3          # seconds between image refreshes when streaming (default: 3)
+refresh_interval_idle: 300             # seconds between snapshots when stream is OFF (default: 300 = 5 min)
+refresh_interval_streaming: 2          # seconds between snapshots when stream ON + Ton OFF (default: 2)
 ```
+
+> **`refresh_interval_streaming`** only applies when the Live Stream switch is ON and **Ton is OFF** (snapshot polling mode).
+> When Ton is ON, the card shows live HLS video — no snapshot polling.
+> **`refresh_interval_idle`** applies when the Live Stream switch is OFF.
 
 **With explicit entity IDs** (if auto-derived names don't match):
 ```yaml
@@ -333,19 +342,15 @@ The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"typ
 
 **Session lifetime:** The Bosch proxy session lasts ~60 seconds. If the switch stays ON, the integration maintains the session. Turn the switch OFF to close the session immediately.
 
-> **Live video with audio in HA:** When the Live Stream switch is ON, the integration registers
-> the `rtsps://` stream in HA's built-in **go2rtc** bridge with `#insecure` to bypass Bosch's
-> private CA certificate. HA's camera card will then play **30fps H.264 via WebRTC**
-> directly in the browser — no extra software needed.
+> **Live video with audio in the Bosch Camera Card:**
+> - Turn on **Live Stream** + **Ton** → the card switches from snapshot polling to a **live HLS video** with 30fps H.264 + AAC audio
+> - Turn on **Live Stream** only (Ton OFF) → the card uses fast snapshot polling (every 2s) — near-real-time image without audio
+> - The integration registers the `rtsps://` stream in HA's built-in **go2rtc** bridge. Chrome/Firefox use **hls.js** (loaded on demand); Safari/iOS use native HLS
 >
-> **Audio is OFF by default** — turn on the **Audio switch** (`switch.bosch_garten_audio`) to add
-> AAC-LC 16kHz mono audio. If already streaming, the switch re-opens the connection automatically
-> so the change takes effect immediately.
+> **Audio is OFF by default.** Turn on the **Ton** switch to enable AAC-LC 16kHz mono audio.
 >
 > If the live stream does not appear: verify that go2rtc is running (HA 2023.4+ includes it by
 > default), then turn the switch OFF and ON again to re-register the stream.
-> The `snap.jpg` proxy (near-real-time JPEG) always works and is used by the Bosch Camera Card
-> for the thumbnail image.
 
 ---
 
