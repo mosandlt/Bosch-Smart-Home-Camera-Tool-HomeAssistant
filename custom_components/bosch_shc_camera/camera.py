@@ -138,6 +138,15 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         """
         if delay:
             await asyncio.sleep(delay)
+
+        # Skip refresh when privacy mode is ON — the camera blocks the view,
+        # so any image we'd fetch would just be the stale last event snapshot.
+        # The frontend card shows the "Privat-Modus aktiv" placeholder instead.
+        shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+        if shc.get("privacy_mode") is True:
+            _LOGGER.debug("%s: skipping image refresh — privacy mode is ON", self._attr_name)
+            return
+
         self._force_image_refresh = True
         try:
             # Fast path: populate _cached_image from the latest event snapshot immediately

@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.4
+ * Version: 1.4.5
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -30,6 +30,7 @@ class BoschCameraCard extends HTMLElement {
     this._refreshTimer  = null;
     this._imgTimestamp  = Date.now();
     this._lastStreaming  = null;   // last known streaming state (true/false/null)
+    this._lastPrivacy   = null;   // last known privacy state (true/false/null)
     this._imageLoaded   = false;  // did we ever successfully load an image?
     this._loadingOverlay = false; // is the "Wird geladen" overlay active?
     this._loadingTimeout = null;  // safety timeout to hide overlay
@@ -540,6 +541,15 @@ class BoschCameraCard extends HTMLElement {
     if (label) label.textContent = "Lädt…";
     this._setLoadingOverlay(true, "Aktualisiere Bild…");
 
+    // If privacy mode is ON — no live image is available, show placeholder immediately
+    const privacyOn = this._hass?.states[this._entities.privacy]?.state === "on";
+    if (privacyOn) {
+      if (label) label.textContent = "Snapshot";
+      if (btn) { btn.disabled = false; btn.classList.remove("loading"); const sp = btn.querySelector("#snapshot-spinner"); if (sp) sp.remove(); }
+      this._setLoadingOverlay(false);
+      return;
+    }
+
     // Trigger backend image refresh
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
 
@@ -709,17 +719,19 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-light",   hass.states[ents.light]);
     this._updateToggleBtn("btn-privacy", hass.states[ents.privacy]);
 
-    // Privacy placeholder — show when no image and privacy mode is ON
+    // Privacy placeholder — show whenever privacy is ON (regardless of image state)
     const privacyOn  = hass.states[ents.privacy]?.state === "on";
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
-    if (placeholder) {
-      placeholder.classList.toggle("visible", privacyOn && !this._imageLoaded);
+    if (placeholder) placeholder.classList.toggle("visible", privacyOn);
+    // Hide the spinner overlay when privacy is ON (placeholder takes over)
+    if (privacyOn) this._setLoadingOverlay(false);
+
+    // Privacy just turned OFF → fetch a fresh image immediately
+    if (this._lastPrivacy === true && !privacyOn) {
+      this._setLoadingOverlay(true, "Aktualisiere Bild…");
+      this._scheduleImageLoad(3000);
     }
-    // When privacy just turned ON and loading overlay is showing — update message
-    if (privacyOn && !this._imageLoaded) {
-      const loadText = this.shadowRoot.getElementById("loading-text");
-      if (loadText) loadText.textContent = "Privat-Modus aktiv";
-    }
+    this._lastPrivacy = privacyOn;
   }
 
   _updateToggleBtn(id, entityState) {
