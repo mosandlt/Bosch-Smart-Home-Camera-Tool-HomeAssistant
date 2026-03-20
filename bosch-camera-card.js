@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.3.6
+ * Version: 1.3.7
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -148,6 +148,19 @@ class BoschCameraCard extends HTMLElement {
           min-height: 160px; transition: opacity 0.3s;
         }
         .cam-img.hidden { opacity: 0; }
+
+        /* Fullscreen — fill entire screen with black letterbox */
+        .img-wrapper:fullscreen,
+        .img-wrapper:-webkit-full-screen {
+          background: #000;
+          display: flex; align-items: center; justify-content: center;
+          width: 100vw; height: 100vh;
+        }
+        .img-wrapper:fullscreen .cam-img,
+        .img-wrapper:-webkit-full-screen .cam-img {
+          width: 100vw; height: 100vh;
+          object-fit: contain; min-height: unset;
+        }
 
         /* Loading overlay */
         .loading-overlay {
