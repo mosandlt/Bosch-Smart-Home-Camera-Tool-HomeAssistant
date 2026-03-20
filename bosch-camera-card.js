@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.7
+ * Version: 1.4.8
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -255,21 +255,38 @@ class BoschCameraCard extends HTMLElement {
           flex-shrink: 0;
         }
 
-        /* Toggle row — Ton / Licht / Privat */
-        .toggle-row { display: flex; gap: 8px; padding: 0 12px 12px; }
-        .btn-toggle {
-          flex: 1; display: flex; flex-direction: column; align-items: center;
-          gap: 4px; padding: 8px 6px; border-radius: 10px; border: none;
-          cursor: pointer; font-size: 11px; font-weight: 500; font-family: inherit;
-          transition: background 0.2s, color 0.2s;
-          background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93);
+        /* Switch rows — Ton / Licht / Privat */
+        .switch-rows { display: flex; flex-direction: column; padding: 0 12px 12px; gap: 2px; }
+        .sw-row {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 9px 4px; cursor: pointer; border-radius: 8px;
           -webkit-tap-highlight-color: transparent;
+          transition: background 0.15s;
         }
-        .btn-toggle:active { opacity: .7; }
-        .btn-toggle.on { background: rgba(10,132,255,.2); color: #0a84ff; }
-        .btn-toggle.on.privacy-btn { background: rgba(255,69,58,.15); color: #ff453a; }
-        .btn-toggle.unavailable { opacity: .35; cursor: default; }
-        .btn-toggle svg { width: 17px; height: 17px; flex-shrink: 0; }
+        .sw-row:active { background: rgba(99,99,102,.12); }
+        .sw-left {
+          display: flex; align-items: center; gap: 10px;
+          color: var(--primary-text-color, #e5e5ea); font-size: 13px; font-weight: 500;
+        }
+        .sw-left svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--secondary-text-color, #8e8e93); }
+        .sw-row.on .sw-left svg { color: #0a84ff; }
+        .sw-row.privacy-row.on .sw-left svg { color: #ff453a; }
+        /* iOS-style toggle */
+        .sw-toggle {
+          width: 44px; height: 26px; border-radius: 13px;
+          background: rgba(99,99,102,.4); border: none; padding: 0;
+          position: relative; flex-shrink: 0; cursor: pointer;
+          transition: background 0.25s;
+        }
+        .sw-row.on    .sw-toggle { background: #30d158; }
+        .sw-row.privacy-row.on .sw-toggle { background: #ff453a; }
+        .sw-thumb {
+          width: 22px; height: 22px; border-radius: 50%; background: #fff;
+          position: absolute; top: 2px; left: 2px;
+          box-shadow: 0 1px 4px rgba(0,0,0,.4);
+          transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+        }
+        .sw-row.on .sw-thumb { transform: translateX(18px); }
 
         /* Privacy placeholder — shown when no image + privacy mode is ON */
         .privacy-placeholder {
@@ -351,35 +368,40 @@ class BoschCameraCard extends HTMLElement {
           </button>
         </div>
 
-        <div class="toggle-row">
-          <button class="btn-toggle" id="btn-audio" title="Ton">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-              <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
-            </svg>
-            <span>Ton</span>
-          </button>
-          <button class="btn-toggle" id="btn-light" title="Kamera-Licht">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="5"/>
-              <line x1="12" y1="1" x2="12" y2="3"/>
-              <line x1="12" y1="21" x2="12" y2="23"/>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-              <line x1="1" y1="12" x2="3" y2="12"/>
-              <line x1="21" y1="12" x2="23" y2="12"/>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-            </svg>
-            <span>Licht</span>
-          </button>
-          <button class="btn-toggle privacy-btn" id="btn-privacy" title="Privat-Modus">
-            <svg id="privacy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0110 0v4"/>
-            </svg>
-            <span>Privat</span>
-          </button>
+        <div class="switch-rows">
+          <div class="sw-row" id="btn-audio">
+            <div class="sw-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+              </svg>
+              <span>Ton</span>
+            </div>
+            <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+          </div>
+          <div class="sw-row" id="btn-light">
+            <div class="sw-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+              <span>Licht</span>
+            </div>
+            <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+          </div>
+          <div class="sw-row privacy-row" id="btn-privacy">
+            <div class="sw-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+              <span>Privat</span>
+            </div>
+            <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+          </div>
         </div>
       </ha-card>
     `;
