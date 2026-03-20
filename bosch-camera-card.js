@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.6
+ * Version: 1.4.7
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -739,17 +739,17 @@ class BoschCameraCard extends HTMLElement {
   _updateToggleBtn(id, entityState) {
     const btn = this.shadowRoot.getElementById(id);
     if (!btn) return;
-    // Hide entirely when entity doesn't exist in HA (e.g. SHC not configured)
-    if (entityState === undefined || entityState === null) {
+    // Hide when entity doesn't exist or is unavailable/unknown
+    // (e.g. camera light on a camera that has no physical light)
+    const state = entityState?.state;
+    if (!entityState || !state || state === "unavailable" || state === "unknown") {
       btn.style.display = "none";
       return;
     }
     btn.style.display = "";
-    const state = entityState.state;
-    const unavailable = !state || state === "unavailable" || state === "unknown";
-    btn.classList.toggle("on",          !unavailable && state === "on");
-    btn.classList.toggle("unavailable", unavailable);
-    btn.disabled = unavailable;
+    btn.classList.toggle("on", state === "on");
+    btn.classList.remove("unavailable");
+    btn.disabled = false;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

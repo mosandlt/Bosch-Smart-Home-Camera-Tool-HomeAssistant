@@ -54,10 +54,11 @@ async def async_setup_entry(
         entities.append(BoschAudioSwitch(coordinator, cam_id, config_entry))
         # Privacy mode — always available via cloud API (no SHC needed)
         entities.append(BoschPrivacyModeSwitch(coordinator, cam_id, config_entry))
-        # Camera light — only if camera supports light (from cloud featureSupport)
-        # or if SHC is configured (SHC will tell us the state; cloud data may not be ready yet)
+        # Camera light — only if cloud API reports featureSupport.light = True.
+        # Do NOT fall back to "SHC configured" — cameras without a physical light
+        # (e.g. CAMERA_360 indoor) would otherwise get a spurious light switch.
         has_light = cam_info.get("featureSupport", {}).get("light", False)
-        if has_light or opts.get("shc_ip", "").strip():
+        if has_light:
             entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
