@@ -428,6 +428,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     ct = snap_resp.headers.get("Content-Type", "")
                     if snap_resp.status == 200 and "image" in ct:
                         data = await snap_resp.read()
+                        # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON
+                        if not data:
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: %s → empty response (privacy mode ON?)",
+                                cam_id,
+                            )
+                            return None
                         _LOGGER.debug(
                             "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
                         )

@@ -327,6 +327,8 @@ The connection is opened via `PUT /v11/video_inputs/{id}/connection` with `{"typ
 - `stream_source` attribute is set to the `rtsps://` URL for HA's stream component
 - `live_rtsps` and `live_proxy` attributes appear on the camera entity
 
+**Privacy Mode:** When Privacy Mode is ON, `snap.jpg` returns HTTP 200 with an empty body (0 bytes). The integration detects this and does not update the cached image. The Lovelace card shows a 🔒 "Privat-Modus aktiv" overlay instead of the camera image. When Privacy Mode is turned OFF, the card automatically fetches a fresh image.
+
 **Session lifetime:** The Bosch proxy session lasts ~60 seconds. If the switch stays ON, the integration maintains the session. Turn the switch OFF to close the session immediately.
 
 > **Live video with audio in HA:** When the Live Stream switch is ON, the integration registers
