@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.1
+ * Version: 1.4.3
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -34,6 +34,7 @@ class BoschCameraCard extends HTMLElement {
     this._loadingOverlay = false; // is the "Wird geladen" overlay active?
     this._loadingTimeout = null;  // safety timeout to hide overlay
     this._sessionKey    = null;   // sessionStorage key for cached image dataURL
+    this._snapshotPollTimer = null; // polling timer during snapshot refresh
   }
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -72,7 +73,8 @@ class BoschCameraCard extends HTMLElement {
 
   disconnectedCallback() {
     this._stopRefreshTimer();
-    if (this._loadingTimeout) clearTimeout(this._loadingTimeout);
+    if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
+    if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
   }
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -447,7 +449,7 @@ class BoschCameraCard extends HTMLElement {
     const btn   = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
 
-    // Visual feedback — show spinner in button
+    // Visual feedback
     if (btn) {
       btn.disabled = true;
       btn.classList.add("loading");
@@ -457,28 +459,96 @@ class BoschCameraCard extends HTMLElement {
       btn.insertBefore(spinner, btn.firstChild);
     }
     if (label) label.textContent = "Lädt…";
-
-    // Show transparent spinner overlay over the existing image
     this._setLoadingOverlay(true, "Aktualisiere Bild…");
 
-    // Call HA service
+    // Trigger backend image refresh
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
 
-    // After 5 seconds: force-refresh the image (backend fast-path seeds cache in ~2s)
-    setTimeout(() => {
-      this._scheduleImageLoad(0);
-    }, 5000);
+    // Capture current image byte count, then poll until it changes (new image ready)
+    // REMOTE takes ~3-5s; LOCAL Digest auth takes ~6-15s
+    const token   = this._hass?.states[this._entities.camera]?.attributes?.access_token || "";
+    const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
 
-    // After 8 seconds: restore button (overlay hides automatically on image load)
-    setTimeout(() => {
-      if (btn) {
-        btn.disabled = false;
-        btn.classList.remove("loading");
-        const spinner = btn.querySelector("#snapshot-spinner");
-        if (spinner) spinner.remove();
+    const startPoll = (prevBytes) => {
+      // First poll after 3s — REMOTE cameras usually have a fresh image by then
+      const startTime = Date.now();
+      this._snapshotPollTimer = setTimeout(
+        () => this._pollSnapshotImage(prevBytes, startTime), 3000
+      );
+    };
+
+    // Get current byte count (best-effort), then start polling
+    fetch(currUrl)
+      .then(r => r.ok ? r.blob() : null)
+      .then(blob => startPoll(blob ? blob.size : 0))
+      .catch(() => startPoll(0));
+  }
+
+  _pollSnapshotImage(prevBytes, startTime) {
+    const TIMEOUT  = 26000;
+    const INTERVAL = 3000;
+    const elapsed  = Date.now() - startTime;
+
+    if (!this._hass) { this._finishSnapshot(); return; }
+
+    // Re-read token on every poll (it may refresh)
+    const token = this._hass.states[this._entities.camera]?.attributes?.access_token || "";
+    const url   = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
+
+    fetch(url)
+      .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+      .then(blob => {
+        const changed = prevBytes === 0 || Math.abs(blob.size - prevBytes) > 200;
+        if (changed || elapsed >= TIMEOUT) {
+          this._showSnapshotBlob(blob);
+        } else {
+          this._snapshotPollTimer = setTimeout(
+            () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
+          );
+        }
+      })
+      .catch(() => {
+        if (elapsed < TIMEOUT) {
+          this._snapshotPollTimer = setTimeout(
+            () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
+          );
+        } else {
+          this._finishSnapshot();
+        }
+      });
+  }
+
+  _showSnapshotBlob(blob) {
+    if (!blob || blob.size < 500) { this._finishSnapshot(); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      const img     = this.shadowRoot.getElementById("cam-img");
+      if (img) {
+        img.src = dataUrl;
+        img.classList.remove("hidden");
+        this._imageLoaded = true;
       }
-      if (label) label.textContent = "Snapshot";
-    }, 8000);
+      this._setLoadingOverlay(false);
+      try { if (this._sessionKey) sessionStorage.setItem(this._sessionKey, dataUrl); } catch (_) {}
+      this._finishSnapshot();
+    };
+    reader.onerror = () => this._finishSnapshot();
+    reader.readAsDataURL(blob);
+  }
+
+  _finishSnapshot() {
+    if (this._snapshotPollTimer) { clearTimeout(this._snapshotPollTimer); this._snapshotPollTimer = null; }
+    const btn   = this.shadowRoot.getElementById("btn-snapshot");
+    const label = this.shadowRoot.getElementById("btn-snapshot-label");
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      const sp = btn.querySelector("#snapshot-spinner");
+      if (sp) sp.remove();
+    }
+    if (label) label.textContent = "Snapshot";
+    this._setLoadingOverlay(false);
   }
 
   // ── State update ──────────────────────────────────────────────────────────

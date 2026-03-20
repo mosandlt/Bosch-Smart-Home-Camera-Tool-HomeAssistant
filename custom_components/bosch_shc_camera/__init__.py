@@ -444,6 +444,144 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         finally:
             await session.close()
 
+    async def async_fetch_fresh_event_snapshot(self, cam_id: str) -> bytes | None:
+        """Fetch fresh events from Bosch API and return the latest event JPEG.
+
+        Used as fallback for cameras whose snap.jpg returns 401 (e.g. CAMERA_360).
+        Bypasses the coordinator's cached event list — always hits Bosch API directly
+        so the returned imageUrl is always fresh (not expired).
+        """
+        token = self.token
+        if not token:
+            return None
+
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        session  = async_get_clientsession(self.hass, verify_ssl=False)
+        headers  = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
+
+        try:
+            async with async_timeout.timeout(15):
+                async with session.get(events_url, headers=headers) as resp:
+                    if resp.status != 200:
+                        _LOGGER.debug(
+                            "fetch_fresh_event_snapshot: events HTTP %d for %s",
+                            resp.status, cam_id,
+                        )
+                        return None
+                    import json as _json
+                    events = _json.loads(await resp.text())
+
+            if not events:
+                return None
+
+            # Try each event URL from newest to oldest
+            img_headers = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
+            for ev in events:
+                img_url = ev.get("imageUrl")
+                if not img_url:
+                    continue
+                try:
+                    async with async_timeout.timeout(20):
+                        async with session.get(img_url, headers=img_headers) as snap_resp:
+                            if snap_resp.status == 200:
+                                data = await snap_resp.read()
+                                if data:
+                                    _LOGGER.debug(
+                                        "fetch_fresh_event_snapshot: %s → %d bytes @ %s",
+                                        cam_id, len(data), ev.get("timestamp", "")[:19],
+                                    )
+                                    return data
+                except (asyncio.TimeoutError, aiohttp.ClientError):
+                    continue
+
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug("fetch_fresh_event_snapshot error for %s: %s", cam_id, err)
+
+        return None
+
+    async def async_fetch_live_snapshot_local(self, cam_id: str) -> bytes | None:
+        """Fetch a live snapshot via LOCAL connection using HTTP Digest auth.
+
+        For cameras like CAMERA_360 whose REMOTE snap.jpg returns 401,
+        this opens a LOCAL connection to get Digest credentials and fetches
+        snap.jpg directly from the camera's LAN IP.
+
+        Runs in an executor thread since requests (sync) is used for Digest auth.
+        """
+        token = self.token
+        if not token:
+            return None
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+
+        result = None
+        try:
+            async with async_timeout.timeout(15):
+                async with session.put(
+                    url, json={"type": "LOCAL"}, headers=headers
+                ) as resp:
+                    if resp.status not in (200, 201):
+                        _LOGGER.debug(
+                            "fetch_live_snapshot_local: PUT LOCAL → HTTP %d for %s",
+                            resp.status, cam_id,
+                        )
+                        return None
+                    import json as _json
+                    result = _json.loads(await resp.text())
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug("fetch_live_snapshot_local: PUT error for %s: %s", cam_id, err)
+            return None
+        finally:
+            await session.close()
+
+        user     = result.get("user")
+        password = result.get("password")
+        urls     = result.get("urls", [])
+        if not user or not password or not urls:
+            _LOGGER.debug(
+                "fetch_live_snapshot_local: missing credentials/urls for %s: %s",
+                cam_id, result,
+            )
+            return None
+
+        camera_host = urls[0]  # e.g. "192.168.20.21:443"
+        snap_url    = f"https://{camera_host}/snap.jpg"
+
+        def _fetch_digest() -> bytes | None:
+            import requests as req
+            import urllib3
+            urllib3.disable_warnings()
+            try:
+                r = req.get(
+                    snap_url,
+                    auth=req.auth.HTTPDigestAuth(user, password),
+                    verify=False,
+                    timeout=10,
+                )
+                if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
+                    _LOGGER.debug(
+                        "fetch_live_snapshot_local: %s → %d bytes via Digest",
+                        cam_id, len(r.content),
+                    )
+                    return r.content
+                _LOGGER.debug(
+                    "fetch_live_snapshot_local: Digest snap.jpg → HTTP %d for %s",
+                    r.status_code, cam_id,
+                )
+            except Exception as err:
+                _LOGGER.debug("fetch_live_snapshot_local: requests error for %s: %s", cam_id, err)
+            return None
+
+        return await self.hass.async_add_executor_job(_fetch_digest)
+
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
         """Register the Bosch rtsps:// stream in go2rtc with TLS verify disabled.
 

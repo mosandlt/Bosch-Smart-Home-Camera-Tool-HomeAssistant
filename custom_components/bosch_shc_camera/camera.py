@@ -160,11 +160,21 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             image = None
             if not self.is_streaming:
                 image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                # Fallback for cameras whose REMOTE snap.jpg returns 401 (e.g. CAMERA_360):
+                # try LOCAL connection with Digest auth for a direct LAN snapshot.
+                if not image:
+                    image = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
+
+            # Last resort: fetch fresh events from Bosch API and use the latest imageUrl.
+            # Bypasses stale/expired coordinator-cached event URLs.
+            if not image:
+                image = await self.coordinator.async_fetch_fresh_event_snapshot(self._cam_id)
+
             if image:
                 self._cached_image = image
                 self._last_image_fetch = time.monotonic()
                 _LOGGER.debug(
-                    "%s: background live-snapshot refresh — %d bytes",
+                    "%s: background refresh — %d bytes",
                     self._attr_name, len(image),
                 )
                 self.async_write_ha_state()
