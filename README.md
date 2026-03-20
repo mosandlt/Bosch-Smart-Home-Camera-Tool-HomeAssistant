@@ -51,6 +51,8 @@ express or implied.
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
 
+> **SHC local API is optional.** All core features — camera snapshots, live stream, privacy mode — work with just a Bosch Bearer token. The SHC local API is only needed for **camera LED light control**. Privacy mode uses the Bosch cloud API directly (`PUT /v11/video_inputs/{id}/privacy`) and requires no local SHC access.
+
 ---
 
 ## Installation
@@ -497,15 +499,50 @@ Base: https://residential.cbs.boschsecurity.com
 Auth: Authorization: Bearer {token}
 SSL:  verify=False (Bosch private CA)
 
-GET  /v11/video_inputs                          → list cameras
+GET  /v11/video_inputs                          → list cameras (includes privacyMode + featureStatus)
 GET  /v11/video_inputs/{id}/ping                → "ONLINE" / "OFFLINE"
 GET  /v11/events?videoInputId={id}&limit=20     → motion events (imageUrl + videoClipUrl)
 GET  {event.imageUrl}                           → event JPEG snapshot
 GET  {event.videoClipUrl}                       → event MP4 clip
-PUT  /v11/video_inputs/{id}/connection          → open live proxy {"type": "REMOTE"}
+PUT  /v11/video_inputs/{id}/connection          → open live proxy {"type": "REMOTE"/"LOCAL"}
+GET  /v11/video_inputs/{id}/privacy             → {"privacyMode": "ON"/"OFF", "durationInSeconds": null}
+PUT  /v11/video_inputs/{id}/privacy             → toggle privacy mode (HTTP 204 on success)
 GET  /v11/feature_flags                         → account feature flags
 GET  /v11/purchases                             → subscription info
 GET  /v11/contracts?locale=de_DE                → contracts
+```
+
+### Privacy mode
+```
+GET  /v11/video_inputs/{id}/privacy
+  → {"privacyMode": "OFF", "durationInSeconds": null}
+
+PUT  /v11/video_inputs/{id}/privacy
+  Body: {"privacyMode": "ON", "durationInSeconds": null}
+  Response: HTTP 204 (no body)
+
+No SHC local API needed. State is also included in GET /v11/video_inputs response
+(privacyMode field), so no separate polling is required.
+```
+
+### Camera light state (read-only via cloud API)
+```
+Privacy mode and light schedule are embedded in GET /v11/video_inputs:
+
+  "featureSupport": {"light": true/false, ...}
+  "featureStatus": {
+    "scheduleStatus": "ALWAYS_OFF" / "ALWAYS_ON" / "SCHEDULE",
+    "frontIlluminatorInGeneralLightOn": false,
+    "frontIlluminatorGeneralLightIntensity": 1.0,
+    "lightOnMotion": false,
+    "lightOnMotionFollowUpTimeSeconds": 60,
+    "generalLightOnTime": "20:15:00",
+    "generalLightOffTime": "22:35:00"
+  }
+
+Note: featureStatus describes the light schedule config, not the current LED state.
+For current LED on/off state, use the SHC local API CameraLight service.
+Light control (write) via cloud API: no endpoint found (all attempts return 404/500).
 ```
 
 ### Live proxy endpoints (after PUT /connection)

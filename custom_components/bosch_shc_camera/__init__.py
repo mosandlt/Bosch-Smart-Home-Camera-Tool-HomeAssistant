@@ -44,13 +44,14 @@ ALL_PLATFORMS = ["camera", "sensor", "button", "switch"]
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
 # LOCAL  → LAN direct, returns Digest user/password, slow (~15s)
-LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
+LIVE_TYPE_CANDIDATES = ["REMOTE"]  # cloud proxy only — LOCAL (LAN) fallback removed
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early to be safe
 
 DEFAULT_OPTIONS = {
-    "scan_interval":    60,    # coordinator tick interval (seconds)
-    "interval_status":  300,   # ping camera status every 5 minutes
-    "interval_events":  300,   # fetch new events every 5 minutes
+    "scan_interval":      60,    # coordinator tick interval (seconds)
+    "interval_status":   300,   # ping camera status every 5 minutes
+    "interval_events":   300,   # fetch new events every 5 minutes
+    "snapshot_interval": 1800,  # how often to fetch a fresh cloud snapshot (seconds, 30 min)
     "enable_snapshots":       True,
     "enable_sensors":         True,
     "enable_snapshot_button": True,

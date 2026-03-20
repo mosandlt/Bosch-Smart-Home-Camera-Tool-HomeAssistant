@@ -250,6 +250,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("interval_events", 300)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
                 vol.Optional(
+                    "snapshot_interval",
+                    default=int(opts.get("snapshot_interval", 1800)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
+                vol.Optional(
                     "enable_snapshots",
                     default=bool(opts.get("enable_snapshots", True)),
                 ): bool,

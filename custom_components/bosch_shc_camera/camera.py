@@ -34,7 +34,9 @@ from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
-IMAGE_REFRESH_INTERVAL = 1800  # seconds between background image refreshes (30 min)
+IMAGE_REFRESH_INTERVAL  = 1800  # seconds between background image refreshes (30 min)
+CLOUD_SNAP_CACHE_TTL    = 30    # minimum seconds between cloud fetches (de-bounce)
+DEFAULT_SNAPSHOT_INTERVAL = 1800 # default snapshot refresh interval (30 minutes)
 
 
 async def async_setup_entry(
@@ -128,9 +130,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     async def _async_trigger_image_refresh(self, delay: float = 0) -> None:
         """Fetch a fresh image and force HA's camera proxy to serve it.
 
-        Tries a temporary live connection (snap.jpg) first — this gives a
-        current view of the camera regardless of when motion last occurred.
-        Falls back to event snapshots if the live connection fails.
+        Primarily used on startup and after stream stop. For CAMERA_360 (whose
+        REMOTE snap.jpg returns 401) this runs the LOCAL Digest-auth fallback so
+        the camera cache stays warm even though async_camera_image's cloud fetch
+        would return None for it.
 
         Sets _force_image_refresh=True so that frame_interval returns 0.1 s,
         causing HA's image cache to expire on the very next proxy request.
@@ -218,12 +221,18 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
         When _force_image_refresh is set: 0.1 s — forces immediate cache expiry
         so HA's next proxy request fetches the new snapshot right away.
-        When streaming: 3 s — near-live refresh from the proxy snap.jpg.
-        When idle:      1800 s (30 min) — latest event snapshot is enough.
+        When streaming: 2 s — near-live refresh from the cloud proxy snap.jpg.
+        When idle:      snapshot_interval (default 1800 s / 30 min) — configurable
+                        via Settings → Integrations → Configure → snapshot_interval
+                        (min 300 s / 5 min, max 86400 s / 24 h).
+                        Each call fetches a fresh cloud proxy snapshot (~1.5 s).
         """
         if getattr(self, "_force_image_refresh", False):
             return 0.1
-        return 3.0 if self.is_streaming else 1800.0
+        if self.is_streaming:
+            return 2.0
+        opts = get_options(self._entry)
+        return float(int(opts.get("snapshot_interval", DEFAULT_SNAPSHOT_INTERVAL)))
 
     @property
     def _token(self) -> str:
@@ -305,14 +314,19 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         1. Cloud proxy live snap  — if a live connection has been opened
            (proxy-NN.live.cbs.boschsecurity.com snap.jpg, no auth needed)
            Updated every coordinator tick while live switch is ON.
-        2. Latest event snapshot  — most recent motion-triggered image (cloud events API)
-           Always available, but only refreshes on motion.
+        2. Cloud proxy on-demand  — PUT /connection REMOTE + snap.jpg (~1.5 s).
+           Called whenever the cached image is older than CLOUD_SNAP_CACHE_TTL (30 s).
+           frame_interval is 60 s when idle, so this gives a fresh image every minute.
+        3. Cached image           — fallback when cloud fetch fails (e.g. CAMERA_360
+           whose REMOTE snap.jpg returns 401; refreshed via background task using LOCAL).
+        4. Latest event snapshot  — last resort on very first startup before any
+           cloud fetch has completed.
         """
         session = async_get_clientsession(self.hass, verify_ssl=False)
         token   = self._token
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
 
-        # ── 1. Cloud proxy live snapshot ─────────────────────────────────────
+        # ── 1. Cloud proxy live snapshot (active live-stream session) ─────────
         live = self.coordinator._live_connections.get(self._cam_id, {})
         proxy_url = live.get("proxyUrl", "")
         if proxy_url:
@@ -351,14 +365,31 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 pass
 
-        # ── 2. Return cached image (kept fresh by 30-min background refresh) ──
-        # Background refresh stores a live snap in _cached_image every 30 minutes
-        # and after every stream stop. This is more current than event snapshots,
-        # which only update on motion and whose URLs eventually expire.
+        # ── 2. Cloud proxy on-demand snapshot (PUT /connection REMOTE → snap.jpg) ──
+        # Fetch a fresh image directly from the Bosch cloud proxy whenever the cache
+        # is stale (older than CLOUD_SNAP_CACHE_TTL). This is the primary snapshot
+        # method for idle cameras: ~1.5 s round-trip, always current, no auth needed.
+        # Skip when streaming — opening a new PUT /connection kills the active RTSP session.
+        if not self.is_streaming:
+            now = time.monotonic()
+            if not self._cached_image or (now - self._last_image_fetch) >= CLOUD_SNAP_CACHE_TTL:
+                fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                if fresh:
+                    self._cached_image = fresh
+                    self._last_image_fetch = now
+                    _LOGGER.debug(
+                        "%s: cloud proxy snapshot %d bytes (on demand)",
+                        self._attr_name, len(fresh),
+                    )
+                    return fresh
+
+        # ── 3. Cached image (fallback for cameras whose REMOTE snap.jpg needs auth) ──
+        # For cameras like CAMERA_360 the cloud fetch above returns None;
+        # _async_trigger_image_refresh keeps this cache warm via LOCAL connection.
         if self._cached_image:
             return self._cached_image
 
-        # ── 3. Latest event snapshot (fallback — first startup before refresh runs) ──
+        # ── 4. Latest event snapshot (last resort — first startup before cloud fetch runs) ──
         events = self._cam_data.get("events", [])
         for ev in events:
             img_url = ev.get("imageUrl")
