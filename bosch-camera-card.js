@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.3.7
+ * Version: 1.3.8
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -248,8 +248,8 @@ class BoschCameraCard extends HTMLElement {
         </div>
 
         <div class="img-wrapper" id="img-wrapper">
-          <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
-          <div class="loading-overlay visible" id="loading-overlay">
+          <img class="cam-img" id="cam-img" alt="Camera" style="cursor:pointer" />
+          <div class="loading-overlay" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
           </div>
@@ -341,6 +341,14 @@ class BoschCameraCard extends HTMLElement {
     const camEntity = this._entities.camera;
     const token = this._hass.states[camEntity]?.attributes?.access_token || "";
     img.src = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}`;
+    // Show loading overlay only if image hasn't appeared within 3 seconds
+    // This prevents "Bild wird geladen" flash when a cached image loads quickly
+    if (!this._imageLoaded) {
+      if (this._loadingDelayTimer) clearTimeout(this._loadingDelayTimer);
+      this._loadingDelayTimer = setTimeout(() => {
+        if (!this._imageLoaded) this._setLoadingOverlay(true);
+      }, 3000);
+    }
   }
 
   _onImageLoaded() {
@@ -351,6 +359,7 @@ class BoschCameraCard extends HTMLElement {
     if (img)     img.classList.remove("hidden");
     if (overlay) overlay.classList.remove("visible");
     if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    if (this._loadingDelayTimer) { clearTimeout(this._loadingDelayTimer); this._loadingDelayTimer = null; }
   }
 
   _onImageError() {

@@ -140,19 +140,31 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             await asyncio.sleep(delay)
         self._force_image_refresh = True
         try:
-            # Prefer a fresh live snapshot (temp connection, stream stays OFF)
+            # Fast path: populate _cached_image from the latest event snapshot immediately
+            # so the HA camera proxy can serve something while the live snap is fetching.
+            # This ensures the card shows a real image within ~1s of startup/stream-stop,
+            # instead of waiting 5-15s for the PUT /connection + snap.jpg round-trip.
+            if not self._cached_image:
+                quick = await self.async_camera_image()
+                if quick:
+                    self._cached_image = quick
+                    self._last_image_fetch = time.monotonic()
+                    _LOGGER.debug(
+                        "%s: quick event-snapshot seed — %d bytes",
+                        self._attr_name, len(quick),
+                    )
+                    self.async_write_ha_state()
+
+            # Slow path: fetch a fresh live snapshot via PUT /connection + snap.jpg
             # Skip when streaming — opening a new PUT /connection kills the active RTSP session
             image = None
             if not self.is_streaming:
                 image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
-            if not image:
-                # Fall back to event snapshots
-                image = await self.async_camera_image()
             if image:
                 self._cached_image = image
                 self._last_image_fetch = time.monotonic()
                 _LOGGER.debug(
-                    "%s: background image refresh — %d bytes",
+                    "%s: background live-snapshot refresh — %d bytes",
                     self._attr_name, len(image),
                 )
                 self.async_write_ha_state()
