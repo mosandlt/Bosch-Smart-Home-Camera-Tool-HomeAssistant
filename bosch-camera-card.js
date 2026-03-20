@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.4.3
+ * Version: 1.4.4
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -55,6 +55,9 @@ class BoschCameraCard extends HTMLElement {
     this._entities = {
       camera:       config.camera_entity,
       switch:       config.switch_entity        || `switch.${base}_live_stream`,
+      audio:        config.audio_entity         || `switch.${base}_audio`,
+      light:        config.light_entity         || `switch.${base}_camera_light`,
+      privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
       last_event:   config.last_event_entity    || `sensor.${base}_last_event`,
@@ -250,6 +253,33 @@ class BoschCameraCard extends HTMLElement {
           animation: spin 0.8s linear infinite;
           flex-shrink: 0;
         }
+
+        /* Toggle row — Ton / Licht / Privat */
+        .toggle-row { display: flex; gap: 8px; padding: 0 12px 12px; }
+        .btn-toggle {
+          flex: 1; display: flex; flex-direction: column; align-items: center;
+          gap: 4px; padding: 8px 6px; border-radius: 10px; border: none;
+          cursor: pointer; font-size: 11px; font-weight: 500; font-family: inherit;
+          transition: background 0.2s, color 0.2s;
+          background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93);
+          -webkit-tap-highlight-color: transparent;
+        }
+        .btn-toggle:active { opacity: .7; }
+        .btn-toggle.on { background: rgba(10,132,255,.2); color: #0a84ff; }
+        .btn-toggle.on.privacy-btn { background: rgba(255,69,58,.15); color: #ff453a; }
+        .btn-toggle.unavailable { opacity: .35; cursor: default; }
+        .btn-toggle svg { width: 17px; height: 17px; flex-shrink: 0; }
+
+        /* Privacy placeholder — shown when no image + privacy mode is ON */
+        .privacy-placeholder {
+          position: absolute; inset: 0;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(0,0,0,.82); gap: 10px;
+          opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        .privacy-placeholder.visible { opacity: 1; }
+        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.35); }
+        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.45); font-weight: 500; }
       </style>
 
       <ha-card>
@@ -269,6 +299,13 @@ class BoschCameraCard extends HTMLElement {
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
+          </div>
+          <div class="privacy-placeholder" id="privacy-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+            <span>Privat-Modus aktiv</span>
           </div>
           <div class="img-overlay">
             <span class="last-event-overlay" id="last-event-overlay"></span>
@@ -312,6 +349,37 @@ class BoschCameraCard extends HTMLElement {
             </svg>
           </button>
         </div>
+
+        <div class="toggle-row">
+          <button class="btn-toggle" id="btn-audio" title="Ton">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+            </svg>
+            <span>Ton</span>
+          </button>
+          <button class="btn-toggle" id="btn-light" title="Kamera-Licht">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="5"/>
+              <line x1="12" y1="1" x2="12" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="23"/>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+              <line x1="1" y1="12" x2="3" y2="12"/>
+              <line x1="21" y1="12" x2="23" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <span>Licht</span>
+          </button>
+          <button class="btn-toggle privacy-btn" id="btn-privacy" title="Privat-Modus">
+            <svg id="privacy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+            <span>Privat</span>
+          </button>
+        </div>
       </ha-card>
     `;
 
@@ -332,6 +400,17 @@ class BoschCameraCard extends HTMLElement {
     );
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
+    );
+
+    // Toggle buttons
+    this.shadowRoot.getElementById("btn-audio").addEventListener("click", () =>
+      this._toggleSwitch(this._entities.audio)
+    );
+    this.shadowRoot.getElementById("btn-light").addEventListener("click", () =>
+      this._toggleSwitch(this._entities.light)
+    );
+    this.shadowRoot.getElementById("btn-privacy").addEventListener("click", () =>
+      this._toggleSwitch(this._entities.privacy)
     );
 
     // Load the first image immediately
@@ -624,12 +703,46 @@ class BoschCameraCard extends HTMLElement {
     const evCount      = evTodayState?.state ?? "—";
     if (infoEvToday) infoEvToday.textContent = evCount !== "—" ? `${evCount} Events` : "—";
     if (evOverlay)   evOverlay.textContent   = evCount !== "—" ? `${evCount} Events heute` : "";
+
+    // Toggle buttons — Ton / Licht / Privat
+    this._updateToggleBtn("btn-audio",   hass.states[ents.audio]);
+    this._updateToggleBtn("btn-light",   hass.states[ents.light]);
+    this._updateToggleBtn("btn-privacy", hass.states[ents.privacy]);
+
+    // Privacy placeholder — show when no image and privacy mode is ON
+    const privacyOn  = hass.states[ents.privacy]?.state === "on";
+    const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
+    if (placeholder) {
+      placeholder.classList.toggle("visible", privacyOn && !this._imageLoaded);
+    }
+    // When privacy just turned ON and loading overlay is showing — update message
+    if (privacyOn && !this._imageLoaded) {
+      const loadText = this.shadowRoot.getElementById("loading-text");
+      if (loadText) loadText.textContent = "Privat-Modus aktiv";
+    }
+  }
+
+  _updateToggleBtn(id, entityState) {
+    const btn = this.shadowRoot.getElementById(id);
+    if (!btn) return;
+    const state = entityState?.state;
+    const unavailable = !state || state === "unavailable" || state === "unknown";
+    btn.classList.toggle("on",          !unavailable && state === "on");
+    btn.classList.toggle("unavailable", unavailable);
+    btn.disabled = unavailable;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   _toggleStream() {
     const isOn  = this._isStreaming();
     this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });
+  }
+
+  _toggleSwitch(entityId) {
+    if (!this._hass || !entityId) return;
+    const state = this._hass.states[entityId]?.state;
+    if (!state || state === "unavailable" || state === "unknown") return;
+    this._callService("switch", state === "on" ? "turn_off" : "turn_on", { entity_id: entityId });
   }
 
   _requestFullscreen() {

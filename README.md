@@ -38,6 +38,8 @@ express or implied.
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
 | 🔇 Audio switch (muted by default) | `switch` | ✅ enabled |
+| 💡 Camera LED light switch | `switch` | ✅ enabled (requires SHC config) |
+| 🔒 Privacy mode switch | `switch` | ✅ enabled (requires SHC config) |
 | 💾 Auto-download events to folder | background | ❌ optional |
 | 🎥 **Live stream — 30fps H.264 + optional AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
@@ -101,28 +103,26 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 ```
 ┌──────────────────────────────────┐
-│ ● Garten              [streaming]│  ← status dot (green/red) + stream state badge
-│                                  │
+│ ● Garten              [streaming]│  ← status dot + stream badge
 │  ┌────────────────────────────┐  │
-│  │                            │  │
 │  │        Camera image        │  │  ← auto-refreshed (30s idle / 3s streaming)
-│  │                            │  │
-│  │ Last: 2026-03-19 09:32  5 events today │
+│  │ Last: 2026-03-19 09:32  5 events │
 │  └────────────────────────────┘  │
-│                                  │
-│  Status: ONLINE                  │
-│  Last event: 2026-03-19 09:32    │
-│  Today: 5 events                 │
-│                                  │
-│  [ 📸 Snapshot ] [ 📹 Stop Stream ]│
+│  Status: ONLINE  Last event: …   │
+│  [ 📸 Snapshot ] [ 📹 Live Stream ] [ ⛶ ] │
+│  [  🔊 Ton  ] [  💡 Licht  ] [  🔒 Privat  ] │
 └──────────────────────────────────┘
 ```
 
 - **Status dot** — green = ONLINE, red = OFFLINE, grey = unknown
-- **Stream badge** — `idle` (grey) or `streaming` (blue, pulsing dot) — mirrors `camera.bosch_garten` state
-- **Camera image** — served via HA camera proxy (`/api/camera_proxy/`), auto-refreshed
-- **Snapshot button** — calls `bosch_shc_camera.trigger_snapshot` to force an immediate refresh
-- **Live Stream button** — toggles `switch.bosch_garten_live_stream` (ON = live proxy opens, badge turns streaming)
+- **Stream badge** — `idle` (grey) or `streaming` (blue, pulsing dot)
+- **Camera image** — served via HA camera proxy, auto-refreshed; shows cached image instantly on load
+- **Snapshot button** — triggers a live image refresh; polls for the new image and displays it automatically (no fixed delay)
+- **Live Stream button** — toggles `switch.bosch_garten_live_stream`; starts 30fps H.264 + audio stream
+- **Fullscreen button** — native fullscreen on desktop/Android; CSS overlay fallback on iOS Safari
+- **Ton** — toggles `switch.bosch_garten_audio` (audio in live stream, default OFF)
+- **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED indicator, requires SHC local API config)
+- **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode, requires SHC local API config); when ON and no image available, shows a "Privat-Modus aktiv" placeholder
 
 ### Installation
 
@@ -166,6 +166,9 @@ refresh_interval_streaming: 3          # seconds between image refreshes when st
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 switch_entity: switch.bosch_garten_live_stream
+audio_entity: switch.bosch_garten_audio
+light_entity: switch.bosch_garten_camera_light
+privacy_entity: switch.bosch_garten_privacy_mode
 status_entity: sensor.bosch_garten_status
 events_today_entity: sensor.bosch_garten_events_today
 last_event_entity: sensor.bosch_garten_last_event
@@ -179,9 +182,14 @@ The card automatically derives all entity IDs from `camera_entity`:
 |--------|---------------|
 | `camera_entity: camera.bosch_garten` | — |
 | *(auto)* | `switch.bosch_garten_live_stream` |
+| *(auto)* | `switch.bosch_garten_audio` |
+| *(auto)* | `switch.bosch_garten_camera_light` |
+| *(auto)* | `switch.bosch_garten_privacy_mode` |
 | *(auto)* | `sensor.bosch_garten_status` |
 | *(auto)* | `sensor.bosch_garten_events_today` |
 | *(auto)* | `sensor.bosch_garten_last_event` |
+
+Toggle buttons (Ton / Licht / Privat) are automatically dimmed and disabled if the corresponding entity is `unavailable` or `unknown`.
 
 For camera named **Kamera**: use `camera_entity: camera.bosch_kamera`.
 
@@ -249,7 +257,9 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_events_today` | sensor | Number of events today |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
-| `switch.bosch_garten_audio` | switch | Audio ON/OFF (default: OFF — muted) |
+| `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
+| `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF (requires SHC) |
+| `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — blocks camera view (requires SHC) |
 
 ### Camera streaming state
 
