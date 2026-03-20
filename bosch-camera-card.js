@@ -18,7 +18,7 @@
  *   refresh_interval_idle: 30                 # seconds (default 30)
  *   refresh_interval_streaming: 3             # seconds (default 3)
  *
- * Version: 1.3.9
+ * Version: 1.4.0
  */
 
 class BoschCameraCard extends HTMLElement {
@@ -33,6 +33,7 @@ class BoschCameraCard extends HTMLElement {
     this._imageLoaded   = false;  // did we ever successfully load an image?
     this._loadingOverlay = false; // is the "Wird geladen" overlay active?
     this._loadingTimeout = null;  // safety timeout to hide overlay
+    this._sessionKey    = null;   // sessionStorage key for cached image dataURL
   }
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -47,6 +48,8 @@ class BoschCameraCard extends HTMLElement {
       refresh_interval_streaming: config.refresh_interval_streaming ?? 3,
     };
 
+    this._sessionKey = `bosch_cam_${config.camera_entity}`;
+
     const base = config.camera_entity.replace(/^camera\./, "");
     this._entities = {
       camera:       config.camera_entity,
@@ -57,6 +60,7 @@ class BoschCameraCard extends HTMLElement {
     };
 
     this._render();
+    this._restoreCachedImage();
     this._startRefreshTimer();
   }
 
@@ -171,6 +175,9 @@ class BoschCameraCard extends HTMLElement {
           opacity: 0; transition: opacity 0.3s; pointer-events: none;
         }
         .loading-overlay.visible { opacity: 1; }
+        /* Transparent overlay when refreshing an existing image — old image stays visible */
+        .loading-overlay.refreshing { background: rgba(0,0,0,.15); }
+        .loading-overlay.refreshing .loading-text { display: none; }
         .spinner {
           width: 36px; height: 36px;
           border: 3px solid rgba(255,255,255,.2);
@@ -349,8 +356,10 @@ class BoschCameraCard extends HTMLElement {
     this._imageLoaded    = true;
     this._loadingOverlay = false;
     if (img)     img.classList.remove("hidden");
-    if (overlay) overlay.classList.remove("visible");
+    if (overlay) { overlay.classList.remove("visible"); overlay.classList.remove("refreshing"); }
     if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    // Store image to sessionStorage so next page load shows it instantly
+    if (img?.src && !img.src.startsWith("data:")) this._cacheImage(img.src);
   }
 
   _onImageError() {
@@ -365,9 +374,13 @@ class BoschCameraCard extends HTMLElement {
     const loadText = this.shadowRoot.getElementById("loading-text");
     const img      = this.shadowRoot.getElementById("cam-img");
     this._loadingOverlay = visible;
-    if (overlay) overlay.classList.toggle("visible", visible);
+    if (overlay) {
+      overlay.classList.toggle("visible", visible);
+      // Use transparent overlay when we already have an image — old image stays visible underneath
+      overlay.classList.toggle("refreshing", visible && this._imageLoaded);
+    }
     if (loadText) loadText.textContent = text;
-    // Only hide image if we're showing overlay AND have no image yet
+    // Only hide image on first load when there's nothing to show yet
     if (img) img.classList.toggle("hidden", visible && !this._imageLoaded);
 
     if (visible) {
@@ -377,6 +390,38 @@ class BoschCameraCard extends HTMLElement {
     } else {
       if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
     }
+  }
+
+  // ── Image caching (sessionStorage) ────────────────────────────────────────
+  _restoreCachedImage() {
+    // Immediately show last known image from sessionStorage — no wait for proxy
+    if (!this._sessionKey) return;
+    try {
+      const cached = sessionStorage.getItem(this._sessionKey);
+      if (!cached) return;
+      const img     = this.shadowRoot.getElementById("cam-img");
+      const overlay = this.shadowRoot.getElementById("loading-overlay");
+      if (img) { img.src = cached; img.classList.remove("hidden"); }
+      if (overlay) overlay.classList.remove("visible");
+      this._imageLoaded = true;
+    } catch (_) {}
+  }
+
+  _cacheImage(proxyUrl) {
+    // Fetch image bytes and store as dataURL in sessionStorage for instant restore
+    if (!this._sessionKey || !proxyUrl) return;
+    fetch(proxyUrl)
+      .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+      .then(blob => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      }))
+      .then(dataUrl => {
+        try { sessionStorage.setItem(this._sessionKey, dataUrl); } catch (_) {}
+      })
+      .catch(() => {});
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
