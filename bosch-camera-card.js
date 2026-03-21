@@ -18,7 +18,14 @@
  *   refresh_interval_idle: 300                # seconds (default 300 = 5 min)
  *   refresh_interval_streaming: 2             # seconds (default 2)
  *
- * Version: 1.5.7
+ * Version: 1.5.9
+ *
+ * Changes vs 1.5.8:
+ *   - Added pan controls for 360 cameras (number.bosch_{cam}_pan_position entity)
+ *     ◀◀ ◀ ■ ▶ ▶▶ buttons with current position display; hidden for cameras without pan support
+ *
+ * Changes vs 1.5.7:
+ *   - Added Notifications toggle (mdi:bell / mdi:bell-off) using switch.bosch_{cam}_notifications
  *
  * Changes vs 1.4.8:
  *   - localStorage (not sessionStorage) → image survives iOS app restart
@@ -81,6 +88,8 @@ class BoschCameraCard extends HTMLElement {
       audio:        config.audio_entity         || `switch.${base}_audio`,
       light:        config.light_entity         || `switch.${base}_camera_light`,
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
+      notifications: config.notifications_entity || `switch.${base}_notifications`,
+      pan:          config.pan_entity           || `number.${base}_pan_position`,
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
       last_event:   config.last_event_entity    || `sensor.${base}_last_event`,
@@ -336,6 +345,19 @@ class BoschCameraCard extends HTMLElement {
         .privacy-placeholder.visible { opacity: 1; }
         .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.35); }
         .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.45); font-weight: 500; }
+
+        /* Pan controls */
+        .pan-section { padding: 0 12px 12px; }
+        .pan-row { display: flex; align-items: center; gap: 6px; }
+        .pan-btn {
+          background: rgba(255,255,255,.15); border: none; border-radius: 6px;
+          color: white; cursor: pointer; font-size: 16px; padding: 6px 10px; flex: 1;
+          font-family: inherit; -webkit-tap-highlight-color: transparent;
+          transition: background 0.15s;
+        }
+        .pan-btn:hover  { background: rgba(255,255,255,.25); }
+        .pan-btn:active { background: rgba(255,255,255,.35); }
+        .pan-pos { margin-left: auto; font-size: 12px; opacity: .7; color: var(--primary-text-color, #e5e5ea); white-space: nowrap; }
       </style>
 
       <ha-card>
@@ -441,6 +463,34 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
+            <div class="sw-row" id="btn-notifications">
+              <div class="sw-left">
+                <svg id="notif-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 01-3.46 0"/>
+                </svg>
+                <svg id="notif-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+                  <path d="M13.73 21a2 2 0 01-3.46 0"/>
+                  <path d="M18.63 13A17.89 17.89 0 0118 8"/>
+                  <path d="M6.26 6.26A5.86 5.86 0 006 8c0 7-3 9-3 9h14"/>
+                  <path d="M18 8a6 6 0 00-9.33-5"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+                <span>Benachrichtigungen</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+          </div>
+
+          <div class="pan-section" id="pan-section" style="display:none">
+            <div class="pan-row">
+              <button class="pan-btn" id="pan-full-left"  title="Ganz links">◀◀</button>
+              <button class="pan-btn" id="pan-left"       title="Links">◀</button>
+              <button class="pan-btn" id="pan-center"     title="Mitte" style="font-size:11px">■</button>
+              <button class="pan-btn" id="pan-right"      title="Rechts">▶</button>
+              <button class="pan-btn" id="pan-full-right" title="Ganz rechts">▶▶</button>
+              <span   class="pan-pos" id="pan-position">0°</span>
+            </div>
           </div>
       </ha-card>
     `;
@@ -476,6 +526,25 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-privacy").addEventListener("click", () =>
       this._toggleSwitch(this._entities.privacy)
     );
+    this.shadowRoot.getElementById("btn-notifications").addEventListener("click", () =>
+      this._toggleSwitch(this._entities.notifications)
+    );
+
+    // Pan buttons
+    const PAN_STEP = 30;
+    const setPan = (pos) => {
+      if (!this._hass || !this._entities.pan) return;
+      this._hass.callService("number", "set_value", {
+        entity_id: this._entities.pan,
+        value: Math.max(-120, Math.min(120, pos)),
+      }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
+    };
+    const getCurPan = () => parseFloat(this._hass?.states[this._entities.pan]?.state || 0);
+    this.shadowRoot.getElementById("pan-full-left") ?.addEventListener("click", () => setPan(-120));
+    this.shadowRoot.getElementById("pan-left")      ?.addEventListener("click", () => setPan(getCurPan() - PAN_STEP));
+    this.shadowRoot.getElementById("pan-center")    ?.addEventListener("click", () => setPan(0));
+    this.shadowRoot.getElementById("pan-right")     ?.addEventListener("click", () => setPan(getCurPan() + PAN_STEP));
+    this.shadowRoot.getElementById("pan-full-right")?.addEventListener("click", () => setPan(120));
 
     // Load the first image immediately
     this._imgTimestamp = Date.now();
@@ -933,10 +1002,20 @@ class BoschCameraCard extends HTMLElement {
     if (infoEvToday) infoEvToday.textContent = evCount !== "—" ? `${evCount} Events` : "—";
     if (evOverlay)   evOverlay.textContent   = evCount !== "—" ? `${evCount} Events heute` : "";
 
-    // Toggle buttons — Ton / Licht / Privat
-    this._updateToggleBtn("btn-audio",   ents.audio,   hass.states[ents.audio]);
-    this._updateToggleBtn("btn-light",   ents.light,   hass.states[ents.light]);
-    this._updateToggleBtn("btn-privacy", ents.privacy, hass.states[ents.privacy]);
+    // Toggle buttons — Ton / Licht / Privat / Benachrichtigungen
+    this._updateToggleBtn("btn-audio",         ents.audio,         hass.states[ents.audio]);
+    this._updateToggleBtn("btn-light",         ents.light,         hass.states[ents.light]);
+    this._updateToggleBtn("btn-privacy",       ents.privacy,       hass.states[ents.privacy]);
+    this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
+
+    // Swap bell icon: bell when ON (notifications active), bell-off when OFF
+    const notifState = this._getEffectiveState(ents.notifications);
+    const notifIconOn  = this.shadowRoot.getElementById("notif-icon-on");
+    const notifIconOff = this.shadowRoot.getElementById("notif-icon-off");
+    if (notifIconOn && notifIconOff) {
+      notifIconOn.style.display  = (notifState === "off") ? "none" : "";
+      notifIconOff.style.display = (notifState === "off") ? ""     : "none";
+    }
 
     // Keep live video muted state in sync with Ton toggle (only when streaming).
     // Only unmute when the video is already playing — unmuting a paused video
@@ -969,6 +1048,18 @@ class BoschCameraCard extends HTMLElement {
       this._scheduleImageLoad(3000);
     }
     this._lastPrivacy = privacyOn;
+
+    // Pan section — only visible when the pan number entity exists and has a valid state
+    const panState   = hass.states[ents.pan];
+    const panSection = this.shadowRoot.getElementById("pan-section");
+    if (panSection) {
+      const hasPan = panState && panState.state && panState.state !== "unavailable" && panState.state !== "unknown";
+      panSection.style.display = hasPan ? "" : "none";
+      if (hasPan) {
+        const posEl = this.shadowRoot.getElementById("pan-position");
+        if (posEl) posEl.textContent = `${panState.state}°`;
+      }
+    }
   }
 
   _updateToggleBtn(id, entityId, entityState) {

@@ -39,7 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["camera", "sensor", "button", "switch"]
+ALL_PLATFORMS = ["camera", "sensor", "button", "switch", "number"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
@@ -106,6 +106,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._shc_state_cache: dict[str, dict] = {}
         self._shc_devices_raw: list = []       # cached GET /smarthome/devices response
         self._last_shc_fetch: float = 0.0      # last time SHC devices were fetched
+        # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
+        self._pan_cache: dict[str, int | None] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -276,10 +278,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 light_on     = feat_status.get("frontIlluminatorInGeneralLightOn")
 
                 cache = self._shc_state_cache.setdefault(cam_id_key, {
-                    "device_id":    None,
-                    "camera_light": None,
-                    "privacy_mode": None,
-                    "has_light":    False,
+                    "device_id":           None,
+                    "camera_light":        None,
+                    "privacy_mode":        None,
+                    "has_light":           False,
+                    "notifications_status": None,
                 })
                 # Always update privacy from cloud API (authoritative, fast, no SHC needed)
                 if privacy_str:
@@ -289,6 +292,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 # (SHC CameraLight service is more accurate for the current LED state)
                 if light_on is not None and cache.get("camera_light") is None:
                     cache["camera_light"] = light_on
+                # Read notifications status from cloud API response
+                notif_status = cam_raw.get("notificationsEnabledStatus", "")
+                if notif_status:
+                    cache["notifications_status"] = notif_status
+
+                # Fetch pan position for cameras that support it
+                pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
+                if pan_limit:
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/pan",
+                                headers=headers,
+                            ) as pan_resp:
+                                if pan_resp.status == 200:
+                                    pan_data = await pan_resp.json()
+                                    self._pan_cache[cam_id_key] = pan_data.get("currentAbsolutePosition")
+                    except Exception as err:
+                        _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, err)
 
             # ── 5. SHC states (camera light current state) ────────────────────
             # Privacy mode is now read from cloud API above (step 4).
@@ -857,6 +879,140 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if self.options.get("shc_ip", "").strip():
             _LOGGER.debug("cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id)
             return await self.async_shc_set_privacy_mode(cam_id, enabled)
+        return False
+
+    async def async_cloud_set_camera_light(self, cam_id: str, on: bool) -> bool:
+        """Turn the camera light on (True) or off (False) via Bosch cloud API.
+
+        Uses PUT /v11/video_inputs/{id}/lighting_override — no SHC local API needed.
+        Discovered 2026-03-21 via mitmproxy capture.
+        ON:  {"frontLightOn": true, "wallwasherOn": true, "frontLightIntensity": 1.0}
+        OFF: {"frontLightOn": false, "wallwasherOn": false}
+        Response: HTTP 204 on success.
+        """
+        token = self.token
+        if not token:
+            _LOGGER.warning("cloud_set_camera_light: no token for %s", cam_id)
+            return False
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
+        body = (
+            {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 1.0}
+            if on else
+            {"frontLightOn": False, "wallwasherOn": False}
+        )
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(url, json=body, headers=headers) as resp:
+                    if resp.status in (200, 201, 204):
+                        self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
+                        _LOGGER.debug(
+                            "cloud_set_camera_light: %s → %s (HTTP %d)",
+                            cam_id, "ON" if on else "OFF", resp.status,
+                        )
+                        await self.async_request_refresh()
+                        return True
+                    _LOGGER.warning(
+                        "cloud_set_camera_light: HTTP %d for %s", resp.status, cam_id
+                    )
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
+        finally:
+            await session.close()
+        return False
+
+    async def async_cloud_set_notifications(self, cam_id: str, enabled: bool) -> bool:
+        """Enable (FOLLOW_CAMERA_SCHEDULE) or disable (ALWAYS_OFF) notifications via cloud API.
+
+        Uses PUT /v11/video_inputs/{id}/enable_notifications.
+        Discovered 2026-03-21 via mitmproxy capture.
+        Response: HTTP 204 on success.
+        """
+        token = self.token
+        if not token:
+            _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
+            return False
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url    = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
+        status = "FOLLOW_CAMERA_SCHEDULE" if enabled else "ALWAYS_OFF"
+        body   = {"enabledNotificationsStatus": status}
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(url, json=body, headers=headers) as resp:
+                    if resp.status in (200, 201, 204):
+                        self._shc_state_cache.setdefault(cam_id, {})["notifications_status"] = status
+                        _LOGGER.debug(
+                            "cloud_set_notifications: %s → %s (HTTP %d)",
+                            cam_id, status, resp.status,
+                        )
+                        await self.async_request_refresh()
+                        return True
+                    _LOGGER.warning(
+                        "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
+                    )
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
+        finally:
+            await session.close()
+        return False
+
+    async def async_cloud_set_pan(self, cam_id: str, position: int) -> bool:
+        """Pan the 360 camera to an absolute position (-120 to +120 degrees).
+
+        Uses PUT /v11/video_inputs/{id}/pan — no SHC local API needed.
+        Discovered 2026-03-21 via mitmproxy capture.
+        Response: {"currentAbsolutePosition": N, "cameraStoppedAtLimit": false,
+                   "estimatedTimeToCompletion": 970}
+        """
+        token = self.token
+        if not token:
+            _LOGGER.warning("cloud_set_pan: no token for %s", cam_id)
+            return False
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        session   = aiohttp.ClientSession(connector=connector)
+        headers   = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan"
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(url, json={"absolutePosition": position}, headers=headers) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        actual = data.get("currentAbsolutePosition", position)
+                        self._pan_cache[cam_id] = actual
+                        _LOGGER.debug(
+                            "cloud_set_pan: %s → %d° (HTTP %d, ETA %dms)",
+                            cam_id, actual, resp.status,
+                            data.get("estimatedTimeToCompletion", 0),
+                        )
+                        await self.async_request_refresh()
+                        return True
+                    _LOGGER.warning("cloud_set_pan: HTTP %d for %s", resp.status, cam_id)
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("cloud_set_pan error for %s: %s", cam_id, err)
+        finally:
+            await session.close()
         return False
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────

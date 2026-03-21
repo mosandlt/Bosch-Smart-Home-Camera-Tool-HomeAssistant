@@ -19,8 +19,13 @@ Creates switch entities per camera:
 
   • {Name} Camera Light — ON = camera indicator LED on, OFF = LED off.
                           Only available if camera supports light (featureSupport.light).
-                          Uses SHC local API for write; reads state from cloud API.
-                          Requires shc_ip + cert/key configured in options for control.
+                          Uses Bosch cloud API: PUT /v11/video_inputs/{id}/lighting_override.
+                          No SHC local API needed — works without SHC configured.
+
+  • {Name} Notifications — ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
+                           Uses Bosch cloud API: PUT /v11/video_inputs/{id}/enable_notifications.
+                           State is read from /v11/video_inputs (notificationsEnabledStatus field).
+                           No SHC local API needed.
 """
 
 import logging
@@ -60,6 +65,8 @@ async def async_setup_entry(
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
+        # Notifications — available for all cameras via cloud API
+        entities.append(BoschNotificationsSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -208,9 +215,10 @@ class BoschCameraLightSwitch(CoordinatorEntity, SwitchEntity):
     """Switch: ON = camera indicator LED on, OFF = LED off.
 
     Only registered for cameras with featureSupport.light = True (from cloud API).
-    State is read from cloud API featureStatus or SHC CameraLight service.
-    Write (turn on/off) requires SHC local API (shc_ip + cert/key in options).
-    If SHC is not configured, the entity is shown but unavailable for control.
+    State is read from cloud API featureStatus (frontIlluminatorInGeneralLightOn).
+    Write (turn on/off) uses Bosch cloud API: PUT /v11/video_inputs/{id}/lighting_override.
+    No SHC local API needed — works without SHC configured.
+    Discovered 2026-03-21 via mitmproxy capture.
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -245,25 +253,22 @@ class BoschCameraLightSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        """Available when coordinator is running and we have a light state.
+        """Available when coordinator is running and camera has light support.
 
-        Light state comes from SHC (if configured) or cloud API featureStatus.
-        The entity shows state without SHC, but control requires SHC to be configured.
+        Light state comes from cloud API featureStatus (no SHC needed).
+        Control uses cloud API (PUT /v11/video_inputs/{id}/lighting_override).
         """
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("camera_light") is not None
-        )
+        return self.coordinator.last_update_success
 
     @property
     def icon(self) -> str:
         return "mdi:led-on" if self.is_on else "mdi:led-off"
 
     async def async_turn_on(self, **kwargs) -> None:
-        await self.coordinator.async_shc_set_camera_light(self._cam_id, True)
+        await self.coordinator.async_cloud_set_camera_light(self._cam_id, True)
 
     async def async_turn_off(self, **kwargs) -> None:
-        await self.coordinator.async_shc_set_camera_light(self._cam_id, False)
+        await self.coordinator.async_cloud_set_camera_light(self._cam_id, False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -333,3 +338,64 @@ class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs) -> None:
         """Disable privacy mode — camera turns back on."""
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch: ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
+
+    Uses Bosch cloud API: PUT /v11/video_inputs/{id}/enable_notifications.
+    State is read from the /v11/video_inputs response (notificationsEnabledStatus field).
+    No SHC local API required.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Notifications"
+        self._attr_unique_id = f"bosch_shc_notifications_{cam_id.lower()}"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        status = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status")
+        if status is None:
+            return None
+        return status != "ALWAYS_OFF"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status") is not None
+        )
+
+    @property
+    def icon(self) -> str:
+        return "mdi:bell" if self.is_on else "mdi:bell-off"
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Enable notifications (follow camera schedule)."""
+        await self.coordinator.async_cloud_set_notifications(self._cam_id, True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Disable notifications (always off)."""
+        await self.coordinator.async_cloud_set_notifications(self._cam_id, False)
