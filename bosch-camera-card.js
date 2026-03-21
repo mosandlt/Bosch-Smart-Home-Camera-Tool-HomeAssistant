@@ -18,7 +18,10 @@
  *   refresh_interval_idle: 300                # seconds (default 300 = 5 min)
  *   refresh_interval_streaming: 2             # seconds (default 2)
  *
- * Version: 1.5.9
+ * Version: 1.5.10
+ *
+ * Changes vs 1.5.9:
+ *   - After panning, automatically refresh snapshot after 2s (camera needs time to move)
  *
  * Changes vs 1.5.8:
  *   - Added pan controls for 360 cameras (number.bosch_{cam}_pan_position entity)
@@ -537,6 +540,9 @@ class BoschCameraCard extends HTMLElement {
       this._hass.callService("number", "set_value", {
         entity_id: this._entities.pan,
         value: Math.max(-120, Math.min(120, pos)),
+      }).then(() => {
+        // Refresh snapshot after camera has had time to move (~2s)
+        this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
     };
     const getCurPan = () => parseFloat(this._hass?.states[this._entities.pan]?.state || 0);
