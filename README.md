@@ -101,6 +101,8 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 
 A dedicated Lovelace card showing the camera feed with streaming state, status, event info, and controls.
 
+![Bosch Camera Card](card-screenshot.png)
+
 ### What the card shows
 
 ```
