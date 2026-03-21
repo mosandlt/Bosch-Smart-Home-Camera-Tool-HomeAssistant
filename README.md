@@ -38,8 +38,10 @@ express or implied.
 | 🔄 Refresh Snapshot button | `button` | ✅ enabled |
 | 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
 | 🔇 Audio switch (muted by default) | `switch` | ✅ enabled |
-| 💡 Camera LED light switch | `switch` | ✅ enabled (requires SHC config for control) |
+| 💡 Camera LED light switch | `switch` | ✅ enabled (cloud API — no SHC needed) |
 | 🔒 Privacy mode switch | `switch` | ✅ enabled (cloud API — no SHC needed) |
+| 🔔 Notifications switch | `switch` | ✅ enabled (ON = FOLLOW_CAMERA_SCHEDULE, OFF = ALWAYS_OFF) |
+| ↔️ Pan position (360 camera) | `number` | ✅ enabled (−120° to +120°, auto-detected for CAMERA_360) |
 | 💾 Auto-download events to folder | background | ❌ optional |
 | 🎥 **Live stream — 30fps H.264 + optional AAC audio** | `camera` | ✅ via Live Stream switch |
 | 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
@@ -51,7 +53,7 @@ express or implied.
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
 
-> **SHC local API is optional.** All core features — camera snapshots, live stream, privacy mode — work with just a Bosch Bearer token. The SHC local API is only needed for **camera LED light control**. Privacy mode uses the Bosch cloud API directly (`PUT /v11/video_inputs/{id}/privacy`) and requires no local SHC access.
+> **SHC local API is not needed.** All features — camera snapshots, live stream, privacy mode, camera LED light, notifications, and pan control — work with just a Bosch Bearer token via the cloud API. Privacy mode uses `PUT /v11/video_inputs/{id}/privacy`, light uses `PUT /v11/video_inputs/{id}/lighting_override`, notifications use `PUT /v11/video_inputs/{id}/enable_notifications`, and pan uses `PUT /v11/video_inputs/{id}/pan`.
 
 ---
 
@@ -97,9 +99,11 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 
 ---
 
-## Custom Lovelace Card — Bosch Camera Card
+## Custom Lovelace Card — Bosch Camera Card (v1.5.9)
 
 A dedicated Lovelace card showing the camera feed with streaming state, status, event info, and controls.
+
+**v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
 ![Bosch Camera Card](card-screenshot.png)
 
@@ -115,6 +119,8 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 │  Status: ONLINE  Last event: …   │
 │  [ 📸 Snapshot ] [ 📹 Live Stream ] [ ⛶ ] │
 │  [  🔊 Ton  ] [  💡 Licht  ] [  🔒 Privat  ] │
+│  [  🔔 Benachrichtigungen  ]                 │
+│  [ ◀ ] [     ■     ] [ ▶ ]  ← pan (360 only)│
 └──────────────────────────────────┘
 ```
 
@@ -130,8 +136,10 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 - **Live Stream button** — toggles `switch.bosch_garten_live_stream`; UI updates instantly (optimistic state)
 - **Fullscreen button** — native fullscreen on desktop/Android; CSS overlay fallback on iOS Safari
 - **Ton** — toggles `switch.bosch_garten_audio`; when stream is active, switches between snapshot polling (OFF) and live HLS video with audio (ON)
-- **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED indicator; control requires SHC local API config)
+- **Licht** — toggles `switch.bosch_garten_camera_light` (camera LED override via **Bosch cloud API** — no SHC needed)
 - **Privat** — toggles `switch.bosch_garten_privacy_mode` (privacy mode via **Bosch cloud API** — no SHC needed); when ON, shows a "Privat-Modus aktiv" placeholder; card fetches a fresh image automatically when turned OFF
+- **Benachrichtigungen** — toggles `switch.bosch_garten_notifications` (push notifications ON = FOLLOW_CAMERA_SCHEDULE, OFF = ALWAYS_OFF)
+- **Pan controls** (◀■▶) — shown only for CAMERA_360 (Kamera); pans left/center/right via `number.bosch_kamera_pan`
 
 ### Installation
 
@@ -198,6 +206,8 @@ The card automatically derives all entity IDs from `camera_entity`:
 | *(auto)* | `switch.bosch_garten_audio` |
 | *(auto)* | `switch.bosch_garten_camera_light` |
 | *(auto)* | `switch.bosch_garten_privacy_mode` |
+| *(auto)* | `switch.bosch_garten_notifications` |
+| *(auto)* | `number.bosch_garten_pan` (CAMERA_360 only) |
 | *(auto)* | `sensor.bosch_garten_status` |
 | *(auto)* | `sensor.bosch_garten_events_today` |
 | *(auto)* | `sensor.bosch_garten_last_event` |
@@ -207,7 +217,7 @@ Toggle button visibility rules:
 - **Entity is `unavailable` / `unknown`** → button shown but **dimmed and disabled**
 - **Entity is `on` / `off`** → button shown, highlighted when ON
 
-Without SHC configured: only **Ton** (audio) and **Privat** (privacy, cloud API) are shown. **Licht** appears once SHC is configured (or if the camera reports `featureSupport.light = true`).
+All buttons use the cloud API — no SHC required. **Licht** is shown only if the camera reports `featureSupport.light = true`. **Pan controls** are shown only for CAMERA_360 cameras. **Benachrichtigungen** is always shown.
 
 For camera named **Kamera**: use `camera_entity: camera.bosch_kamera`.
 
@@ -276,8 +286,10 @@ For each discovered camera (example: camera named "Garten"):
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
-| `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF (control requires SHC; state from cloud API) |
+| `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF — cloud API, no SHC needed |
 | `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — cloud API, no SHC needed |
+| `switch.bosch_garten_notifications` | switch | Push notifications ON (FOLLOW_CAMERA_SCHEDULE) / OFF (ALWAYS_OFF) |
+| `number.bosch_kamera_pan` | number | Pan position −120° to +120° (CAMERA_360 only, auto-detected) |
 
 ### Camera streaming state
 
@@ -514,6 +526,10 @@ GET  {event.videoClipUrl}                       → event MP4 clip
 PUT  /v11/video_inputs/{id}/connection          → open live proxy {"type": "REMOTE"/"LOCAL"}
 GET  /v11/video_inputs/{id}/privacy             → {"privacyMode": "ON"/"OFF", "durationInSeconds": null}
 PUT  /v11/video_inputs/{id}/privacy             → toggle privacy mode (HTTP 204 on success)
+PUT  /v11/video_inputs/{id}/lighting_override   → camera light on/off (HTTP 204 on success)
+PUT  /v11/video_inputs/{id}/enable_notifications → notifications on/off (HTTP 204 on success)
+GET  /v11/video_inputs/{id}/pan                 → pan position (CAMERA_360 only)
+PUT  /v11/video_inputs/{id}/pan                 → set pan position (CAMERA_360 only, HTTP 204)
 GET  /v11/feature_flags                         → account feature flags
 GET  /v11/purchases                             → subscription info
 GET  /v11/contracts?locale=de_DE                → contracts
@@ -532,10 +548,19 @@ No SHC local API needed. State is also included in GET /v11/video_inputs respons
 (privacyMode field), so no separate polling is required.
 ```
 
-### Camera light state (read-only via cloud API)
+### Camera light control (cloud API)
 ```
-Privacy mode and light schedule are embedded in GET /v11/video_inputs:
+GET  /v11/video_inputs/{id}/lighting_override
+→ {"frontLightOn": false, "wallwasherOn": false}
 
+PUT  /v11/video_inputs/{id}/lighting_override
+# Turn on:
+{"frontLightOn": true, "wallwasherOn": true, "frontLightIntensity": 1.0}
+# Turn off:
+{"frontLightOn": false, "wallwasherOn": false}
+→ HTTP 204 No Content
+
+Light schedule state is also embedded in GET /v11/video_inputs per camera:
   "featureSupport": {"light": true/false, ...}
   "featureStatus": {
     "scheduleStatus": "ALWAYS_OFF" / "ALWAYS_ON" / "SCHEDULE",
@@ -547,9 +572,7 @@ Privacy mode and light schedule are embedded in GET /v11/video_inputs:
     "generalLightOffTime": "22:35:00"
   }
 
-Note: featureStatus describes the light schedule config, not the current LED state.
-For current LED on/off state, use the SHC local API CameraLight service.
-Light control (write) via cloud API: no endpoint found (all attempts return 404/500).
+No SHC local API needed — light override is fully controllable via cloud API.
 ```
 
 ### Live proxy endpoints (after PUT /connection)
