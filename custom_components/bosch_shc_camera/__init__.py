@@ -124,6 +124,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
+        # RCP session ID cache — keyed by proxy_hash, value (session_id, expires_monotonic)
+        # Avoids 2 round-trip RCP handshake on every thumbnail/data fetch
+        self._rcp_session_cache: dict[str, tuple[str, float]] = {}
+        # Last-seen event IDs per camera — used to detect new events for snapshot refresh
+        self._last_event_ids: dict[str, str] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -267,6 +272,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
                     self._cached_events[cam_id] = events
+
+                    # ── Event-driven snapshot refresh ─────────────────────────
+                    # When a new event arrives (newest event ID changed), trigger
+                    # an immediate image refresh so the card shows the motion frame
+                    # without waiting for the next 60 s card timer tick.
+                    if events:
+                        newest_id = events[0].get("id", "")
+                        prev_id   = self._last_event_ids.get(cam_id)
+                        if prev_id is not None and newest_id and newest_id != prev_id:
+                            _LOGGER.debug(
+                                "New event detected for %s (id=%s) — triggering snapshot refresh",
+                                cam_id, newest_id,
+                            )
+                            cam_entity = self._camera_entities.get(cam_id)
+                            if cam_entity:
+                                self.hass.async_create_task(
+                                    cam_entity._async_trigger_image_refresh(delay=2)
+                                )
+                        if newest_id:
+                            self._last_event_ids[cam_id] = newest_id
                 else:
                     events = self._cached_events.get(cam_id, [])
 
@@ -631,7 +656,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                 rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
                 try:
-                    session_id = await self._rcp_session(proxy_host_rcp, proxy_hash_rcp)
+                    session_id = await self._get_cached_rcp_session(proxy_host_rcp, proxy_hash_rcp)
                     if session_id:
                         raw = await self._rcp_read(rcp_base, "0x099e", session_id)
                         if raw and raw[:2] == b"\xff\xd8":
@@ -894,6 +919,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             pass  # go2rtc may not be running — silently ignore
 
     # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
+    async def _get_cached_rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
+        """Return a cached RCP session ID, opening a new one if missing or expired.
+
+        Caches valid session IDs for 5 minutes (TTL 300 s) to avoid the 2-step
+        RCP handshake (0xff0c + 0xff0d) on every thumbnail or data fetch.
+        """
+        now = time.monotonic()
+        cached = self._rcp_session_cache.get(proxy_hash)
+        if cached:
+            session_id, expires_at = cached
+            if now < expires_at:
+                return session_id
+            del self._rcp_session_cache[proxy_hash]
+
+        session_id = await self._rcp_session(proxy_host, proxy_hash)
+        if session_id:
+            self._rcp_session_cache[proxy_hash] = (session_id, now + 300.0)  # 5-min TTL
+        return session_id
+
     async def _rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
         """Open an RCP session via the cloud proxy and return the sessionid, or None on failure.
 
@@ -1014,7 +1058,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         and caches the results. Gracefully skips on any failure — RCP is read-only
         supplementary data and must never block the main coordinator update.
         """
-        session_id = await self._rcp_session(proxy_host, proxy_hash)
+        session_id = await self._get_cached_rcp_session(proxy_host, proxy_hash)
         if not session_id:
             _LOGGER.debug("_async_update_rcp_data: could not open RCP session for %s", cam_id)
             return

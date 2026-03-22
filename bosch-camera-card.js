@@ -18,7 +18,13 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.6.0
+ * Version: 1.7.0
+ *
+ * Changes vs 1.6.0:
+ *   - Event-driven snapshot refresh: when sensor.last_event changes (new motion/audio
+ *     event detected), the card automatically refreshes the image after 2.5 s,
+ *     without waiting for the 60 s timer. Works alongside the HA integration's own
+ *     event-driven refresh (v2.8.0) for double-redundant coverage.
  *
  * Changes vs 1.5.11:
  *   - Page Visibility API for smart refresh intervals:
@@ -85,6 +91,7 @@ class BoschCameraCard extends HTMLElement {
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
     this._visibilityHandler = null;  // bound visibilitychange listener
+    this._lastEventState    = null;  // last known last_event sensor value — for event detection
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -1059,10 +1066,18 @@ class BoschCameraCard extends HTMLElement {
       }
     }
 
-    // Last event
+    // Last event — detect new events and refresh snapshot immediately
     const lastEventState = hass.states[ents.last_event];
     const infoLastEvent  = this.shadowRoot.getElementById("info-last-event");
     const lastEventOverlay = this.shadowRoot.getElementById("last-event-overlay");
+    const curEventVal = lastEventState?.state;
+    if (curEventVal && curEventVal !== "unavailable" && curEventVal !== "unknown"
+        && this._lastEventState !== null && curEventVal !== this._lastEventState
+        && !this._liveVideoActive) {
+      // New event detected — refresh image after short delay (HA needs ~2s to fetch fresh snap)
+      this._scheduleImageLoad(2500);
+    }
+    this._lastEventState = curEventVal || this._lastEventState;
     let lastEventStr = "—";
     if (lastEventState?.state && lastEventState.state !== "unavailable") {
       try {

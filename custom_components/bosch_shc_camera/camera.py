@@ -358,7 +358,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         proxy_host = parts[0]
         proxy_hash = parts[1]
 
-        session_id = await self.coordinator._rcp_session(proxy_host, proxy_hash)
+        session_id = await self.coordinator._get_cached_rcp_session(proxy_host, proxy_hash)
         if not session_id:
             return None
 

@@ -117,7 +117,13 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.7.0 — RCP 0x099e (320×180 JPEG) now used as primary idle thumbnail before falling back to snap.jpg; card v1.6.0 uses Page Visibility API for smart refresh intervals.
+> **Integration version:** v2.8.0 — event-driven snapshot refresh + RCP session caching; Card v1.7.0 detects new events via `sensor.last_event` and auto-refreshes snapshot.
+
+## What's New in v2.8.0 + Card v1.7.0
+
+- **Event-driven snapshot refresh (HA integration):** When a new event is detected (newest event ID changes), the integration immediately triggers a snapshot refresh on the camera entity — no need to wait for the next coordinator tick. The card will update within a few seconds of motion being detected.
+- **Card event detection:** The card now watches `sensor.last_event` state changes directly. When a new event arrives, it auto-refreshes the image after 2.5 s (giving the HA integration time to fetch a fresh snap). Works in parallel with the server-side trigger for double-redundant coverage.
+- **RCP session caching (HA integration + Python CLI):** The 2-step RCP handshake (0xff0c + 0xff0d) is now cached per proxy hash for 5 minutes. All RCP calls (`_async_update_rcp_data`, `_async_rcp_thumbnail`, `async_fetch_live_snapshot`) reuse the cached session ID, reducing overhead by 2 round-trips per call.
 
 ## What's New in v2.7.0 + Card v1.6.0
 
