@@ -587,7 +587,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 rtsps_url = result.get("rtspsUrl", "")
                                 if rtsps_url:
                                     await self._register_go2rtc_stream(cam_id, rtsps_url)
-                                await self.async_request_refresh()
+                                self.hass.async_create_task(self.async_request_refresh())
                                 return result
                             elif resp.status == 401:
                                 _LOGGER.warning(
@@ -1347,7 +1347,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         )
         if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
             self._shc_state_cache[cam_id]["camera_light"] = on
-            await self.async_request_refresh()
+            self.hass.async_create_task(self.async_request_refresh())
             return True
         return False
 
@@ -1364,7 +1364,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         )
         if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
             self._shc_state_cache[cam_id]["privacy_mode"] = enabled
-            await self.async_request_refresh()
+            self.hass.async_create_task(self.async_request_refresh())
             return True
         return False
 
@@ -1402,7 +1402,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "cloud_set_privacy_mode: %s → %s (HTTP %d)",
                             cam_id, "ON" if enabled else "OFF", resp.status,
                         )
-                        await self.async_request_refresh()
+                        self.hass.async_create_task(self.async_request_refresh())
                         return True
                     _LOGGER.warning(
                         "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
@@ -1455,7 +1455,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "cloud_set_camera_light: %s → %s (HTTP %d)",
                             cam_id, "ON" if on else "OFF", resp.status,
                         )
-                        await self.async_request_refresh()
+                        self.hass.async_create_task(self.async_request_refresh())
                         return True
                     _LOGGER.warning(
                         "cloud_set_camera_light: HTTP %d for %s", resp.status, cam_id
@@ -1498,7 +1498,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "cloud_set_notifications: %s → %s (HTTP %d)",
                             cam_id, status, resp.status,
                         )
-                        await self.async_request_refresh()
+                        self.hass.async_create_task(self.async_request_refresh())
                         return True
                     _LOGGER.warning(
                         "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
@@ -1543,7 +1543,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             cam_id, actual, resp.status,
                             data.get("estimatedTimeToCompletion", 0),
                         )
-                        await self.async_request_refresh()
+                        self.hass.async_create_task(self.async_request_refresh())
                         return True
                     _LOGGER.warning("cloud_set_pan: HTTP %d for %s", resp.status, cam_id)
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:

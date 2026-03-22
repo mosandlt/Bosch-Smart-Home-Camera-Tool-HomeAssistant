@@ -18,7 +18,7 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.2
+ * Version: 1.7.3
  *
  * Changes vs 1.6.0:
  *   - Event-driven snapshot refresh: when sensor.last_event changes (new motion/audio
@@ -244,16 +244,16 @@ class BoschCameraCard extends HTMLElement {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
         /* Camera image area */
-        .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; }
+        .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; aspect-ratio: 16/9; }
         .cam-img {
-          width: 100%; height: auto; display: block; object-fit: cover;
+          width: 100%; height: 100%; display: block; object-fit: cover;
           min-height: 160px; transition: opacity 0.3s;
         }
         .cam-img.hidden { opacity: 0; }
 
         /* Live video element */
         .cam-video {
-          width: 100%; height: auto; display: block; object-fit: cover;
+          width: 100%; height: 100%; display: block; object-fit: cover;
           min-height: 160px; background: #000;
         }
 

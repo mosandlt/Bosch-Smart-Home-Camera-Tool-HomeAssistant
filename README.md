@@ -986,6 +986,45 @@ automation:
 
 ---
 
+## Changelog
+
+### v2.9.0 — Performance: sub-second snapshot response, non-blocking switches & buttons
+
+**Proxy URL caching (50 s TTL)**
+`PUT /connection` (opens the Bosch proxy lease, ~1.5 s) is now cached per camera. All snapshot refreshes within 50 s reuse the cached URL and skip the PUT call entirely.
+- Cold first fetch: ~3 s (unchanged — proxy must be opened)
+- Warm refreshes: ~70 ms (down from ~3 s)
+- Quality change (`select.bosch_*_video_quality`) invalidates the cache so the next fetch always opens a fresh proxy with the new settings.
+
+**Background snapshot refresh in `camera.py`**
+`async_camera_image` now returns the stale cached image immediately (< 1 ms) and fires a background task to refresh the snapshot. Every 60 s card cycle resolves in < 90 ms. Only the very first image load (empty cache) waits for the network.
+
+**Non-blocking coordinator refresh — all switches and buttons**
+All `await coordinator.async_request_refresh()` calls across `__init__.py`, `switch.py`, and `button.py` replaced with `hass.async_create_task(coordinator.async_request_refresh())`. Previously, toggling any switch (Live Stream, Privacy, Audio, Motion, Record Sound, Light, Notifications, Pan) or pressing the Refresh button blocked the HA event loop for up to 22 s while the full coordinator tick ran.
+
+Affected methods:
+- `BoschLiveStreamSwitch.async_turn_off`
+- `BoschAudioSwitch._apply_audio_change`
+- `BoschMotionEnabledSwitch.async_turn_on / async_turn_off`
+- `BoschRecordSoundSwitch.async_turn_on / async_turn_off`
+- `try_live_connection` in `__init__.py`
+- All 5 cloud API call methods in coordinator (`set_privacy`, `set_light`, `set_notifications`, `set_pan`, `set_quality`)
+- `BoschRefreshSnapshotButton.async_press`
+- `handle_trigger_snapshot` service handler
+
+**Lovelace card v1.7.3 — reduced delays**
+- First snapshot poll after page load: 3 s → 1 s
+- Snapshot poll interval (stream ON, Ton OFF): 3 s → 1 s
+- Snapshot poll timeout: 26 s → 15 s
+- Stream stop → snapshot switch delay: 6 s → 2 s
+- Event-driven refresh delay (after new event detected): 2.5 s → 1.5 s
+- Privacy-off auto-refresh delay: 3 s → 1.5 s
+- Stream retry delay on HLS error: 2 s → 1 s
+- hls.js pre-loaded at card init (`setConfig()`) instead of on demand — CDN fetch is done before the user toggles the stream
+- `img-wrapper` CSS: `aspect-ratio: 16/9` added — privacy mode placeholder is now the same size as the camera image (was different aspect ratio for lower-resolution cameras)
+
+---
+
 ## Related Projects
 
 - [Bosch SHC API Docs Issue #63](https://github.com/BoschSmartHome/bosch-shc-api-docs/issues/63) — camera API discussion
