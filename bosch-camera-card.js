@@ -18,7 +18,19 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.3
+ * Version: 1.7.4
+ *
+ * Changes vs 1.7.3:
+ *   - Fix: initial image load was silently skipped because _hass is null when
+ *     _render() fires _scheduleImageLoad(0). HA assigns hass only after setConfig.
+ *     Without localStorage cache the spinner was visible for up to 60 s (first timer
+ *     tick). Fixed: re-trigger _scheduleImageLoad(0) on first hass assignment when
+ *     image hasn't loaded yet.
+ *   - Smaller image requests: pass ?width=<display_width> on every camera proxy URL
+ *     so HA forwards the hint to async_camera_image(). Backend already returns the
+ *     320×180 RCP thumbnail (~3 KB) via proxy cache, so mobile downloads 3 KB
+ *     instead of a 150 KB 1080p snap.jpg.
+ *   - Snapshot button first poll: 1000 ms → 500 ms (RCP refresh is ~100 ms).
  *
  * Changes vs 1.6.0:
  *   - Event-driven snapshot refresh: when sensor.last_event changes (new motion/audio
@@ -138,8 +150,15 @@ class BoschCameraCard extends HTMLElement {
 
   // ── HA state updates ──────────────────────────────────────────────────────
   set hass(hass) {
+    const firstHass = !this._hass;
     this._hass = hass;
     this._update();
+    // _render() calls _scheduleImageLoad(0) before _hass is assigned (HA sets hass
+    // AFTER setConfig), so the first image load silently returns early and the spinner
+    // stays visible until the 60 s timer fires. Re-trigger it here on first hass assign.
+    if (firstHass && !this._imageLoaded) {
+      this._scheduleImageLoad(0);
+    }
   }
 
   disconnectedCallback() {
@@ -661,7 +680,11 @@ class BoschCameraCard extends HTMLElement {
     if (!img || !this._hass) return;
     const camEntity = this._entities.camera;
     const token = this._hass.states[camEntity]?.attributes?.access_token || "";
-    const url = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}`;
+    // Request at display width — HA passes this to async_camera_image(width=).
+    // Our backend already prefers the 320×180 RCP thumbnail (~3 KB) which is
+    // well within 640 px. This avoids serving 1080p (~150 KB) to mobile.
+    const dispW = Math.round(this.offsetWidth || 640);
+    const url = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}&width=${dispW}`;
 
     if (this._imageLoaded) {
       // Preload so the old image stays visible until the new one is fully ready
@@ -906,13 +929,14 @@ class BoschCameraCard extends HTMLElement {
     // Capture current image byte count, then poll until it changes (new image ready)
     // REMOTE takes ~3-5s; LOCAL Digest auth takes ~6-15s
     const token   = this._hass?.states[this._entities.camera]?.attributes?.access_token || "";
-    const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
+    const dispW   = Math.round(this.offsetWidth || 640);
+    const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
 
     const startPoll = (prevBytes) => {
-      // First poll after 1s — warm proxy cache: bg refresh ~0.5s so 1s is enough
+      // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
-        () => this._pollSnapshotImage(prevBytes, startTime), 1000
+        () => this._pollSnapshotImage(prevBytes, startTime), 500
       );
     };
 
@@ -932,7 +956,8 @@ class BoschCameraCard extends HTMLElement {
 
     // Re-read token on every poll (it may refresh)
     const token = this._hass.states[this._entities.camera]?.attributes?.access_token || "";
-    const url   = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
+    const dispW2 = Math.round(this.offsetWidth || 640);
+    const url   = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW2}`;
 
     fetch(url)
       .then(r => r.ok ? r.blob() : Promise.reject(r.status))

@@ -438,19 +438,25 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
            Updated every coordinator tick while live switch is ON.
            1b. RCP thumbnail fallback — 320×180 JPEG via RCP 0x099e, used when
                snap.jpg fetch fails with any error (timeout, network, etc.)
-        2. Cloud proxy on-demand  — PUT /connection REMOTE + snap.jpg (~1.5 s).
-           If no cached image: blocks synchronously (first load, ~3 s).
+        2. Cloud proxy on-demand  — PUT /connection REMOTE + RCP 0x099e / snap.jpg.
+           If no cached image and width <= 640: tries RCP directly (320×180, ~100 ms).
+           If no cached image and width > 640 or None: full proxy + snap.jpg (~3 s).
            If cached image is older than CLOUD_SNAP_CACHE_TTL (30 s): returns the
-           stale cached image instantly and kicks off a background refresh. The fresh
-           image is ready for the next proxy request (typically the next 60 s cycle).
+           stale cached image instantly and kicks off a background refresh.
         3. Cached image           — fallback when cloud fetch fails (e.g. CAMERA_360
            whose REMOTE snap.jpg returns 401; refreshed via background task using LOCAL).
         4. Latest event snapshot  — last resort on very first startup before any
            cloud fetch has completed.
+
+        width/height: passed by HA when the card requests ?width=N. We use this to
+        prefer the 320×180 RCP thumbnail on mobile/small displays (avoids 150 KB
+        snap.jpg when the card only needs a 400 px thumbnail).
         """
         session = async_get_clientsession(self.hass, verify_ssl=False)
         token   = self._token
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
+        # True when card requests a mobile/thumbnail-sized image
+        prefer_small = width is not None and width <= 640
 
         # ── 1. Cloud proxy live snapshot (active live-stream session) ─────────
         live = self.coordinator._live_connections.get(self._cam_id, {})
@@ -537,7 +543,20 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             now = time.monotonic()
             cache_stale = (now - self._last_image_fetch) >= CLOUD_SNAP_CACHE_TTL
             if not self._cached_image:
-                # First load — must wait synchronously
+                # First load — must wait synchronously.
+                # For mobile/thumbnail requests (width ≤ 640): try RCP 0x099e first
+                # (320×180 JPEG, ~3 KB, ~100 ms with cached session) before the slow
+                # full proxy path (PUT /connection + snap.jpg, ~3 s cold).
+                if prefer_small:
+                    rcp_img = await self._async_rcp_thumbnail()
+                    if rcp_img:
+                        self._cached_image = rcp_img
+                        self._last_image_fetch = now
+                        _LOGGER.debug(
+                            "%s: RCP thumbnail (first load, prefer_small) — %d bytes",
+                            self._attr_name, len(rcp_img),
+                        )
+                        return rcp_img
                 fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
                 if fresh:
                     self._cached_image = fresh
