@@ -39,12 +39,19 @@ express or implied.
 | Firmware version | `sensor` | enabled |
 | Ambient light level (%) | `sensor` | enabled |
 | LED dimmer value (%) | `sensor` | enabled (cameras with LED only, via RCP) |
+| Motion sensitivity | `sensor` | enabled (diagnostic) |
+| Audio alarm state | `sensor` | enabled (diagnostic) |
+| Last event type | `sensor` | enabled |
+| Movement events today | `sensor` | enabled |
+| Audio events today | `sensor` | enabled |
 | Refresh Snapshot button | `button` | enabled |
 | Live Stream switch (ON/OFF) | `switch` | enabled |
 | Audio switch (muted by default) | `switch` | enabled |
 | Camera LED light switch | `switch` | enabled (cloud API — no SHC needed) |
 | Privacy mode switch | `switch` | enabled (cloud API — no SHC needed) |
 | Notifications switch | `switch` | enabled (ON = FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE, OFF = ALWAYS_OFF) |
+| Motion detection switch | `switch` | enabled (cloud API — no SHC needed) |
+| Record sound switch | `switch` | enabled (cloud API — no SHC needed) |
 | Pan position (360 camera) | `number` | enabled (−120° to +120°, auto-detected for CAMERA_360) |
 | Auto-download events to folder | background | optional (disabled by default) |
 | **Live stream — 30fps H.264 + optional AAC audio** | `camera` | via Live Stream switch |
@@ -109,17 +116,19 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.3.0 — maxSessionDuration fix (60→3600), `high_quality_video` config option, RCP YUV422 fallback snapshot, `stream_url` camera attribute, bitrate ladder on WiFi sensor.
+> **Integration version:** v2.4.0 — motion detection sensor & switch, audio alarm sensor, last event type sensor, movement/audio event counters, record sound switch.
 
-## What's New in v2.3.0
+## What's New in v2.4.0
 
-- **maxSessionDuration fix (60→3600):** go2rtc now reconnects the RTSPS stream every hour instead of every minute, eliminating 1-minute stream interruptions.
-- **`high_quality_video` config option:** New boolean in Settings → Integrations → Configure. Passes `highQualityVideo: true` to all `PUT /connection` requests when enabled (default: false).
-- **Better RCP snapshot fallback:** `_async_rcp_thumbnail` now tries `0x0c98` (320×180 YUV422 raw frame, converted to JPEG via numpy+Pillow) if `0x099e` (160×90 JPEG) is unavailable.
-- **`stream_url` camera attribute:** The camera entity (`camera.bosch_garten` etc.) now exposes a `stream_url` attribute containing the active RTSPS URL when a live connection is open.
-- **Bitrate ladder on WiFi sensor:** `sensor.bosch_garten_wifi_signal` now shows `bitrate_ladder_kbps` and `max_bitrate_kbps` attributes from RCP command `0x0c81`.
+- **Motion Sensitivity sensor** (`sensor.bosch_<cam>_motion_sensitivity`): shows motion detection enabled state and sensitivity level; attributes: `enabled`, `sensitivity`.
+- **Audio Alarm sensor** (`sensor.bosch_<cam>_audio_alarm`): shows audio alarm enabled/disabled state and detection threshold; attributes: `enabled`, `threshold`.
+- **Last Event Type sensor** (`sensor.bosch_<cam>_last_event_type`): shows the type of the most recent event (`movement` / `audio alarm`); attributes: `event_type`, `timestamp`, `event_id`.
+- **Movement Events Today sensor** (`sensor.bosch_<cam>_movement_events_today`): count of MOVEMENT events today.
+- **Audio Events Today sensor** (`sensor.bosch_<cam>_audio_events_today`): count of AUDIO_ALARM events today.
+- **Motion Detection switch** (`switch.bosch_<cam>_motion_detection`): toggle motion detection on/off via cloud API; preserves existing sensitivity level.
+- **Record Sound switch** (`switch.bosch_<cam>_record_sound`): toggle audio recording in cloud event clips on/off via cloud API.
 
-> **Previous version:** v2.2.0 — added clock offset sensor, RCP LAN IP attribute on WiFi sensor, RCP product name attribute on firmware sensor.
+> **Previous version:** v2.3.0 — maxSessionDuration fix (60→3600), `high_quality_video` config option, RCP YUV422 fallback snapshot, `stream_url` camera attribute, bitrate ladder on WiFi sensor.
 
 ![Bosch Camera Card](card-screenshot.png)
 
@@ -350,12 +359,19 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_ambient_light` | sensor | Ambient light level 0–100% (from on-camera light sensor) |
 | `sensor.bosch_garten_led_dimmer` | sensor | LED dimmer value 0–100% via RCP (cameras with LED only) |
 | `sensor.bosch_garten_clock_offset` | sensor | Camera clock offset vs HA server in seconds; attributes: offset_seconds, status (in_sync/minor_drift/out_of_sync) |
+| `sensor.bosch_garten_motion_sensitivity` | sensor | Motion detection status and sensitivity level; attributes: enabled, sensitivity |
+| `sensor.bosch_garten_audio_alarm` | sensor | Audio alarm status (enabled/disabled) and threshold; attributes: enabled, threshold |
+| `sensor.bosch_garten_last_event_type` | sensor | Type of most recent event (movement / audio alarm / none); attributes: event_type, timestamp, event_id |
+| `sensor.bosch_garten_movement_events_today` | sensor | Number of MOVEMENT events today |
+| `sensor.bosch_garten_audio_events_today` | sensor | Number of AUDIO_ALARM events today |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
 | `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF — cloud API, no SHC needed |
 | `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — cloud API, no SHC needed |
 | `switch.bosch_garten_notifications` | switch | Push notifications ON (FOLLOW_CAMERA_SCHEDULE / ON_CAMERA_SCHEDULE) / OFF (ALWAYS_OFF) |
+| `switch.bosch_garten_motion_detection` | switch | Motion detection ON/OFF — cloud API, preserves sensitivity level |
+| `switch.bosch_garten_record_sound` | switch | Audio in cloud event recordings ON/OFF — cloud API |
 | `number.bosch_kamera_pan` | number | Pan position −120° to +120° (CAMERA_360 only, auto-detected) |
 
 ### Camera streaming state
@@ -802,6 +818,127 @@ When the live proxy `snap.jpg` fetch fails (timeout or network error), the camer
 - Much faster than snap.jpg (~instant vs ~1.5 s round-trip)
 - Logged as: `Using RCP thumbnail fallback (160x90)`
 - Only attempted when a live proxy connection is active (the proxy URL is required for RCP access)
+
+---
+
+## Example Automations
+
+### Motion alert with camera snapshot
+
+```yaml
+automation:
+  - alias: "Bosch Garten — Motion Alert"
+    description: "Push notification with snapshot on motion detection"
+    trigger:
+      - platform: state
+        entity_id: sensor.bosch_garten_last_event_type
+        to: "movement"
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Bewegung erkannt — Garten"
+          message: >
+            {{ now().strftime('%H:%M') }} Uhr
+          data:
+            image: "{{ state_attr('sensor.bosch_garten_last_event', 'image_url') }}"
+            url: "{{ state_attr('sensor.bosch_garten_last_event', 'video_clip_url') }}"
+```
+
+### Audio alarm alert
+
+```yaml
+automation:
+  - alias: "Bosch Kamera — Audio Alarm"
+    trigger:
+      - platform: state
+        entity_id: sensor.bosch_kamera_last_event_type
+        to: "audio alarm"
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Geraeusch erkannt — Kamera"
+          message: "Audio-Alarm um {{ now().strftime('%H:%M') }} Uhr"
+```
+
+### Privacy mode schedule
+
+```yaml
+automation:
+  - alias: "Bosch Kamera — Privacy On at Night"
+    trigger:
+      - platform: time
+        at: "22:00:00"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.bosch_kamera_privacy_mode
+
+  - alias: "Bosch Kamera — Privacy Off in Morning"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.bosch_kamera_privacy_mode
+```
+
+### Camera light on motion after sunset
+
+```yaml
+automation:
+  - alias: "Bosch Garten — Light on Motion After Dark"
+    trigger:
+      - platform: state
+        entity_id: sensor.bosch_garten_last_event_type
+        to: "movement"
+    condition:
+      - condition: sun
+        after: sunset
+        before: sunrise
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.bosch_garten_camera_light
+      - delay:
+          minutes: 5
+      - service: switch.turn_off
+        target:
+          entity_id: switch.bosch_garten_camera_light
+```
+
+### Enable motion on workdays only
+
+```yaml
+automation:
+  - alias: "Bosch — Motion On on Workdays"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    condition:
+      - condition: time
+        weekday: [mon, tue, wed, thu, fri]
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id:
+            - switch.bosch_garten_motion_detection
+            - switch.bosch_kamera_motion_detection
+
+  - alias: "Bosch — Motion Off on Weekends"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    condition:
+      - condition: time
+        weekday: [sat, sun]
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id:
+            - switch.bosch_garten_motion_detection
+            - switch.bosch_kamera_motion_detection
+```
 
 ---
 

@@ -53,6 +53,11 @@ async def async_setup_entry(
             BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
             BoschAmbientLightSensor(coordinator, cam_id, config_entry),
             BoschClockOffsetSensor(coordinator, cam_id, config_entry),
+            BoschMotionSensitivitySensor(coordinator, cam_id, config_entry),
+            BoschAudioAlarmSensor(coordinator, cam_id, config_entry),
+            BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
+            BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
+            BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
         ])
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -294,6 +299,7 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschAmbientLightSensor(_BoschSensorBase):
     """Sensor: ambient light level as a percentage (0–100%).
+    Disabled by default — enable in HA entity settings if needed.
 
     Data source: GET /v11/video_inputs/{id}/ambient_light_sensor_level (fetched by coordinator).
     The API returns a float 0.0–1.0 which is converted to 0–100%.
@@ -301,11 +307,12 @@ class BoschAmbientLightSensor(_BoschSensorBase):
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name                       = f"Bosch {self._cam_title} Ambient Light"
-        self._attr_unique_id                  = f"bosch_shc_ambient_light_{cam_id.lower()}"
-        self._attr_state_class                = SensorStateClass.MEASUREMENT
-        self._attr_native_unit_of_measurement = "%"
-        self._attr_icon                       = "mdi:brightness-6"
+        self._attr_name                              = f"Bosch {self._cam_title} Ambient Light"
+        self._attr_unique_id                         = f"bosch_shc_ambient_light_{cam_id.lower()}"
+        self._attr_state_class                       = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement        = "%"
+        self._attr_icon                              = "mdi:brightness-6"
+        self._attr_entity_registry_enabled_default   = False
 
     @property
     def native_value(self) -> int | None:
@@ -334,11 +341,12 @@ class BoschLedDimmerSensor(_BoschSensorBase):
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name                       = f"Bosch {self._cam_title} LED Dimmer"
-        self._attr_unique_id                  = f"bosch_shc_led_dimmer_{cam_id.lower()}"
-        self._attr_state_class                = SensorStateClass.MEASUREMENT
-        self._attr_native_unit_of_measurement = "%"
-        self._attr_icon                       = "mdi:brightness-6"
+        self._attr_name                              = f"Bosch {self._cam_title} LED Dimmer"
+        self._attr_unique_id                         = f"bosch_shc_led_dimmer_{cam_id.lower()}"
+        self._attr_state_class                       = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement        = "%"
+        self._attr_icon                              = "mdi:brightness-6"
+        self._attr_entity_registry_enabled_default   = False
 
     @property
     def native_value(self) -> int | None:
@@ -360,6 +368,7 @@ class BoschClockOffsetSensor(_BoschSensorBase):
     _attr_native_unit_of_measurement = "s"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
@@ -393,3 +402,167 @@ class BoschClockOffsetSensor(_BoschSensorBase):
             "offset_seconds": val,
             "status": status,
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschMotionSensitivitySensor(_BoschSensorBase):
+    """Shows motion detection enabled state and sensitivity level."""
+
+    _attr_icon = "mdi:motion-sensor"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Motion Sensitivity"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_motion_sensitivity"
+
+    @property
+    def native_value(self):
+        settings = self.coordinator.motion_settings(self._cam_id)
+        if not settings:
+            return None
+        enabled = settings.get("enabled", False)
+        if not enabled:
+            return "disabled"
+        return settings.get("motionAlarmConfiguration", "UNKNOWN").lower().replace("_", " ")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        settings = self.coordinator.motion_settings(self._cam_id)
+        if not settings:
+            return {}
+        return {
+            "enabled": settings.get("enabled"),
+            "sensitivity": settings.get("motionAlarmConfiguration"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAudioAlarmSensor(_BoschSensorBase):
+    """Shows audio alarm enabled state and detection threshold."""
+
+    _attr_icon = "mdi:volume-high"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Audio Alarm"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_audio_alarm"
+
+    @property
+    def native_value(self):
+        settings = self.coordinator.audio_alarm_settings(self._cam_id)
+        if not settings:
+            return None
+        return "enabled" if settings.get("enabled", False) else "disabled"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        settings = self.coordinator.audio_alarm_settings(self._cam_id)
+        if not settings:
+            return {}
+        return {
+            "enabled": settings.get("enabled"),
+            "threshold": settings.get("threshold"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschLastEventTypeSensor(_BoschSensorBase):
+    """Shows the type of the most recent camera event."""
+
+    _attr_icon = "mdi:alert-circle-outline"
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Last Event Type"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_last_event_type"
+
+    @property
+    def native_value(self):
+        events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
+        if not events:
+            return "none"
+        latest = events[0]
+        return latest.get("eventType", "unknown").lower().replace("_", " ")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
+        if not events:
+            return {}
+        latest = events[0]
+        return {
+            "event_type": latest.get("eventType"),
+            "timestamp": latest.get("timestamp"),
+            "event_id": latest.get("id"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschMovementEventsTodaySensor(_BoschSensorBase):
+    """Number of MOVEMENT events today."""
+
+    _attr_icon = "mdi:run"
+    _attr_native_unit_of_measurement = "events"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Movement Events Today"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_movement_events_today"
+
+    @property
+    def native_value(self):
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
+        return sum(
+            1 for e in events
+            if e.get("eventType") == "MOVEMENT"
+            and (e.get("timestamp") or "").startswith(today)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAudioEventsTodaySensor(_BoschSensorBase):
+    """Number of AUDIO_ALARM events today."""
+
+    _attr_icon = "mdi:volume-vibrate"
+    _attr_native_unit_of_measurement = "events"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Audio Events Today"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_audio_events_today"
+
+    @property
+    def native_value(self):
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
+        return sum(
+            1 for e in events
+            if e.get("eventType") == "AUDIO_ALARM"
+            and (e.get("timestamp") or "").startswith(today)
+        )

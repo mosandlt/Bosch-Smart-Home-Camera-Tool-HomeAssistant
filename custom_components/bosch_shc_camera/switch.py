@@ -36,12 +36,40 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):
+    """Shared base for Bosch camera switch entities."""
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
 
 
 async def async_setup_entry(
@@ -70,6 +98,10 @@ async def async_setup_entry(
             entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
         # Notifications — available for all cameras via cloud API
         entities.append(BoschNotificationsSwitch(coordinator, cam_id, config_entry))
+        # Motion detection toggle — available for all cameras via cloud API
+        entities.append(BoschMotionEnabledSwitch(coordinator, cam_id, config_entry))
+        # Record sound toggle — available for all cameras via cloud API
+        entities.append(BoschRecordSoundSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -422,3 +454,82 @@ class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs) -> None:
         """Disable notifications (always off)."""
         await self.coordinator.async_cloud_set_notifications(self._cam_id, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschMotionEnabledSwitch(_BoschSwitchBase):
+    """Toggle motion detection on/off."""
+
+    _attr_icon = "mdi:motion-sensor"
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Motion Detection"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_motion_enabled"
+
+    @property
+    def is_on(self) -> bool | None:
+        settings = self.coordinator.motion_settings(self._cam_id)
+        if not settings:
+            return None
+        return settings.get("enabled", False)
+
+    async def async_turn_on(self, **kwargs):
+        settings = self.coordinator.motion_settings(self._cam_id)
+        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        await self.coordinator.async_put_camera(
+            self._cam_id,
+            "motion",
+            {"enabled": True, "motionAlarmConfiguration": sensitivity},
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        settings = self.coordinator.motion_settings(self._cam_id)
+        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        await self.coordinator.async_put_camera(
+            self._cam_id,
+            "motion",
+            {"enabled": False, "motionAlarmConfiguration": sensitivity},
+        )
+        await self.coordinator.async_request_refresh()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschRecordSoundSwitch(_BoschSwitchBase):
+    """Toggle audio in cloud event recordings."""
+
+    _attr_icon = "mdi:record-rec"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Record Sound"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_record_sound"
+
+    @property
+    def is_on(self) -> bool | None:
+        opts = self.coordinator.recording_options(self._cam_id)
+        if not opts:
+            return None
+        return opts.get("recordSound", False)
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "recording_options", {"recordSound": True}
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "recording_options", {"recordSound": False}
+        )
+        await self.coordinator.async_request_refresh()

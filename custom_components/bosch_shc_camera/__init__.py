@@ -99,6 +99,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Per-type last-fetched timestamps (0 = never → fetch immediately)
         self._last_status: float = 0.0
         self._last_events: float = 0.0
+        self._last_slow:   float = 0.0   # wifiinfo / ambient / RCP / motion / audio / recording
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         self._cached_events: dict[str, list] = {}
@@ -191,6 +192,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
         do_events = (now - self._last_events) >= int(opts.get("interval_events", 60))
+        # Slow tier — wifiinfo, ambient light, RCP, motion, audio alarm, recording (every 5 min)
+        do_slow   = (now - self._last_slow)   >= int(opts.get("interval_slow", 300))
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -276,6 +279,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 self._last_status = now
             if do_events:
                 self._last_events = now
+            if do_slow:
+                self._last_slow = now
 
             # ── 4. Read privacy mode + light support from cloud API response ─────
             # privacyMode and featureSupport are already in the /v11/video_inputs
@@ -324,50 +329,87 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, err)
 
-                # Fetch WiFi info (signal strength, IP, SSID)
-                try:
-                    async with async_timeout.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/wifiinfo",
-                            headers=headers,
-                        ) as wifi_resp:
-                            if wifi_resp.status == 200:
-                                self._wifiinfo_cache[cam_id_key] = await wifi_resp.json()
-                            else:
-                                _LOGGER.debug(
-                                    "wifiinfo HTTP %d for %s", wifi_resp.status, cam_id_key
-                                )
-                except Exception as err:
-                    _LOGGER.debug("WiFi info fetch error for %s: %s", cam_id_key, err)
+                # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
+                # Only fetched every interval_slow seconds (default 5 min).
+                # These values change rarely — fetching every tick wastes bandwidth.
+                if do_slow:
+                    # WiFi info (signal strength, IP, SSID)
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/wifiinfo",
+                                headers=headers,
+                            ) as wifi_resp:
+                                if wifi_resp.status == 200:
+                                    self._wifiinfo_cache[cam_id_key] = await wifi_resp.json()
+                                else:
+                                    _LOGGER.debug(
+                                        "wifiinfo HTTP %d for %s", wifi_resp.status, cam_id_key
+                                    )
+                    except Exception as err:
+                        _LOGGER.debug("WiFi info fetch error for %s: %s", cam_id_key, err)
 
-                # Fetch ambient light sensor level
-                try:
-                    async with async_timeout.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/ambient_light_sensor_level",
-                            headers=headers,
-                        ) as al_resp:
-                            if al_resp.status == 200:
-                                al_data = await al_resp.json()
-                                self._ambient_light_cache[cam_id_key] = al_data.get(
-                                    "ambientLightSensorLevel"
-                                )
-                            else:
-                                _LOGGER.debug(
-                                    "ambient_light_sensor_level HTTP %d for %s",
-                                    al_resp.status, cam_id_key,
-                                )
-                except Exception as err:
-                    _LOGGER.debug(
-                        "Ambient light fetch error for %s: %s", cam_id_key, err
-                    )
+                    # Ambient light sensor level
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/ambient_light_sensor_level",
+                                headers=headers,
+                            ) as al_resp:
+                                if al_resp.status == 200:
+                                    al_data = await al_resp.json()
+                                    self._ambient_light_cache[cam_id_key] = al_data.get(
+                                        "ambientLightSensorLevel"
+                                    )
+                                else:
+                                    _LOGGER.debug(
+                                        "ambient_light_sensor_level HTTP %d for %s",
+                                        al_resp.status, cam_id_key,
+                                    )
+                    except Exception as err:
+                        _LOGGER.debug("Ambient light fetch error for %s: %s", cam_id_key, err)
 
-                # ── RCP data (LED dimmer + privacy state) via cloud proxy ──────
-                # Open a temporary REMOTE connection to get the proxy URL, then
-                # use it as the RCP base. Only attempted when camera is ONLINE.
-                # Failures are silently logged — never blocks the coordinator.
+                    # Motion detection settings
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/motion",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    data[cam_id_key]["motion"] = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Motion fetch error for %s: %s", cam_id_key, err)
+
+                    # Audio alarm settings
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/audioAlarm",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    data[cam_id_key]["audioAlarm"] = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("AudioAlarm fetch error for %s: %s", cam_id_key, err)
+
+                    # Recording options
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/recording_options",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    data[cam_id_key]["recordingOptions"] = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Recording options fetch error for %s: %s", cam_id_key, err)
+
+                # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
+                # Opens a proxy connection and reads multiple RCP values.
+                # Only when camera is ONLINE and slow-tier interval elapsed.
                 cam_status = self._cached_status.get(cam_id_key, "UNKNOWN")
-                if cam_status == "ONLINE":
+                if cam_status == "ONLINE" and do_slow:
                     try:
                         rcp_connector = aiohttp.TCPConnector(ssl=False)
                         rcp_session   = aiohttp.ClientSession(connector=rcp_connector)
@@ -1035,6 +1077,34 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def rcp_bitrate_ladder(self, cam_id: str) -> list[int]:
         """Return bitrate ladder (kbps) from RCP 0x0c81, or empty list."""
         return self._rcp_bitrate_cache.get(cam_id, [])
+
+    def motion_settings(self, cam_id: str) -> dict:
+        """Return motion detection settings dict, or empty dict."""
+        return self.data.get(cam_id, {}).get("motion", {})
+
+    def audio_alarm_settings(self, cam_id: str) -> dict:
+        """Return audio alarm settings dict, or empty dict."""
+        return self.data.get(cam_id, {}).get("audioAlarm", {})
+
+    def recording_options(self, cam_id: str) -> dict:
+        """Return recording options dict, or empty dict."""
+        return self.data.get(cam_id, {}).get("recordingOptions", {})
+
+    async def async_put_camera(self, cam_id: str, endpoint: str, payload: dict) -> bool:
+        """PUT to /v11/video_inputs/{cam_id}/{endpoint} with payload. Returns True on success."""
+        token = self.token
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            connector = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}",
+                    headers=headers, json=payload,
+                ) as resp:
+                    return resp.status in (200, 204)
+        except Exception as err:
+            _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
+            return False
 
     # ── SHC local API (camera light + privacy mode) ───────────────────────────
     async def _async_shc_request(
