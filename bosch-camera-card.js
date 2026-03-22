@@ -669,6 +669,8 @@ class BoschCameraCard extends HTMLElement {
         entity_id: this._entities.pan,
         value: Math.max(-120, Math.min(120, pos)),
       }).then(() => {
+        // Trigger backend image refresh so _cached_image is warm before card requests it
+        this._callService("bosch_shc_camera", "trigger_snapshot", {});
         // Refresh snapshot after camera has had time to move (~2s)
         this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));

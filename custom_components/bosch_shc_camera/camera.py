@@ -34,9 +34,10 @@ from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
-IMAGE_REFRESH_INTERVAL  = 1800  # seconds between background image refreshes (30 min)
+IMAGE_REFRESH_INTERVAL  = 1800  # fallback: seconds between background proactive refreshes
 CLOUD_SNAP_CACHE_TTL    = 30    # minimum seconds between cloud fetches (de-bounce)
-DEFAULT_SNAPSHOT_INTERVAL = 1800 # default snapshot refresh interval (30 minutes)
+DEFAULT_SNAPSHOT_INTERVAL = 1800 # default proactive background refresh interval (30 min)
+IDLE_FRAME_INTERVAL     = 60    # seconds — how often HA's camera proxy calls async_camera_image
 
 
 async def async_setup_entry(
@@ -119,10 +120,13 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         if getattr(self, "_was_streaming", False) and not is_now_streaming:
             self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
 
-        # Background 30-min refresh (even when nobody has the page open)
+        # Proactive background refresh (even when nobody has the page open).
+        # Interval: snapshot_interval option (default 1800 s / 30 min).
         elif not is_now_streaming:
             now = time.monotonic()
-            if now - self._last_image_fetch >= IMAGE_REFRESH_INTERVAL:
+            opts = get_options(self._entry)
+            proactive_interval = float(int(opts.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)))
+            if now - self._last_image_fetch >= proactive_interval:
                 self.hass.async_create_task(self._async_trigger_image_refresh(delay=0))
 
         self._was_streaming = is_now_streaming
@@ -223,17 +227,18 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         When _force_image_refresh is set: 0.1 s — forces immediate cache expiry
         so HA's next proxy request fetches the new snapshot right away.
         When streaming: 2 s — near-live refresh from the cloud proxy snap.jpg.
-        When idle:      snapshot_interval (default 1800 s / 30 min) — configurable
-                        via Settings → Integrations → Configure → snapshot_interval
-                        (min 300 s / 5 min, max 86400 s / 24 h).
-                        Each call fetches a fresh cloud proxy snapshot (~1.5 s).
+        When idle:      IDLE_FRAME_INTERVAL (60 s) — HA calls async_camera_image
+                        every 60 s. The actual cloud fetch rate is governed by
+                        CLOUD_SNAP_CACHE_TTL (30 s) inside async_camera_image:
+                        stale cache → return cached immediately + bg refresh.
+                        snapshot_interval (default 1800 s) controls the proactive
+                        background refresh in _handle_coordinator_update, not this.
         """
         if getattr(self, "_force_image_refresh", False):
             return 0.1
         if self.is_streaming:
             return 2.0
-        opts = get_options(self._entry)
-        return float(int(opts.get("snapshot_interval", DEFAULT_SNAPSHOT_INTERVAL)))
+        return float(IDLE_FRAME_INTERVAL)
 
     @property
     def _token(self) -> str:

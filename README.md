@@ -121,7 +121,24 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.11.0 — instant toggle feedback (privacy/light/notifications no longer revert), fresh snapshot after disabling privacy mode. Card v1.7.4: spinner gone on first load, smaller images on mobile.
+> **Integration version:** v3.1.0 — snapshot refresh fixed (image now updates every 60 s instead of every 30 min). Card v1.7.6: pan now triggers an automatic snapshot refresh 2 s after moving.
+
+## What's New in v3.1.0 + Card v1.7.6
+
+**Snapshot refresh fixed — image was stuck after HA restart**
+
+Previously, `frame_interval` was set to `snapshot_interval` (default 1800 s / 30 min). HA's camera proxy uses `frame_interval` as its image-cache TTL, so the card was served the same cached snapshot for up to 30 minutes on every request — regardless of the card's 60 s refresh timer.
+
+- `frame_interval` is now hardcoded to **60 s** when idle. HA calls `async_camera_image()` every 60 s, which triggers the background cloud fetch. The cached image is served instantly while the new one loads in the background (~0.5 s with cached proxy URL).
+- `snapshot_interval` (config option, default 1800 s) now correctly drives only the **proactive background refresh** in `_handle_coordinator_update` — the safety-net that keeps the cache warm even when no browser has the dashboard open.
+
+**Card v1.7.6 — pan triggers snapshot refresh**
+
+After a pan command (◀◀ ◀ ■ ▶ ▶▶ buttons on CAMERA_360), the card now:
+1. Calls `bosch_shc_camera.trigger_snapshot` immediately — the backend fetches a fresh image in the background (~0.5–2 s).
+2. Requests the updated image 2 s later so the card shows the new camera position.
+
+Previously the 2 s refresh was there but the backend image cache was not invalidated, so the card often still showed the old angle.
 
 ## What's New in v2.11.0
 
@@ -1013,6 +1030,17 @@ automation:
 ---
 
 ## Changelog
+
+### v3.1.0 + Card v1.7.6 — Snapshot refresh fix, pan snapshot
+
+**Snapshot refresh fix**
+- `frame_interval` decoupled from `snapshot_interval`. Was 1800 s (30 min) → HA served a 30-min-old cached image on every card request. Now hardcoded to 60 s so the backend is called every minute and the background refresh chain runs properly.
+- `snapshot_interval` config option (300–86400 s, default 1800 s) now controls only the proactive background refresh in `_handle_coordinator_update`.
+
+**Card v1.7.6 — pan triggers snapshot refresh**
+- After any pan button press, `bosch_shc_camera.trigger_snapshot` is called immediately (invalidates backend image cache) and `_scheduleImageLoad(2000)` shows the updated frame 2 s later.
+
+---
 
 ### v3.0.0 — Motion & Audio binary sensors, HA event bus, motion sensitivity & audio threshold control
 
