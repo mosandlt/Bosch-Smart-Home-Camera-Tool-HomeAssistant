@@ -112,6 +112,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._wifiinfo_cache: dict[str, dict] = {}
         # Ambient light sensor cache — keyed by cam_id, populated from GET /ambient_light_sensor_level
         self._ambient_light_cache: dict[str, float | None] = {}
+        # RCP data caches — keyed by cam_id, populated via RCP protocol over cloud proxy
+        self._rcp_dimmer_cache: dict[str, int | None] = {}    # LED dimmer value 0–100
+        self._rcp_privacy_cache: dict[str, int | None] = {}   # privacy mask byte[1] (1=ON)
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -353,6 +356,53 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(
                         "Ambient light fetch error for %s: %s", cam_id_key, err
                     )
+
+                # ── RCP data (LED dimmer + privacy state) via cloud proxy ──────
+                # Open a temporary REMOTE connection to get the proxy URL, then
+                # use it as the RCP base. Only attempted when camera is ONLINE.
+                # Failures are silently logged — never blocks the coordinator.
+                cam_status = self._cached_status.get(cam_id_key, "UNKNOWN")
+                if cam_status == "ONLINE":
+                    try:
+                        rcp_connector = aiohttp.TCPConnector(ssl=False)
+                        rcp_session   = aiohttp.ClientSession(connector=rcp_connector)
+                        rcp_headers   = {
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type":  "application/json",
+                            "Accept":        "application/json",
+                        }
+                        try:
+                            async with async_timeout.timeout(10):
+                                async with rcp_session.put(
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
+                                    json={"type": "REMOTE", "highQualityVideo": False},
+                                    headers=rcp_headers,
+                                ) as conn_resp:
+                                    if conn_resp.status in (200, 201):
+                                        import json as _json
+                                        conn_data = _json.loads(await conn_resp.text())
+                                        urls = conn_data.get("urls", [])
+                                        if urls:
+                                            # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
+                                            parts = urls[0].split("/", 1)
+                                            if len(parts) == 2:
+                                                proxy_host = parts[0]  # "proxy-NN:42090"
+                                                proxy_hash = parts[1]  # "{hash}"
+                                                await self._async_update_rcp_data(
+                                                    cam_id_key, proxy_host, proxy_hash
+                                                )
+                                    else:
+                                        _LOGGER.debug(
+                                            "RCP proxy connection HTTP %d for %s",
+                                            conn_resp.status, cam_id_key,
+                                        )
+                        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                            _LOGGER.debug("RCP proxy connect error for %s: %s", cam_id_key, err)
+                        finally:
+                            await rcp_session.close()
+                            await rcp_connector.close()
+                    except Exception as err:
+                        _LOGGER.debug("RCP update skipped for %s: %s", cam_id_key, err)
 
             # ── 5. SHC states (camera light current state) ────────────────────
             # Privacy mode is now read from cloud API above (step 4).
@@ -763,6 +813,156 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("go2rtc stream '%s' removed", stream_name)
         except (asyncio.TimeoutError, aiohttp.ClientError):
             pass  # go2rtc may not be running — silently ignore
+
+    # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
+    async def _rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
+        """Open an RCP session via the cloud proxy and return the sessionid, or None on failure.
+
+        The RCP handshake consists of two steps:
+          1. WRITE command 0xff0c with a fixed payload → extract <sessionid> from XML response
+          2. WRITE command 0xff0d with the sessionid → ACK (confirms the session)
+
+        Auth=3 (anonymous via URL hash) provides read-only access.
+        The proxy_host should be in the form "proxy-NN.live.cbs.boschsecurity.com:42090".
+        """
+        base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
+        init_payload = "0x0102004000000000040000000000000000010000000000000001000000000000"
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        try:
+            async with aiohttp.ClientSession(connector=connector) as session:
+                # Step 1: open session
+                params1 = {
+                    "command":   "0xff0c",
+                    "direction": "WRITE",
+                    "type":      "P_OCTET",
+                    "payload":   init_payload,
+                }
+                try:
+                    async with async_timeout.timeout(8):
+                        async with session.get(base, params=params1) as resp:
+                            if resp.status != 200:
+                                _LOGGER.debug(
+                                    "_rcp_session: step1 HTTP %d for %s", resp.status, proxy_host
+                                )
+                                return None
+                            text = await resp.text()
+                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug("_rcp_session: step1 error for %s: %s", proxy_host, err)
+                    return None
+
+                # Parse <sessionid> from XML response
+                import re as _re
+                m = _re.search(r"<sessionid>(\S+)</sessionid>", text, _re.IGNORECASE)
+                if not m:
+                    _LOGGER.debug(
+                        "_rcp_session: no <sessionid> in response for %s: %s",
+                        proxy_host, text[:200],
+                    )
+                    return None
+                session_id = m.group(1)
+
+                # Step 2: ACK the session
+                params2 = {
+                    "command":   "0xff0d",
+                    "direction": "WRITE",
+                    "type":      "P_OCTET",
+                    "sessionid": session_id,
+                }
+                try:
+                    async with async_timeout.timeout(8):
+                        async with session.get(base, params=params2) as resp2:
+                            _LOGGER.debug(
+                                "_rcp_session: ACK HTTP %d for %s (sessionid=%s)",
+                                resp2.status, proxy_host, session_id,
+                            )
+                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug("_rcp_session: step2 error for %s: %s", proxy_host, err)
+                    # Session may still be valid — return it anyway
+
+                return session_id
+        finally:
+            await connector.close()
+
+    async def _rcp_read(
+        self,
+        rcp_base: str,
+        command: str,
+        sessionid: str,
+        type_: str = "P_OCTET",
+        num: int = 0,
+    ) -> bytes | None:
+        """READ an RCP command and return the raw payload bytes, or None on failure.
+
+        Args:
+            rcp_base:  Full RCP base URL, e.g. "https://proxy-NN:42090/{hash}/rcp.xml"
+            command:   Hex command string, e.g. "0x0c22"
+            sessionid: Session ID from _rcp_session()
+            type_:     RCP type string, e.g. "P_OCTET" or "T_WORD"
+            num:       num parameter (0 = omit)
+        """
+        params: dict = {
+            "command":   command,
+            "direction": "READ",
+            "type":      type_,
+            "sessionid": sessionid,
+        }
+        if num:
+            params["num"] = str(num)
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        try:
+            async with aiohttp.ClientSession(connector=connector) as session:
+                try:
+                    async with async_timeout.timeout(8):
+                        async with session.get(rcp_base, params=params) as resp:
+                            if resp.status != 200:
+                                _LOGGER.debug(
+                                    "_rcp_read: command=%s HTTP %d", command, resp.status
+                                )
+                                return None
+                            return await resp.read()
+                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug("_rcp_read: command=%s error: %s", command, err)
+                    return None
+        finally:
+            await connector.close()
+
+    async def _async_update_rcp_data(self, cam_id: str, proxy_host: str, proxy_hash: str) -> None:
+        """Fetch RCP data (LED dimmer, privacy state) for a camera via cloud proxy.
+
+        Opens a fresh RCP session, reads 0x0c22 (LED dimmer) and 0x0d00 (privacy mask),
+        and caches the results. Gracefully skips on any failure — RCP is read-only
+        supplementary data and must never block the main coordinator update.
+        """
+        session_id = await self._rcp_session(proxy_host, proxy_hash)
+        if not session_id:
+            _LOGGER.debug("_async_update_rcp_data: could not open RCP session for %s", cam_id)
+            return
+
+        rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
+
+        # Read LED dimmer (0x0c22) — T_WORD, num=1 → integer 0–100
+        try:
+            raw = await self._rcp_read(rcp_base, "0x0c22", session_id, type_="T_WORD", num=1)
+            if raw and len(raw) >= 2:
+                import struct as _struct
+                dimmer_val = _struct.unpack(">H", raw[:2])[0]
+                self._rcp_dimmer_cache[cam_id] = int(dimmer_val)
+                _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
+        except Exception as err:
+            _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
+
+        # Read privacy mask (0x0d00) — P_OCTET 4B → byte[1]=1 means ON
+        try:
+            raw = await self._rcp_read(rcp_base, "0x0d00", session_id, type_="P_OCTET")
+            if raw and len(raw) >= 2:
+                self._rcp_privacy_cache[cam_id] = int(raw[1])
+                _LOGGER.debug(
+                    "RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1]
+                )
+        except Exception as err:
+            _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
 
     # ── SHC local API (camera light + privacy mode) ───────────────────────────
     async def _async_shc_request(

@@ -304,6 +304,49 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
         return f"{url}#insecure"
 
+    # ── RCP thumbnail fallback ────────────────────────────────────────────────
+    async def _async_rcp_thumbnail(self) -> bytes | None:
+        """Fetch a fast 160×90 JPEG thumbnail via RCP command 0x099e.
+
+        Uses the cached live proxy connection (if available) to reach the
+        camera's RCP endpoint. The thumbnail is already valid JPEG (~2–3 KB)
+        and is returned directly as the camera image.
+
+        This is much faster than snap.jpg (~instant vs ~1.5 s) and is used as
+        a fallback when the proxy snap.jpg fetch fails.
+        """
+        live = self.coordinator._live_connections.get(self._cam_id, {})
+        urls = live.get("urls", [])
+        if not urls:
+            return None
+
+        # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
+        parts = urls[0].split("/", 1)
+        if len(parts) != 2:
+            return None
+        proxy_host = parts[0]
+        proxy_hash = parts[1]
+
+        session_id = await self.coordinator._rcp_session(proxy_host, proxy_hash)
+        if not session_id:
+            return None
+
+        rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
+        raw = await self.coordinator._rcp_read(rcp_base, "0x099e", session_id)
+        if raw and len(raw) > 100:
+            # Verify JPEG magic bytes (FFD8)
+            if raw[:2] == b"\xff\xd8":
+                _LOGGER.debug(
+                    "%s: Using RCP thumbnail fallback (160x90) — %d bytes",
+                    self._attr_name, len(raw),
+                )
+                return raw
+            _LOGGER.debug(
+                "%s: RCP thumbnail: unexpected format (first bytes: %s)",
+                self._attr_name, raw[:4].hex(),
+            )
+        return None
+
     # ── Snapshot image ────────────────────────────────────────────────────────
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -314,6 +357,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         1. Cloud proxy live snap  — if a live connection has been opened
            (proxy-NN.live.cbs.boschsecurity.com snap.jpg, no auth needed)
            Updated every coordinator tick while live switch is ON.
+           1b. RCP thumbnail fallback — 160×90 JPEG via RCP 0x099e, used when
+               snap.jpg fetch fails with any error (timeout, network, etc.)
         2. Cloud proxy on-demand  — PUT /connection REMOTE + snap.jpg (~1.5 s).
            Called whenever the cached image is older than CLOUD_SNAP_CACHE_TTL (30 s).
            frame_interval is 60 s when idle, so this gives a fresh image every minute.
@@ -388,7 +433,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                     self._attr_name, resp.status, age,
                                 )
             except (asyncio.TimeoutError, aiohttp.ClientError):
-                pass
+                # Any network/timeout error on the live proxy snap.jpg — try RCP thumbnail
+                rcp_thumb = await self._async_rcp_thumbnail()
+                if rcp_thumb:
+                    self._cached_image = rcp_thumb
+                    self._last_image_fetch = time.monotonic()
+                    return self._cached_image
 
         # ── 2. Cloud proxy on-demand snapshot (PUT /connection REMOTE → snap.jpg) ──
         # Fetch a fresh image directly from the Bosch cloud proxy whenever the cache

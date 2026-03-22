@@ -10,6 +10,8 @@ Creates sensor entities per camera:
                                   attributes: up_to_date
   • {Name} Ambient Light Level — ambient light sensor level (0.0–1.0) as percentage
                                   from GET /v11/video_inputs/{id}/ambient_light_sensor_level
+  • {Name} LED Dimmer          — LED dimmer value 0–100% via RCP protocol (0x0c22)
+                                  only for cameras with featureSupport.light = True
 """
 
 import logging
@@ -50,6 +52,11 @@ async def async_setup_entry(
             BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
             BoschAmbientLightSensor(coordinator, cam_id, config_entry),
         ])
+        # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
+        cam_info = coordinator.data[cam_id].get("info", {})
+        has_light = cam_info.get("featureSupport", {}).get("light", False)
+        if has_light:
+            entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -299,4 +306,33 @@ class BoschAmbientLightSensor(_BoschSensorBase):
         return (
             self.coordinator.last_update_success
             and self.coordinator._ambient_light_cache.get(self._cam_id) is not None
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschLedDimmerSensor(_BoschSensorBase):
+    """Sensor: LED dimmer value 0–100% read via RCP protocol (command 0x0c22).
+
+    Data source: RCP command 0x0c22 (T_WORD) via cloud proxy (rcp.xml).
+    Only registered for cameras with featureSupport.light = True.
+    State is None (unavailable) when RCP session could not be established.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name                       = f"Bosch {self._cam_title} LED Dimmer"
+        self._attr_unique_id                  = f"bosch_shc_led_dimmer_{cam_id.lower()}"
+        self._attr_state_class                = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_icon                       = "mdi:brightness-6"
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator._rcp_dimmer_cache.get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_dimmer_cache.get(self._cam_id) is not None
         )

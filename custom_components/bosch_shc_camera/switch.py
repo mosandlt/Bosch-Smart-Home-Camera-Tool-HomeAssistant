@@ -334,6 +334,19 @@ class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
     def icon(self) -> str:
         return "mdi:eye-off" if self.is_on else "mdi:eye"
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Extra attributes including RCP-sourced privacy state for cross-validation.
+
+        rcp_state: privacy mask byte[1] from RCP command 0x0d00 (1=ON, 0=OFF, None=unavailable).
+        This supplements the REST API privacy state with a direct camera-side reading.
+        The switch logic (is_on) remains driven by the REST API only.
+        """
+        rcp_raw = self.coordinator._rcp_privacy_cache.get(self._cam_id)
+        return {
+            "rcp_state": rcp_raw,
+        }
+
     async def async_turn_on(self, **kwargs) -> None:
         """Enable privacy mode — camera turns off / shutter closes."""
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)

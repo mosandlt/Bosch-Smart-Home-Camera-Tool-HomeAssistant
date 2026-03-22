@@ -38,6 +38,7 @@ express or implied.
 | WiFi signal strength (%) | `sensor` | enabled |
 | Firmware version | `sensor` | enabled |
 | Ambient light level (%) | `sensor` | enabled |
+| LED dimmer value (%) | `sensor` | enabled (cameras with LED only, via RCP) |
 | Refresh Snapshot button | `button` | enabled |
 | Live Stream switch (ON/OFF) | `switch` | enabled |
 | Audio switch (muted by default) | `switch` | enabled |
@@ -108,7 +109,7 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.0.0 — added WiFi signal strength sensor, firmware version sensor, ambient light level sensor, 3-state notifications fix, `highQualityVideo: false` in all PUT /connection calls, and `inst=2` in RTSPS stream URLs.
+> **Integration version:** v2.1.0 — added RCP protocol integration: LED dimmer sensor, RCP privacy cross-validation attribute, and fast RCP thumbnail fallback in camera entity.
 
 ![Bosch Camera Card](card-screenshot.png)
 
@@ -337,6 +338,7 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_wifi_signal` | sensor | WiFi signal strength in %; attributes: ssid, ip_address, mac_address |
 | `sensor.bosch_garten_firmware_version` | sensor | Firmware version string; attributes: up_to_date, hardware_version |
 | `sensor.bosch_garten_ambient_light` | sensor | Ambient light level 0–100% (from on-camera light sensor) |
+| `sensor.bosch_garten_led_dimmer` | sensor | LED dimmer value 0–100% via RCP (cameras with LED only) |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
@@ -668,7 +670,7 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 
 ---
 
-## New Sensors (v2.0.0)
+## New Sensors (v2.0.0 / v2.1.0)
 
 ### WiFi Signal Strength
 
@@ -693,6 +695,15 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 - API returns a float 0.0–1.0, converted to 0–100%
 - Unit: `%`
 
+### LED Dimmer (v2.1.0)
+
+`sensor.bosch_garten_led_dimmer` — LED indicator dimmer value.
+
+- Data source: RCP command `0x0c22` (T_WORD) via cloud proxy `rcp.xml`
+- Unit: `%` (0–100), state class: `measurement`
+- Only created for cameras with `featureSupport.light = True`
+- State is `unavailable` if RCP session fails (camera OFFLINE or proxy expired)
+
 ---
 
 ## Notifications Switch — 3-State Handling (v2.0.0)
@@ -707,6 +718,69 @@ The Bosch API can return three values for `notificationsEnabledStatus`:
 
 Both `FOLLOW_CAMERA_SCHEDULE` and `ON_CAMERA_SCHEDULE` are treated as switch state = **ON**.
 Turning the switch **ON** always sends `FOLLOW_CAMERA_SCHEDULE`.
+
+---
+
+## RCP Protocol Integration (v2.1.0)
+
+### What is RCP?
+
+RCP (Bosch Remote Configuration Protocol) is a low-level camera configuration protocol embedded in Bosch cameras. It is accessible via the cloud proxy connection at the path `rcp.xml` — the same proxy used for `snap.jpg` and the RTSP stream.
+
+After calling `PUT /connection REMOTE`, the proxy URL `https://proxy-NN:42090/{hash}/rcp.xml` accepts RCP commands as HTTP GET requests with query parameters. Authentication is provided by the URL hash (auth=3, anonymous via hash), which grants **read-only access**.
+
+### Session handshake
+
+Each RCP session requires a two-step handshake:
+
+1. `GET rcp.xml?command=0xff0c&direction=WRITE&type=P_OCTET&payload=...` → extracts `<sessionid>` from the XML response
+2. `GET rcp.xml?command=0xff0d&direction=WRITE&type=P_OCTET&sessionid=...` → ACK
+
+After the handshake, read commands can be issued:
+```
+GET rcp.xml?command=0xCOMMAND&direction=READ&type=TYPE&sessionid=SID
+```
+
+### Readable RCP commands
+
+| Command | Type | Description |
+|---------|------|-------------|
+| `0x099e` | P_OCTET | Live JPEG thumbnail 160×90 (~2–3 KB) — very fast alternative to snap.jpg |
+| `0x0a0f` | P_OCTET 8B | Camera real-time clock (bytes: YYYY×2 MM DD HH MM SS DOW) |
+| `0x0c22` | T_WORD num=1 | LED dimmer value 0–100 |
+| `0x0d00` | P_OCTET 4B | Privacy mask state (byte[1]=1 means ON) |
+| `0x0aea` | P_OCTET | Product name as ASCII string |
+| `0x0a36` | P_OCTET 16B | Camera LAN IP address (bytes 0–3 as IPv4) |
+
+> **Note:** Write commands require a service account (auth level > 3). This integration uses auth=3 (anonymous via hash) which is read-only. No camera configuration is modified by the RCP integration.
+
+### New entity: LED Dimmer sensor
+
+`sensor.bosch_*_led_dimmer` — LED dimmer intensity 0–100%.
+
+- Only registered for cameras that report `featureSupport.light = True` (i.e. cameras with a physical LED indicator)
+- Data source: RCP command `0x0c22` (T_WORD) via cloud proxy on each coordinator tick
+- Unit: `%`, state class: `measurement`, icon: `mdi:brightness-6`
+- State is `unavailable` when the RCP session cannot be established (e.g. camera OFFLINE, proxy expired)
+
+### Privacy mode cross-validation
+
+The privacy mode switch (`switch.bosch_*_privacy_mode`) now exposes an additional attribute:
+
+| Attribute | Description |
+|-----------|-------------|
+| `rcp_state` | Privacy mask byte[1] from RCP command `0x0d00` (1=ON, 0=OFF, None=unavailable) |
+
+This allows cross-validating the REST API privacy state (from `/v11/video_inputs`) with a direct camera-side reading. The switch logic (`is_on`) is still driven solely by the REST API — `rcp_state` is informational only.
+
+### RCP thumbnail fallback in camera entity
+
+When the live proxy `snap.jpg` fetch fails (timeout or network error), the camera entity automatically tries the RCP thumbnail (command `0x099e`) as a fallback:
+
+- Returns a 160×90 JPEG (2–3 KB, valid JPEG with `FFD8` magic)
+- Much faster than snap.jpg (~instant vs ~1.5 s round-trip)
+- Logged as: `Using RCP thumbnail fallback (160x90)`
+- Only attempted when a live proxy connection is active (the proxy URL is required for RCP access)
 
 ---
 
