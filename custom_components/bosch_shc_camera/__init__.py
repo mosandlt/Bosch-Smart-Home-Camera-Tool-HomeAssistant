@@ -39,7 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["camera", "sensor", "button", "switch", "number", "select"]
+ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
@@ -62,6 +62,7 @@ DEFAULT_OPTIONS = {
     "shc_cert_path": "",   # path to client cert PEM (e.g. /config/claude_cert.pem)
     "shc_key_path":  "",   # path to client key PEM  (e.g. /config/claude_key.pem)
     "high_quality_video": False,  # True = highQualityVideo: True in PUT /connection
+    "enable_binary_sensors": True,  # motion + audio binary sensor entities
 }
 
 
@@ -292,6 +293,31 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if cam_entity:
                                 self.hass.async_create_task(
                                     cam_entity._async_trigger_image_refresh(delay=2)
+                                )
+                            # Fire HA event bus so automations can trigger on motion/audio
+                            newest_event  = events[0]
+                            event_type    = newest_event.get("eventType", "")
+                            cam_name      = cam.get("title", cam_id)
+                            event_payload = {
+                                "camera_id":   cam_id,
+                                "camera_name": cam_name,
+                                "timestamp":   newest_event.get("timestamp", ""),
+                                "image_url":   newest_event.get("imageUrl", ""),
+                                "event_id":    newest_id,
+                            }
+                            if event_type == "MOVEMENT":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_motion", event_payload
+                                )
+                                _LOGGER.debug(
+                                    "Fired bosch_shc_camera_motion for %s", cam_id
+                                )
+                            elif event_type == "AUDIO_ALARM":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_audio_alarm", event_payload
+                                )
+                                _LOGGER.debug(
+                                    "Fired bosch_shc_camera_audio_alarm for %s", cam_id
                                 )
                         if newest_id:
                             self._last_event_ids[cam_id] = newest_id
@@ -1630,7 +1656,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
 
-    await hass.config_entries.async_forward_entry_setups(entry, ALL_PLATFORMS)
+    opts = get_options(entry)
+    platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
+    if opts.get("enable_binary_sensors", True):
+        platforms = ["binary_sensor"] + platforms
+
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))

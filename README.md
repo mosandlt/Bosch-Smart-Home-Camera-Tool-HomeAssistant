@@ -53,7 +53,11 @@ express or implied.
 | Motion detection switch | `switch` | enabled (cloud API — no SHC needed) |
 | Record sound switch | `switch` | enabled (cloud API — no SHC needed) |
 | Pan position (360 camera) | `number` | enabled (−120° to +120°, auto-detected for CAMERA_360) |
+| Audio alarm threshold (dB) | `number` | disabled by default — read/write dB threshold via `PUT /v11/video_inputs/{id}/audioAlarm` |
 | Stream quality | `select` | enabled (Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps) |
+| Motion sensitivity | `select` | disabled by default — SUPER_HIGH / HIGH / MEDIUM / MEDIUM_LOW / LOW via `PUT /v11/video_inputs/{id}/motion` |
+| Motion detected | `binary_sensor` | disabled by default — ON for 30 s after MOVEMENT event (enable in entity registry) |
+| Audio alarm detected | `binary_sensor` | disabled by default — ON for 30 s after AUDIO_ALARM event (enable in entity registry) |
 | Auto-download events to folder | background | optional (disabled by default) |
 | **Live stream — 30fps H.264 + optional AAC audio** | `camera` | via Live Stream switch |
 | Live snapshot (current image, ~1.5s) | `camera` | via snap.jpg proxy |
@@ -1009,6 +1013,54 @@ automation:
 ---
 
 ## Changelog
+
+### v3.0.0 — Motion & Audio binary sensors, HA event bus, motion sensitivity & audio threshold control
+
+**New binary sensor entities (disabled by default)**
+Two new binary sensor entities per camera, disabled by default. Enable in **Settings → Entities** to use in automations.
+
+| Entity | Device class | Logic |
+|--------|-------------|-------|
+| `binary_sensor.bosch_<name>_motion` | `motion` | ON when a `MOVEMENT` event was detected within the last 30 seconds |
+| `binary_sensor.bosch_<name>_audio_alarm` | `sound` | ON when an `AUDIO_ALARM` event was detected within the last 30 seconds |
+
+Each binary sensor exposes `event_id`, `timestamp`, and `image_url` as state attributes.
+
+**HA event bus — real-time automation triggers**
+When the coordinator detects a new event ID (on each poll), it fires a Home Assistant event bus event — no entity state change required:
+
+```yaml
+# Trigger on motion from any Bosch camera
+trigger:
+  - platform: event
+    event_type: bosch_shc_camera_motion
+    # optional filter:
+    event_data:
+      camera_name: Garten
+
+# Trigger on audio alarm
+trigger:
+  - platform: event
+    event_type: bosch_shc_camera_audio_alarm
+```
+
+Event payload: `camera_id`, `camera_name`, `timestamp`, `image_url`, `event_id`.
+
+**New motion sensitivity select entity (disabled by default)**
+`select.bosch_<name>_motion_sensitivity` — read/write motion detection sensitivity:
+- Options: `SUPER_HIGH` / `HIGH` / `MEDIUM` / `MEDIUM_LOW` / `LOW`
+- Writes via `PUT /v11/video_inputs/{id}/motion {"enabled": true, "motionAlarmConfiguration": "<value>"}`
+
+**New audio alarm threshold number entity (disabled by default)**
+`number.bosch_<name>_audio_threshold` — read/write audio alarm trigger threshold:
+- Range: 0–100 dB, step 1, unit: dB
+- Writes via `PUT /v11/video_inputs/{id}/audioAlarm {"threshold": <value>, "enabled": true}`
+- Note: Default factory threshold is very sensitive (Kamera: 33 dB, Garten: 80 dB). Raise if you get constant false alarms.
+
+**Config option: enable/disable binary sensors**
+In **Settings → Integrations → Bosch Smart Home Camera → Configure**, the option `Enable motion & audio binary sensors` controls whether binary sensor entities are created. Default: enabled. Disable to reduce entity count if you only use the event bus.
+
+---
 
 ### v2.11.0 — Instant toggle feedback, snapshot on privacy OFF
 
