@@ -117,7 +117,20 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.9.0 — background snapshot refresh (instant card reloads) + proxy URL caching; Card v1.7.0 detects new events via `sensor.last_event` and auto-refreshes snapshot.
+> **Integration version:** v2.11.0 — instant toggle feedback (privacy/light/notifications no longer revert), fresh snapshot after disabling privacy mode. Card v1.7.4: spinner gone on first load, smaller images on mobile.
+
+## What's New in v2.11.0
+
+- **Privacy/light/notifications toggle no longer reverts:** After toggling any switch via the cloud API, the new state is now pushed to HA immediately via `async_update_listeners()` — no more waiting for the next 22 s coordinator tick. The card's optimistic state (10 s) was expiring before the coordinator updated, causing the toggle to visually snap back.
+- **Fresh snapshot after disabling privacy:** When privacy mode is turned OFF, a snapshot refresh is automatically triggered after 1.5 s, so the card shows the live image immediately instead of the privacy placeholder.
+- **Same fix applied to:** camera LED light and notifications switches (all cloud API paths).
+
+## What's New in v2.10.0 + Card v1.7.4
+
+**Card v1.7.4 — faster initial load & mobile-appropriate images**
+- **Spinner on first load fixed:** The card rendered before HA assigned `hass` (standard HA lifecycle). `_scheduleImageLoad(0)` fired in `_render()` before `_hass` was set, so the image request silently returned early and the spinner showed for 60 s until the first periodic timer fired. Fixed: `set hass(hass)` now re-triggers image load on first assignment.
+- **Smaller images on mobile:** All snapshot requests now pass `?width=<display_width>` to the HA camera proxy. HA passes this to `async_camera_image(width, height)` and the integration chooses the 320×180 RCP thumbnail (3 KB) instead of the 1080p snap.jpg (150 KB) when `width ≤ 640`. Desktop still gets full resolution.
+- **Snapshot button first poll:** 1000 ms → 500 ms.
 
 ## What's New in v2.9.0
 
@@ -987,6 +1000,28 @@ automation:
 ---
 
 ## Changelog
+
+### v2.11.0 — Instant toggle feedback, snapshot on privacy OFF
+
+**Toggle state no longer reverts on mobile**
+After toggling privacy mode, camera LED light, or notifications, the integration now immediately calls `async_update_listeners()` after writing the new state to the cache. Previously, the card's 10 s optimistic timeout expired before the 22 s coordinator tick updated the entity state, causing the toggle to snap back.
+
+**Fresh snapshot after privacy OFF**
+When privacy mode is disabled, a `_async_trigger_image_refresh(delay=1.5)` task is kicked off automatically. The card will show the live camera image within ~2 s of disabling privacy.
+
+---
+
+### v2.10.0 + Card v1.7.4 — Faster first load, mobile images
+
+**Card v1.7.4**
+- Fixed 60 s spinner on first load (HA assigns `hass` after `setConfig()` — image request now re-triggered in `set hass(hass)`)
+- Snapshot URLs now include `?width=<display_width>` — mobile gets 320×180 RCP thumbnail (3 KB); desktop gets 1080p snap.jpg (150 KB)
+- Snapshot button first poll: 1000 ms → 500 ms
+
+**Integration (camera.py)**
+- `async_camera_image(width, height)` prefers RCP `0x099e` thumbnail when `width ≤ 640`
+
+---
 
 ### v2.9.0 — Performance: sub-second snapshot response, non-blocking switches & buttons
 

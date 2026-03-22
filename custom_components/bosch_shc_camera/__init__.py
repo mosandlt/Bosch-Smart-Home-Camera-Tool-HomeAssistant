@@ -1347,6 +1347,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         )
         if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
             self._shc_state_cache[cam_id]["camera_light"] = on
+            self.async_update_listeners()
             self.hass.async_create_task(self.async_request_refresh())
             return True
         return False
@@ -1364,7 +1365,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         )
         if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
             self._shc_state_cache[cam_id]["privacy_mode"] = enabled
+            self.async_update_listeners()
             self.hass.async_create_task(self.async_request_refresh())
+            if not enabled:
+                cam = self._camera_entities.get(cam_id)
+                if cam:
+                    self.hass.async_create_task(cam._async_trigger_image_refresh(delay=1.5))
             return True
         return False
 
@@ -1398,11 +1404,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
+                        # Push new state to HA immediately — don't wait for the 22s coordinator tick.
+                        # Without this, entity state stays stale until the next full refresh,
+                        # causing the card's optimistic toggle to revert visually.
+                        self.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_privacy_mode: %s → %s (HTTP %d)",
                             cam_id, "ON" if enabled else "OFF", resp.status,
                         )
                         self.hass.async_create_task(self.async_request_refresh())
+                        # When privacy is turned OFF, trigger a fresh snapshot so the card
+                        # shows a live image immediately instead of a stale cached one.
+                        if not enabled:
+                            cam = self._camera_entities.get(cam_id)
+                            if cam:
+                                self.hass.async_create_task(
+                                    cam._async_trigger_image_refresh(delay=1.5)
+                                )
                         return True
                     _LOGGER.warning(
                         "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
@@ -1451,6 +1469,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
+                        self.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_camera_light: %s → %s (HTTP %d)",
                             cam_id, "ON" if on else "OFF", resp.status,
@@ -1494,6 +1513,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["notifications_status"] = status
+                        self.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_notifications: %s → %s (HTTP %d)",
                             cam_id, status, resp.status,
