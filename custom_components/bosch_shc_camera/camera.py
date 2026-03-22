@@ -344,7 +344,32 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                     self._attr_name, len(self._cached_image),
                                 )
                                 return self._cached_image
-                        elif resp.status in (401, 403, 404):
+                        elif resp.status == 404:
+                            # 404 = proxy URL expired — re-request a fresh connection and retry
+                            opened_at = self.coordinator._live_opened_at.get(self._cam_id, 0)
+                            age = time.monotonic() - opened_at
+                            _LOGGER.debug(
+                                "%s: proxy snapshot 404 (age %.0fs) — proxy URL expired, refreshing connection",
+                                self._attr_name, age,
+                            )
+                            # Refresh the live connection so proxyUrl is current again
+                            new_live = await self.coordinator.try_live_connection(self._cam_id)
+                            if new_live:
+                                new_proxy_url = new_live.get("proxyUrl", "")
+                                if new_proxy_url:
+                                    try:
+                                        async with async_timeout.timeout(10):
+                                            async with session.get(new_proxy_url) as retry_resp:
+                                                ct2 = retry_resp.headers.get("Content-Type", "")
+                                                if retry_resp.status == 200 and "image" in ct2:
+                                                    data = await retry_resp.read()
+                                                    if data:
+                                                        self._cached_image = data
+                                                        self._last_image_fetch = time.monotonic()
+                                                        return self._cached_image
+                                    except (asyncio.TimeoutError, aiohttp.ClientError):
+                                        pass
+                        elif resp.status in (401, 403):
                             # Only clear the session if it's old enough to have expired
                             # naturally — avoids clearing fresh sessions for cameras
                             # that require Digest auth for direct snap.jpg access (e.g. CAMERA_360)

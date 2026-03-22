@@ -31,21 +31,24 @@ express or implied.
 
 | Feature | Entity type | Default |
 |---------|-------------|---------|
-| 📸 Latest snapshot per camera | `camera` | ✅ enabled |
-| 🟢 Camera status (ONLINE/OFFLINE) | `sensor` | ✅ enabled |
-| 🕐 Last event timestamp | `sensor` | ✅ enabled |
-| 📊 Events today count | `sensor` | ✅ enabled |
-| 🔄 Refresh Snapshot button | `button` | ✅ enabled |
-| 📡 Live Stream switch (ON/OFF) | `switch` | ✅ enabled |
-| 🔇 Audio switch (muted by default) | `switch` | ✅ enabled |
-| 💡 Camera LED light switch | `switch` | ✅ enabled (cloud API — no SHC needed) |
-| 🔒 Privacy mode switch | `switch` | ✅ enabled (cloud API — no SHC needed) |
-| 🔔 Notifications switch | `switch` | ✅ enabled (ON = FOLLOW_CAMERA_SCHEDULE, OFF = ALWAYS_OFF) |
-| ↔️ Pan position (360 camera) | `number` | ✅ enabled (−120° to +120°, auto-detected for CAMERA_360) |
-| 💾 Auto-download events to folder | background | ❌ optional |
-| 🎥 **Live stream — 30fps H.264 + optional AAC audio** | `camera` | ✅ via Live Stream switch |
-| 📷 Live snapshot (current image, ~1.5s) | `camera` | ✅ via snap.jpg proxy |
-| 🃏 **Custom Lovelace card** | `bosch-camera-card` | ✅ separate JS file |
+| Latest snapshot per camera | `camera` | enabled |
+| Camera status (ONLINE/OFFLINE) | `sensor` | enabled |
+| Last event timestamp | `sensor` | enabled |
+| Events today count | `sensor` | enabled |
+| WiFi signal strength (%) | `sensor` | enabled |
+| Firmware version | `sensor` | enabled |
+| Ambient light level (%) | `sensor` | enabled |
+| Refresh Snapshot button | `button` | enabled |
+| Live Stream switch (ON/OFF) | `switch` | enabled |
+| Audio switch (muted by default) | `switch` | enabled |
+| Camera LED light switch | `switch` | enabled (cloud API — no SHC needed) |
+| Privacy mode switch | `switch` | enabled (cloud API — no SHC needed) |
+| Notifications switch | `switch` | enabled (ON = FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE, OFF = ALWAYS_OFF) |
+| Pan position (360 camera) | `number` | enabled (−120° to +120°, auto-detected for CAMERA_360) |
+| Auto-download events to folder | background | optional (disabled by default) |
+| **Live stream — 30fps H.264 + optional AAC audio** | `camera` | via Live Stream switch |
+| Live snapshot (current image, ~1.5s) | `camera` | via snap.jpg proxy |
+| **Custom Lovelace card** | `bosch-camera-card` | separate JS file |
 
 **Camera state** — `camera.bosch_garten` shows:
 - `idle` — no live stream active
@@ -104,6 +107,8 @@ All features are individually toggleable in **Settings → Integrations → Bosc
 A dedicated Lovelace card showing the camera feed with streaming state, status, event info, and controls.
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
+
+> **Integration version:** v2.0.0 — added WiFi signal strength sensor, firmware version sensor, ambient light level sensor, 3-state notifications fix, `highQualityVideo: false` in all PUT /connection calls, and `inst=2` in RTSPS stream URLs.
 
 ![Bosch Camera Card](card-screenshot.png)
 
@@ -236,6 +241,52 @@ cards:
     title: Kamera
 ```
 
+### Diagnostic cards (v2.0.0)
+
+The Camera view (`/lovelace/camera`) includes two additional diagnostic sections showing the new sensor data for each camera.
+
+**Garten diagnostics card:**
+```yaml
+type: entities
+title: Garten Diagnose
+show_header_toggle: false
+entities:
+  - entity: sensor.bosch_garten_wifi_signal
+    name: WLAN-Signal
+  - entity: sensor.bosch_garten_firmware_version
+    name: Firmware
+  - entity: sensor.bosch_garten_ambient_light
+    name: Umgebungslicht
+  - entity: sensor.bosch_garten_status
+    name: Status
+  - entity: sensor.bosch_garten_events_today
+    name: Ereignisse heute
+  - entity: sensor.bosch_garten_last_event
+    name: Letztes Ereignis
+```
+
+**Kamera diagnostics card:**
+```yaml
+type: entities
+title: Kamera Diagnose
+show_header_toggle: false
+entities:
+  - entity: sensor.bosch_kamera_wifi_signal
+    name: WLAN-Signal
+  - entity: sensor.bosch_kamera_firmware_version
+    name: Firmware
+  - entity: sensor.bosch_kamera_ambient_light
+    name: Umgebungslicht
+  - entity: sensor.bosch_kamera_status
+    name: Status
+  - entity: sensor.bosch_kamera_events_today
+    name: Ereignisse heute
+  - entity: sensor.bosch_kamera_last_event
+    name: Letztes Ereignis
+```
+
+To add these manually: edit the Camera view in the Lovelace UI → **+ Add section** → paste the YAML above into a new **Entities** card.
+
 ---
 
 ## Authentication
@@ -283,12 +334,15 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_status` | sensor | ONLINE / OFFLINE |
 | `sensor.bosch_garten_last_event` | sensor | Timestamp of latest motion event |
 | `sensor.bosch_garten_events_today` | sensor | Number of events today |
+| `sensor.bosch_garten_wifi_signal` | sensor | WiFi signal strength in %; attributes: ssid, ip_address, mac_address |
+| `sensor.bosch_garten_firmware_version` | sensor | Firmware version string; attributes: up_to_date, hardware_version |
+| `sensor.bosch_garten_ambient_light` | sensor | Ambient light level 0–100% (from on-camera light sensor) |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
 | `switch.bosch_garten_camera_light` | switch | Camera LED indicator ON/OFF — cloud API, no SHC needed |
 | `switch.bosch_garten_privacy_mode` | switch | Privacy mode ON/OFF — cloud API, no SHC needed |
-| `switch.bosch_garten_notifications` | switch | Push notifications ON (FOLLOW_CAMERA_SCHEDULE) / OFF (ALWAYS_OFF) |
+| `switch.bosch_garten_notifications` | switch | Push notifications ON (FOLLOW_CAMERA_SCHEDULE / ON_CAMERA_SCHEDULE) / OFF (ALWAYS_OFF) |
 | `number.bosch_kamera_pan` | number | Pan position −120° to +120° (CAMERA_360 only, auto-detected) |
 
 ### Camera streaming state
@@ -586,6 +640,73 @@ rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
   → 30fps H.264 1920×1080 + AAC-LC 16kHz mono
   → Open: ffplay -rtsp_transport tcp -tls_verify 0 "rtsps://..."
 ```
+
+---
+
+## Discovered API Endpoints (v2.0.0)
+
+The following endpoints were found via mitmproxy traffic analysis of the official Bosch Smart Home Camera iOS/Android app. Not all endpoints are used by this integration — this is a complete reference for future development.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v11/registration/check` | GET | User info + exact token expiration time |
+| `/protocol_support?protocol=11` | GET | Protocol support check |
+| `/v11/state/pre-maintenance` | GET | Server maintenance mode check |
+| `/v11/video_inputs/{id}` | GET | Fetch single camera by ID |
+| `/v11/video_inputs/{id}/commissioned` | GET | Pairing/connection status |
+| `/v11/video_inputs/{id}/firmware` | GET | Firmware version + update status |
+| `/v11/video_inputs/{id}/lighting_override` | GET | Current light override state |
+| `/v11/video_inputs/{id}/lighting_options` | GET | Full light schedule config |
+| `/v11/video_inputs/{id}/ambient_light_sensor_level` | GET | Ambient light sensor reading (0.0–1.0) |
+| `/v11/video_inputs/{id}/motion` | GET | Motion detection on/off + sensitivity |
+| `/v11/video_inputs/{id}/motion_sensitive_areas` | GET | Motion zones (normalized rect coords) |
+| `/v11/video_inputs/{id}/audioAlarm` | GET | Audio alarm threshold + config |
+| `/v11/video_inputs/{id}/recording_options` | GET | Sound-in-recording setting |
+| `/v11/video_inputs/{id}/timestamp` | GET | Timestamp overlay on/off |
+| `/v11/video_inputs/{id}/wifiinfo` | GET | WiFi SSID, signal strength, local IP, MAC |
+| `/v11/video_inputs/{id}/rules` | GET | Camera automation rules |
+
+---
+
+## New Sensors (v2.0.0)
+
+### WiFi Signal Strength
+
+`sensor.bosch_garten_wifi_signal` — WiFi signal strength in percent.
+
+- Data source: `GET /v11/video_inputs/{id}/wifiinfo` (polled each coordinator tick)
+- Unit: `%`, device class: `signal_strength`
+- Attributes: `ssid`, `ip_address`, `mac_address`
+
+### Firmware Version
+
+`sensor.bosch_garten_firmware_version` — Firmware version string.
+
+- Data source: `firmwareVersion` field from `GET /v11/video_inputs` (no extra API call)
+- Attributes: `up_to_date` (bool), `hardware_version`
+
+### Ambient Light Level
+
+`sensor.bosch_garten_ambient_light` — Ambient light level as percentage.
+
+- Data source: `GET /v11/video_inputs/{id}/ambient_light_sensor_level` (polled each coordinator tick)
+- API returns a float 0.0–1.0, converted to 0–100%
+- Unit: `%`
+
+---
+
+## Notifications Switch — 3-State Handling (v2.0.0)
+
+The Bosch API can return three values for `notificationsEnabledStatus`:
+
+| API value | Switch state | Description |
+|-----------|-------------|-------------|
+| `FOLLOW_CAMERA_SCHEDULE` | ON | Notifications follow the camera schedule |
+| `ON_CAMERA_SCHEDULE` | ON | Notifications active (alternate ON state) |
+| `ALWAYS_OFF` | OFF | Notifications always disabled |
+
+Both `FOLLOW_CAMERA_SCHEDULE` and `ON_CAMERA_SCHEDULE` are treated as switch state = **ON**.
+Turning the switch **ON** always sends `FOLLOW_CAMERA_SCHEDULE`.
 
 ---
 

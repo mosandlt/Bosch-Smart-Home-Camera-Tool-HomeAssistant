@@ -108,6 +108,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._last_shc_fetch: float = 0.0      # last time SHC devices were fetched
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
         self._pan_cache: dict[str, int | None] = {}
+        # WiFi info cache — keyed by cam_id, populated from GET /wifiinfo
+        self._wifiinfo_cache: dict[str, dict] = {}
+        # Ambient light sensor cache — keyed by cam_id, populated from GET /ambient_light_sensor_level
+        self._ambient_light_cache: dict[str, float | None] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -312,6 +316,44 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, err)
 
+                # Fetch WiFi info (signal strength, IP, SSID)
+                try:
+                    async with async_timeout.timeout(5):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/wifiinfo",
+                            headers=headers,
+                        ) as wifi_resp:
+                            if wifi_resp.status == 200:
+                                self._wifiinfo_cache[cam_id_key] = await wifi_resp.json()
+                            else:
+                                _LOGGER.debug(
+                                    "wifiinfo HTTP %d for %s", wifi_resp.status, cam_id_key
+                                )
+                except Exception as err:
+                    _LOGGER.debug("WiFi info fetch error for %s: %s", cam_id_key, err)
+
+                # Fetch ambient light sensor level
+                try:
+                    async with async_timeout.timeout(5):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/ambient_light_sensor_level",
+                            headers=headers,
+                        ) as al_resp:
+                            if al_resp.status == 200:
+                                al_data = await al_resp.json()
+                                self._ambient_light_cache[cam_id_key] = al_data.get(
+                                    "ambientLightSensorLevel"
+                                )
+                            else:
+                                _LOGGER.debug(
+                                    "ambient_light_sensor_level HTTP %d for %s",
+                                    al_resp.status, cam_id_key,
+                                )
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Ambient light fetch error for %s: %s", cam_id_key, err
+                    )
+
             # ── 5. SHC states (camera light current state) ────────────────────
             # Privacy mode is now read from cloud API above (step 4).
             # SHC is only used for camera light state + control (no cloud API found).
@@ -370,7 +412,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 try:
                     async with async_timeout.timeout(10):
                         async with session.put(
-                            url, json={"type": type_val}, headers=headers
+                            url,
+                            json={"type": type_val, "highQualityVideo": False},
+                            headers=headers,
                         ) as resp:
                             body = await resp.text()
                             _LOGGER.debug(
@@ -393,7 +437,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                        f"?inst=1{audio_param}&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=60"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 elif result.get("hash"):
@@ -404,7 +448,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                        f"?inst=1{audio_param}&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=60"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
@@ -460,7 +504,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         try:
             async with async_timeout.timeout(10):
                 async with session.put(
-                    url, json={"type": "REMOTE"}, headers=headers
+                    url,
+                    json={"type": "REMOTE", "highQualityVideo": False},
+                    headers=headers,
                 ) as resp:
                     if resp.status not in (200, 201):
                         _LOGGER.debug(
@@ -478,6 +524,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             async with async_timeout.timeout(10):
                 async with session.get(proxy_url) as snap_resp:
                     ct = snap_resp.headers.get("Content-Type", "")
+                    if snap_resp.status == 404:
+                        # Proxy URL expired — re-request connection and retry once
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: snap.jpg 404 for %s — proxy URL expired, retrying",
+                            cam_id,
+                        )
+                        async with async_timeout.timeout(10):
+                            async with session.put(
+                                url,
+                                json={"type": "REMOTE", "highQualityVideo": False},
+                                headers=headers,
+                            ) as resp2:
+                                if resp2.status not in (200, 201):
+                                    return None
+                                result2 = _json.loads(await resp2.text())
+                                urls2 = result2.get("urls", [])
+                                if not urls2:
+                                    return None
+                                proxy_url = f"https://{urls2[0]}/snap.jpg"
+                        async with async_timeout.timeout(10):
+                            async with session.get(proxy_url) as snap_resp2:
+                                ct2 = snap_resp2.headers.get("Content-Type", "")
+                                if snap_resp2.status == 200 and "image" in ct2:
+                                    data = await snap_resp2.read()
+                                    if data:
+                                        return data
+                        return None
                     if snap_resp.status == 200 and "image" in ct:
                         data = await snap_resp.read()
                         # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON
@@ -585,7 +658,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         try:
             async with async_timeout.timeout(15):
                 async with session.put(
-                    url, json={"type": "LOCAL"}, headers=headers
+                    url, json={"type": "LOCAL", "highQualityVideo": False}, headers=headers
                 ) as resp:
                     if resp.status not in (200, 201):
                         _LOGGER.debug(

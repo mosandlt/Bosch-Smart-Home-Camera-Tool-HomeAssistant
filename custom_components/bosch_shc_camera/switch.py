@@ -22,9 +22,12 @@ Creates switch entities per camera:
                           Uses Bosch cloud API: PUT /v11/video_inputs/{id}/lighting_override.
                           No SHC local API needed — works without SHC configured.
 
-  • {Name} Notifications — ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
+  • {Name} Notifications — ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE),
+                           OFF = ALWAYS_OFF.
                            Uses Bosch cloud API: PUT /v11/video_inputs/{id}/enable_notifications.
                            State is read from /v11/video_inputs (notificationsEnabledStatus field).
+                           Three-state aware: both FOLLOW_CAMERA_SCHEDULE and ON_CAMERA_SCHEDULE
+                           are treated as ON. Turning ON always sends FOLLOW_CAMERA_SCHEDULE.
                            No SHC local API needed.
 """
 
@@ -342,7 +345,11 @@ class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch: ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
+    """Switch: ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
+
+    Three-state aware: the API can return FOLLOW_CAMERA_SCHEDULE, ON_CAMERA_SCHEDULE, or ALWAYS_OFF.
+    Both "ON" variants are treated as switch state = True.
+    Turning ON always sends FOLLOW_CAMERA_SCHEDULE.
 
     Uses Bosch cloud API: PUT /v11/video_inputs/{id}/enable_notifications.
     State is read from the /v11/video_inputs response (notificationsEnabledStatus field).
@@ -374,12 +381,15 @@ class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }
 
+    # Values that map to ON state (notifications active in some form)
+    _NOTIFICATIONS_ON_STATES = {"FOLLOW_CAMERA_SCHEDULE", "ON_CAMERA_SCHEDULE"}
+
     @property
     def is_on(self) -> bool | None:
         status = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status")
         if status is None:
             return None
-        return status != "ALWAYS_OFF"
+        return status in self._NOTIFICATIONS_ON_STATES
 
     @property
     def available(self) -> bool:
