@@ -18,7 +18,12 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.4
+ * Version: 1.7.5
+ *
+ * Changes vs 1.7.4:
+ *   - Pan row buttons now use SVG icons (double-chevron left/right, chevron left/right,
+ *     crosshair center) matching the style of all other card buttons.
+ *     Previously used Unicode text characters which rendered inconsistently.
  *
  * Changes vs 1.7.3:
  *   - Fix: initial image load was silently skipped because _hass is null when
@@ -437,10 +442,12 @@ class BoschCameraCard extends HTMLElement {
         .pan-row { display: flex; align-items: center; gap: 6px; }
         .pan-btn {
           background: rgba(255,255,255,.15); border: none; border-radius: 6px;
-          color: white; cursor: pointer; font-size: 16px; padding: 6px 10px; flex: 1;
+          color: white; cursor: pointer; padding: 6px 10px; flex: 1;
           font-family: inherit; -webkit-tap-highlight-color: transparent;
           transition: background 0.15s;
+          display: flex; align-items: center; justify-content: center;
         }
+        .pan-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
         .pan-btn:hover  { background: rgba(255,255,255,.25); }
         .pan-btn:active { background: rgba(255,255,255,.35); }
         .pan-pos { margin-left: auto; font-size: 12px; opacity: .7; color: var(--primary-text-color, #e5e5ea); white-space: nowrap; }
@@ -570,11 +577,33 @@ class BoschCameraCard extends HTMLElement {
 
           <div class="pan-section" id="pan-section" style="display:none">
             <div class="pan-row">
-              <button class="pan-btn" id="pan-full-left"  title="Ganz links">◀◀</button>
-              <button class="pan-btn" id="pan-left"       title="Links">◀</button>
-              <button class="pan-btn" id="pan-center"     title="Mitte" style="font-size:11px">■</button>
-              <button class="pan-btn" id="pan-right"      title="Rechts">▶</button>
-              <button class="pan-btn" id="pan-full-right" title="Ganz rechts">▶▶</button>
+              <button class="pan-btn" id="pan-full-left"  title="Ganz links">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="11 18 5 12 11 6"/><polyline points="18 18 12 12 18 6"/>
+                </svg>
+              </button>
+              <button class="pan-btn" id="pan-left"       title="Links">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="15 18 9 12 15 6"/>
+                </svg>
+              </button>
+              <button class="pan-btn" id="pan-center"     title="Mitte">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+                  <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+                </svg>
+              </button>
+              <button class="pan-btn" id="pan-right"      title="Rechts">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </button>
+              <button class="pan-btn" id="pan-full-right" title="Ganz rechts">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="13 18 19 12 13 6"/><polyline points="6 18 12 12 6 6"/>
+                </svg>
+              </button>
               <span   class="pan-pos" id="pan-position">0°</span>
             </div>
           </div>

@@ -37,7 +37,7 @@ express or implied.
 | Events today count | `sensor` | enabled |
 | WiFi signal strength (%) | `sensor` | enabled |
 | Firmware version | `sensor` | enabled |
-| Ambient light level (%) | `sensor` | enabled |
+| Ambient light level (%) | `sensor` | enabled — environmental brightness as seen by the camera's built-in light sensor (0% = dark/night, 100% = bright daylight) |
 | LED dimmer value (%) | `sensor` | enabled (cameras with LED only, via RCP) |
 | Motion sensitivity | `sensor` | enabled (diagnostic) |
 | Audio alarm state | `sensor` | enabled (diagnostic) |
@@ -399,7 +399,7 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_events_today` | sensor | Number of events today |
 | `sensor.bosch_garten_wifi_signal` | sensor | WiFi signal strength in %; attributes: ssid, ip_address, mac_address, lan_ip_rcp |
 | `sensor.bosch_garten_firmware_version` | sensor | Firmware version string; attributes: up_to_date, hardware_version, product_name_rcp |
-| `sensor.bosch_garten_ambient_light` | sensor | Ambient light level 0–100% (from on-camera light sensor) |
+| `sensor.bosch_garten_ambient_light` | sensor | Environmental brightness as seen by the camera's built-in light sensor (0% = dark/night, 100% = bright daylight). Useful in automations, e.g. turn on garden lights when it drops below 20%. |
 | `sensor.bosch_garten_led_dimmer` | sensor | LED dimmer value 0–100% via RCP (cameras with LED only) |
 | `sensor.bosch_garten_clock_offset` | sensor | Camera clock offset vs HA server in seconds; attributes: offset_seconds, status (in_sync/minor_drift/out_of_sync) |
 | `sensor.bosch_garten_motion_sensitivity` | sensor | Motion detection status and sensitivity level; attributes: enabled, sensitivity |
@@ -759,11 +759,20 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 
 ### Ambient Light Level
 
-`sensor.bosch_garten_ambient_light` — Ambient light level as percentage.
+`sensor.bosch_garten_ambient_light` — Environmental brightness as measured by the camera's built-in photodiode.
 
-- Data source: `GET /v11/video_inputs/{id}/ambient_light_sensor_level` (polled each coordinator tick)
-- API returns a float 0.0–1.0, converted to 0–100%
-- Unit: `%`
+The camera contains a hardware light sensor that it uses internally to decide when to switch to IR night mode and how to adjust exposure. This sensor reads that value and exposes it as a percentage:
+
+- **0%** — Complete darkness / night. Camera is likely in IR (black-and-white) mode.
+- **~10–30%** — Dusk or dawn / dimly lit indoors.
+- **~50–80%** — Overcast daylight or bright indoor lighting.
+- **100%** — Direct bright daylight.
+
+Useful in HA automations — for example, trigger garden lights when ambient light drops below 20%, or send a notification when the camera switches to night mode.
+
+- Data source: `GET /v11/video_inputs/{id}/ambient_light_sensor_level` (polled each slow coordinator tick, ~5 min)
+- API returns a float `0.0–1.0` (e.g. `{"ambientLightSensorLevel": 0.42}`), multiplied by 100 for display
+- Unit: `%`, state class: `measurement`
 
 ### Clock Offset (v2.2.0)
 
