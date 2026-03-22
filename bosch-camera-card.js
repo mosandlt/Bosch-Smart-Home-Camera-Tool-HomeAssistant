@@ -18,7 +18,13 @@
  *   refresh_interval_idle: 300                # seconds (default 300 = 5 min)
  *   refresh_interval_streaming: 2             # seconds (default 2)
  *
- * Version: 1.5.10
+ * Version: 1.5.11
+ *
+ * Changes vs 1.5.10:
+ *   - Added video quality dropdown inside card (select entity):
+ *     Qualität: Auto / Hoch (30 Mbps) / Niedrig (1.9 Mbps)
+ *     Hidden automatically when the select entity doesn't exist or is unavailable.
+ *     Configure with quality_entity: select.bosch_xxx_video_quality in card YAML.
  *
  * Changes vs 1.5.9:
  *   - After panning, automatically refresh snapshot after 2s (camera needs time to move)
@@ -93,6 +99,7 @@ class BoschCameraCard extends HTMLElement {
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       notifications: config.notifications_entity || `switch.${base}_notifications`,
       pan:          config.pan_entity           || `number.${base}_pan_position`,
+      quality:      config.quality_entity       || null,
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
       last_event:   config.last_event_entity    || `sensor.${base}_last_event`,
@@ -349,6 +356,19 @@ class BoschCameraCard extends HTMLElement {
         .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.35); }
         .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.45); font-weight: 500; }
 
+        /* Quality select */
+        .quality-section { padding: 0 12px 12px; }
+        .quality-row { display: flex; align-items: center; gap: 10px; }
+        .quality-label { font-size: 13px; color: var(--secondary-text-color, #8e8e93); flex-shrink: 0; }
+        .quality-select {
+          flex: 1; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12);
+          border-radius: 8px; color: var(--primary-text-color, #e5e5ea); font-size: 13px;
+          padding: 6px 10px; cursor: pointer; font-family: inherit;
+          -webkit-appearance: none; appearance: none;
+        }
+        .quality-select:focus { outline: none; background: rgba(255,255,255,.15); }
+        .quality-select option { background: #2c2c2e; color: #e5e5ea; }
+
         /* Pan controls */
         .pan-section { padding: 0 12px 12px; }
         .pan-row { display: flex; align-items: center; gap: 6px; }
@@ -495,6 +515,22 @@ class BoschCameraCard extends HTMLElement {
               <span   class="pan-pos" id="pan-position">0°</span>
             </div>
           </div>
+
+          <div class="quality-section" id="quality-section" style="display:none">
+            <div class="quality-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   style="width:16px;height:16px;flex-shrink:0;color:var(--secondary-text-color,#8e8e93)">
+                <rect x="2" y="7" width="20" height="15" rx="2"/>
+                <polyline points="17 2 12 7 7 2"/>
+              </svg>
+              <span class="quality-label">Qualität</span>
+              <select class="quality-select" id="quality-select">
+                <option value="Auto">Auto</option>
+                <option value="Hoch (30 Mbps)">Hoch (30 Mbps)</option>
+                <option value="Niedrig (1.9 Mbps)">Niedrig (1.9 Mbps)</option>
+              </select>
+            </div>
+          </div>
       </ha-card>
     `;
 
@@ -551,6 +587,12 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("pan-center")    ?.addEventListener("click", () => setPan(0));
     this.shadowRoot.getElementById("pan-right")     ?.addEventListener("click", () => setPan(getCurPan() + PAN_STEP));
     this.shadowRoot.getElementById("pan-full-right")?.addEventListener("click", () => setPan(120));
+
+    // Quality dropdown
+    const qualitySel = this.shadowRoot.getElementById("quality-select");
+    if (qualitySel) {
+      qualitySel.addEventListener("change", () => this._onQualityChange(qualitySel.value));
+    }
 
     // Load the first image immediately
     this._imgTimestamp = Date.now();
@@ -1066,6 +1108,20 @@ class BoschCameraCard extends HTMLElement {
         if (posEl) posEl.textContent = `${panState.state}°`;
       }
     }
+
+    // Quality section — only visible when quality_entity is configured and available
+    const qualitySection = this.shadowRoot.getElementById("quality-section");
+    const qualitySel     = this.shadowRoot.getElementById("quality-select");
+    if (qualitySection && qualitySel) {
+      const qualityEntityId = ents.quality;
+      const qualityState    = qualityEntityId ? hass.states[qualityEntityId] : null;
+      const hasQuality = qualityState && qualityState.state &&
+                         qualityState.state !== "unavailable" && qualityState.state !== "unknown";
+      qualitySection.style.display = hasQuality ? "" : "none";
+      if (hasQuality && qualitySel.value !== qualityState.state) {
+        qualitySel.value = qualityState.state;
+      }
+    }
   }
 
   _updateToggleBtn(id, entityId, entityState) {
@@ -1120,6 +1176,12 @@ class BoschCameraCard extends HTMLElement {
     // Optimistic update — toggle flips instantly without waiting for HA confirmation
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });
+  }
+
+  _onQualityChange(option) {
+    const entityId = this._entities.quality;
+    if (!entityId || !this._hass) return;
+    this._callService("select", "select_option", { entity_id: entityId, option });
   }
 
   _setOptimistic(entityId, state) {
