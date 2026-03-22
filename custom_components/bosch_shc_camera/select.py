@@ -50,8 +50,7 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity):
         self._cam_id = cam_id
         cam_data = coordinator.data.get(cam_id, {})
         cam_info = cam_data.get("info", {})
-        raw_name = cam_info.get("name") or cam_info.get("id", cam_id)
-        self._cam_title = raw_name.replace("_", " ").title()
+        self._cam_title = cam_info.get("title", cam_id)
         self._entry = entry
         self._attr_name      = f"Bosch {self._cam_title} Video Quality"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_video_quality"
@@ -62,9 +61,10 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity):
         cam_info = cam_data.get("info", {})
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
-            "name": cam_info.get("name", self._cam_id),
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("deviceType", "Smart Home Camera"),
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
     @property
