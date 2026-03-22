@@ -115,6 +115,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # RCP data caches — keyed by cam_id, populated via RCP protocol over cloud proxy
         self._rcp_dimmer_cache: dict[str, int | None] = {}    # LED dimmer value 0–100
         self._rcp_privacy_cache: dict[str, int | None] = {}   # privacy mask byte[1] (1=ON)
+        self._rcp_clock_offset_cache: dict[str, float | None] = {}  # camera clock offset vs server (seconds)
+        self._rcp_lan_ip_cache: dict[str, str | None] = {}          # camera LAN IP via RCP 0x0a36
+        self._rcp_product_name_cache: dict[str, str | None] = {}    # camera product name via RCP 0x0aea
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -963,6 +966,57 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 )
         except Exception as err:
             _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
+
+        # Read camera clock (0x0a0f) — 8 bytes → compute offset vs server time
+        try:
+            import datetime as _dt
+            raw = await self._rcp_read(rcp_base, "0x0a0f", session_id, type_="P_OCTET")
+            if raw and len(raw) >= 8:
+                # RCP clock format: year(2B big-endian) month(1B) day(1B) hour(1B) min(1B) sec(1B) weekday(1B)
+                import struct as _struct2
+                year, month, day, hour, minute, second, _ = _struct2.unpack(">HBBBBBB", raw[:8])
+                cam_dt = _dt.datetime(year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc)
+                server_dt = _dt.datetime.now(_dt.timezone.utc)
+                offset = (cam_dt - server_dt).total_seconds()
+                self._rcp_clock_offset_cache[cam_id] = round(offset, 1)
+                _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
+        except Exception as err:
+            _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
+
+        # Read LAN IP via RCP (0x0a36) — 4 bytes IPv4 or ASCII string
+        try:
+            raw = await self._rcp_read(rcp_base, "0x0a36", session_id, type_="P_OCTET")
+            if raw:
+                if len(raw) == 4:
+                    ip_str = ".".join(str(b) for b in raw)
+                else:
+                    ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
+                self._rcp_lan_ip_cache[cam_id] = ip_str
+                _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
+        except Exception as err:
+            _LOGGER.debug("RCP LAN IP read error for %s: %s", cam_id, err)
+
+        # Read product name via RCP (0x0aea) — null-terminated ASCII
+        try:
+            raw = await self._rcp_read(rcp_base, "0x0aea", session_id, type_="P_OCTET")
+            if raw:
+                name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
+                self._rcp_product_name_cache[cam_id] = name_str
+                _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
+        except Exception as err:
+            _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
+
+    def clock_offset(self, cam_id: str) -> float | None:
+        """Return clock offset in seconds (camera time − server time), or None."""
+        return self._rcp_clock_offset_cache.get(cam_id)
+
+    def rcp_lan_ip(self, cam_id: str) -> str | None:
+        """Return camera LAN IP from RCP 0x0a36, or None."""
+        return self._rcp_lan_ip_cache.get(cam_id)
+
+    def rcp_product_name(self, cam_id: str) -> str | None:
+        """Return camera product name from RCP 0x0aea, or None."""
+        return self._rcp_product_name_cache.get(cam_id)
 
     # ── SHC local API (camera light + privacy mode) ───────────────────────────
     async def _async_shc_request(

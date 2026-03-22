@@ -109,7 +109,7 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.1.0 — added RCP protocol integration: LED dimmer sensor, RCP privacy cross-validation attribute, and fast RCP thumbnail fallback in camera entity.
+> **Integration version:** v2.2.0 — added clock offset sensor, RCP LAN IP attribute on WiFi sensor, RCP product name attribute on firmware sensor.
 
 ![Bosch Camera Card](card-screenshot.png)
 
@@ -335,10 +335,11 @@ For each discovered camera (example: camera named "Garten"):
 | `sensor.bosch_garten_status` | sensor | ONLINE / OFFLINE |
 | `sensor.bosch_garten_last_event` | sensor | Timestamp of latest motion event |
 | `sensor.bosch_garten_events_today` | sensor | Number of events today |
-| `sensor.bosch_garten_wifi_signal` | sensor | WiFi signal strength in %; attributes: ssid, ip_address, mac_address |
-| `sensor.bosch_garten_firmware_version` | sensor | Firmware version string; attributes: up_to_date, hardware_version |
+| `sensor.bosch_garten_wifi_signal` | sensor | WiFi signal strength in %; attributes: ssid, ip_address, mac_address, lan_ip_rcp |
+| `sensor.bosch_garten_firmware_version` | sensor | Firmware version string; attributes: up_to_date, hardware_version, product_name_rcp |
 | `sensor.bosch_garten_ambient_light` | sensor | Ambient light level 0–100% (from on-camera light sensor) |
 | `sensor.bosch_garten_led_dimmer` | sensor | LED dimmer value 0–100% via RCP (cameras with LED only) |
+| `sensor.bosch_garten_clock_offset` | sensor | Camera clock offset vs HA server in seconds; attributes: offset_seconds, status (in_sync/minor_drift/out_of_sync) |
 | `button.bosch_garten_refresh_snapshot` | button | Force immediate data refresh |
 | `switch.bosch_garten_live_stream` | switch | Live stream ON/OFF |
 | `switch.bosch_garten_audio` | switch | Audio ON/OFF in live stream (default: OFF) |
@@ -670,7 +671,7 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 
 ---
 
-## New Sensors (v2.0.0 / v2.1.0)
+## New Sensors (v2.0.0 / v2.1.0 / v2.2.0)
 
 ### WiFi Signal Strength
 
@@ -678,14 +679,14 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 
 - Data source: `GET /v11/video_inputs/{id}/wifiinfo` (polled each coordinator tick)
 - Unit: `%`, device class: `signal_strength`
-- Attributes: `ssid`, `ip_address`, `mac_address`
+- Attributes: `ssid`, `ip_address`, `mac_address`, `lan_ip_rcp` (LAN IP from RCP 0x0a36, if available)
 
 ### Firmware Version
 
 `sensor.bosch_garten_firmware_version` — Firmware version string.
 
 - Data source: `firmwareVersion` field from `GET /v11/video_inputs` (no extra API call)
-- Attributes: `up_to_date` (bool), `hardware_version`
+- Attributes: `up_to_date` (bool), `hardware_version`, `product_name_rcp` (product name from RCP 0x0aea, if available)
 
 ### Ambient Light Level
 
@@ -694,6 +695,16 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 - Data source: `GET /v11/video_inputs/{id}/ambient_light_sensor_level` (polled each coordinator tick)
 - API returns a float 0.0–1.0, converted to 0–100%
 - Unit: `%`
+
+### Clock Offset (v2.2.0)
+
+`sensor.bosch_garten_clock_offset` — camera clock offset vs HA server in seconds.
+
+- Data source: RCP command `0x0a0f` (P_OCTET 8B) via cloud proxy `rcp.xml`
+- Unit: `s` (seconds), state class: `measurement`, entity category: `diagnostic`
+- Attributes: `offset_seconds` (float), `status` (`in_sync` if |offset| < 5s, `minor_drift` if < 60s, `out_of_sync` otherwise)
+- State is `unavailable` if RCP session fails or command not accessible
+- Registered for all cameras
 
 ### LED Dimmer (v2.1.0)
 
@@ -721,7 +732,7 @@ Turning the switch **ON** always sends `FOLLOW_CAMERA_SCHEDULE`.
 
 ---
 
-## RCP Protocol Integration (v2.1.0)
+## RCP Protocol Integration (v2.1.0 / v2.2.0)
 
 ### What is RCP?
 

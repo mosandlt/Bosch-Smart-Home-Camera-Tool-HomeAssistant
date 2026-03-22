@@ -21,6 +21,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.util import dt as dt_util
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -51,6 +52,7 @@ async def async_setup_entry(
             BoschWifiSignalSensor(coordinator, cam_id, config_entry),
             BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
             BoschAmbientLightSensor(coordinator, cam_id, config_entry),
+            BoschClockOffsetSensor(coordinator, cam_id, config_entry),
         ])
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -230,11 +232,15 @@ class BoschWifiSignalSensor(_BoschSensorBase):
     @property
     def extra_state_attributes(self) -> dict:
         wifi = self.coordinator._wifiinfo_cache.get(self._cam_id, {})
-        return {
+        attrs = {
             "ssid":        wifi.get("ssid", ""),
             "ip_address":  wifi.get("ipAddress", ""),
             "mac_address": wifi.get("macAddress", ""),
         }
+        lan_ip_rcp = self.coordinator.rcp_lan_ip(self._cam_id)
+        if lan_ip_rcp:
+            attrs["lan_ip_rcp"] = lan_ip_rcp
+        return attrs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -271,10 +277,14 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
         up_to_date = info.get("upToDate")
         if up_to_date is None:
             up_to_date = info.get("featureSupport", {}).get("upToDate")
-        return {
+        attrs = {
             "up_to_date": up_to_date,
             "hardware_version": info.get("hardwareVersion", ""),
         }
+        product_name = self.coordinator.rcp_product_name(self._cam_id)
+        if product_name:
+            attrs["product_name_rcp"] = product_name
+        return attrs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,3 +346,46 @@ class BoschLedDimmerSensor(_BoschSensorBase):
             self.coordinator.last_update_success
             and self.coordinator._rcp_dimmer_cache.get(self._cam_id) is not None
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschClockOffsetSensor(_BoschSensorBase):
+    """Clock offset between camera internal clock and HA server (seconds)."""
+
+    _attr_icon = "mdi:clock-alert-outline"
+    _attr_native_unit_of_measurement = "s"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Clock Offset"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_clock_offset"
+
+    @property
+    def native_value(self):
+        return self.coordinator.clock_offset(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.clock_offset(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        val = self.coordinator.clock_offset(self._cam_id)
+        if val is None:
+            return {}
+        abs_offset = abs(val)
+        if abs_offset < 5:
+            status = "in_sync"
+        elif abs_offset < 60:
+            status = "minor_drift"
+        else:
+            status = "out_of_sync"
+        return {
+            "offset_seconds": val,
+            "status": status,
+        }
