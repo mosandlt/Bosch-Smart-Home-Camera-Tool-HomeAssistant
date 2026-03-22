@@ -77,8 +77,11 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Force an immediate data refresh and image update for this camera."""
         _LOGGER.debug("Snapshot refresh triggered for %s", self._cam_title)
-        await self.coordinator.async_request_refresh()
-        # Also refresh the image — data refresh alone doesn't update the image
+        # Fire coordinator refresh in background — do NOT await it.
+        # async_request_refresh() awaits the full coordinator tick (can take 6-22 s);
+        # blocking here makes the button feel frozen in the browser/card.
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        # Refresh the camera image immediately (parallel, faster than coordinator tick)
         cam = self.coordinator._camera_entities.get(self._cam_id)
         if cam:
-            self.hass.async_create_task(cam._async_trigger_image_refresh(delay=1))
+            self.hass.async_create_task(cam._async_trigger_image_refresh(delay=0))

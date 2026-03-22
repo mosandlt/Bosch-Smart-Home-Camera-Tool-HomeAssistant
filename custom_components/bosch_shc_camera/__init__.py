@@ -1640,9 +1640,12 @@ def _register_services(hass: HomeAssistant) -> None:
         """Force an immediate refresh for all cameras (data + images)."""
         for edata in hass.data.get(DOMAIN, {}).values():
             if coord := edata.get("coordinator"):
-                await coord.async_request_refresh()
+                # Fire coordinator refresh in background — do NOT await it.
+                # async_request_refresh() awaits the full coordinator tick which can
+                # take 6-22 s; blocking here freezes the card until the tick finishes.
+                hass.async_create_task(coord.async_request_refresh())
                 for cam_id, cam in coord._camera_entities.items():
-                    hass.async_create_task(cam._async_trigger_image_refresh(delay=1))
+                    hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
 
     async def handle_open_live_connection(call: ServiceCall) -> None:
         """Try to open a live proxy connection for a specific camera."""

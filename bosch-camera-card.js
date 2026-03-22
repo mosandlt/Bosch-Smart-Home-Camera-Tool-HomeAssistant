@@ -18,7 +18,7 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.0
+ * Version: 1.7.1
  *
  * Changes vs 1.6.0:
  *   - Event-driven snapshot refresh: when sensor.last_event changes (new motion/audio
@@ -907,10 +907,11 @@ class BoschCameraCard extends HTMLElement {
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
 
     const startPoll = (prevBytes) => {
-      // First poll after 3s — REMOTE cameras usually have a fresh image by then
+      // First poll after 1.5s — background refresh completes in ~1-3s; polling sooner
+      // reduces visible delay after button press (was 3s, now 1.5s)
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
-        () => this._pollSnapshotImage(prevBytes, startTime), 3000
+        () => this._pollSnapshotImage(prevBytes, startTime), 1500
       );
     };
 
