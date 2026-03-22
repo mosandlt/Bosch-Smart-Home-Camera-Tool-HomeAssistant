@@ -53,6 +53,7 @@ express or implied.
 | Motion detection switch | `switch` | enabled (cloud API — no SHC needed) |
 | Record sound switch | `switch` | enabled (cloud API — no SHC needed) |
 | Pan position (360 camera) | `number` | enabled (−120° to +120°, auto-detected for CAMERA_360) |
+| Stream quality | `select` | enabled (Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps) |
 | Auto-download events to folder | background | optional (disabled by default) |
 | **Live stream — 30fps H.264 + optional AAC audio** | `camera` | via Live Stream switch |
 | Live snapshot (current image, ~1.5s) | `camera` | via snap.jpg proxy |
@@ -116,7 +117,15 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.4.0 — motion detection sensor & switch, audio alarm sensor, last event type sensor, movement/audio event counters, record sound switch.
+> **Integration version:** v2.6.0 — stream quality select entity (Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps), runtime quality preference applied to all PUT /connection calls.
+
+## What's New in v2.6.0
+
+- **Stream Quality select entity** (`select.bosch_<cam>_video_quality`) — choose between Auto (inst=2, ~7.5 Mbps), Hoch (inst=1, ~30 Mbps), and Niedrig (inst=4, ~1.9 Mbps) at runtime.
+- Quality preference is applied to all `PUT /connection` calls: live stream, background snapshot, and RCP proxy.
+- When the Live Stream switch is ON and quality changes, the stream reconnects automatically.
+
+> **Previous version:** v2.4.0 — motion detection sensor & switch, audio alarm sensor, last event type sensor, movement/audio event counters, record sound switch.
 
 ## What's New in v2.4.0
 
@@ -740,6 +749,20 @@ The following endpoints were found via mitmproxy traffic analysis of the officia
 - Unit: `%` (0–100), state class: `measurement`
 - Only created for cameras with `featureSupport.light = True`
 - State is `unavailable` if RCP session fails (camera OFFLINE or proxy expired)
+
+---
+
+## Video Quality — Stream Quality Select (v2.6.0)
+
+The `select.bosch_<cam>_video_quality` entity lets you choose the RTSPS stream quality at runtime without restarting the integration. The preference is applied to the next `PUT /connection` call (live stream reconnect, background snapshot refresh, or RCP proxy connection).
+
+| Option | `highQualityVideo` | `inst` | Approx. bitrate | Use when |
+|--------|-------------------|--------|----------------|----------|
+| **Auto** (default) | `false` | `2` | ~7.5 Mbps | Balanced — matches iOS app default |
+| **Hoch (30 Mbps)** | `true` | `1` | ~30 Mbps | Maximum quality, primary encoder stream |
+| **Niedrig (1.9 Mbps)** | `false` | `4` | ~1.9 Mbps | Slow network / remote access |
+
+When the Live Stream switch is already ON and you change the quality, the integration automatically reconnects the stream with the new parameters and re-registers the go2rtc source.
 
 ---
 

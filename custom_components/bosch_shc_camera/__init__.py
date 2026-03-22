@@ -39,7 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["camera", "sensor", "button", "switch", "number"]
+ALL_PLATFORMS = ["camera", "sensor", "button", "switch", "number", "select"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 # REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
@@ -121,6 +121,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._rcp_lan_ip_cache: dict[str, str | None] = {}          # camera LAN IP via RCP 0x0a36
         self._rcp_product_name_cache: dict[str, str | None] = {}    # camera product name via RCP 0x0aea
         self._rcp_bitrate_cache: dict[str, list[int]] = {}          # bitrate ladder kbps from 0x0c81
+        # Video quality preference — keyed by cam_id, runtime only (not persisted)
+        # Values: "auto" | "high" | "low"
+        self._quality_preference: dict[str, str] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -422,7 +425,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             async with async_timeout.timeout(10):
                                 async with rcp_session.put(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
-                                    json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
+                                    json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id_key)[0]},
                                     headers=rcp_headers,
                                 ) as conn_resp:
                                     if conn_resp.status in (200, 201):
@@ -505,12 +508,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
         try:
+            hq, inst = self.get_quality_params(cam_id)
             for type_val in LIVE_TYPE_CANDIDATES:
                 try:
                     async with async_timeout.timeout(10):
                         async with session.put(
                             url,
-                            json={"type": type_val, "highQualityVideo": self.options.get("high_quality_video", False)},
+                            json={"type": type_val, "highQualityVideo": hq},
                             headers=headers,
                         ) as resp:
                             body = await resp.text()
@@ -534,7 +538,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                        f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 elif result.get("hash"):
@@ -545,7 +549,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                        f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
@@ -602,7 +606,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             async with async_timeout.timeout(10):
                 async with session.put(
                     url,
-                    json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
+                    json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
                     headers=headers,
                 ) as resp:
                     if resp.status not in (200, 201):
@@ -630,7 +634,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         async with async_timeout.timeout(10):
                             async with session.put(
                                 url,
-                                json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
+                                json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
                                 headers=headers,
                             ) as resp2:
                                 if resp2.status not in (200, 201):
@@ -755,7 +759,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         try:
             async with async_timeout.timeout(15):
                 async with session.put(
-                    url, json={"type": "LOCAL", "highQualityVideo": self.options.get("high_quality_video", False)}, headers=headers
+                    url, json={"type": "LOCAL", "highQualityVideo": self.get_quality_params(cam_id)[0]}, headers=headers
                 ) as resp:
                     if resp.status not in (200, 201):
                         _LOGGER.debug(
@@ -1077,6 +1081,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def rcp_bitrate_ladder(self, cam_id: str) -> list[int]:
         """Return bitrate ladder (kbps) from RCP 0x0c81, or empty list."""
         return self._rcp_bitrate_cache.get(cam_id, [])
+
+    def get_quality(self, cam_id: str) -> str:
+        """Return current quality preference: 'auto', 'high', or 'low'."""
+        return self._quality_preference.get(cam_id, "auto")
+
+    def set_quality(self, cam_id: str, quality: str) -> None:
+        """Set quality preference. quality must be 'auto', 'high', or 'low'."""
+        self._quality_preference[cam_id] = quality
+
+    def get_quality_params(self, cam_id: str) -> tuple[bool, int]:
+        """Return (highQualityVideo: bool, inst: int) for current quality preference."""
+        q = self.get_quality(cam_id)
+        if q == "high":
+            return True, 1    # primary encoder, max quality (~30 Mbps)
+        elif q == "low":
+            return False, 4   # low-bandwidth stream (~1.9 Mbps)
+        else:  # "auto"
+            return False, 2   # iOS default, balanced (~7.5 Mbps)
 
     def motion_settings(self, cam_id: str) -> dict:
         """Return motion detection settings dict, or empty dict."""
