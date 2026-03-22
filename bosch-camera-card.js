@@ -18,7 +18,7 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.1
+ * Version: 1.7.2
  *
  * Changes vs 1.6.0:
  *   - Event-driven snapshot refresh: when sensor.last_event changes (new motion/audio
@@ -132,6 +132,8 @@ class BoschCameraCard extends HTMLElement {
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
+    // Pre-load hls.js in the background so it's cached when the user starts the stream
+    this._loadHlsJs().catch(() => {});
   }
 
   // ── HA state updates ──────────────────────────────────────────────────────
@@ -845,7 +847,7 @@ class BoschCameraCard extends HTMLElement {
     } catch (e) {
       if (attempt < 3) {
         // Retry — go2rtc may still be starting the RTSP session
-        setTimeout(() => this._startLiveVideo(attempt + 1), 2000);
+        setTimeout(() => this._startLiveVideo(attempt + 1), 1000);
       } else {
         // Fall back to fast snapshot polling
         console.warn("bosch-camera-card: HLS stream not available, using snapshot fallback", e);
@@ -907,11 +909,10 @@ class BoschCameraCard extends HTMLElement {
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}`;
 
     const startPoll = (prevBytes) => {
-      // First poll after 1.5s — background refresh completes in ~1-3s; polling sooner
-      // reduces visible delay after button press (was 3s, now 1.5s)
+      // First poll after 1s — warm proxy cache: bg refresh ~0.5s so 1s is enough
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
-        () => this._pollSnapshotImage(prevBytes, startTime), 1500
+        () => this._pollSnapshotImage(prevBytes, startTime), 1000
       );
     };
 
@@ -923,8 +924,8 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _pollSnapshotImage(prevBytes, startTime) {
-    const TIMEOUT  = 26000;
-    const INTERVAL = 3000;
+    const TIMEOUT  = 15000;
+    const INTERVAL = 1000;
     const elapsed  = Date.now() - startTime;
 
     if (!this._hass) { this._finishSnapshot(); return; }
@@ -1043,7 +1044,7 @@ class BoschCameraCard extends HTMLElement {
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._scheduleImageLoad(6000);
+      this._scheduleImageLoad(2000);
       this._startRefreshTimer();
     }
     this._lastStreaming = isStreaming;
@@ -1075,8 +1076,8 @@ class BoschCameraCard extends HTMLElement {
     if (curEventVal && curEventVal !== "unavailable" && curEventVal !== "unknown"
         && this._lastEventState !== null && curEventVal !== this._lastEventState
         && !this._liveVideoActive) {
-      // New event detected — refresh image after short delay (HA needs ~2s to fetch fresh snap)
-      this._scheduleImageLoad(2500);
+      // New event detected — refresh image after short delay (HA needs ~1s to fetch fresh snap)
+      this._scheduleImageLoad(1500);
     }
     this._lastEventState = curEventVal || this._lastEventState;
     let lastEventStr = "—";
@@ -1144,7 +1145,7 @@ class BoschCameraCard extends HTMLElement {
     // Privacy just turned OFF → fetch a fresh image immediately
     if (this._lastPrivacy === true && !privacyOn) {
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._scheduleImageLoad(3000);
+      this._scheduleImageLoad(1500);
     }
     this._lastPrivacy = privacyOn;
 

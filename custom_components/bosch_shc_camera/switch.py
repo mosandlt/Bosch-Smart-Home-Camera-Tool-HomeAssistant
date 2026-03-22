@@ -174,7 +174,7 @@ class BoschLiveStreamSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
         await self.coordinator._unregister_go2rtc_stream(self._cam_id)
-        await self.coordinator.async_request_refresh()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ class BoschAudioSwitch(CoordinatorEntity, SwitchEntity):
             )
             await self.coordinator.try_live_connection(self._cam_id)
         else:
-            await self.coordinator.async_request_refresh()
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -486,7 +486,7 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
             "motion",
             {"enabled": True, "motionAlarmConfiguration": sensitivity},
         )
-        await self.coordinator.async_request_refresh()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_turn_off(self, **kwargs):
         settings = self.coordinator.motion_settings(self._cam_id)
@@ -496,7 +496,7 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
             "motion",
             {"enabled": False, "motionAlarmConfiguration": sensitivity},
         )
-        await self.coordinator.async_request_refresh()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -526,10 +526,10 @@ class BoschRecordSoundSwitch(_BoschSwitchBase):
         await self.coordinator.async_put_camera(
             self._cam_id, "recording_options", {"recordSound": True}
         )
-        await self.coordinator.async_request_refresh()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_turn_off(self, **kwargs):
         await self.coordinator.async_put_camera(
             self._cam_id, "recording_options", {"recordSound": False}
         )
-        await self.coordinator.async_request_refresh()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
