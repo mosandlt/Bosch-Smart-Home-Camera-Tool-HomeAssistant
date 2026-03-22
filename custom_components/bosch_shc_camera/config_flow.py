@@ -221,7 +221,8 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
             force_relogin = user_input.pop("force_relogin", False)
 
             for k in ["enable_snapshots", "enable_sensors",
-                      "enable_snapshot_button", "enable_auto_download"]:
+                      "enable_snapshot_button", "enable_auto_download",
+                      "high_quality_video"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -286,6 +287,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "shc_key_path",
                     default=str(opts.get("shc_key_path", "")),
                 ): str,
+                vol.Optional(
+                    "high_quality_video",
+                    default=bool(opts.get("high_quality_video", False)),
+                ): bool,
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={

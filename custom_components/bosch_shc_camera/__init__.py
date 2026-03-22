@@ -61,6 +61,7 @@ DEFAULT_OPTIONS = {
     "shc_ip":        "",   # e.g. 192.168.20.4
     "shc_cert_path": "",   # path to client cert PEM (e.g. /config/claude_cert.pem)
     "shc_key_path":  "",   # path to client key PEM  (e.g. /config/claude_key.pem)
+    "high_quality_video": False,  # True = highQualityVideo: True in PUT /connection
 }
 
 
@@ -118,6 +119,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._rcp_clock_offset_cache: dict[str, float | None] = {}  # camera clock offset vs server (seconds)
         self._rcp_lan_ip_cache: dict[str, str | None] = {}          # camera LAN IP via RCP 0x0a36
         self._rcp_product_name_cache: dict[str, str | None] = {}    # camera product name via RCP 0x0aea
+        self._rcp_bitrate_cache: dict[str, list[int]] = {}          # bitrate ladder kbps from 0x0c81
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -378,7 +380,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             async with async_timeout.timeout(10):
                                 async with rcp_session.put(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
-                                    json={"type": "REMOTE", "highQualityVideo": False},
+                                    json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
                                     headers=rcp_headers,
                                 ) as conn_resp:
                                     if conn_resp.status in (200, 201):
@@ -466,7 +468,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     async with async_timeout.timeout(10):
                         async with session.put(
                             url,
-                            json={"type": type_val, "highQualityVideo": False},
+                            json={"type": type_val, "highQualityVideo": self.options.get("high_quality_video", False)},
                             headers=headers,
                         ) as resp:
                             body = await resp.text()
@@ -490,7 +492,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=3600"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 elif result.get("hash"):
@@ -501,7 +503,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
                                     result["rtspsUrl"] = (
                                         f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=60"
+                                        f"?inst=2{audio_param}&fmtp=1&maxSessionDuration=3600"
                                     )
                                     result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
@@ -558,7 +560,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             async with async_timeout.timeout(10):
                 async with session.put(
                     url,
-                    json={"type": "REMOTE", "highQualityVideo": False},
+                    json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
                     headers=headers,
                 ) as resp:
                     if resp.status not in (200, 201):
@@ -586,7 +588,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         async with async_timeout.timeout(10):
                             async with session.put(
                                 url,
-                                json={"type": "REMOTE", "highQualityVideo": False},
+                                json={"type": "REMOTE", "highQualityVideo": self.options.get("high_quality_video", False)},
                                 headers=headers,
                             ) as resp2:
                                 if resp2.status not in (200, 201):
@@ -711,7 +713,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         try:
             async with async_timeout.timeout(15):
                 async with session.put(
-                    url, json={"type": "LOCAL", "highQualityVideo": False}, headers=headers
+                    url, json={"type": "LOCAL", "highQualityVideo": self.options.get("high_quality_video", False)}, headers=headers
                 ) as resp:
                     if resp.status not in (200, 201):
                         _LOGGER.debug(
@@ -1006,6 +1008,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
 
+        # Read bitrate ladder (0x0c81) — series of big-endian uint32 kbps values
+        try:
+            import struct as _struct3
+            raw = await self._rcp_read(rcp_base, "0x0c81", session_id, type_="P_OCTET")
+            if raw and len(raw) >= 4:
+                n = len(raw) // 4
+                ladder = [_struct3.unpack(">I", raw[i*4:(i+1)*4])[0] for i in range(n)]
+                self._rcp_bitrate_cache[cam_id] = ladder
+                _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
+        except Exception as err:
+            _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
+
     def clock_offset(self, cam_id: str) -> float | None:
         """Return clock offset in seconds (camera time − server time), or None."""
         return self._rcp_clock_offset_cache.get(cam_id)
@@ -1017,6 +1031,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def rcp_product_name(self, cam_id: str) -> str | None:
         """Return camera product name from RCP 0x0aea, or None."""
         return self._rcp_product_name_cache.get(cam_id)
+
+    def rcp_bitrate_ladder(self, cam_id: str) -> list[int]:
+        """Return bitrate ladder (kbps) from RCP 0x0c81, or empty list."""
+        return self._rcp_bitrate_cache.get(cam_id, [])
 
     # ── SHC local API (camera light + privacy mode) ───────────────────────────
     async def _async_shc_request(

@@ -240,6 +240,10 @@ class BoschWifiSignalSensor(_BoschSensorBase):
         lan_ip_rcp = self.coordinator.rcp_lan_ip(self._cam_id)
         if lan_ip_rcp:
             attrs["lan_ip_rcp"] = lan_ip_rcp
+        ladder = self.coordinator.rcp_bitrate_ladder(self._cam_id)
+        if ladder:
+            attrs["bitrate_ladder_kbps"] = ladder
+            attrs["max_bitrate_kbps"] = max(ladder)
         return attrs
 
 

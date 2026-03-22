@@ -109,7 +109,17 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.2.0 — added clock offset sensor, RCP LAN IP attribute on WiFi sensor, RCP product name attribute on firmware sensor.
+> **Integration version:** v2.3.0 — maxSessionDuration fix (60→3600), `high_quality_video` config option, RCP YUV422 fallback snapshot, `stream_url` camera attribute, bitrate ladder on WiFi sensor.
+
+## What's New in v2.3.0
+
+- **maxSessionDuration fix (60→3600):** go2rtc now reconnects the RTSPS stream every hour instead of every minute, eliminating 1-minute stream interruptions.
+- **`high_quality_video` config option:** New boolean in Settings → Integrations → Configure. Passes `highQualityVideo: true` to all `PUT /connection` requests when enabled (default: false).
+- **Better RCP snapshot fallback:** `_async_rcp_thumbnail` now tries `0x0c98` (320×180 YUV422 raw frame, converted to JPEG via numpy+Pillow) if `0x099e` (160×90 JPEG) is unavailable.
+- **`stream_url` camera attribute:** The camera entity (`camera.bosch_garten` etc.) now exposes a `stream_url` attribute containing the active RTSPS URL when a live connection is open.
+- **Bitrate ladder on WiFi sensor:** `sensor.bosch_garten_wifi_signal` now shows `bitrate_ladder_kbps` and `max_bitrate_kbps` attributes from RCP command `0x0c81`.
+
+> **Previous version:** v2.2.0 — added clock offset sensor, RCP LAN IP attribute on WiFi sensor, RCP product name attribute on firmware sensor.
 
 ![Bosch Camera Card](card-screenshot.png)
 

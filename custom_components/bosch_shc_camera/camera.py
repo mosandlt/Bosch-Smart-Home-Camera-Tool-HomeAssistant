@@ -9,7 +9,7 @@ a stream_source (rtsps:// URL on port 443) for full 30fps H.264 + AAC audio.
 
 Stream URL format:
   rtsps://proxy-NN.live.cbs.boschsecurity.com:443/{hash}/rtsp_tunnel
-    ?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60
+    ?inst=2&enableaudio=1&fmtp=1&maxSessionDuration=3600
 
 Note: HA's stream component must support rtsps:// (RTSP over TLS).
 The stream requires -tls_verify 0 / insecure TLS (Bosch private CA).
@@ -269,7 +269,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         latest   = events[0] if events else {}
         live     = cam_data.get("live", {})
         rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
-        return {
+        attrs = {
             "camera_id":       self._cam_id,
             "status":          cam_data.get("status", "UNKNOWN"),
             "streaming_state": "active" if self.is_streaming else "idle",
@@ -281,6 +281,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             "live_rtsps":      rtsps_url,
             "live_proxy":      live.get("proxyUrl", ""),
         }
+        if rtsps_url:
+            attrs["stream_url"] = rtsps_url
+        return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
     async def stream_source(self) -> str | None:
@@ -305,15 +308,42 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         return f"{url}#insecure"
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────
+    def _yuv422_to_jpeg(self, data: bytes) -> bytes | None:
+        """Convert a 320×180 YUV422 (YUYV) raw frame to JPEG bytes using numpy+Pillow."""
+        try:
+            import numpy as np
+            from PIL import Image
+            import io
+            if len(data) != 320 * 180 * 2:
+                return None
+            # YUYV interleaved: Y0 U Y1 V per 4 bytes = 2 pixels
+            raw = np.frombuffer(data, dtype=np.uint8).reshape(180, 320, 2)
+            y = raw[:, :, 0].astype(np.float32)
+            # U/V are at alternating positions in the second byte channel
+            uv_plane = raw[:, :, 1].astype(np.float32)
+            # U at even columns, V at odd columns
+            u_half = uv_plane[:, 0::2]  # shape (180, 160)
+            v_half = uv_plane[:, 1::2]  # shape (180, 160)
+            u = np.repeat(u_half, 2, axis=1) - 128.0  # (180, 320)
+            v = np.repeat(v_half, 2, axis=1) - 128.0  # (180, 320)
+            r = np.clip(y + 1.402 * v, 0, 255).astype(np.uint8)
+            g = np.clip(y - 0.344136 * u - 0.714136 * v, 0, 255).astype(np.uint8)
+            b = np.clip(y + 1.772 * u, 0, 255).astype(np.uint8)
+            rgb = np.stack([r, g, b], axis=2)
+            img = Image.fromarray(rgb, mode='RGB')
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=85)
+            return buf.getvalue()
+        except Exception:
+            return None
+
     async def _async_rcp_thumbnail(self) -> bytes | None:
-        """Fetch a fast 160×90 JPEG thumbnail via RCP command 0x099e.
+        """Fetch a thumbnail via RCP — tries 160×90 JPEG (0x099e) first,
+        falls back to 320×180 YUV422 raw frame (0x0c98) converted to JPEG.
 
         Uses the cached live proxy connection (if available) to reach the
-        camera's RCP endpoint. The thumbnail is already valid JPEG (~2–3 KB)
-        and is returned directly as the camera image.
-
-        This is much faster than snap.jpg (~instant vs ~1.5 s) and is used as
-        a fallback when the proxy snap.jpg fetch fails.
+        camera's RCP endpoint. Much faster than snap.jpg (~instant vs ~1.5 s)
+        and used as a fallback when the proxy snap.jpg fetch fails.
         """
         live = self.coordinator._live_connections.get(self._cam_id, {})
         urls = live.get("urls", [])
@@ -332,18 +362,34 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             return None
 
         rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
+
+        # Try 160×90 JPEG first (fast)
         raw = await self.coordinator._rcp_read(rcp_base, "0x099e", session_id)
-        if raw and len(raw) > 100:
-            # Verify JPEG magic bytes (FFD8)
-            if raw[:2] == b"\xff\xd8":
-                _LOGGER.debug(
-                    "%s: Using RCP thumbnail fallback (160x90) — %d bytes",
-                    self._attr_name, len(raw),
-                )
-                return raw
+        if raw and raw[:2] == b"\xff\xd8":
             _LOGGER.debug(
-                "%s: RCP thumbnail: unexpected format (first bytes: %s)",
-                self._attr_name, raw[:4].hex(),
+                "%s: Using RCP thumbnail fallback (160x90) — %d bytes",
+                self._attr_name, len(raw),
+            )
+            return raw
+
+        # Fallback: 320×180 YUV422 raw frame → convert to JPEG
+        raw = await self.coordinator._rcp_read(rcp_base, "0x0c98", session_id)
+        if raw and len(raw) == 115200:
+            jpeg = self._yuv422_to_jpeg(raw)
+            if jpeg:
+                _LOGGER.debug(
+                    "%s: Using RCP YUV422 fallback (320x180) — %d bytes → %d bytes JPEG",
+                    self._attr_name, len(raw), len(jpeg),
+                )
+                return jpeg
+            _LOGGER.debug(
+                "%s: RCP YUV422 conversion failed (0x0c98, %d bytes)",
+                self._attr_name, len(raw),
+            )
+        elif raw:
+            _LOGGER.debug(
+                "%s: RCP 0x0c98 unexpected size: %d bytes (expected 115200)",
+                self._attr_name, len(raw),
             )
         return None
 
