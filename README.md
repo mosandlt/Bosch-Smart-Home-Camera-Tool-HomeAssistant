@@ -117,7 +117,16 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.6.0 — stream quality select entity (Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps), runtime quality preference applied to all PUT /connection calls.
+> **Integration version:** v2.7.0 — RCP 0x099e (320×180 JPEG) now used as primary idle thumbnail before falling back to snap.jpg; card v1.6.0 uses Page Visibility API for smart refresh intervals.
+
+## What's New in v2.7.0 + Card v1.6.0
+
+- **Smarter idle snapshot (HA integration):** When fetching a background thumbnail, the integration now tries RCP command `0x099e` first — returning a 320×180 JPEG directly from the camera via the cloud proxy. This is faster and lower bandwidth than the previous snap.jpg approach. Falls back to snap.jpg if RCP is unavailable. Resolution confirmed via RCP `0x0a88` (reads `320×180`).
+- **Page Visibility API (Card):** The card now uses the browser's `visibilitychange` event to adjust the snapshot refresh interval automatically:
+  - **60 s** when the HA dashboard tab is **visible** (was configurable, default 300 s)
+  - **1800 s (30 min)** when the tab is **in the background** — saves bandwidth and CPU
+  - **Immediate refresh** when the tab comes back to the foreground
+  - Removes the `refresh_interval_idle` card YAML option (no longer needed)
 
 ## What's New in v2.6.0
 
@@ -208,13 +217,13 @@ camera_entity: camera.bosch_garten
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 title: Garten                          # optional — overrides entity friendly name
-refresh_interval_idle: 300             # seconds between snapshots when stream is OFF (default: 300 = 5 min)
 refresh_interval_streaming: 2          # seconds between snapshots when stream ON + Ton OFF (default: 2)
+# idle refresh is automatic: 60 s when tab visible, 1800 s in background (Page Visibility API)
 ```
 
 > **`refresh_interval_streaming`** only applies when the Live Stream switch is ON and **Ton is OFF** (snapshot polling mode).
 > When Ton is ON, the card shows live HLS video — no snapshot polling.
-> **`refresh_interval_idle`** applies when the Live Stream switch is OFF.
+> **Idle refresh** is now automatic via the Page Visibility API: 60 s when the tab is visible, 1800 s in the background. The old `refresh_interval_idle` option is removed.
 
 **With explicit entity IDs** (if auto-derived names don't match):
 ```yaml

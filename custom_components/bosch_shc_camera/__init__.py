@@ -622,6 +622,34 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         return None
                     proxy_url = f"https://{urls[0]}/snap.jpg"
 
+            # ── RCP 0x099e: 320×180 JPEG (faster and lower bandwidth than snap.jpg) ──
+            # 0x0a88 READ confirms the camera's snapshot resolution is 320×180.
+            # 0x099e returns a JPEG at that resolution via the proxy RCP endpoint.
+            # Falls back to snap.jpg below if RCP session or read fails.
+            parts = urls[0].split("/", 1)
+            if len(parts) == 2:
+                proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
+                rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
+                try:
+                    session_id = await self._rcp_session(proxy_host_rcp, proxy_hash_rcp)
+                    if session_id:
+                        raw = await self._rcp_read(rcp_base, "0x099e", session_id)
+                        if raw and raw[:2] == b"\xff\xd8":
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
+                                len(raw), cam_id,
+                            )
+                            return raw
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
+                            cam_id,
+                        )
+                except Exception as _rcp_err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "fetch_live_snapshot: RCP error for %s: %s — using snap.jpg",
+                        cam_id, _rcp_err,
+                    )
+
             async with async_timeout.timeout(10):
                 async with session.get(proxy_url) as snap_resp:
                     ct = snap_resp.headers.get("Content-Type", "")

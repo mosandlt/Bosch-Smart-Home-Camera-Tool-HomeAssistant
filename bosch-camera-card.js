@@ -15,10 +15,20 @@
  *   type: custom:bosch-camera-card
  *   camera_entity: camera.bosch_garten        # required
  *   title: Garten                             # optional
- *   refresh_interval_idle: 300                # seconds (default 300 = 5 min)
- *   refresh_interval_streaming: 2             # seconds (default 2)
+ *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
+ *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.5.11
+ * Version: 1.6.0
+ *
+ * Changes vs 1.5.11:
+ *   - Page Visibility API for smart refresh intervals:
+ *     Snapshot refreshes every 60 s when the HA dashboard is visible.
+ *     Drops to every 1800 s (30 min) when the browser tab goes to background.
+ *     Immediately refreshes when the tab returns to foreground.
+ *     Replaces the old configurable refresh_interval_idle (now removed).
+ *   - HA integration (v2.7.0): async_fetch_live_snapshot tries RCP 0x099e
+ *     (320×180 JPEG via cloud proxy) before falling back to snap.jpg.
+ *     Faster and lower bandwidth for idle thumbnail updates.
  *
  * Changes vs 1.5.10:
  *   - Added video quality dropdown inside card (select entity):
@@ -74,6 +84,13 @@ class BoschCameraCard extends HTMLElement {
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
+    this._visibilityHandler = null;  // bound visibilitychange listener
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  connectedCallback() {
+    this._visibilityHandler = () => this._onVisibilityChange();
+    document.addEventListener("visibilitychange", this._visibilityHandler);
   }
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -84,8 +101,8 @@ class BoschCameraCard extends HTMLElement {
     this._config = {
       camera_entity:              config.camera_entity,
       title:                      config.title || null,
-      refresh_interval_idle:      config.refresh_interval_idle      ?? 300,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
+      // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
     this._storageKey = `bosch_cam_${config.camera_entity}`;
@@ -118,6 +135,10 @@ class BoschCameraCard extends HTMLElement {
 
   disconnectedCallback() {
     this._stopRefreshTimer();
+    if (this._visibilityHandler) {
+      document.removeEventListener("visibilitychange", this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
     if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
@@ -129,14 +150,28 @@ class BoschCameraCard extends HTMLElement {
     this._stopRefreshTimer();
     // No snapshot polling when live video is playing
     if (this._liveVideoActive) return;
-    const interval = this._isStreaming()
-      ? this._config.refresh_interval_streaming
-      : this._config.refresh_interval_idle;
-
+    let interval;
+    if (this._isStreaming()) {
+      // Snapshot-mode streaming (Stream ON + Ton OFF): fast polling
+      interval = this._config.refresh_interval_streaming;
+    } else if (document.visibilityState === "hidden") {
+      interval = 1800; // 30 min — page is in background, save resources
+    } else {
+      interval = 60;   // 1 min — page is visible
+    }
     this._refreshTimer = setInterval(() => {
       this._imgTimestamp = Date.now();
       this._updateImage();
     }, interval * 1000);
+  }
+
+  _onVisibilityChange() {
+    if (document.visibilityState === "visible" && !this._liveVideoActive) {
+      // Page just came to foreground — refresh immediately
+      this._scheduleImageLoad(0);
+    }
+    // Restart timer with the correct interval (60 s or 1800 s)
+    this._startRefreshTimer();
   }
 
   _stopRefreshTimer() {

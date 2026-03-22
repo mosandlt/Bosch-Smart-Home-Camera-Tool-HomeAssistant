@@ -338,9 +338,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             return None
 
     async def _async_rcp_thumbnail(self) -> bytes | None:
-        """Fetch a thumbnail via RCP — tries 160×90 JPEG (0x099e) first,
+        """Fetch a thumbnail via RCP — tries 320×180 JPEG (0x099e) first,
         falls back to 320×180 YUV422 raw frame (0x0c98) converted to JPEG.
 
+        Resolution confirmed via RCP 0x0a88 READ (returns 0x00000140/0x000000B4 = 320×180).
         Uses the cached live proxy connection (if available) to reach the
         camera's RCP endpoint. Much faster than snap.jpg (~instant vs ~1.5 s)
         and used as a fallback when the proxy snap.jpg fetch fails.
@@ -363,11 +364,11 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
         rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
 
-        # Try 160×90 JPEG first (fast)
+        # Try 320×180 JPEG via RCP 0x099e (resolution confirmed by 0x0a88 = 320×180)
         raw = await self.coordinator._rcp_read(rcp_base, "0x099e", session_id)
         if raw and raw[:2] == b"\xff\xd8":
             _LOGGER.debug(
-                "%s: Using RCP thumbnail fallback (160x90) — %d bytes",
+                "%s: Using RCP thumbnail fallback (320×180) — %d bytes",
                 self._attr_name, len(raw),
             )
             return raw
@@ -403,7 +404,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         1. Cloud proxy live snap  — if a live connection has been opened
            (proxy-NN.live.cbs.boschsecurity.com snap.jpg, no auth needed)
            Updated every coordinator tick while live switch is ON.
-           1b. RCP thumbnail fallback — 160×90 JPEG via RCP 0x099e, used when
+           1b. RCP thumbnail fallback — 320×180 JPEG via RCP 0x099e, used when
                snap.jpg fetch fails with any error (timeout, network, etc.)
         2. Cloud proxy on-demand  — PUT /connection REMOTE + snap.jpg (~1.5 s).
            Called whenever the cached image is older than CLOUD_SNAP_CACHE_TTL (30 s).
