@@ -127,6 +127,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # RCP session ID cache — keyed by proxy_hash, value (session_id, expires_monotonic)
         # Avoids 2 round-trip RCP handshake on every thumbnail/data fetch
         self._rcp_session_cache: dict[str, tuple[str, float]] = {}
+        # Proxy URL cache — keyed by cam_id, value (urls[0], expires_monotonic)
+        # Proxy leases last ~60s; cache for 50s to skip PUT /connection on warm refreshes
+        self._proxy_url_cache: dict[str, tuple[str, float]] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
 
@@ -613,7 +616,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Does NOT register the connection in _live_connections — the live stream
         switch stays OFF. Used by background image refresh so cameras always
         show a current image rather than a (possibly expired) event snapshot.
+
+        Proxy URL caching: PUT /connection takes ~1.5s. The resulting proxy lease
+        lasts ~60s. We cache urls[0] for 50s and skip PUT /connection on warm
+        refreshes, reducing latency from ~3s → ~0.5s per card refresh cycle.
         """
+        import json as _json
+
         token = self.token
         if not token:
             return None
@@ -625,12 +634,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             "Content-Type":  "application/json",
             "Accept":        "application/json",
         }
-        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+        conn_url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
-        try:
+        async def _get_proxy_url_entry() -> str | None:
+            """Return a valid urls[0] string, using cache when possible."""
+            now = time.monotonic()
+            cached = self._proxy_url_cache.get(cam_id)
+            if cached:
+                url_entry, expires_at = cached
+                if now < expires_at:
+                    _LOGGER.debug(
+                        "fetch_live_snapshot: proxy cache HIT for %s (%.0fs remaining)",
+                        cam_id, expires_at - now,
+                    )
+                    return url_entry
+                del self._proxy_url_cache[cam_id]
+
+            # Cache miss — call PUT /connection
             async with async_timeout.timeout(10):
                 async with session.put(
-                    url,
+                    conn_url,
                     json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
                     headers=headers,
                 ) as resp:
@@ -640,18 +663,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             resp.status, cam_id,
                         )
                         return None
-                    import json as _json
                     result = _json.loads(await resp.text())
                     urls = result.get("urls", [])
                     if not urls:
                         return None
-                    proxy_url = f"https://{urls[0]}/snap.jpg"
+                    self._proxy_url_cache[cam_id] = (urls[0], now + 50.0)  # 50s TTL
+                    _LOGGER.debug(
+                        "fetch_live_snapshot: proxy cache MISS for %s — PUT /connection done",
+                        cam_id,
+                    )
+                    return urls[0]
+
+        try:
+            url_entry = await _get_proxy_url_entry()
+            if not url_entry:
+                return None
 
             # ── RCP 0x099e: 320×180 JPEG (faster and lower bandwidth than snap.jpg) ──
             # 0x0a88 READ confirms the camera's snapshot resolution is 320×180.
             # 0x099e returns a JPEG at that resolution via the proxy RCP endpoint.
             # Falls back to snap.jpg below if RCP session or read fails.
-            parts = urls[0].split("/", 1)
+            parts = url_entry.split("/", 1)
             if len(parts) == 2:
                 proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                 rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
@@ -675,30 +707,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         cam_id, _rcp_err,
                     )
 
+            proxy_url = f"https://{url_entry}/snap.jpg"
             async with async_timeout.timeout(10):
                 async with session.get(proxy_url) as snap_resp:
                     ct = snap_resp.headers.get("Content-Type", "")
                     if snap_resp.status == 404:
-                        # Proxy URL expired — re-request connection and retry once
+                        # Proxy URL expired — invalidate cache and retry once with a fresh lease
                         _LOGGER.debug(
                             "fetch_live_snapshot: snap.jpg 404 for %s — proxy URL expired, retrying",
                             cam_id,
                         )
+                        self._proxy_url_cache.pop(cam_id, None)
+                        url_entry2 = await _get_proxy_url_entry()
+                        if not url_entry2:
+                            return None
+                        proxy_url2 = f"https://{url_entry2}/snap.jpg"
                         async with async_timeout.timeout(10):
-                            async with session.put(
-                                url,
-                                json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
-                                headers=headers,
-                            ) as resp2:
-                                if resp2.status not in (200, 201):
-                                    return None
-                                result2 = _json.loads(await resp2.text())
-                                urls2 = result2.get("urls", [])
-                                if not urls2:
-                                    return None
-                                proxy_url = f"https://{urls2[0]}/snap.jpg"
-                        async with async_timeout.timeout(10):
-                            async with session.get(proxy_url) as snap_resp2:
+                            async with session.get(proxy_url2) as snap_resp2:
                                 ct2 = snap_resp2.headers.get("Content-Type", "")
                                 if snap_resp2.status == 200 and "image" in ct2:
                                     data = await snap_resp2.read()
@@ -1161,6 +1186,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def set_quality(self, cam_id: str, quality: str) -> None:
         """Set quality preference. quality must be 'auto', 'high', or 'low'."""
         self._quality_preference[cam_id] = quality
+        # Invalidate proxy URL cache so next fetch uses a fresh PUT /connection
+        # with the updated highQualityVideo flag
+        self._proxy_url_cache.pop(cam_id, None)
 
     def get_quality_params(self, cam_id: str) -> tuple[bool, int]:
         """Return (highQualityVideo: bool, inst: int) for current quality preference."""

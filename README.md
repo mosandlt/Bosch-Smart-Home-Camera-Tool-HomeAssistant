@@ -117,7 +117,12 @@ A dedicated Lovelace card showing the camera feed with streaming state, status, 
 
 **v1.5.9 additions:** pan ◀■▶ controls for the 360 camera (Kamera), and a **Benachrichtigungen** (notifications) toggle button.
 
-> **Integration version:** v2.8.0 — event-driven snapshot refresh + RCP session caching; Card v1.7.0 detects new events via `sensor.last_event` and auto-refreshes snapshot.
+> **Integration version:** v2.9.0 — proxy URL caching eliminates PUT /connection overhead on warm refreshes; Card v1.7.0 detects new events via `sensor.last_event` and auto-refreshes snapshot.
+
+## What's New in v2.9.0
+
+- **Proxy URL caching (HA integration):** The `PUT /connection` call (~1.5 s) that opens a temporary proxy lease is now cached per camera for 50 s. On warm refreshes the lease is reused directly, cutting snapshot latency from ~3–4 s → ~0.5 s. On cache miss (first load, expired lease, or quality change) the lease is re-fetched automatically. A 404 from snap.jpg still invalidates the cache and retries transparently.
+- **Quality change invalidation:** When the stream quality entity changes value, the proxy URL cache is immediately cleared so the next fetch uses a fresh `PUT /connection` with the updated `highQualityVideo` flag.
 
 ## What's New in v2.8.0 + Card v1.7.0
 
