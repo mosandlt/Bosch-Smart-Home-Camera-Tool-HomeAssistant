@@ -18,7 +18,13 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.5
+ * Version: 1.7.6
+ *
+ * Changes vs 1.7.5:
+ *   - Fix: stale image shown for up to 60 s on page load. When localStorage cache
+ *     restored an old image, _imageLoaded=true blocked the immediate fresh fetch on
+ *     first hass assignment. Now always fetches fresh on first hass, with a subtle
+ *     "Aktualisiere…" spinner overlay on the cached image while loading.
  *
  * Changes vs 1.7.4:
  *   - Pan row buttons now use SVG icons (double-chevron left/right, chevron left/right,
@@ -159,9 +165,14 @@ class BoschCameraCard extends HTMLElement {
     this._hass = hass;
     this._update();
     // _render() calls _scheduleImageLoad(0) before _hass is assigned (HA sets hass
-    // AFTER setConfig), so the first image load silently returns early and the spinner
-    // stays visible until the 60 s timer fires. Re-trigger it here on first hass assign.
-    if (firstHass && !this._imageLoaded) {
+    // AFTER setConfig), so the first image load silently returns early.
+    // Always fetch fresh on first hass — even when localStorage cache is showing an
+    // old image. Show a "refreshing" overlay so the user knows it's updating.
+    if (firstHass) {
+      if (this._imageLoaded) {
+        // Cached image is visible — show subtle refresh spinner on top
+        this._setLoadingOverlay(true, "Aktualisiere…");
+      }
       this._scheduleImageLoad(0);
     }
   }
