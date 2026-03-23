@@ -32,10 +32,14 @@ async def async_setup_entry(
         return
 
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    entities = [
-        BoschRefreshSnapshotButton(coordinator, cam_id, config_entry)
-        for cam_id in coordinator.data
-    ]
+    entities = []
+    for cam_id in coordinator.data:
+        entities.append(BoschRefreshSnapshotButton(coordinator, cam_id, config_entry))
+        # Acoustic alarm (siren) — only for indoor CAMERA_360 cameras
+        cam_info = coordinator.data[cam_id].get("info", {})
+        hw_version = cam_info.get("hardwareVersion", "")
+        if hw_version == "CAMERA_360":
+            entities.append(BoschAcousticAlarmButton(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -85,3 +89,61 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
         cam = self.coordinator._camera_entities.get(self._cam_id)
         if cam:
             self.hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
+    """Button: trigger the camera siren (acoustic alarm).
+
+    Sends PUT /v11/video_inputs/{id}/acoustic_alarm to activate the built-in siren.
+    Discovered from iOS app analysis (GetAcousticAlarmActivationUrl).
+    Only available on CAMERA_360 (indoor) — outdoor cameras return HTTP 442.
+
+    Experimental: payload is {"enabled": true} based on iOS patterns.
+    """
+
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Siren"
+        self._attr_unique_id = f"bosch_shc_siren_{cam_id.lower()}"
+        self._attr_icon      = "mdi:alarm-light"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    async def async_press(self) -> None:
+        """Trigger the acoustic alarm (siren) on the camera."""
+        _LOGGER.info("Triggering acoustic alarm (siren) for %s", self._cam_title)
+        try:
+            success = await self.coordinator.async_put_camera(
+                self._cam_id, "acoustic_alarm", {"enabled": True}
+            )
+            if success:
+                _LOGGER.info("Siren activated for %s", self._cam_title)
+            else:
+                _LOGGER.warning(
+                    "Siren activation returned non-success for %s — "
+                    "endpoint may not be supported or payload format differs",
+                    self._cam_title,
+                )
+        except Exception as err:
+            _LOGGER.error("Siren activation failed for %s: %s", self._cam_title, err)

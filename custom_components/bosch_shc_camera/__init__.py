@@ -49,6 +49,9 @@ LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 # Config stored in integration data (populated on first FCM registration)
 FCM_SENDER_ID     = "404630424405"
 
+# iOS FCM config (different API key + app ID than Android)
+FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
+
 DEFAULT_OPTIONS = {
     "scan_interval":      60,    # coordinator tick interval (seconds)
     "interval_status":   300,   # ping camera status every 5 minutes
@@ -68,6 +71,16 @@ DEFAULT_OPTIONS = {
     "alert_notify_service": "",   # notify service for alerts (e.g. "notify.signal_messenger"), empty = disabled
     "alert_save_snapshots": False, # save event snapshots locally to /config/www/bosch_alerts/
     "alert_delete_after_send": True, # delete local snapshot after sending (only when alert_save_snapshots=False)
+    "fcm_push_mode": "auto",  # "auto" (ios→android→polling fallback), "android", "ios", "polling"
+    "enable_intercom": False,  # Two-way audio (intercom) switch — disabled by default
+    "enable_smb_upload": False,  # Upload events to SMB/NAS share (opt-in)
+    "smb_server": "",            # SMB server IP/hostname (e.g. 192.168.1.1 for FRITZ!Box)
+    "smb_share": "",             # Share name (e.g. "FRITZ.NAS")
+    "smb_username": "",          # SMB username
+    "smb_password": "",          # SMB password
+    "smb_base_path": "Bosch-Kameras",  # Base folder on the share
+    "smb_folder_pattern": "{year}/{month}",  # Subfolder pattern (default: YYYY/MM)
+    "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",  # File name pattern
 }
 
 
@@ -144,6 +157,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._fcm_running: bool = False
         self._fcm_last_push: float = 0.0  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
+        self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
+        # Unread events count cache — keyed by cam_id, populated from GET /unread_events_count
+        self._unread_events_cache: dict[str, int] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -284,14 +300,37 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 # ── 3. Events — only when interval_events elapsed ─────────────
                 if do_events:
                     events: list = []
+                    # Fast-path: check /last_event first — if ID matches cached,
+                    # skip full events list fetch (saves bandwidth)
+                    skip_full_fetch = False
                     try:
-                        url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-                        async with async_timeout.timeout(15):
-                            async with session.get(url, headers=headers) as r:
-                                if r.status == 200:
-                                    events = await r.json()
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
+                                headers=headers,
+                            ) as le_resp:
+                                if le_resp.status == 200:
+                                    last_ev = await le_resp.json()
+                                    last_ev_id = last_ev.get("id", "")
+                                    if last_ev_id and last_ev_id == self._last_event_ids.get(cam_id):
+                                        skip_full_fetch = True
+                                        events = self._cached_events.get(cam_id, [])
+                                        _LOGGER.debug(
+                                            "last_event unchanged for %s (id=%s) — skipping full fetch",
+                                            cam_id, last_ev_id[:8],
+                                        )
                     except Exception as err:
-                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+                        _LOGGER.debug("last_event check error for %s: %s — falling back to full fetch", cam_id, err)
+
+                    if not skip_full_fetch:
+                        try:
+                            url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
+                            async with async_timeout.timeout(15):
+                                async with session.get(url, headers=headers) as r:
+                                    if r.status == 200:
+                                        events = await r.json()
+                        except Exception as err:
+                            _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
                     self._cached_events[cam_id] = events
 
                     # ── Event-driven snapshot refresh ─────────────────────────
@@ -336,6 +375,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 _LOGGER.debug(
                                     "Fired bosch_shc_camera_audio_alarm for %s", cam_id
                                 )
+                            elif event_type == "PERSON":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_person", event_payload
+                                )
+                                _LOGGER.debug(
+                                    "Fired bosch_shc_camera_person for %s", cam_id
+                                )
                             # Send alert notification (2-step: text + snapshot)
                             self.hass.async_create_task(
                                 self._async_send_alert(
@@ -346,6 +392,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     newest_event.get("videoClipUploadStatus", ""),
                                 )
                             )
+                            # Mark new event as read on the Bosch cloud
+                            try:
+                                await self.async_mark_events_read([newest_id])
+                            except Exception:
+                                pass
                         if newest_id:
                             self._last_event_ids[cam_id] = newest_id
                 else:
@@ -489,6 +540,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("Recording options fetch error for %s: %s", cam_id_key, err)
 
+                    # Unread events count
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/unread_events_count",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    ue_data = await r.json()
+                                    # API may return {"count": N} or just a number
+                                    if isinstance(ue_data, dict):
+                                        self._unread_events_cache[cam_id_key] = int(ue_data.get("count", ue_data.get("result", 0)))
+                                    elif isinstance(ue_data, (int, float)):
+                                        self._unread_events_cache[cam_id_key] = int(ue_data)
+                                else:
+                                    _LOGGER.debug(
+                                        "unread_events_count HTTP %d for %s",
+                                        r.status, cam_id_key,
+                                    )
+                    except Exception as err:
+                        _LOGGER.debug("Unread events count fetch error for %s: %s", cam_id_key, err)
+
                     # Autofollow (only CAMERA_360 with panLimit > 0)
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
                     if pan_limit:
@@ -562,6 +635,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
                 await self.hass.async_add_executor_job(
                     self._sync_download, data, token, opts["download_path"]
+                )
+                # Mark all downloaded events as read
+                dl_event_ids = []
+                for cam_id_dl, cam_data_dl in data.items():
+                    for ev_dl in cam_data_dl.get("events", []):
+                        eid = ev_dl.get("id")
+                        if eid:
+                            dl_event_ids.append(eid)
+                if dl_event_ids:
+                    try:
+                        await self.async_mark_events_read(dl_event_ids)
+                    except Exception:
+                        pass
+
+            # ── 7. SMB/NAS upload ─────────────────────────────────────────────
+            if do_events and opts.get("enable_smb_upload") and opts.get("smb_server"):
+                await self.hass.async_add_executor_job(
+                    self._sync_smb_upload, data, token
                 )
 
             return data
@@ -1069,7 +1160,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         if self._fcm_running:
             return
-        if not self.options.get("enable_fcm_push", True):
+        if not self.options.get("enable_fcm_push", False):
             _LOGGER.debug("FCM push disabled in options")
             return
 
@@ -1079,81 +1170,121 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
             return
 
-        # FCM config — stored in entry data after first registration,
-        # or fetched from Google's public Firebase config endpoint.
-        fcm_cfg = self._entry.data.get("fcm_config") or {}
-        if not fcm_cfg:
-            fcm_cfg = await self._fetch_firebase_config()
-            if fcm_cfg:
+        # Determine push mode
+        push_mode = self.options.get("fcm_push_mode", "auto")
+
+        # Build FCM config based on mode
+        async def _build_fcm_cfg(mode: str) -> dict:
+            """Return FCM config dict for the given mode (android or ios)."""
+            if mode == "ios":
+                import base64
+                return {
+                    "project_id": "bosch-smart-cameras",
+                    "app_id": FCM_IOS_APP_ID,
+                    "api_key": base64.b64decode("QUl6YVN5QmxyN1o0ZmpaM0lmcnhsN1VRZFE4eGZRd3g5WFJBYnBJ").decode(),
+                }
+            else:
+                # Android mode — use stored config or fetch from Firebase
+                cfg = self._entry.data.get("fcm_config") or {}
+                if not cfg:
+                    cfg = await self._fetch_firebase_config()
+                    if cfg:
+                        self.hass.config_entries.async_update_entry(
+                            self._entry,
+                            data={**self._entry.data, "fcm_config": cfg},
+                        )
+                return cfg
+
+        async def _try_fcm_with_mode(mode: str) -> bool:
+            """Attempt FCM registration and start with the given mode. Returns True on success."""
+            fcm_cfg = await _build_fcm_cfg(mode)
+            if not fcm_cfg.get("api_key"):
+                _LOGGER.warning("FCM: could not obtain Firebase config for mode '%s'", mode)
+                return False
+
+            fcm_config = FcmRegisterConfig(
+                project_id=fcm_cfg["project_id"],
+                app_id=fcm_cfg["app_id"],
+                api_key=fcm_cfg["api_key"],
+                messaging_sender_id=FCM_SENDER_ID,
+            )
+
+            # Load saved FCM credentials from config entry (survives HA restarts)
+            saved_fcm_creds = self._entry.data.get("fcm_credentials")
+
+            def _on_creds_updated(creds):
+                """Save FCM credentials to config entry for persistence."""
                 self.hass.config_entries.async_update_entry(
                     self._entry,
-                    data={**self._entry.data, "fcm_config": fcm_cfg},
+                    data={**self._entry.data, "fcm_credentials": creds},
                 )
-        if not fcm_cfg.get("api_key"):
-            _LOGGER.warning("FCM: could not obtain Firebase config — push disabled")
-            return
+                _LOGGER.debug("FCM credentials saved to config entry")
 
-        fcm_config = FcmRegisterConfig(
-            project_id=fcm_cfg["project_id"],
-            app_id=fcm_cfg["app_id"],
-            api_key=fcm_cfg["api_key"],
-            messaging_sender_id=FCM_SENDER_ID,
-        )
-
-        # Load saved FCM credentials from config entry (survives HA restarts)
-        saved_fcm_creds = self._entry.data.get("fcm_credentials")
-
-        def _on_creds_updated(creds):
-            """Save FCM credentials to config entry for persistence."""
-            self.hass.config_entries.async_update_entry(
-                self._entry,
-                data={**self._entry.data, "fcm_credentials": creds},
+            self._fcm_client = FcmPushClient(
+                callback=self._on_fcm_push,
+                fcm_config=fcm_config,
+                credentials=saved_fcm_creds,
+                credentials_updated_callback=_on_creds_updated,
             )
-            _LOGGER.debug("FCM credentials saved to config entry")
 
-        self._fcm_client = FcmPushClient(
-            callback=self._on_fcm_push,
-            fcm_config=fcm_config,
-            credentials=saved_fcm_creds,
-            credentials_updated_callback=_on_creds_updated,
-        )
+            try:
+                self._fcm_token = await self._fcm_client.checkin_or_register()
+                _LOGGER.info("FCM registered (mode=%s) — token: %s...", mode, self._fcm_token[:40])
+            except Exception as err:
+                _LOGGER.warning("FCM registration failed (mode=%s): %s", mode, err)
+                self._fcm_client = None
+                return False
 
-        try:
-            self._fcm_token = await self._fcm_client.checkin_or_register()
-            _LOGGER.info("FCM registered — token: %s...", self._fcm_token[:40])
-        except Exception as err:
-            _LOGGER.warning("FCM registration failed: %s", err)
-            self._fcm_client = None
+            # Register FCM token with Bosch CBS API
+            await self._register_fcm_with_bosch()
+
+            # Start listening for pushes
+            try:
+                await self._fcm_client.start()
+                self._fcm_running = True
+                self._fcm_healthy = True
+                self._fcm_push_mode = mode
+                _LOGGER.info("FCM push listener started (mode=%s) — near-instant event detection active", mode)
+                return True
+            except Exception as err:
+                _LOGGER.warning("FCM push listener failed to start (mode=%s): %s", mode, err)
+                self._fcm_client = None
+                return False
+
+        if push_mode == "polling":
+            _LOGGER.info("FCM push mode set to 'polling' — using standard API polling only")
             return
-
-        # Register FCM token with Bosch CBS API
-        await self._register_fcm_with_bosch()
-
-        # Start listening for pushes
-        try:
-            await self._fcm_client.start()
-            self._fcm_running = True
-            self._fcm_healthy = True
-            _LOGGER.info("FCM push listener started — near-instant event detection active")
-        except Exception as err:
-            _LOGGER.warning("FCM push listener failed to start: %s", err)
-            self._fcm_client = None
+        elif push_mode == "auto":
+            # Try iOS first, fall back to Android, then polling
+            if not await _try_fcm_with_mode("ios"):
+                _LOGGER.info("FCM auto mode: iOS failed, trying Android fallback")
+                if not await _try_fcm_with_mode("android"):
+                    _LOGGER.warning("FCM auto mode: both iOS and Android failed — falling back to standard polling")
+        elif push_mode in ("android", "ios"):
+            await _try_fcm_with_mode(push_mode)
+        else:
+            _LOGGER.warning("FCM: unknown push mode '%s' — defaulting to ios", push_mode)
+            await _try_fcm_with_mode("ios")
 
     async def _register_fcm_with_bosch(self) -> bool:
         """Register our FCM token with Bosch CBS so it sends us push notifications.
 
-        Endpoint: POST /v11/devices {"deviceType": "ANDROID", "deviceToken": token}
+        Endpoint: POST /v11/devices {"deviceType": "ANDROID"|"IOS", "deviceToken": token}
         Response: HTTP 204 on success.
+        deviceType must match the FCM platform used for registration.
         """
         if not self._fcm_token or not self.token:
             return False
+
+        # Determine device type from active push mode
+        device_type = "IOS" if self._fcm_push_mode == "ios" else "ANDROID"
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type":  "application/json",
         }
-        body = {"deviceType": "ANDROID", "deviceToken": self._fcm_token}
+        body = {"deviceType": device_type, "deviceToken": self._fcm_token}
 
         try:
             async with async_timeout.timeout(10):
@@ -1240,6 +1371,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         self.hass.bus.async_fire("bosch_shc_camera_motion", event_payload)
                     elif event_type == "AUDIO_ALARM":
                         self.hass.bus.async_fire("bosch_shc_camera_audio_alarm", event_payload)
+                    elif event_type == "PERSON":
+                        self.hass.bus.async_fire("bosch_shc_camera_person", event_payload)
 
                     # Send alert notification (3-step: text + snapshot + video)
                     self.hass.async_create_task(
@@ -1261,6 +1394,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Notify all entity listeners
                     self.async_update_listeners()
+
+                    # Mark new event as read on the Bosch cloud
+                    try:
+                        await self.async_mark_events_read([newest_id])
+                    except Exception:
+                        pass
 
                 if newest_id:
                     self._last_event_ids[cam_id] = newest_id
@@ -1292,8 +1431,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         delete_after   = opts.get("alert_delete_after_send", True)
         ts_short       = timestamp[11:19] if len(timestamp) >= 19 else timestamp
 
-        type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm"}.get(event_type, event_type)
-        type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a"}.get(event_type, "\u26a0\ufe0f")
+        type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm", "PERSON": "Person erkannt"}.get(event_type, event_type)
+        type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a", "PERSON": "\U0001f9d1"}.get(event_type, "\u26a0\ufe0f")
 
         alert_dir = os.path.join(self.hass.config.config_dir, "media", "bosch_alerts")
         await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
@@ -1382,8 +1521,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             auth_headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
             found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
 
-            if not found_clip_url:
+            if not found_clip_url and clip_status == "Unavailable":
+                _LOGGER.debug(
+                    "Alert: clip status Unavailable from start — skipping poll for %s", cam_name,
+                )
+            elif not found_clip_url:
                 # Poll for clip readiness (10s intervals, up to 90s)
+                clip_unavailable = False
                 for attempt in range(9):
                     await asyncio.sleep(10)
                     try:
@@ -1401,12 +1545,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         url = ev.get("videoClipUrl", "")
                                         if status == "Done" and url:
                                             found_clip_url = url
-                                            break
+                                        elif status == "Unavailable":
+                                            clip_unavailable = True
+                                            _LOGGER.debug(
+                                                "Alert: clip Unavailable after %ds — stop polling for %s",
+                                                (attempt + 1) * 10, cam_name,
+                                            )
+                                        break
                         if found_clip_url:
                             _LOGGER.debug(
                                 "Alert: clip ready after %ds for %s",
                                 (attempt + 1) * 10, cam_name,
                             )
+                            break
+                        if clip_unavailable:
                             break
                     except Exception:
                         continue
@@ -1437,6 +1589,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             else:
                 _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
 
+        # ── Mark event as read ─────────────────────────────────────────────
+        if cam_id:
+            event_id = self._last_event_ids.get(cam_id, "")
+            if event_id:
+                try:
+                    await self.async_mark_events_read([event_id])
+                except Exception:
+                    pass
+
         # ── Cleanup local files ───────────────────────────────────────────────
         if delete_after and files_to_cleanup:
             await asyncio.sleep(5)  # give Signal time to read the files
@@ -1445,6 +1606,57 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     await self.hass.async_add_executor_job(os.remove, fpath)
                 except OSError:
                     pass
+
+    async def async_mark_events_read(self, event_ids: list[str]) -> bool:
+        """Mark events as read/seen on the Bosch cloud.
+
+        Tries PUT /v11/events/bulk first, falls back to individual PUT.
+        Best-effort — never raises.
+        """
+        if not event_ids:
+            return True
+
+        token = self.token
+        if not token:
+            return False
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        # Try bulk update
+        try:
+            body = {"events": [{"id": eid, "isSeen": True} for eid in event_ids]}
+            async with async_timeout.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/events/bulk", headers=headers, json=body
+                ) as resp:
+                    if resp.status in (200, 204):
+                        _LOGGER.debug("Marked %d events as read (bulk)", len(event_ids))
+                        return True
+                    _LOGGER.debug("Bulk mark-read HTTP %d — trying individual", resp.status)
+        except Exception as err:
+            _LOGGER.debug("Bulk mark-read error: %s — trying individual", err)
+
+        # Fallback: individual
+        success = False
+        for eid in event_ids:
+            try:
+                async with async_timeout.timeout(5):
+                    async with session.put(
+                        f"{CLOUD_API}/v11/events/{eid}",
+                        headers=headers, json={"isSeen": True},
+                    ) as resp:
+                        if resp.status in (200, 204):
+                            success = True
+            except Exception:
+                pass
+
+        if success:
+            _LOGGER.debug("Marked events as read (individual)")
+        return success
 
     @staticmethod
     def _write_file(path: str, data: bytes) -> None:
@@ -2095,6 +2307,143 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Download failed for %s: %s", os.path.basename(path), err)
 
+    # ── SMB/NAS upload (runs in executor thread) ────────────────────────────
+    def _sync_smb_upload(self, data: dict, token: str) -> None:
+        """Upload new event files to SMB/NAS share.
+
+        Folder structure: {smb_base_path}/{year}/{month}/{camera_name}_{date}_{time}_{type}.{ext}
+        Uses smbprotocol for cross-platform SMB access.
+        """
+        import requests as req
+        import urllib3
+        urllib3.disable_warnings()
+
+        opts = self.options
+        server = opts.get("smb_server", "").strip()
+        share = opts.get("smb_share", "").strip()
+        username = opts.get("smb_username", "").strip()
+        password = opts.get("smb_password", "")
+        base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
+        folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}").strip()
+        file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+
+        if not server or not share:
+            return
+
+        try:
+            from smbclient import (
+                register_session, mkdir, open_file, stat as smb_stat
+            )
+            import smbclient  # noqa: F401
+        except ImportError:
+            _LOGGER.warning(
+                "smbprotocol not installed — SMB upload disabled. "
+                "Install with: pip install smbprotocol"
+            )
+            return
+
+        try:
+            register_session(server, username=username, password=password)
+        except Exception as err:
+            _LOGGER.warning("SMB session to %s failed: %s", server, err)
+            return
+
+        session = req.Session()
+        session.headers["Authorization"] = f"Bearer {token}"
+        session.verify = False
+
+        for cam_id, cam_data in data.items():
+            cam_name = cam_data["info"].get("title", cam_id)
+
+            for ev in cam_data.get("events", []):
+                ts = ev.get("timestamp", "")
+                if not ts or len(ts) < 19:
+                    continue
+
+                # Parse timestamp for folder/file patterns
+                year = ts[:4]
+                month = ts[5:7]
+                day = ts[8:10]
+                date_str = f"{year}-{month}-{day}"
+                time_str = ts[11:19].replace(":", "-")
+                etype = ev.get("eventType", "EVENT")
+                ev_id = ev.get("id", "")[:8]
+
+                # Build folder path from pattern
+                folder_parts = folder_pattern.format(
+                    year=year, month=month, day=day,
+                    camera=cam_name, type=etype,
+                )
+                smb_folder = f"\\\\{server}\\{share}\\{base_path}\\{folder_parts}"
+                smb_folder = smb_folder.replace("/", "\\")
+
+                # Build file name from pattern
+                file_base = file_pattern.format(
+                    camera=cam_name, date=date_str, time=time_str,
+                    type=etype, id=ev_id, year=year, month=month, day=day,
+                )
+
+                # Ensure folder exists (create recursively)
+                try:
+                    self._smb_makedirs(smb_folder, server, share, base_path, folder_parts)
+                except Exception as err:
+                    _LOGGER.debug("SMB mkdir error for %s: %s", smb_folder, err)
+                    continue
+
+                # Upload snapshot
+                img_url = ev.get("imageUrl")
+                if img_url:
+                    smb_path = f"{smb_folder}\\{file_base}.jpg"
+                    try:
+                        smb_stat(smb_path)
+                        # File exists — skip
+                    except OSError:
+                        try:
+                            r = session.get(img_url, timeout=30)
+                            if r.status_code == 200 and r.content:
+                                with open_file(smb_path, mode="wb") as f:
+                                    f.write(r.content)
+                                _LOGGER.debug("SMB uploaded: %s", smb_path.split("\\")[-1])
+                        except Exception as err:
+                            _LOGGER.debug("SMB upload error for %s: %s", file_base, err)
+
+                # Upload video clip
+                clip_url = ev.get("videoClipUrl")
+                clip_status = ev.get("videoClipUploadStatus", "")
+                if clip_url and clip_status == "Done":
+                    smb_path = f"{smb_folder}\\{file_base}.mp4"
+                    try:
+                        smb_stat(smb_path)
+                    except OSError:
+                        try:
+                            r = session.get(clip_url, timeout=60, stream=True)
+                            if r.status_code == 200:
+                                with open_file(smb_path, mode="wb") as f:
+                                    for chunk in r.iter_content(65536):
+                                        f.write(chunk)
+                                _LOGGER.debug("SMB uploaded: %s", smb_path.split("\\")[-1])
+                        except Exception as err:
+                            _LOGGER.debug("SMB clip upload error for %s: %s", file_base, err)
+
+    @staticmethod
+    def _smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder_parts: str) -> None:
+        """Create SMB directories recursively."""
+        from smbclient import mkdir, stat as smb_stat
+
+        # Build path incrementally
+        parts = [p for p in f"{base_path}\\{folder_parts}".replace("/", "\\").split("\\") if p]
+        current = f"\\\\{server}\\{share}"
+
+        for part in parts:
+            current = f"{current}\\{part}"
+            try:
+                smb_stat(current)
+            except OSError:
+                try:
+                    mkdir(current)
+                except OSError:
+                    pass  # May exist due to race condition
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -2124,7 +2473,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _register_services(hass)
 
     # Start FCM push listener (runs in background, non-blocking)
-    if opts.get("enable_fcm_push", True):
+    if opts.get("enable_fcm_push", False):
         hass.async_create_task(coordinator.async_start_fcm_push())
 
     return True

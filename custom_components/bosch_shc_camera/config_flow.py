@@ -224,7 +224,8 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "enable_snapshot_button", "enable_auto_download",
                       "high_quality_video", "enable_binary_sensors",
                       "enable_fcm_push", "alert_save_snapshots",
-                      "alert_delete_after_send"]:
+                      "alert_delete_after_send", "enable_intercom",
+                      "enable_smb_upload"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -313,6 +314,46 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "alert_delete_after_send",
                     default=bool(opts.get("alert_delete_after_send", True)),
                 ): bool,
+                vol.Optional(
+                    "fcm_push_mode",
+                    default=str(opts.get("fcm_push_mode", "auto")),
+                ): vol.In(["auto", "android", "ios", "polling"]),
+                vol.Optional(
+                    "enable_intercom",
+                    default=bool(opts.get("enable_intercom", False)),
+                ): bool,
+                vol.Optional(
+                    "enable_smb_upload",
+                    default=bool(opts.get("enable_smb_upload", False)),
+                ): bool,
+                vol.Optional(
+                    "smb_server",
+                    default=str(opts.get("smb_server", "")),
+                ): str,
+                vol.Optional(
+                    "smb_share",
+                    default=str(opts.get("smb_share", "")),
+                ): str,
+                vol.Optional(
+                    "smb_username",
+                    default=str(opts.get("smb_username", "")),
+                ): str,
+                vol.Optional(
+                    "smb_password",
+                    default=str(opts.get("smb_password", "")),
+                ): str,
+                vol.Optional(
+                    "smb_base_path",
+                    default=str(opts.get("smb_base_path", "Bosch-Kameras")),
+                ): str,
+                vol.Optional(
+                    "smb_folder_pattern",
+                    default=str(opts.get("smb_folder_pattern", "{year}/{month}")),
+                ): str,
+                vol.Optional(
+                    "smb_file_pattern",
+                    default=str(opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}")),
+                ): str,
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={

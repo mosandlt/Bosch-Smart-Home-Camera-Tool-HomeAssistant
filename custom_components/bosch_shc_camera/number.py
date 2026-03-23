@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN
+from . import DOMAIN, CLOUD_API
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ async def async_setup_entry(
         if pan_limit:
             entities.append(BoschPanNumber(coordinator, cam_id, config_entry, pan_limit))
         entities.append(BoschAudioThresholdNumber(coordinator, cam_id, config_entry))
+        entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -175,4 +176,82 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):
             _LOGGER.debug("Audio threshold set to %d dB for %s", threshold, self._cam_id)
         else:
             _LOGGER.warning("Failed to set audio threshold for %s", self._cam_id)
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to control the intercom speaker volume (0–100).
+
+    Writes via PUT /v11/video_inputs/{id}/audio {"SpeakerLevel": value}.
+    Disabled by default — enable in Settings -> Entities.
+    """
+
+    _attr_icon                        = "mdi:volume-medium"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 100
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "%"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+        self._current_level: float = 50  # default speaker level
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Speaker Level"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_speaker_level"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def native_value(self) -> float:
+        return self._current_level
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the new speaker level to the camera via cloud API."""
+        import aiohttp
+        import async_timeout
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        level = int(round(value))
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.coordinator.token}",
+            "Content-Type": "application/json",
+        }
+        body = {"SpeakerLevel": level}
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
+                    headers=headers,
+                    json=body,
+                ) as resp:
+                    if resp.status in (200, 204):
+                        self._current_level = float(level)
+                        _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
+                    else:
+                        _LOGGER.warning(
+                            "Failed to set speaker level for %s: HTTP %d", self._cam_id, resp.status
+                        )
+        except Exception as err:
+            _LOGGER.warning("Speaker level error for %s: %s", self._cam_id, err)
         self.async_write_ha_state()

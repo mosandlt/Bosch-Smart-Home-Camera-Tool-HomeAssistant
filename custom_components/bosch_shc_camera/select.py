@@ -18,7 +18,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import BoschCameraCoordinator, DOMAIN
+from homeassistant.helpers.entity import EntityCategory
+
+from . import BoschCameraCoordinator, DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +34,10 @@ QUALITY_MAP_REVERSE = {v: k for k, v in QUALITY_MAP.items()}
 
 MOTION_SENSITIVITY_OPTIONS = ["SUPER_HIGH", "HIGH", "MEDIUM_HIGH", "MEDIUM_LOW", "LOW", "OFF"]
 
+FCM_PUSH_MODE_OPTIONS = ["Auto", "Android", "iOS", "Polling"]
+FCM_PUSH_MODE_MAP = {"Auto": "auto", "Android": "android", "iOS": "ios", "Polling": "polling"}
+FCM_PUSH_MODE_MAP_REVERSE = {v: k for k, v in FCM_PUSH_MODE_MAP.items()}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -43,6 +49,10 @@ async def async_setup_entry(
     for cam_id in coordinator.data:
         entities.append(BoschVideoQualitySelect(coordinator, cam_id, config_entry))
         entities.append(BoschMotionSensitivitySelect(coordinator, cam_id, config_entry))
+    # Integration-level FCM Push Mode select (one per integration, not per camera)
+    first_cam_id = next(iter(coordinator.data), None)
+    if first_cam_id:
+        entities.append(BoschFcmPushModeSelect(coordinator, first_cam_id, config_entry))
     async_add_entities(entities)
 
 
@@ -186,4 +196,64 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
             _LOGGER.debug("Motion sensitivity set to %s for %s", option, self._cam_id)
         else:
             _LOGGER.warning("Failed to set motion sensitivity for %s", self._cam_id)
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
+    """Select entity to choose the FCM push notification mode.
+
+    Options: Auto (ios→android→polling fallback), Android, iOS, Polling.
+    When changed: restarts FCM with the new mode.
+    One per integration (not per camera).
+    """
+
+    _attr_icon    = "mdi:cellphone-arrow-down"
+    _attr_options = FCM_PUSH_MODE_OPTIONS
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+        self._attr_name      = "Bosch Camera FCM Push Mode"
+        self._attr_unique_id = "bosch_shc_camera_fcm_push_mode"
+
+    @property
+    def device_info(self) -> dict:
+        cam_data = self.coordinator.data.get(self._cam_id, {})
+        cam_info = cam_data.get("info", {})
+        cam_title = cam_info.get("title", self._cam_id)
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {cam_title}",
+            "manufacturer": "Bosch",
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str:
+        mode = get_options(self._entry).get("fcm_push_mode", "auto")
+        return FCM_PUSH_MODE_MAP_REVERSE.get(mode, "Auto")
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle push mode selection — update options and restart FCM."""
+        mode_key = FCM_PUSH_MODE_MAP.get(option, "auto")
+        # Update the integration options
+        new_options = dict(self._entry.options)
+        new_options["fcm_push_mode"] = mode_key
+        self.hass.config_entries.async_update_entry(
+            self._entry, options=new_options,
+        )
+        # Restart FCM with new mode
+        await self.coordinator.async_stop_fcm_push()
+        self.coordinator._fcm_push_mode = "unknown"
+        if self.coordinator.options.get("enable_fcm_push", False):
+            self.hass.async_create_task(self.coordinator.async_start_fcm_push())
         self.async_write_ha_state()

@@ -40,7 +40,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, get_options
+from . import DOMAIN, get_options, CLOUD_API
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,6 +106,8 @@ async def async_setup_entry(
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
             entities.append(BoschAutoFollowSwitch(coordinator, cam_id, config_entry))
+        # Intercom (two-way audio) — disabled by default
+        entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -476,3 +478,97 @@ class BoschAutoFollowSwitch(_BoschSwitchBase):
             self._cam_id, "autofollow", {"result": False}
         )
         self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschIntercomSwitch(_BoschSwitchBase):
+    """Switch: ON = intercom (two-way audio) active, OFF = intercom off.
+
+    When turned ON: enables speaker via PUT /v11/video_inputs/{id}/audio
+    with {"audioEnabled": True, "SpeakerLevel": 50}.
+    When turned OFF: disables speaker with {"audioEnabled": False}.
+    Disabled by default — enable in Settings -> Entities.
+    """
+
+    _attr_icon = "mdi:microphone"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._is_on: bool = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Intercom"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_intercom"
+
+    @property
+    def is_on(self) -> bool:
+        return self._is_on
+
+    @property
+    def icon(self) -> str:
+        return "mdi:microphone" if self._is_on else "mdi:microphone-off"
+
+    async def async_turn_on(self, **kwargs):
+        """Enable intercom (two-way audio) with speaker level 50."""
+        import aiohttp
+        import async_timeout
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.coordinator.token}",
+            "Content-Type": "application/json",
+        }
+        body = {"audioEnabled": True, "SpeakerLevel": 50}
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
+                    headers=headers,
+                    json=body,
+                ) as resp:
+                    if resp.status in (200, 204):
+                        self._is_on = True
+                        _LOGGER.info("Intercom ON for %s", self._cam_title)
+                    else:
+                        _LOGGER.warning(
+                            "Intercom ON failed for %s: HTTP %d", self._cam_title, resp.status
+                        )
+        except Exception as err:
+            _LOGGER.warning("Intercom ON error for %s: %s", self._cam_title, err)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        """Disable intercom (two-way audio)."""
+        import aiohttp
+        import async_timeout
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.coordinator.token}",
+            "Content-Type": "application/json",
+        }
+        body = {"audioEnabled": False}
+        try:
+            async with async_timeout.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
+                    headers=headers,
+                    json=body,
+                ) as resp:
+                    if resp.status in (200, 204):
+                        self._is_on = False
+                        _LOGGER.info("Intercom OFF for %s", self._cam_title)
+                    else:
+                        _LOGGER.warning(
+                            "Intercom OFF failed for %s: HTTP %d", self._cam_title, resp.status
+                        )
+        except Exception as err:
+            _LOGGER.warning("Intercom OFF error for %s: %s", self._cam_title, err)
+        self.async_write_ha_state()

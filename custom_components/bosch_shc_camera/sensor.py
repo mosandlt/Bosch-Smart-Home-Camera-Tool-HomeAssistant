@@ -58,6 +58,7 @@ async def async_setup_entry(
             BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
             BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
             BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
+            BoschUnreadEventsCountSensor(coordinator, cam_id, config_entry),
         ])
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -615,8 +616,40 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
             "fcm_enabled": self.coordinator.options.get("enable_fcm_push", False),
             "fcm_running": self.coordinator._fcm_running,
             "fcm_healthy": self.coordinator._fcm_healthy,
+            "fcm_push_mode": self.coordinator._fcm_push_mode,
+            "fcm_push_mode_config": self.coordinator.options.get("fcm_push_mode", "auto"),
         }
         if self.coordinator._fcm_last_push > 0:
             age = _time.monotonic() - self.coordinator._fcm_last_push
             attrs["last_push_seconds_ago"] = round(age)
         return attrs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschUnreadEventsCountSensor(_BoschSensorBase):
+    """Sensor: number of unread events for this camera.
+
+    Data source: GET /v11/video_inputs/{id}/unread_events_count (fetched by coordinator, slow tier).
+    Disabled by default — enable in HA entity settings if needed.
+    """
+
+    _attr_icon = "mdi:email-alert"
+    _attr_native_unit_of_measurement = "events"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Unread Events"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_unread_events"
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator._unread_events_cache.get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._unread_events_cache.get(self._cam_id) is not None
+        )

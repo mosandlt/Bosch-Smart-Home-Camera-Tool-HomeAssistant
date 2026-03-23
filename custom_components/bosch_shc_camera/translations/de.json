@@ -56,6 +56,16 @@
           "shc_ip":                  "SHC IP-Adresse (optional)",
           "shc_cert_path":           "SHC Zertifikat-Pfad",
           "shc_key_path":            "SHC Schlüssel-Pfad",
+          "fcm_push_mode":           "FCM Push-Modus (auto / android / ios / polling)",
+          "enable_intercom":         "Gegensprechanlage (Zwei-Wege-Audio)",
+          "enable_smb_upload":       "Upload auf SMB/NAS (z.B. FRITZ!Box)",
+          "smb_server":              "SMB-Server IP-Adresse",
+          "smb_share":               "SMB-Freigabename",
+          "smb_username":            "SMB-Benutzername",
+          "smb_password":            "SMB-Passwort",
+          "smb_base_path":           "Basisordner auf der Freigabe",
+          "smb_folder_pattern":      "Unterordner-Muster",
+          "smb_file_pattern":        "Dateiname-Muster",
           "force_relogin":           "Neu anmelden (Browser-Login)"
         },
         "data_description": {
@@ -77,6 +87,16 @@
           "shc_ip":                  "Smart Home Controller IP für lokale API-Funktionen (z.B. 192.168.1.100). Optional — die meisten Funktionen arbeiten ohne SHC.",
           "shc_cert_path":           "Pfad zur Client-Zertifikat PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_cert.pem",
           "shc_key_path":            "Pfad zur Client-Schlüssel PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_key.pem",
+          "fcm_push_mode":           "Push-Modus wählen. Auto versucht zuerst iOS, dann Android, dann Polling. Polling nutzt nur Standard-API-Aufrufe (kein FCM).",
+          "enable_intercom":         "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden.",
+          "enable_smb_upload":       "Ereignis-Snapshots und Videoclips auf eine SMB/CIFS-Netzwerkfreigabe hochladen (z.B. FRITZ!Box NAS, Synology, Windows-Freigabe). Benötigt das smbprotocol-Paket.",
+          "smb_server":              "IP-Adresse oder Hostname des SMB-Servers. Beispiel: 192.168.1.1 (FRITZ!Box) oder nas.local",
+          "smb_share":               "Name der SMB-Freigabe. Beispiel: FRITZ.NAS",
+          "smb_username":            "SMB-Anmeldename",
+          "smb_password":            "SMB-Anmeldepasswort",
+          "smb_base_path":           "Basisordner auf der Freigabe. Standard: Bosch-Kameras",
+          "smb_folder_pattern":      "Unterordner-Muster. Variablen: {year}, {month}, {day}, {camera}, {type}. Standard: {year}/{month}",
+          "smb_file_pattern":        "Dateiname-Muster (ohne Endung). Variablen: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Standard: {camera}_{date}_{time}_{type}_{id}",
           "force_relogin":           "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten)."
         }
       },

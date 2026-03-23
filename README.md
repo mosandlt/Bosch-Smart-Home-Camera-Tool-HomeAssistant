@@ -61,9 +61,18 @@ All settings have descriptions in the UI. Key options:
 | Setting | Description | Default |
 |---|---|---|
 | **FCM Push** | Near-instant (~2s) event detection via Firebase Cloud Messaging | OFF |
+| **FCM Push Mode** | `Auto` (iOS → Android → polling), `iOS`, `Android`, or `Polling` | Auto |
 | **Alert services** | Comma-separated notify services for alerts (e.g. `notify.signal_messenger, notify.mobile_app_iphone`) | empty (disabled) |
 | **Save alert snapshots** | Keep event images/videos locally in `/media/bosch_alerts/` | OFF |
 | **Event check interval** | How often to poll for events (FCM Push makes this a fallback only) | 300s (5 min) |
+| **SMB Upload** | Upload event snapshots + video clips to SMB/CIFS share | OFF |
+| **SMB Server** | IP/hostname of SMB share (e.g. `192.168.1.1`) | empty |
+| **SMB Share** | Share name (e.g. `cameras`) | empty |
+| **SMB Username** | SMB authentication username | empty |
+| **SMB Password** | SMB authentication password | empty |
+| **SMB Base Path** | Base path on the share (e.g. `bosch_cameras`) | empty |
+| **SMB Folder Pattern** | Subfolder pattern: `{year}/{month}` | `{year}/{month}` |
+| **SMB File Pattern** | File naming: `{camera}_{date}_{time}_{type}_{id}` | `{camera}_{date}_{time}_{type}_{id}` |
 | **Binary sensors** | Motion / Audio alarm binary sensors (ON for 30s after event) | ON |
 
 ### Step 3 — Add the Lovelace Card
@@ -110,12 +119,18 @@ title: Garten
 | Motion detection | `switch` | disabled by default |
 | Record sound | `switch` | disabled by default |
 | Auto-follow (360 camera) | `switch` | disabled by default |
+| Intercom (two-way audio) | `switch` | disabled by default |
 | Pan position (360 camera) | `number` | enabled (±120°) |
 | Audio alarm threshold | `number` | disabled by default |
+| Speaker level (intercom volume) | `number` | disabled by default (0–100) |
 | Stream quality | `select` | Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
+| FCM Push mode | `select` | Auto / iOS / Android / Polling |
 | Motion detected | `binary_sensor` | disabled by default |
 | Audio alarm detected | `binary_sensor` | disabled by default |
+| Person detected | `binary_sensor` | disabled by default |
+| Unread events count | `sensor` | disabled by default |
+| Acoustic alarm (siren, 360 only) | `button` | disabled by default |
 | Live stream (30fps H.264 + AAC) | `camera` | via Live Stream switch |
 
 > **SHC local API is not needed.** All features work with just the Bosch cloud API.
@@ -135,6 +150,12 @@ Configure in **Settings → Configure:**
 - `Save alert snapshots` — keep files locally or delete after sending
 - `Delete after send` — cleanup local files after notification sent
 
+### Mark-as-Read & Last Event Fast-Path
+
+Events are automatically **marked as read** after alert processing or download. This uses `PUT /v11/events/bulk` for batch updates and `PUT /v11/events/{id}` for individual events, keeping the unread count in sync with the Bosch Smart Camera app.
+
+The integration uses `GET /v11/video_inputs/{id}/last_event` as a **fast-path** to check for new events before fetching the full event list. This reduces unnecessary API calls — the full event list is only fetched when the last event has actually changed.
+
 ### FCM Push vs Polling
 
 | | FCM Push (recommended) | Polling (default) |
@@ -144,13 +165,35 @@ Configure in **Settings → Configure:**
 | **Fallback** | Automatic — if FCM goes down, polling continues | Always active |
 | **Status sensor** | `sensor.bosch_camera_event_detection` = `fcm_push` | `polling` |
 
-Enable FCM Push in **Settings → Configure → FCM Push**.
+Enable FCM Push in **Settings → Configure → FCM Push**. You can also select the push mode (`Auto`, `iOS`, `Android`, or `Polling`) — `Auto` tries iOS first, then Android, then falls back to polling. The mode can also be changed at runtime via the **FCM Push Mode** select entity.
+
+### SMB/NAS Upload
+
+Upload event snapshots and video clips directly to a SMB/CIFS network share (FRITZ!Box NAS, Synology, any Windows share, etc.). Disabled by default.
+
+**How it works:**
+- When an event is detected (via FCM push or polling), the integration downloads the snapshot and video clip
+- Files are uploaded to the configured SMB share using the folder and file naming patterns
+- Supports any SMB-compatible NAS or router with USB storage
+
+**Configuration:** Go to **Settings → Integrations → Bosch Smart Home Camera → Configure** and enable **SMB Upload**. Then fill in the server, share, and credentials.
+
+**Folder pattern variables:** `{year}`, `{month}`, `{day}`
+**File pattern variables:** `{camera}`, `{date}`, `{time}`, `{type}`, `{id}`
+
+Example file path on NAS:
+```
+\\192.168.1.1\cameras\bosch_cameras\2026\03\Garten_2026-03-23_14-32-05_MOVEMENT_abc123.jpg
+```
+
+> Requires the `smbprotocol` Python package, which is auto-installed via `manifest.json`.
 
 ### HA Events
 
 The integration fires events for custom automations:
 - `bosch_shc_camera_motion` — movement detected
 - `bosch_shc_camera_audio_alarm` — audio alarm triggered
+- `bosch_shc_camera_person` — person detected
 
 Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`)
 
@@ -176,6 +219,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 │  [ 📸 Snapshot ] [ 📹 Stream ] [ ⛶ ] │
 │  [ 🔊 Ton ] [ 💡 Licht ] [ 🔒 Privat ] │
 │  [ 🔔 Benachrichtigungen ]            │
+│  [ 🎙 Gegensprechanlage ]             │
 │  [ ◀ ] [     ■     ] [ ▶ ]  ← pan    │
 │  Qualität: [Auto ▼]                   │
 └──────────────────────────────────┘
@@ -223,8 +267,30 @@ cards:
 ## Requirements
 
 - Home Assistant 2024.1+
-- Python packages: `requests`, `firebase-messaging` (auto-installed via manifest)
+- Python packages: `requests`, `firebase-messaging`, `smbprotocol` (auto-installed via manifest)
 - For live video: go2rtc (built into HA) or ffplay/mpv
+
+---
+
+## Version History
+
+| Version | Changes |
+|---------|---------|
+| **v6.0.0** | FCM Push mode selection (Auto/iOS/Android/Polling) with iOS-first fallback order, intercom switch (two-way audio, disabled by default), speaker level number entity (disabled by default), SMB/NAS upload for event snapshots + video clips (FRITZ!Box, Synology, etc.), configurable folder/file patterns, person detection binary sensor (disabled by default), acoustic alarm / siren button (CAMERA_360 only, disabled by default), unread events count sensor (disabled by default), `bosch_shc_camera_person` HA event, mark-as-read (events auto-marked after alerts/downloads), last_event fast-path to reduce API calls, bug fixes (FCM auto-start default corrected, events --limit fixed), Lovelace card v1.8.0 with intercom toggle |
+| v5.1.3 | Skip video clip polling when status is Unavailable |
+| v5.1.2 | Alert files saved to `/media/bosch_alerts/` |
+| v5.1.0 | German + English translations, multi-service alerts, video clip poll retry |
+| v5.0.0 | FCM push notifications, 3-step alert system, auto-follow switch |
+| v4.0.0 | Code cleanup: switch base class, shared aiohttp session, TZ-aware counters |
+| v3.1.0 | Snapshot refresh fix (frame_interval decoupled) |
+| v3.0.0 | Motion/audio binary sensors, sensitivity select, audio threshold |
+| v2.9.0 | Proxy URL caching (50s TTL), background snapshot refresh |
+| v2.8.0 | Event-driven snapshot refresh, RCP session caching |
+| v2.7.0 | RCP snapshot primary, snap.jpg fallback |
+| v2.6.0 | Video quality select entity |
+| v2.0.0 | WiFi/firmware/ambient sensors, 3-state notifications, diagnostics |
+| v1.8.0 | Live HLS video in Lovelace card |
+| v1.7.1 | Cloud proxy snapshots, iOS-style toggles |
 
 ---
 

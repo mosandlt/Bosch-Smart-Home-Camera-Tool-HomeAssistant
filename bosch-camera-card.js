@@ -18,7 +18,13 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.7.6
+ * Version: 1.8.0
+ *
+ * Changes vs 1.7.6:
+ *   - Added Intercom (Gegensprechanlage) toggle row — switch.bosch_{cam}_intercom
+ *     Hidden when entity doesn't exist (disabled by default in HA integration).
+ *   - Added Speaker Level display when intercom is active.
+ *   - Updated debug line to v1.8.0
  *
  * Changes vs 1.7.5:
  *   - Fix: stale image shown for up to 60 s on page load. When localStorage cache
@@ -145,8 +151,11 @@ class BoschCameraCard extends HTMLElement {
       light:        config.light_entity         || `switch.${base}_camera_light`,
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       notifications: config.notifications_entity || `switch.${base}_notifications`,
+      intercom:     config.intercom_entity      || `switch.${base}_intercom`,
+      speaker:      config.speaker_entity       || `number.${base}_speaker_level`,
       pan:          config.pan_entity           || `number.${base}_pan_position`,
       quality:      config.quality_entity       || null,
+      push_status:  config.push_status_entity   || "sensor.bosch_camera_event_detection",
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
       last_event:   config.last_event_entity    || `sensor.${base}_last_event`,
@@ -285,6 +294,19 @@ class BoschCameraCard extends HTMLElement {
         .stream-badge.idle .dot      { background: #636366; }
         .stream-badge.streaming .dot { background: #0a84ff; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        /* Push status badge */
+        .push-badge {
+          display: inline-flex; align-items: center; gap: 4px;
+          font-size: 10px; font-weight: 600; letter-spacing: .3px;
+          text-transform: uppercase; padding: 2px 6px; border-radius: 12px;
+          white-space: nowrap;
+        }
+        .push-badge.fcm  { background: rgba(48,209,88,.15); color: #30d158; }
+        .push-badge.poll { background: rgba(99,99,102,.2); color: #8e8e93; }
+        .push-badge .pdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+        .push-badge.fcm .pdot  { background: #30d158; }
+        .push-badge.poll .pdot { background: #636366; }
 
         /* Camera image area */
         .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; aspect-ratio: 16/9; }
@@ -478,9 +500,15 @@ class BoschCameraCard extends HTMLElement {
             <div class="status-dot unknown" id="status-dot"></div>
             <span class="title" id="title">Bosch Camera</span>
           </div>
-          <div class="stream-badge idle" id="stream-badge">
-            <div class="dot"></div>
-            <span id="stream-label">idle</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="push-badge poll" id="push-badge">
+              <div class="pdot"></div>
+              <span id="push-label">poll</span>
+            </div>
+            <div class="stream-badge idle" id="stream-badge">
+              <div class="dot"></div>
+              <span id="stream-label">idle</span>
+            </div>
           </div>
         </div>
 
@@ -592,6 +620,18 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
+            <div class="sw-row" id="btn-intercom" style="display:none">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+                  <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                <span>Gegensprech.</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
           </div>
 
           <div class="pan-section" id="pan-section" style="display:none">
@@ -642,7 +682,7 @@ class BoschCameraCard extends HTMLElement {
               </select>
             </div>
           </div>
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.7.6</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.8.0</div>
       </ha-card>
     `;
 
@@ -679,6 +719,9 @@ class BoschCameraCard extends HTMLElement {
     );
     this.shadowRoot.getElementById("btn-notifications").addEventListener("click", () =>
       this._toggleSwitch(this._entities.notifications)
+    );
+    this.shadowRoot.getElementById("btn-intercom")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.intercom)
     );
 
     // Pan buttons
@@ -1102,6 +1145,17 @@ class BoschCameraCard extends HTMLElement {
         || ents.camera;
     }
 
+    // Push status badge
+    const pushState  = hass.states[ents.push_status];
+    const pushBadge  = this.shadowRoot.getElementById("push-badge");
+    const pushLabel  = this.shadowRoot.getElementById("push-label");
+    if (pushBadge && pushLabel) {
+      const isFcm  = pushState?.state === "fcm_push";
+      const mode   = pushState?.attributes?.fcm_push_mode || "";
+      pushBadge.className = "push-badge " + (isFcm ? "fcm" : "poll");
+      pushLabel.textContent = isFcm ? `fcm${mode ? " " + mode : ""}` : "poll";
+    }
+
     // Status dot
     const statusState = hass.states[ents.status]?.state || "UNKNOWN";
     const statusDot   = this.shadowRoot.getElementById("status-dot");
@@ -1188,11 +1242,12 @@ class BoschCameraCard extends HTMLElement {
     if (infoEvToday) infoEvToday.textContent = evCount !== "—" ? `${evCount} Events` : "—";
     if (evOverlay)   evOverlay.textContent   = evCount !== "—" ? `${evCount} Events heute` : "";
 
-    // Toggle buttons — Ton / Licht / Privat / Benachrichtigungen
+    // Toggle buttons — Ton / Licht / Privat / Benachrichtigungen / Gegensprech.
     this._updateToggleBtn("btn-audio",         ents.audio,         hass.states[ents.audio]);
     this._updateToggleBtn("btn-light",         ents.light,         hass.states[ents.light]);
     this._updateToggleBtn("btn-privacy",       ents.privacy,       hass.states[ents.privacy]);
     this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
+    this._updateToggleBtn("btn-intercom",      ents.intercom,      hass.states[ents.intercom]);
 
     // Swap bell icon: bell when ON (notifications active), bell-off when OFF
     const notifState = this._getEffectiveState(ents.notifications);
