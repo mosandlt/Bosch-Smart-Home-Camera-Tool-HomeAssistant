@@ -31,7 +31,7 @@ import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers.aiohttp_client import async_get_clientsession, async_create_clientsession
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -1068,12 +1068,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     ) -> bytes | None:
         """READ an RCP command and return the raw payload bytes, or None on failure.
 
-        Args:
-            rcp_base:  Full RCP base URL, e.g. "https://proxy-NN:42090/{hash}/rcp.xml"
-            command:   Hex command string, e.g. "0x0c22"
-            sessionid: Session ID from _rcp_session()
-            type_:     RCP type string, e.g. "P_OCTET" or "T_WORD"
-            num:       num parameter (0 = omit)
+        Uses the HA shared session (verify_ssl=False) to avoid creating a new
+        connector+session per RCP command (prevents socket exhaustion).
         """
         params: dict = {
             "command":   command,
@@ -1084,23 +1080,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if num:
             params["num"] = str(num)
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        session = async_get_clientsession(self.hass, verify_ssl=False)
         try:
-            async with aiohttp.ClientSession(connector=connector) as session:
-                try:
-                    async with async_timeout.timeout(8):
-                        async with session.get(rcp_base, params=params) as resp:
-                            if resp.status != 200:
-                                _LOGGER.debug(
-                                    "_rcp_read: command=%s HTTP %d", command, resp.status
-                                )
-                                return None
-                            return await resp.read()
-                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                    _LOGGER.debug("_rcp_read: command=%s error: %s", command, err)
-                    return None
-        finally:
-            await connector.close()
+            async with async_timeout.timeout(8):
+                async with session.get(rcp_base, params=params) as resp:
+                    if resp.status != 200:
+                        _LOGGER.debug(
+                            "_rcp_read: command=%s HTTP %d", command, resp.status
+                        )
+                        return None
+                    return await resp.read()
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug("_rcp_read: command=%s error: %s", command, err)
+            return None
 
     async def _async_update_rcp_data(self, cam_id: str, proxy_host: str, proxy_hash: str) -> None:
         """Fetch RCP data (LED dimmer, privacy state) for a camera via cloud proxy.
@@ -1242,9 +1234,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """PUT to /v11/video_inputs/{cam_id}/{endpoint} with payload. Returns True on success."""
         token = self.token
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        session = async_get_clientsession(self.hass, verify_ssl=False)
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
-            async with aiohttp.ClientSession(connector=connector) as session:
+            async with async_timeout.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}",
                     headers=headers, json=payload,
@@ -1405,19 +1397,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         Uses PUT /v11/video_inputs/{id}/privacy — no SHC local API needed.
         Falls back to SHC API if cloud call fails and SHC is configured.
-
-        Discovery: GET/PUT /v11/video_inputs/{id}/privacy
-          Body: {"privacyMode": "ON"/"OFF", "durationInSeconds": null}
-          Response: HTTP 204 on success.
         """
         token = self.token
         if not token:
             _LOGGER.warning("cloud_set_privacy_mode: no token for %s", cam_id)
             return False
 
-        connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
-        headers   = {
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
             "Accept":        "application/json",
@@ -1430,17 +1417,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
-                        # Push new state to HA immediately — don't wait for the 22s coordinator tick.
-                        # Without this, entity state stays stale until the next full refresh,
-                        # causing the card's optimistic toggle to revert visually.
                         self.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_privacy_mode: %s → %s (HTTP %d)",
                             cam_id, "ON" if enabled else "OFF", resp.status,
                         )
                         self.hass.async_create_task(self.async_request_refresh())
-                        # When privacy is turned OFF, trigger a fresh snapshot so the card
-                        # shows a live image immediately instead of a stale cached one.
                         if not enabled:
                             cam = self._camera_entities.get(cam_id)
                             if cam:
@@ -1453,8 +1435,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     )
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
-        finally:
-            await session.close()
 
         # Fallback to SHC if cloud API fails and SHC is configured
         if self.options.get("shc_ip", "").strip():
@@ -1466,19 +1446,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Turn the camera light on (True) or off (False) via Bosch cloud API.
 
         Uses PUT /v11/video_inputs/{id}/lighting_override — no SHC local API needed.
-        Discovered 2026-03-21 via mitmproxy capture.
-        ON:  {"frontLightOn": true, "wallwasherOn": true, "frontLightIntensity": 1.0}
-        OFF: {"frontLightOn": false, "wallwasherOn": false}
-        Response: HTTP 204 on success.
         """
         token = self.token
         if not token:
             _LOGGER.warning("cloud_set_camera_light: no token for %s", cam_id)
             return False
 
-        connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
-        headers   = {
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
             "Accept":        "application/json",
@@ -1507,25 +1482,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     )
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
-        finally:
-            await session.close()
         return False
 
     async def async_cloud_set_notifications(self, cam_id: str, enabled: bool) -> bool:
         """Enable (FOLLOW_CAMERA_SCHEDULE) or disable (ALWAYS_OFF) notifications via cloud API.
 
         Uses PUT /v11/video_inputs/{id}/enable_notifications.
-        Discovered 2026-03-21 via mitmproxy capture.
-        Response: HTTP 204 on success.
         """
         token = self.token
         if not token:
             _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
             return False
 
-        connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
-        headers   = {
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
             "Accept":        "application/json",
@@ -1551,26 +1521,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     )
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
-        finally:
-            await session.close()
         return False
 
     async def async_cloud_set_pan(self, cam_id: str, position: int) -> bool:
         """Pan the 360 camera to an absolute position (-120 to +120 degrees).
 
         Uses PUT /v11/video_inputs/{id}/pan — no SHC local API needed.
-        Discovered 2026-03-21 via mitmproxy capture.
-        Response: {"currentAbsolutePosition": N, "cameraStoppedAtLimit": false,
-                   "estimatedTimeToCompletion": 970}
         """
         token = self.token
         if not token:
             _LOGGER.warning("cloud_set_pan: no token for %s", cam_id)
             return False
 
-        connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
-        headers   = {
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
             "Accept":        "application/json",
@@ -1594,8 +1558,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning("cloud_set_pan: HTTP %d for %s", resp.status, cam_id)
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_pan error for %s: %s", cam_id, err)
-        finally:
-            await session.close()
         return False
 
     # ── Auto-download (runs in executor thread) ───────────────────────────────

@@ -86,7 +86,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._cached_image: bytes | None = None
         self._force_image_refresh: bool = False  # bypasses HA image cache once
         self._last_image_fetch: float = 0.0      # monotonic timestamp of last fetch
-        self._bg_snap_running: bool = False       # guard: only one background refresh at a time
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         title = info.get("title", cam_id)
@@ -400,37 +399,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             )
         return None
 
-    async def _async_bg_snapshot_refresh(self) -> None:
-        """Fetch a fresh snapshot in the background without blocking the caller.
-
-        Called when the cached image is stale but the card still needs an
-        immediate response. The stale image is returned instantly; this task
-        populates `_cached_image` for the NEXT request.
-
-        Tries the same fallback chain as _async_trigger_image_refresh, but
-        does NOT touch _force_image_refresh or frame_interval — it just silently
-        updates the image cache so the next proxy request gets a fresh image.
-        """
-        self._bg_snap_running = True
-        try:
-            image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
-            if not image:
-                image = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
-            if not image:
-                image = await self.coordinator.async_fetch_fresh_event_snapshot(self._cam_id)
-            if image:
-                self._cached_image = image
-                self._last_image_fetch = time.monotonic()
-                _LOGGER.debug(
-                    "%s: background snapshot refresh done — %d bytes",
-                    self._attr_name, len(image),
-                )
-                self.async_write_ha_state()
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("%s: background snapshot refresh failed: %s", self._attr_name, err)
-        finally:
-            self._bg_snap_running = False
-
     # ── Snapshot image ────────────────────────────────────────────────────────
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -444,14 +412,20 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
            1b. RCP thumbnail fallback — 320×180 JPEG via RCP 0x099e, used when
                snap.jpg fetch fails with any error (timeout, network, etc.)
         2. Cloud proxy on-demand  — PUT /connection REMOTE + RCP 0x099e / snap.jpg.
-           If no cached image and width <= 640: tries RCP directly (320×180, ~100 ms).
-           If no cached image and width > 640 or None: full proxy + snap.jpg (~3 s).
-           If cached image is older than CLOUD_SNAP_CACHE_TTL (30 s): returns the
-           stale cached image instantly and kicks off a background refresh.
+           If no cached image: fetches fresh synchronously (~3 s for snap.jpg,
+           ~100 ms for RCP thumbnail when width <= 640).
+           If cached image is older than CLOUD_SNAP_CACHE_TTL (30 s): fetches
+           fresh synchronously so the user always sees a current image.
         3. Cached image           — fallback when cloud fetch fails (e.g. CAMERA_360
-           whose REMOTE snap.jpg returns 401; refreshed via background task using LOCAL).
+           whose REMOTE snap.jpg returns 401; refreshed via _async_trigger_image_refresh
+           using LOCAL connection).
         4. Latest event snapshot  — last resort on very first startup before any
            cloud fetch has completed.
+
+        The card calls trigger_snapshot on page load / tab switch / 60s timer,
+        which sets _force_image_refresh=True (frame_interval → 0.1s) and fetches
+        a fresh image via _async_trigger_image_refresh. This ensures HA's camera
+        proxy serves the fresh image on the next request instead of its 60s cache.
 
         width/height: passed by HA when the card requests ?width=N. We use this to
         prefer the 320×180 RCP thumbnail on mobile/small displays (avoids 150 KB
@@ -538,10 +512,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         # a) No cached image yet (first load / cache empty): fetch synchronously so
         #    HA has something to serve immediately. ~3s on cold cache.
         #
-        # b) Cached image exists but is stale (> CLOUD_SNAP_CACHE_TTL): return the
-        #    stale image IMMEDIATELY, then kick off a background refresh. The card
-        #    sees an instant response; the new image is ready for the next request.
-        #    This eliminates the 3s blocking delay on every 60s card refresh cycle.
+        # b) Cached image exists but is stale (> CLOUD_SNAP_CACHE_TTL): fetch fresh
+        #    synchronously so the user always sees a current image. The card triggers
+        #    this via trigger_snapshot service which sets _force_image_refresh, so
+        #    HA's frame_interval cache is bypassed and the fresh image is served.
         #
         # Skip when streaming — opening a new PUT /connection kills the active RTSP session.
         if not self.is_streaming:
@@ -572,12 +546,31 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                     )
                     return fresh
             elif cache_stale:
-                # Stale cache — return immediately, refresh in background
-                if not self._bg_snap_running:
-                    self.hass.async_create_task(self._async_bg_snapshot_refresh())
+                cache_age = now - self._last_image_fetch
+                # Always fetch fresh synchronously when cache is stale.
+                # The old background-refresh approach returned the stale image
+                # and refreshed async — but HA's frame_interval meant the fresh
+                # image was never served until the NEXT cycle, so the user saw
+                # the same stale frame repeatedly.
                 _LOGGER.debug(
-                    "%s: cloud proxy snapshot — returning cached (%ds old), refreshing in background",
-                    self._attr_name, int(now - self._last_image_fetch),
+                    "%s: cache stale (%ds) — fetching fresh synchronously",
+                    self._attr_name, int(cache_age),
+                )
+                if prefer_small:
+                    rcp_img = await self._async_rcp_thumbnail()
+                    if rcp_img:
+                        self._cached_image = rcp_img
+                        self._last_image_fetch = now
+                        return rcp_img
+                fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                if fresh:
+                    self._cached_image = fresh
+                    self._last_image_fetch = now
+                    return fresh
+                # Fetch failed — return stale cache as fallback
+                _LOGGER.debug(
+                    "%s: fresh fetch failed — returning cached (%ds old)",
+                    self._attr_name, int(cache_age),
                 )
                 return self._cached_image
             else:

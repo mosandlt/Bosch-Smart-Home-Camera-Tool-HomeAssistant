@@ -106,7 +106,7 @@ async def async_setup_entry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschLiveStreamSwitch(CoordinatorEntity, SwitchEntity):
+class BoschLiveStreamSwitch(_BoschSwitchBase):
     """Switch: ON = live stream active, OFF = stopped.
 
     State is driven by the coordinator's _live_connections dict.
@@ -115,29 +115,9 @@ class BoschLiveStreamSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Live Stream"
         self._attr_unique_id = f"bosch_shc_live_{cam_id.lower()}"
-
-    @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def is_on(self) -> bool:
@@ -178,7 +158,7 @@ class BoschLiveStreamSwitch(CoordinatorEntity, SwitchEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioSwitch(CoordinatorEntity, SwitchEntity):
+class BoschAudioSwitch(_BoschSwitchBase):
     """Switch: ON = live stream includes audio (AAC), OFF = video-only.
 
     Default: OFF — silent stream. Turn ON to enable AAC-LC 16kHz mono audio.
@@ -187,32 +167,11 @@ class BoschAudioSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Audio"
         self._attr_unique_id = f"bosch_shc_audio_{cam_id.lower()}"
-
         # Default: audio OFF (silent stream)
         coordinator._audio_enabled.setdefault(cam_id, False)
-
-    @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def is_on(self) -> bool:
@@ -246,41 +205,20 @@ class BoschAudioSwitch(CoordinatorEntity, SwitchEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschCameraLightSwitch(CoordinatorEntity, SwitchEntity):
+class BoschCameraLightSwitch(_BoschSwitchBase):
     """Switch: ON = camera indicator LED on, OFF = LED off.
 
     Only registered for cameras with featureSupport.light = True (from cloud API).
     State is read from cloud API featureStatus (frontIlluminatorInGeneralLightOn).
     Write (turn on/off) uses Bosch cloud API: PUT /v11/video_inputs/{id}/lighting_override.
     No SHC local API needed — works without SHC configured.
-    Discovered 2026-03-21 via mitmproxy capture.
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Camera Light"
         self._attr_unique_id = f"bosch_shc_light_{cam_id.lower()}"
         self._attr_icon      = "mdi:led-on"
-
-    @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def is_on(self) -> bool | None:
@@ -307,7 +245,7 @@ class BoschCameraLightSwitch(CoordinatorEntity, SwitchEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
+class BoschPrivacyModeSwitch(_BoschSwitchBase):
     """Switch: ON = privacy mode active (camera off / shutter closed), OFF = camera active.
 
     Uses the Bosch cloud API: PUT /v11/video_inputs/{id}/privacy
@@ -317,29 +255,9 @@ class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Privacy Mode"
         self._attr_unique_id = f"bosch_shc_privacy_{cam_id.lower()}"
-
-    @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def is_on(self) -> bool | None:
@@ -389,7 +307,7 @@ class BoschPrivacyModeSwitch(CoordinatorEntity, SwitchEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
+class BoschNotificationsSwitch(_BoschSwitchBase):
     """Switch: ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
 
     Three-state aware: the API can return FOLLOW_CAMERA_SCHEDULE, ON_CAMERA_SCHEDULE, or ALWAYS_OFF.
@@ -402,29 +320,9 @@ class BoschNotificationsSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Notifications"
         self._attr_unique_id = f"bosch_shc_notifications_{cam_id.lower()}"
-
-    @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
 
     # Values that map to ON state (notifications active in some form)
     _NOTIFICATIONS_ON_STATES = {"FOLLOW_CAMERA_SCHEDULE", "ON_CAMERA_SCHEDULE"}

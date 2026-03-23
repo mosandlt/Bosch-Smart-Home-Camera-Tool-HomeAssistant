@@ -184,13 +184,13 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
     @property
     def native_value(self) -> int:
         events = self._cam_data.get("events", [])
-        today  = datetime.now().strftime("%Y-%m-%d")
+        today  = dt_util.now().strftime("%Y-%m-%d")
         return sum(1 for ev in events if ev.get("timestamp", "").startswith(today))
 
     @property
     def extra_state_attributes(self) -> dict:
         events = self._cam_data.get("events", [])
-        today  = datetime.now().strftime("%Y-%m-%d")
+        today  = dt_util.now().strftime("%Y-%m-%d")
         today_events = [ev for ev in events if ev.get("timestamp", "").startswith(today)]
         return {
             "events_in_feed": len(events),
@@ -529,8 +529,7 @@ class BoschMovementEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self):
-        import datetime as _dt
-        today = _dt.date.today().isoformat()
+        today = dt_util.now().strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1 for e in events
@@ -558,8 +557,7 @@ class BoschAudioEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self):
-        import datetime as _dt
-        today = _dt.date.today().isoformat()
+        today = dt_util.now().strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1 for e in events

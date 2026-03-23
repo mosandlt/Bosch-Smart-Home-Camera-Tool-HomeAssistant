@@ -170,10 +170,9 @@ class BoschCameraCard extends HTMLElement {
     // old image. Show a "refreshing" overlay so the user knows it's updating.
     if (firstHass) {
       if (this._imageLoaded) {
-        // Cached image is visible — show subtle refresh spinner on top
         this._setLoadingOverlay(true, "Aktualisiere…");
       }
-      this._scheduleImageLoad(0);
+      this._triggerFreshSnapshot();
     }
   }
 
@@ -204,15 +203,14 @@ class BoschCameraCard extends HTMLElement {
       interval = 60;   // 1 min — page is visible
     }
     this._refreshTimer = setInterval(() => {
-      this._imgTimestamp = Date.now();
-      this._updateImage();
+      this._triggerFreshSnapshot();
     }, interval * 1000);
   }
 
   _onVisibilityChange() {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
-      // Page just came to foreground — refresh immediately
-      this._scheduleImageLoad(0);
+      // Page just came to foreground — trigger fresh snapshot like on page load
+      this._triggerFreshSnapshot();
     }
     // Restart timer with the correct interval (60 s or 1800 s)
     this._startRefreshTimer();
@@ -232,6 +230,16 @@ class BoschCameraCard extends HTMLElement {
     const cam = this._hass.states[this._entities.camera];
     if (cam?.attributes?.streaming_state) return cam.attributes.streaming_state === "active";
     return cam?.state === "streaming";
+  }
+
+  _triggerFreshSnapshot() {
+    // Tell backend to fetch a fresh image and bypass HA's 60s frame_interval cache.
+    // _force_image_refresh makes frame_interval=0.1s so the next proxy request
+    // actually calls async_camera_image instead of returning HA's internal cache.
+    // Cloud API response varies (1.5–5s), so fetch at 1.5s and 4s.
+    this._callService("bosch_shc_camera", "trigger_snapshot", {});
+    this._scheduleImageLoad(1500);
+    this._scheduleImageLoad(4000);
   }
 
   // ── Full DOM render (once on setConfig) ───────────────────────────────────
@@ -452,15 +460,15 @@ class BoschCameraCard extends HTMLElement {
         .pan-section { padding: 0 12px 12px; }
         .pan-row { display: flex; align-items: center; gap: 6px; }
         .pan-btn {
-          background: rgba(255,255,255,.15); border: none; border-radius: 6px;
-          color: white; cursor: pointer; padding: 6px 10px; flex: 1;
+          background: rgba(128,128,128,.15); border: none; border-radius: 6px;
+          color: var(--primary-text-color, #333); cursor: pointer; padding: 6px 10px; flex: 1;
           font-family: inherit; -webkit-tap-highlight-color: transparent;
           transition: background 0.15s;
           display: flex; align-items: center; justify-content: center;
         }
         .pan-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
-        .pan-btn:hover  { background: rgba(255,255,255,.25); }
-        .pan-btn:active { background: rgba(255,255,255,.35); }
+        .pan-btn:hover  { background: rgba(128,128,128,.25); }
+        .pan-btn:active { background: rgba(128,128,128,.35); }
         .pan-pos { margin-left: auto; font-size: 12px; opacity: .7; color: var(--primary-text-color, #e5e5ea); white-space: nowrap; }
       </style>
 
@@ -634,6 +642,7 @@ class BoschCameraCard extends HTMLElement {
               </select>
             </div>
           </div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.7.6</div>
       </ha-card>
     `;
 
@@ -705,6 +714,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   // ── Image lifecycle ───────────────────────────────────────────────────────
+
   _scheduleImageLoad(delayMs = 0) {
     if (delayMs <= 0) {
       this._imgTimestamp = Date.now();
@@ -748,6 +758,15 @@ class BoschCameraCard extends HTMLElement {
     if (img)     img.classList.remove("hidden");
     if (overlay) { overlay.classList.remove("visible"); overlay.classList.remove("refreshing"); }
     if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    // Debug: show load time on card
+    const dbg = this.shadowRoot.getElementById("debug-line");
+    if (dbg) {
+      const src = img?.src || "";
+      const isCache = src.startsWith("data:");
+      const now = new Date().toLocaleTimeString("de-DE");
+      const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
+      dbg.textContent = `Card v1.7.6 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
+    }
     // Store image to localStorage so next app launch shows it instantly
     if (img?.src && !img.src.startsWith("data:")) this._cacheImage(img.src);
   }
