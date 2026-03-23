@@ -102,6 +102,10 @@ async def async_setup_entry(
         entities.append(BoschMotionEnabledSwitch(coordinator, cam_id, config_entry))
         # Record sound toggle — available for all cameras via cloud API
         entities.append(BoschRecordSoundSwitch(coordinator, cam_id, config_entry))
+        # Auto-follow — only for cameras with panLimit > 0 (CAMERA_360)
+        pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
+        if pan_limit:
+            entities.append(BoschAutoFollowSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -429,5 +433,46 @@ class BoschRecordSoundSwitch(_BoschSwitchBase):
     async def async_turn_off(self, **kwargs):
         await self.coordinator.async_put_camera(
             self._cam_id, "recording_options", {"recordSound": False}
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAutoFollowSwitch(_BoschSwitchBase):
+    """Toggle auto-follow (camera automatically pans to track motion).
+
+    Only available on CAMERA_360 (indoor) — cameras with panLimit > 0.
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/autofollow
+    Body: {"result": true/false}
+    Response: HTTP 204 on success.
+    """
+
+    _attr_icon = "mdi:target-account"
+    _attr_entity_registry_enabled_default = False
+
+    @property
+    def name(self) -> str:
+        return f"Bosch {self._cam_title} Auto Follow"
+
+    @property
+    def unique_id(self) -> str:
+        return f"bosch_shc_camera_{self._cam_id}_autofollow"
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self.coordinator.data.get(self._cam_id, {}).get("autofollow")
+        if data is None:
+            return None
+        return data.get("result", False)
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "autofollow", {"result": True}
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "autofollow", {"result": False}
         )
         self.hass.async_create_task(self.coordinator.async_request_refresh())

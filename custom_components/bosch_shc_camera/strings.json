@@ -41,7 +41,7 @@
           "enable_snapshot_button": "Enable buttons (Refresh Snapshot / Open Live Stream)",
           "enable_auto_download":   "Auto-download all event files (JPEG + MP4) in background",
           "download_path":          "Download folder path (e.g. /config/bosch_events)",
-          "shc_ip":                 "SHC local IP address (e.g. 192.168.20.4) — for camera light + privacy mode",
+          "shc_ip":                 "SHC local IP address (e.g. 192.168.1.100) — for camera light + privacy mode",
           "shc_cert_path":          "Client certificate path (e.g. /config/claude_cert.pem) — SHC mutual TLS",
           "shc_key_path":           "Client key path (e.g. /config/claude_key.pem) — SHC mutual TLS",
           "force_relogin":          "Force new browser login (only needed if refresh token expired)"

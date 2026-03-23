@@ -64,6 +64,10 @@ async def async_setup_entry(
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
+    # Integration-level sensor: FCM push status (one per integration, not per camera)
+    first_cam_id = next(iter(coordinator.data), None)
+    if first_cam_id:
+        entities.append(BoschFcmPushStatusSensor(coordinator, first_cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -564,3 +568,55 @@ class BoschAudioEventsTodaySensor(_BoschSensorBase):
             if e.get("eventType") == "AUDIO_ALARM"
             and (e.get("timestamp") or "").startswith(today)
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschFcmPushStatusSensor(_BoschSensorBase):
+    """Shows the event detection method: FCM push (instant) or polling (fallback).
+
+    States:
+      - "fcm_push"  — FCM connected and receiving pushes (~2s event detection)
+      - "polling"   — FCM disabled or failed, using interval-based polling
+      - "disabled"  — FCM push not enabled in options
+    """
+
+    _attr_icon = "mdi:bell-ring-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def name(self) -> str:
+        return "Bosch Camera Event Detection"
+
+    @property
+    def unique_id(self) -> str:
+        return "bosch_shc_camera_fcm_push_status"
+
+    @property
+    def native_value(self) -> str:
+        if not self.coordinator.options.get("enable_fcm_push", False):
+            return "disabled"
+        if self.coordinator._fcm_healthy:
+            return "fcm_push"
+        return "polling"
+
+    @property
+    def icon(self) -> str:
+        val = self.native_value
+        if val == "fcm_push":
+            return "mdi:bell-ring"
+        if val == "polling":
+            return "mdi:timer-sand"
+        return "mdi:bell-off"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        import time as _time
+        attrs = {
+            "fcm_enabled": self.coordinator.options.get("enable_fcm_push", False),
+            "fcm_running": self.coordinator._fcm_running,
+            "fcm_healthy": self.coordinator._fcm_healthy,
+        }
+        if self.coordinator._fcm_last_push > 0:
+            age = _time.monotonic() - self.coordinator._fcm_last_push
+            attrs["last_push_seconds_ago"] = round(age)
+        return attrs

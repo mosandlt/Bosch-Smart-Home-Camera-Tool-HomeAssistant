@@ -222,7 +222,9 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
 
             for k in ["enable_snapshots", "enable_sensors",
                       "enable_snapshot_button", "enable_auto_download",
-                      "high_quality_video", "enable_binary_sensors"]:
+                      "high_quality_video", "enable_binary_sensors",
+                      "enable_fcm_push", "alert_save_snapshots",
+                      "alert_delete_after_send"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -294,6 +296,22 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     "enable_binary_sensors",
                     default=bool(opts.get("enable_binary_sensors", True)),
+                ): bool,
+                vol.Optional(
+                    "enable_fcm_push",
+                    default=bool(opts.get("enable_fcm_push", False)),
+                ): bool,
+                vol.Optional(
+                    "alert_notify_service",
+                    default=str(opts.get("alert_notify_service", "")),
+                ): str,
+                vol.Optional(
+                    "alert_save_snapshots",
+                    default=bool(opts.get("alert_save_snapshots", False)),
+                ): bool,
+                vol.Optional(
+                    "alert_delete_after_send",
+                    default=bool(opts.get("alert_delete_after_send", True)),
                 ): bool,
                 vol.Optional("force_relogin", default=False): bool,
             }),

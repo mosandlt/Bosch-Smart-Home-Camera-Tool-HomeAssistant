@@ -55,9 +55,12 @@ express or implied.
 | Pan position (360 camera) | `number` | enabled (−120° to +120°, auto-detected for CAMERA_360) |
 | Audio alarm threshold (dB) | `number` | disabled by default — read/write dB threshold via `PUT /v11/video_inputs/{id}/audioAlarm` |
 | Stream quality | `select` | enabled (Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps) |
-| Motion sensitivity | `select` | disabled by default — SUPER_HIGH / HIGH / MEDIUM / MEDIUM_LOW / LOW via `PUT /v11/video_inputs/{id}/motion` |
+| Motion sensitivity | `select` | disabled by default — SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF via `PUT /v11/video_inputs/{id}/motion` |
+| Auto-follow (360 camera) | `switch` | disabled by default — camera auto-pans to track motion (CAMERA_360 only) |
 | Motion detected | `binary_sensor` | disabled by default — ON for 30 s after MOVEMENT event (enable in entity registry) |
 | Audio alarm detected | `binary_sensor` | disabled by default — ON for 30 s after AUDIO_ALARM event (enable in entity registry) |
+| **FCM push notifications** | background | disabled by default — near-instant (~2s) event detection via Firebase Cloud Messaging. Enable in Settings → Configure. Automatic fallback to polling when FCM is down. |
+| Event detection status sensor | `sensor` | diagnostic — shows `fcm_push` / `polling` / `disabled` |
 | Auto-download events to folder | background | optional (disabled by default) |
 | **Live stream — 30fps H.264 + optional AAC audio** | `camera` | via Live Stream switch |
 | Live snapshot (current image, ~1.5s) | `camera` | via snap.jpg proxy |
@@ -68,6 +71,44 @@ express or implied.
 - `streaming` — live proxy connection is open (switch ON)
 
 All features are individually toggleable in **Settings → Integrations → Bosch Smart Home Camera → Configure**.
+
+### Built-in Alert Notifications (Signal, Telegram, etc.)
+
+The integration has a **built-in 3-step alert system** — no automations needed:
+
+1. **Instant text:** `📷 Kamera: Bewegung (10:31:56)` — sent immediately on detection
+2. **Snapshot image:** `📸 Kamera Snapshot (10:31:56)` + JPEG attached — sent ~5s later (downloaded from Bosch cloud with auth, saved locally, attached as file)
+3. **Video clip:** `🎬 Kamera Video (10:31:56, 245 KB)` + MP4 attached — sent ~15s later (if Bosch has finished uploading)
+
+Configure in **Settings → Integrations → Bosch Smart Home Camera → Configure**:
+
+| Setting | Description |
+|---|---|
+| `alert_notify_service` | Notify service to use (e.g. `notify.signal_messenger` for Signal, `notify.mobile_app_xxx` for iOS push). Leave empty to disable. |
+| `alert_save_snapshots` | `true` = keep event images/videos in `/config/www/bosch_alerts/`. `false` = delete after sending. |
+| `alert_delete_after_send` | `true` = cleanup local files after Signal has read them. |
+
+The integration also fires HA events for custom automations:
+- `bosch_shc_camera_motion` — movement detected
+- `bosch_shc_camera_audio_alarm` — audio alarm triggered
+
+Event data includes `camera_name`, `timestamp`, `image_url`, `event_id`, and `source` (`fcm_push` or `polling`).
+
+**Ready-to-use automations** (copy to your `automations.yaml` or create via HA UI):
+- [`examples/automation_ios_push_alert.yaml`](examples/automation_ios_push_alert.yaml) — iPhone push with time-sensitive interruption
+- [`examples/automation_signal_alert.yaml`](examples/automation_signal_alert.yaml) — Signal text message
+- [`blueprints/bosch_camera_signal_alert.yaml`](blueprints/bosch_camera_signal_alert.yaml) — blueprint with cooldown, per-event-type filtering, and snapshot
+
+### FCM Push vs Polling Fallback
+
+When **FCM Push** is enabled (Settings → Configure):
+- Events arrive in ~2-3 seconds via Firebase Cloud Messaging
+- Polling runs as safety net at `interval_events` (default 5 min)
+- If FCM goes down, polling interval shortens automatically
+- Status visible via `sensor.bosch_camera_event_detection` (`fcm_push` / `polling` / `disabled`)
+
+When **FCM Push** is disabled (default):
+- Events detected via polling every `interval_events` seconds
 
 > **SHC local API is not needed.** All features — camera snapshots, live stream, privacy mode, camera LED light, notifications, and pan control — work with just a Bosch Bearer token via the cloud API. Privacy mode uses `PUT /v11/video_inputs/{id}/privacy`, light uses `PUT /v11/video_inputs/{id}/lighting_override`, notifications use `PUT /v11/video_inputs/{id}/enable_notifications`, and pan uses `PUT /v11/video_inputs/{id}/pan`.
 

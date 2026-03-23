@@ -1,0 +1,42 @@
+# Bosch Camera — Signal Alert Automations (ready to use)
+#
+# Sends a Signal message when motion or audio is detected.
+# Copy to your automations.yaml or create via HA UI.
+#
+# Prerequisites:
+#   1. signal-cli-rest-api running (e.g. Docker container)
+#   2. HA Signal Messenger integration configured
+#   3. Bosch SHC Camera integration installed
+#
+# Replace "notify.YOUR_SIGNAL_SERVICE" with your actual Signal notify service.
+# Find yours in Developer Tools -> Services -> search "notify.signal"
+#
+# Note: For snapshot images via Signal, use the built-in alert system instead
+# (Settings -> Configure -> alert_notify_service). It downloads images with
+# Bearer auth and sends them as local file attachments.
+#
+# Works with FCM push (~2s) or polling (5min) — whichever is active.
+
+- alias: "Bosch Kamera - Bewegung Signal"
+  description: "Sends Signal message on camera motion detection"
+  triggers:
+    - trigger: event
+      event_type: bosch_shc_camera_motion
+  conditions: []
+  actions:
+    - action: notify.YOUR_SIGNAL_SERVICE
+      data:
+        message: "{{ trigger.event.data.camera_name }}: Bewegung erkannt um {{ trigger.event.data.timestamp[11:19] }}"
+  mode: single
+
+- alias: "Bosch Kamera - Audio-Alarm Signal"
+  description: "Sends Signal message on camera audio alarm"
+  triggers:
+    - trigger: event
+      event_type: bosch_shc_camera_audio_alarm
+  conditions: []
+  actions:
+    - action: notify.YOUR_SIGNAL_SERVICE
+      data:
+        message: "{{ trigger.event.data.camera_name }}: Audio-Alarm um {{ trigger.event.data.timestamp[11:19] }}"
+  mode: single

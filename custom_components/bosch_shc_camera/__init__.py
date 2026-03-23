@@ -42,10 +42,15 @@ CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
-# REMOTE → cloud proxy, fast (~1.5s), no credentials, works from anywhere
-# LOCAL  → LAN direct, returns Digest user/password, slow (~15s)
-LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]  # REMOTE (cloud) first, LOCAL (LAN) as fallback
-LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early to be safe
+LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
+LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
+
+# Firebase Cloud Messaging — push notifications from Bosch CBS
+# Extracted from Bosch Smart Camera APK v2.3.3
+FCM_PROJECT_ID    = "bosch-smart-cameras"
+FCM_APP_ID        = "1:404630424405:android:9e5b6b58e4c70075"
+FCM_API_KEY       = "REDACTED_FIREBASE_KEY"
+FCM_SENDER_ID     = "404630424405"
 
 DEFAULT_OPTIONS = {
     "scan_interval":      60,    # coordinator tick interval (seconds)
@@ -57,12 +62,15 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_auto_download":   False,
     "download_path":          "",
-    # SHC local API — for camera light + privacy mode control
-    "shc_ip":        "",   # e.g. 192.168.20.4
-    "shc_cert_path": "",   # path to client cert PEM (e.g. /config/claude_cert.pem)
-    "shc_key_path":  "",   # path to client key PEM  (e.g. /config/claude_key.pem)
-    "high_quality_video": False,  # True = highQualityVideo: True in PUT /connection
-    "enable_binary_sensors": True,  # motion + audio binary sensor entities
+    "shc_ip":        "",
+    "shc_cert_path": "",
+    "shc_key_path":  "",
+    "high_quality_video": False,
+    "enable_binary_sensors": True,
+    "enable_fcm_push": False,  # FCM push notifications for near-instant event detection (opt-in)
+    "alert_notify_service": "",   # notify service for alerts (e.g. "notify.signal_messenger"), empty = disabled
+    "alert_save_snapshots": False, # save event snapshots locally to /config/www/bosch_alerts/
+    "alert_delete_after_send": True, # delete local snapshot after sending (only when alert_save_snapshots=False)
 }
 
 
@@ -133,6 +141,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._proxy_url_cache: dict[str, tuple[str, float]] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
+        # FCM push client — near-instant event detection via Firebase Cloud Messaging
+        self._fcm_client = None        # FcmPushClient instance (or None if disabled)
+        self._fcm_token: str = ""      # FCM registration token
+        self._fcm_running: bool = False
+        self._fcm_last_push: float = 0.0  # monotonic time of last received push
+        self._fcm_healthy: bool = False   # True when FCM is connected and receiving
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -203,7 +217,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         now     = time.monotonic()
 
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
-        do_events = (now - self._last_events) >= int(opts.get("interval_events", 60))
+        # Event polling interval: when FCM push is healthy, extend to interval_events (5 min)
+        # as a safety net. When FCM is down/disabled, poll at scan_interval (60s) for faster detection.
+        if self._fcm_healthy:
+            event_interval = int(opts.get("interval_events", 300))
+        else:
+            event_interval = int(opts.get("interval_events", 60))
+        do_events = (now - self._last_events) >= event_interval
         # Slow tier — wifiinfo, ambient light, RCP, motion, audio alarm, recording (every 5 min)
         do_slow   = (now - self._last_slow)   >= int(opts.get("interval_slow", 300))
 
@@ -319,6 +339,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 _LOGGER.debug(
                                     "Fired bosch_shc_camera_audio_alarm for %s", cam_id
                                 )
+                            # Send alert notification (2-step: text + snapshot)
+                            self.hass.async_create_task(
+                                self._async_send_alert(
+                                    cam_name, event_type,
+                                    newest_event.get("timestamp", ""),
+                                    newest_event.get("imageUrl", ""),
+                                    newest_event.get("videoClipUrl", ""),
+                                    newest_event.get("videoClipUploadStatus", ""),
+                                )
+                            )
                         if newest_id:
                             self._last_event_ids[cam_id] = newest_id
                 else:
@@ -461,6 +491,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     data[cam_id_key]["recordingOptions"] = await r.json()
                     except Exception as err:
                         _LOGGER.debug("Recording options fetch error for %s: %s", cam_id_key, err)
+
+                    # Autofollow (only CAMERA_360 with panLimit > 0)
+                    pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
+                    if pan_limit:
+                        try:
+                            async with async_timeout.timeout(5):
+                                async with session.get(
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/autofollow",
+                                    headers=headers,
+                                ) as r:
+                                    if r.status == 200:
+                                        data[cam_id_key]["autofollow"] = await r.json()
+                        except Exception as err:
+                            _LOGGER.debug("Autofollow fetch error for %s: %s", cam_id_key, err)
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -889,7 +933,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             )
             return None
 
-        camera_host = urls[0]  # e.g. "192.168.20.21:443"
+        camera_host = urls[0]  # e.g. "192.168.x.x:443"
         snap_url    = f"https://{camera_host}/snap.jpg"
 
         def _fetch_digest() -> bytes | None:
@@ -968,6 +1012,398 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("go2rtc stream '%s' removed", stream_name)
         except (asyncio.TimeoutError, aiohttp.ClientError):
             pass  # go2rtc may not be running — silently ignore
+
+    # ── FCM push notifications (near-instant event detection) ────────────────
+    async def async_start_fcm_push(self) -> None:
+        """Start the FCM push listener for near-instant motion/audio event detection.
+
+        Flow:
+          1. Register with Google FCM (get a device token)
+          2. Register the token with Bosch CBS (POST /v11/devices)
+          3. Listen for silent push notifications from Bosch
+          4. On push → immediately fetch events → fire HA events + update sensors
+
+        FCM credentials are stored in the config entry data and reused across restarts.
+        The push is a silent wake-up signal (no payload) — event data comes from /v11/events.
+        """
+        if self._fcm_running:
+            return
+        if not self.options.get("enable_fcm_push", True):
+            _LOGGER.debug("FCM push disabled in options")
+            return
+
+        try:
+            from firebase_messaging import FcmPushClient, FcmRegisterConfig
+        except ImportError:
+            _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
+            return
+
+        fcm_config = FcmRegisterConfig(
+            project_id=FCM_PROJECT_ID,
+            app_id=FCM_APP_ID,
+            api_key=FCM_API_KEY,
+            messaging_sender_id=FCM_SENDER_ID,
+        )
+
+        # Load saved FCM credentials from config entry (survives HA restarts)
+        saved_fcm_creds = self._entry.data.get("fcm_credentials")
+
+        def _on_creds_updated(creds):
+            """Save FCM credentials to config entry for persistence."""
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={**self._entry.data, "fcm_credentials": creds},
+            )
+            _LOGGER.debug("FCM credentials saved to config entry")
+
+        self._fcm_client = FcmPushClient(
+            callback=self._on_fcm_push,
+            fcm_config=fcm_config,
+            credentials=saved_fcm_creds,
+            credentials_updated_callback=_on_creds_updated,
+        )
+
+        try:
+            self._fcm_token = await self._fcm_client.checkin_or_register()
+            _LOGGER.info("FCM registered — token: %s...", self._fcm_token[:40])
+        except Exception as err:
+            _LOGGER.warning("FCM registration failed: %s", err)
+            self._fcm_client = None
+            return
+
+        # Register FCM token with Bosch CBS API
+        await self._register_fcm_with_bosch()
+
+        # Start listening for pushes
+        try:
+            await self._fcm_client.start()
+            self._fcm_running = True
+            self._fcm_healthy = True
+            _LOGGER.info("FCM push listener started — near-instant event detection active")
+        except Exception as err:
+            _LOGGER.warning("FCM push listener failed to start: %s", err)
+            self._fcm_client = None
+
+    async def _register_fcm_with_bosch(self) -> bool:
+        """Register our FCM token with Bosch CBS so it sends us push notifications.
+
+        Endpoint: POST /v11/devices {"deviceType": "ANDROID", "deviceToken": token}
+        Response: HTTP 204 on success.
+        """
+        if not self._fcm_token or not self.token:
+            return False
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type":  "application/json",
+        }
+        body = {"deviceType": "ANDROID", "deviceToken": self._fcm_token}
+
+        try:
+            async with async_timeout.timeout(10):
+                async with session.post(
+                    f"{CLOUD_API}/v11/devices", headers=headers, json=body
+                ) as resp:
+                    if resp.status in (200, 201, 204):
+                        _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
+                        return True
+                    _LOGGER.warning(
+                        "FCM token registration failed: HTTP %d", resp.status
+                    )
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("FCM token registration error: %s", err)
+        return False
+
+    def _on_fcm_push(self, notification: dict, persistent_id: str, obj=None) -> None:
+        """Called when a push notification arrives from Bosch CBS.
+
+        The push is a silent wake-up signal with no event payload.
+        We immediately trigger an event fetch + snapshot refresh for all cameras.
+        """
+        self._fcm_last_push = time.monotonic()
+        self._fcm_healthy = True
+        _LOGGER.info(
+            "FCM push received (id=%s, from=%s) — fetching events",
+            persistent_id, notification.get("from", "?"),
+        )
+        # Schedule immediate event fetch + snapshot refresh on the HA event loop
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.async_create_task,
+            self._async_handle_fcm_push(),
+        )
+
+    async def _async_handle_fcm_push(self) -> None:
+        """Handle an FCM push — fetch fresh events for all cameras and fire HA events."""
+        token = self.token
+        if not token:
+            return
+
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+        for cam_id in list(self.data.keys()):
+            try:
+                url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=5"
+                async with async_timeout.timeout(10):
+                    async with session.get(url, headers=headers) as r:
+                        if r.status != 200:
+                            continue
+                        events = await r.json()
+
+                if not events:
+                    continue
+
+                newest_id = events[0].get("id", "")
+                prev_id   = self._last_event_ids.get(cam_id)
+
+                if prev_id is not None and newest_id and newest_id != prev_id:
+                    newest_event = events[0]
+                    event_type   = newest_event.get("eventType", "")
+                    cam_name     = self.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+
+                    _LOGGER.info(
+                        "FCM push → new %s event for %s (id=%s)",
+                        event_type, cam_name, newest_id[:8],
+                    )
+
+                    # Update cached events
+                    if cam_id in self.data:
+                        self.data[cam_id]["events"] = events
+                    self._cached_events[cam_id] = events
+
+                    # Fire HA event bus
+                    event_payload = {
+                        "camera_id":   cam_id,
+                        "camera_name": cam_name,
+                        "timestamp":   newest_event.get("timestamp", ""),
+                        "image_url":   newest_event.get("imageUrl", ""),
+                        "event_id":    newest_id,
+                        "source":      "fcm_push",
+                    }
+                    if event_type == "MOVEMENT":
+                        self.hass.bus.async_fire("bosch_shc_camera_motion", event_payload)
+                    elif event_type == "AUDIO_ALARM":
+                        self.hass.bus.async_fire("bosch_shc_camera_audio_alarm", event_payload)
+
+                    # Send alert notification (3-step: text + snapshot + video)
+                    self.hass.async_create_task(
+                        self._async_send_alert(
+                            cam_name, event_type,
+                            newest_event.get("timestamp", ""),
+                            newest_event.get("imageUrl", ""),
+                            newest_event.get("videoClipUrl", ""),
+                            newest_event.get("videoClipUploadStatus", ""),
+                        )
+                    )
+
+                    # Trigger snapshot refresh
+                    cam_entity = self._camera_entities.get(cam_id)
+                    if cam_entity:
+                        self.hass.async_create_task(
+                            cam_entity._async_trigger_image_refresh(delay=2)
+                        )
+
+                    # Notify all entity listeners
+                    self.async_update_listeners()
+
+                if newest_id:
+                    self._last_event_ids[cam_id] = newest_id
+
+            except Exception as err:
+                _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
+
+    async def _async_send_alert(
+        self, cam_name: str, event_type: str, timestamp: str,
+        image_url: str, clip_url: str = "", clip_status: str = "",
+    ) -> None:
+        """Send a 3-step alert: instant text, snapshot image, video clip.
+
+        Step 1: Immediate text notification (no delay)
+        Step 2: Download snapshot from Bosch cloud (after 5s), send with image
+        Step 3: Download video clip (after 15s total), send as attachment
+        """
+        opts = self.options
+        notify_service = opts.get("alert_notify_service", "").strip()
+        if not notify_service:
+            return
+
+        save_snapshots = opts.get("alert_save_snapshots", False)
+        delete_after   = opts.get("alert_delete_after_send", True)
+        ts_short       = timestamp[11:19] if len(timestamp) >= 19 else timestamp
+
+        type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm"}.get(event_type, event_type)
+        type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a"}.get(event_type, "\u26a0\ufe0f")
+
+        try:
+            domain, service = notify_service.split(".", 1)
+        except ValueError:
+            _LOGGER.warning("Invalid notify service: %s", notify_service)
+            return
+
+        alert_dir = os.path.join(self.hass.config.config_dir, "www", "bosch_alerts")
+        await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
+        ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
+        files_to_cleanup: list[str] = []
+
+        # ── Step 1: Instant text alert ────────────────────────────────────────
+        try:
+            await self.hass.services.async_call(
+                domain, service,
+                {"message": f"{type_icon} {cam_name}: {type_label} ({ts_short})"},
+            )
+            _LOGGER.debug("Alert step 1 (text) sent via %s", notify_service)
+        except Exception as err:
+            _LOGGER.warning("Alert step 1 failed: %s", err)
+            return
+
+        # ── Step 2: Snapshot image (after 5s) ─────────────────────────────────
+        # If image_url is empty (event just created), re-fetch events to get it
+        if not image_url:
+            await asyncio.sleep(5)
+            try:
+                events_url = f"{CLOUD_API}/v11/events?videoInputId=&limit=5"
+                # Find cam_id from cam_name in coordinator data
+                for cid, cdata in self.data.items():
+                    if cdata.get("info", {}).get("title", "") == cam_name:
+                        events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
+                        break
+                async with async_timeout.timeout(10):
+                    async with session.get(events_url, headers=headers) as r:
+                        if r.status == 200:
+                            fresh_events = await r.json()
+                            if fresh_events:
+                                image_url = fresh_events[0].get("imageUrl", "")
+                                clip_url = fresh_events[0].get("videoClipUrl", "") or clip_url
+                                clip_status = fresh_events[0].get("videoClipUploadStatus", "") or clip_status
+                                _LOGGER.debug("Alert: re-fetched image_url=%s", image_url[:60] if image_url else "empty")
+            except Exception as err:
+                _LOGGER.debug("Alert: re-fetch events failed: %s", err)
+
+        if image_url:
+            if not image_url.startswith("http"):
+                _LOGGER.debug("Alert: invalid image_url: %s", image_url[:60])
+            else:
+                await asyncio.sleep(5)
+            snap_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.jpg")
+            try:
+                async with async_timeout.timeout(15):
+                    async with session.get(image_url, headers=headers) as resp:
+                        if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
+                            data = await resp.read()
+                            if data:
+                                await self.hass.async_add_executor_job(self._write_file, snap_path, data)
+                                await self.hass.services.async_call(
+                                    domain, service,
+                                    {
+                                        "message": f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
+                                        "data": {"attachments": [snap_path]},
+                                    },
+                                )
+                                _LOGGER.debug("Alert step 2 (snapshot) sent: %s", snap_path)
+                                if not save_snapshots:
+                                    files_to_cleanup.append(snap_path)
+            except Exception as err:
+                _LOGGER.warning("Alert step 2 failed: %s", err)
+
+        # ── Step 3: Video clip — poll until ready, then download + send ─────
+        # Bosch uploads clips asynchronously. The event initially has
+        # clip_status=Pending (or no clipUrl at all). We poll the events API
+        # every 10s for up to 90s until videoClipUploadStatus=Done.
+        cam_id = None
+        for cid, cdata in self.data.items():
+            if cdata.get("info", {}).get("title", "") == cam_name:
+                cam_id = cid
+                break
+
+        if cam_id:
+            clip_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.mp4")
+            auth_headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
+            found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
+
+            if not found_clip_url:
+                # Poll for clip readiness (10s intervals, up to 90s)
+                for attempt in range(9):
+                    await asyncio.sleep(10)
+                    try:
+                        async with async_timeout.timeout(10):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=3",
+                                headers=auth_headers,
+                            ) as r:
+                                if r.status != 200:
+                                    continue
+                                fresh = await r.json()
+                                for ev in fresh:
+                                    if ev.get("timestamp", "")[:19] == timestamp[:19]:
+                                        status = ev.get("videoClipUploadStatus", "")
+                                        url = ev.get("videoClipUrl", "")
+                                        if status == "Done" and url:
+                                            found_clip_url = url
+                                            break
+                        if found_clip_url:
+                            _LOGGER.debug(
+                                "Alert: clip ready after %ds for %s",
+                                (attempt + 1) * 10, cam_name,
+                            )
+                            break
+                    except Exception:
+                        continue
+
+            if found_clip_url:
+                try:
+                    dl_headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
+                    async with async_timeout.timeout(60):
+                        async with session.get(found_clip_url, headers=dl_headers) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                if data and len(data) > 1000:
+                                    await self.hass.async_add_executor_job(
+                                        self._write_file, clip_path, data
+                                    )
+                                    size_kb = len(data) // 1024
+                                    await self.hass.services.async_call(
+                                        domain, service,
+                                        {
+                                            "message": f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
+                                            "data": {"attachments": [clip_path]},
+                                        },
+                                    )
+                                    _LOGGER.info(
+                                        "Alert step 3 (video) sent: %s (%d KB)", clip_path, size_kb
+                                    )
+                                    if not save_snapshots:
+                                        files_to_cleanup.append(clip_path)
+                except Exception as err:
+                    _LOGGER.warning("Alert step 3 (video) failed: %s", err)
+            else:
+                _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
+
+        # ── Cleanup local files ───────────────────────────────────────────────
+        if delete_after and files_to_cleanup:
+            await asyncio.sleep(5)  # give Signal time to read the files
+            for fpath in files_to_cleanup:
+                try:
+                    await self.hass.async_add_executor_job(os.remove, fpath)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _write_file(path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
+
+    async def async_stop_fcm_push(self) -> None:
+        """Stop the FCM push listener."""
+        if self._fcm_client and self._fcm_running:
+            try:
+                await self._fcm_client.stop()
+            except Exception:
+                pass
+            self._fcm_running = False
+            _LOGGER.info("FCM push listener stopped")
 
     # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
     async def _get_cached_rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
@@ -1631,10 +2067,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services (idempotent)
     _register_services(hass)
 
+    # Start FCM push listener (runs in background, non-blocking)
+    if opts.get("enable_fcm_push", True):
+        hass.async_create_task(coordinator.async_start_fcm_push())
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Stop FCM push listener before unloading
+    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if coord := edata.get("coordinator"):
+        await coord.async_stop_fcm_push()
+
     unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)

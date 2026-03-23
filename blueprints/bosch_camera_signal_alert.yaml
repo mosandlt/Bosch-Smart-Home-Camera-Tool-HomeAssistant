@@ -1,0 +1,146 @@
+blueprint:
+  name: "Bosch Camera — Signal Alert with Snapshot"
+  description: >
+    Sends a Signal message with the event snapshot when a Bosch Smart Home
+    camera detects motion or an audio alarm.
+
+    Requires a Signal notification service in HA (e.g. signal_messenger via
+    signal-cli-rest-api, or any notify.* service that supports images).
+
+    The integration fires `bosch_shc_camera_motion` and `bosch_shc_camera_audio_alarm`
+    events on the HA event bus — this blueprint triggers on those events.
+
+    Works with both FCM push (instant, ~2s) and polling (interval_events, default 5min).
+  domain: automation
+  author: mosandlt
+  source_url: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/blob/main/blueprints/bosch_camera_signal_alert.yaml
+
+  input:
+    notify_service:
+      name: Notification service
+      description: >
+        The notify service to use (e.g. notify.signal_messenger, notify.mobile_app_iphone).
+        Must support sending images via the `data.attachment.url` or `data.photo` field.
+      selector:
+        text:
+      default: "notify.signal_messenger"
+
+    event_types:
+      name: Event types to alert on
+      description: Which event types trigger a notification
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: "Motion (MOVEMENT)"
+              value: "motion"
+            - label: "Audio Alarm (AUDIO_ALARM)"
+              value: "audio"
+      default:
+        - motion
+        - audio
+
+    cooldown_seconds:
+      name: Cooldown (seconds)
+      description: Minimum seconds between alerts per camera (prevents notification spam)
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+      default: 30
+
+    include_snapshot:
+      name: Include snapshot image
+      description: Download and attach the event JPEG snapshot to the notification
+      selector:
+        boolean:
+      default: true
+
+    message_template:
+      name: Message template
+      description: >
+        Notification message. Available variables:
+        {{ camera_name }}, {{ event_type }}, {{ timestamp }}
+      selector:
+        text:
+          multiline: true
+      default: "{{ camera_name }}: {{ event_type }} um {{ timestamp }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+trigger:
+  - platform: event
+    event_type: bosch_shc_camera_motion
+    id: motion
+  - platform: event
+    event_type: bosch_shc_camera_audio_alarm
+    id: audio
+
+condition:
+  # Check if this event type is enabled
+  - condition: template
+    value_template: >
+      {{ trigger.id in (input_event_types | default(['motion', 'audio'])) }}
+
+# Per-camera cooldown
+mode: queued
+max: 5
+
+variables:
+  input_event_types: !input event_types
+  input_notify_service: !input notify_service
+  input_cooldown: !input cooldown_seconds
+  input_include_snapshot: !input include_snapshot
+  input_message_template: !input message_template
+  camera_name: "{{ trigger.event.data.camera_name }}"
+  event_type: >
+    {% if trigger.id == 'motion' %}Bewegung{% else %}Audio-Alarm{% endif %}
+  timestamp: "{{ trigger.event.data.timestamp[:19] | default('?') }}"
+  image_url: "{{ trigger.event.data.image_url | default('') }}"
+  event_id: "{{ trigger.event.data.event_id | default('') }}"
+  source: "{{ trigger.event.data.get('source', 'polling') }}"
+
+action:
+  # Cooldown check — skip if last alert for this camera was too recent
+  - condition: template
+    value_template: >
+      {% set last = state_attr('automation.' ~ this.entity_id.split('.')[1], 'last_triggered') %}
+      {% if last is none %}true
+      {% else %}{{ (now() - last).total_seconds() > input_cooldown }}
+      {% endif %}
+
+  # Wait 2s for the snapshot to be available on the Bosch cloud
+  - delay:
+      seconds: 2
+
+  # Send notification with or without image
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ input_include_snapshot and image_url != '' }}"
+        sequence:
+          # Download snapshot to /config/www/ for local access
+          - service: downloader.download_file
+            data:
+              url: "{{ image_url }}"
+              filename: "bosch_alert_{{ event_id[:8] }}.jpg"
+              overwrite: true
+            continue_on_error: true
+
+          - service: "{{ input_notify_service }}"
+            data:
+              title: "{{ camera_name }}"
+              message: "{{ input_message_template }}"
+              data:
+                photo:
+                  - url: "{{ image_url }}"
+                    caption: "{{ camera_name }}: {{ event_type }} ({{ timestamp }})"
+                attachment:
+                  url: "{{ image_url }}"
+                image: "{{ image_url }}"
+
+    default:
+      - service: "{{ input_notify_service }}"
+        data:
+          title: "{{ camera_name }}"
+          message: "{{ input_message_template }}"
