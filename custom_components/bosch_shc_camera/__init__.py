@@ -1224,8 +1224,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Step 3: Download video clip (after 15s total), send as attachment
         """
         opts = self.options
-        notify_service = opts.get("alert_notify_service", "").strip()
-        if not notify_service:
+        notify_raw = opts.get("alert_notify_service", "").strip()
+        if not notify_raw:
+            return
+
+        # Support multiple comma-separated notify services
+        notify_services = [s.strip() for s in notify_raw.split(",") if s.strip()]
+        if not notify_services:
             return
 
         save_snapshots = opts.get("alert_save_snapshots", False)
@@ -1235,12 +1240,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm"}.get(event_type, event_type)
         type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a"}.get(event_type, "\u26a0\ufe0f")
 
-        try:
-            domain, service = notify_service.split(".", 1)
-        except ValueError:
-            _LOGGER.warning("Invalid notify service: %s", notify_service)
-            return
-
         alert_dir = os.path.join(self.hass.config.config_dir, "www", "bosch_alerts")
         await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
         ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
@@ -1248,13 +1247,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
         files_to_cleanup: list[str] = []
 
+        async def _notify_all(data: dict) -> None:
+            """Send notification to all configured services."""
+            for svc in notify_services:
+                try:
+                    domain, service = svc.split(".", 1)
+                    await self.hass.services.async_call(domain, service, data)
+                except Exception as err:
+                    _LOGGER.warning("Alert send failed for %s: %s", svc, err)
+
         # ── Step 1: Instant text alert ────────────────────────────────────────
         try:
-            await self.hass.services.async_call(
-                domain, service,
-                {"message": f"{type_icon} {cam_name}: {type_label} ({ts_short})"},
+            await _notify_all(
+                {"message": f"{type_icon} {cam_name}: {type_label} ({ts_short})"}
             )
-            _LOGGER.debug("Alert step 1 (text) sent via %s", notify_service)
+            _LOGGER.debug("Alert step 1 (text) sent to %d services", len(notify_services))
         except Exception as err:
             _LOGGER.warning("Alert step 1 failed: %s", err)
             return
@@ -1295,13 +1302,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             data = await resp.read()
                             if data:
                                 await self.hass.async_add_executor_job(self._write_file, snap_path, data)
-                                await self.hass.services.async_call(
-                                    domain, service,
-                                    {
-                                        "message": f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
-                                        "data": {"attachments": [snap_path]},
-                                    },
-                                )
+                                await _notify_all({
+                                    "message": f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
+                                    "data": {"attachments": [snap_path]},
+                                })
                                 _LOGGER.debug("Alert step 2 (snapshot) sent: %s", snap_path)
                                 if not save_snapshots:
                                     files_to_cleanup.append(snap_path)
@@ -1364,13 +1368,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         self._write_file, clip_path, data
                                     )
                                     size_kb = len(data) // 1024
-                                    await self.hass.services.async_call(
-                                        domain, service,
-                                        {
-                                            "message": f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
-                                            "data": {"attachments": [clip_path]},
-                                        },
-                                    )
+                                    await _notify_all({
+                                        "message": f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
+                                        "data": {"attachments": [clip_path]},
+                                    })
                                     _LOGGER.info(
                                         "Alert step 3 (video) sent: %s (%d KB)", clip_path, size_kb
                                     )

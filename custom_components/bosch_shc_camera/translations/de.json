@@ -1,0 +1,118 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bosch Smart Home Camera — Anmeldung (Schritt 1 von 2)",
+        "description": "**So melden Sie sich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **404-Seite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **Absenden** klicken",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "Diese URL kopieren und im Browser öffnen."
+        }
+      },
+      "auth": {
+        "title": "Bosch Smart Home Camera — URL einfügen (Schritt 2 von 2)",
+        "description": "Die Redirect-URL aus der Browser-Adressleiste unten einfügen.\n\n**Wichtig:** Der Code läuft nach ~60 Sekunden ab!",
+        "data": {
+          "redirect_url": "Redirect URL"
+        },
+        "data_description": {
+          "redirect_url": "Die komplette URL aus der Browser-Adressleiste nach der Anmeldung (beginnt mit https://www.bosch.com/boschcam?code=...)"
+        }
+      }
+    },
+    "error": {
+      "invalid_redirect_url":  "Kein Auth-Code in der URL gefunden.",
+      "token_exchange_failed": "Anmeldung fehlgeschlagen — Code möglicherweise abgelaufen. Erneut versuchen.",
+      "cannot_connect":        "Verbindung zu Bosch-Servern fehlgeschlagen.",
+      "timeout":               "Zeitüberschreitung."
+    },
+    "abort": {
+      "already_configured": "Bereits konfiguriert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bosch Kamera — Einstellungen",
+        "description": "**Token:** {token_status}",
+        "data": {
+          "scan_interval":           "Abfrage-Intervall (Sekunden)",
+          "interval_status":         "Status-Prüfung (Sekunden)",
+          "interval_events":         "Ereignis-Prüfung (Sekunden)",
+          "snapshot_interval":       "Snapshot-Aktualisierung (Sekunden)",
+          "enable_snapshots":        "Kamera-Snapshots",
+          "enable_sensors":          "Sensoren (Status, WiFi, Firmware, Events)",
+          "enable_snapshot_button":  "Schalter & Buttons (Stream, Privat, Licht)",
+          "enable_binary_sensors":   "Bewegungs-/Audio-Sensoren",
+          "enable_auto_download":    "Events automatisch herunterladen",
+          "download_path":           "Download-Ordner",
+          "enable_fcm_push":         "FCM Push — Echtzeit-Erkennung (~2 Sek.)",
+          "alert_notify_service":    "Alert-Dienste (kommagetrennt)",
+          "alert_save_snapshots":    "Alert-Bilder/Videos lokal speichern",
+          "alert_delete_after_send": "Dateien nach Senden löschen",
+          "high_quality_video":      "Hohe Videoqualität (30 Mbps)",
+          "shc_ip":                  "SHC IP-Adresse (optional)",
+          "shc_cert_path":           "SHC Zertifikat-Pfad",
+          "shc_key_path":            "SHC Schlüssel-Pfad",
+          "force_relogin":           "Neu anmelden (Browser-Login)"
+        },
+        "data_description": {
+          "scan_interval":           "Wie oft die Integration Daten von der Bosch Cloud abruft. Niedriger = schneller, mehr API-Aufrufe. Standard: 60",
+          "interval_status":         "Wie oft Kameras auf ONLINE/OFFLINE geprüft werden. Standard: 300 (5 Min.)",
+          "interval_events":         "Wie oft neue Bewegungs-/Audio-Ereignisse geprüft werden. Mit FCM Push nur als Fallback. Standard: 300 (5 Min.)",
+          "snapshot_interval":       "Wie oft Kamera-Snapshots im Hintergrund aktualisiert werden. Bereich: 300–86400. Standard: 1800 (30 Min.)",
+          "enable_snapshots":        "Zeigt das letzte Bewegungs-JPEG als Kamera-Entity in HA.",
+          "enable_sensors":          "Erstellt Sensoren für Kamera-Status, WiFi-Signal, Firmware, Ereignisse heute, letztes Ereignis, etc.",
+          "enable_snapshot_button":  "Erstellt Schalter und Buttons: Live Stream, Audio, Privat-Modus, Kameralicht, Benachrichtigungen, Aktualisieren.",
+          "enable_binary_sensors":   "Binärsensoren die nach Bewegung oder Audio-Alarm für 30 Sekunden EIN werden. Nützlich für Automationen.",
+          "enable_auto_download":    "Alle Event-Snapshots (JPEG) und Videoclips (MP4) automatisch im Hintergrund herunterladen.",
+          "download_path":           "Lokaler Ordner für heruntergeladene Events. Beispiel: /config/bosch_events",
+          "enable_fcm_push":         "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
+          "alert_notify_service":    "3-Stufen-Alerts senden (Text → Snapshot → Video). Kommagetrennt für mehrere Empfänger. Beispiele: notify.signal_messenger, notify.mobile_app_iphone. Leer lassen zum Deaktivieren.",
+          "alert_save_snapshots":    "Heruntergeladene Event-Bilder und Videos in /config/www/bosch_alerts/ behalten. Wenn AUS, werden Dateien nach dem Senden gelöscht.",
+          "alert_delete_after_send": "Lokale Dateien löschen nachdem der Benachrichtigungsdienst sie empfangen hat. Gilt nur wenn 'Lokal speichern' AUS ist.",
+          "high_quality_video":      "Höhere Bitrate für Live-Streams (30 Mbps statt 7.5 Mbps). Verbraucht mehr Bandbreite.",
+          "shc_ip":                  "Smart Home Controller IP für lokale API-Funktionen (z.B. 192.168.1.100). Optional — die meisten Funktionen arbeiten ohne SHC.",
+          "shc_cert_path":           "Pfad zur Client-Zertifikat PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_cert.pem",
+          "shc_key_path":            "Pfad zur Client-Schlüssel PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_key.pem",
+          "force_relogin":           "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten)."
+        }
+      },
+      "relogin_show": {
+        "title": "Neu anmelden — Schritt 1 von 2",
+        "description": "URL unten kopieren, im Browser öffnen, anmelden, dann Absenden klicken.",
+        "data": { "login_url": "Bosch Login URL" },
+        "data_description": { "login_url": "Kopieren und im Browser öffnen." }
+      },
+      "relogin_paste": {
+        "title": "Neu anmelden — Schritt 2 von 2",
+        "description": "Redirect-URL einfügen. **Code läuft nach ~60 Sekunden ab!**",
+        "data": { "redirect_url": "Redirect URL" },
+        "data_description": { "redirect_url": "Komplette URL aus der Browser-Adressleiste (beginnt mit https://www.bosch.com/boschcam?code=...)" }
+      }
+    },
+    "error": {
+      "invalid_redirect_url":  "Kein Auth-Code gefunden. Komplette URL einfügen.",
+      "token_exchange_failed": "Anmeldung fehlgeschlagen — Code abgelaufen. Erneut versuchen.",
+      "cannot_connect":        "Verbindung zu Bosch-Servern fehlgeschlagen."
+    }
+  },
+  "services": {
+    "trigger_snapshot": {
+      "name": "Snapshot aktualisieren",
+      "description": "Sofortige Snapshot-Aktualisierung aller Bosch-Kameras."
+    },
+    "open_live_connection": {
+      "name": "Live-Verbindung öffnen",
+      "description": "Live-Stream-Verbindung für eine Bosch-Kamera öffnen (H.264 30fps + AAC Audio).",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Cloud-UUID der Kamera (in den Entity-Attributen zu finden)"
+        }
+      }
+    }
+  }
+}
