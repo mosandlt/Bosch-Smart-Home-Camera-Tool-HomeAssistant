@@ -71,7 +71,7 @@
           "download_path":           "Local folder path for auto-downloaded events. Example: /config/bosch_events",
           "enable_fcm_push":         "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
           "alert_notify_service":    "Send 3-step alerts (text → snapshot → video) to these services. Comma-separated for multiple. Examples: notify.signal_messenger, notify.mobile_app_iphone. Leave empty to disable.",
-          "alert_save_snapshots":    "Keep downloaded event images and videos in /config/www/bosch_alerts/. If OFF, files are deleted after sending.",
+          "alert_save_snapshots":    "Keep downloaded event images and videos in /media/bosch_alerts/. If OFF, files are deleted after sending.",
           "alert_delete_after_send": "Remove local files after the notification service has received them. Only applies when 'Save locally' is OFF.",
           "high_quality_video":      "Request higher bitrate for live streams (30 Mbps instead of 7.5 Mbps). Uses more bandwidth.",
           "shc_ip":                  "Smart Home Controller IP for local API features (e.g. 192.168.1.100). Optional — most features work without SHC.",

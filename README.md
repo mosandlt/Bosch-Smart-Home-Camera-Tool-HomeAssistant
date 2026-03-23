@@ -62,7 +62,7 @@ All settings have descriptions in the UI. Key options:
 |---|---|---|
 | **FCM Push** | Near-instant (~2s) event detection via Firebase Cloud Messaging | OFF |
 | **Alert services** | Comma-separated notify services for alerts (e.g. `notify.signal_messenger, notify.mobile_app_iphone`) | empty (disabled) |
-| **Save alert snapshots** | Keep event images/videos locally in `/config/www/bosch_alerts/` | OFF |
+| **Save alert snapshots** | Keep event images/videos locally in `/media/bosch_alerts/` | OFF |
 | **Event check interval** | How often to poll for events (FCM Push makes this a fallback only) | 300s (5 min) |
 | **Binary sensors** | Motion / Audio alarm binary sensors (ON for 30s after event) | ON |
 

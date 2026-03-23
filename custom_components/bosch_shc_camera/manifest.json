@@ -9,5 +9,5 @@
   "iot_class":         "cloud_push",
   "config_flow":       true,
   "integration_type":  "hub",
-  "version":           "5.1.0"
+  "version":           "5.1.2"
 }

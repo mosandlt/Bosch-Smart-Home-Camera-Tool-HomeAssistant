@@ -1295,7 +1295,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm"}.get(event_type, event_type)
         type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a"}.get(event_type, "\u26a0\ufe0f")
 
-        alert_dir = os.path.join(self.hass.config.config_dir, "www", "bosch_alerts")
+        alert_dir = os.path.join(self.hass.config.config_dir, "media", "bosch_alerts")
         await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
         ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
         session = async_get_clientsession(self.hass, verify_ssl=False)
