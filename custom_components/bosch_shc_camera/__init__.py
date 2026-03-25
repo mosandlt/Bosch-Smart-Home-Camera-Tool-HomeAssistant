@@ -115,10 +115,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._audio_enabled:    dict[str, bool]  = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict = {}
-        # Per-type last-fetched timestamps (0 = never → fetch immediately)
-        self._last_status: float = 0.0
-        self._last_events: float = 0.0
-        self._last_slow:   float = 0.0   # wifiinfo / ambient / RCP / motion / audio / recording
+        # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
+        self._last_status: float = -86400.0  # force status check on first tick
+        self._last_events: float = -86400.0  # force event check on first tick
+        self._last_slow:   float = -86400.0  # force slow check on first tick
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         self._cached_events: dict[str, list] = {}
@@ -172,6 +172,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._privacy_sound_cache: dict[str, bool | None] = {}
         # Commissioned status cache — keyed by cam_id, populated from GET /commissioned
         self._commissioned_cache: dict[str, dict] = {}
+        # Feature flags — populated once from GET /v11/feature_flags
+        self._feature_flags: dict[str, bool] = {}
+        # Firmware update status cache — keyed by cam_id, from GET /firmware
+        self._firmware_cache: dict[str, dict] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -277,6 +281,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             raise UpdateFailed(f"Camera list returned HTTP {resp2.status}")
                         cam_list = await resp2.json()
 
+            # ── Feature flags (fetch once — rarely changes) ────────────────
+            if not self._feature_flags:
+                try:
+                    async with async_timeout.timeout(5):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/feature_flags", headers=headers
+                        ) as ff_resp:
+                            if ff_resp.status == 200:
+                                self._feature_flags = await ff_resp.json()
+                                _LOGGER.debug("Feature flags: %s", self._feature_flags)
+                except Exception:
+                    pass
+
             data: dict = {}
 
             for cam in cam_list:
@@ -284,19 +301,41 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if not cam_id:
                     continue
 
-                # ── 2. Ping status — only when interval_status elapsed ─────────
+                # ── 2. Status via /commissioned (primary) + /ping (fallback) ────
                 if do_status:
                     status = "UNKNOWN"
+                    comm_ok = False
                     try:
                         async with async_timeout.timeout(8):
                             async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
                                 headers=headers,
                             ) as r:
                                 if r.status == 200:
-                                    status = (await r.text()).strip().strip('"')
+                                    comm = await r.json()
+                                    self._commissioned_cache[cam_id] = comm
+                                    comm_ok = True
+                                    if comm.get("connected") and comm.get("commissioned"):
+                                        status = "ONLINE"
+                                    elif comm.get("configured"):
+                                        status = "OFFLINE"
+                                elif r.status == 444:
+                                    status = "OFFLINE"
+                                    comm_ok = True
                     except Exception as err:
-                        _LOGGER.debug("Ping error for %s: %s", cam_id, err)
+                        _LOGGER.debug("Commissioned check error for %s: %s", cam_id, err)
+                    # Fallback to /ping if /commissioned didn't work
+                    if not comm_ok:
+                        try:
+                            async with async_timeout.timeout(5):
+                                async with session.get(
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
+                                    headers=headers,
+                                ) as pr:
+                                    if pr.status == 200:
+                                        status = (await pr.text()).strip().strip('"')
+                        except Exception as err:
+                            _LOGGER.debug("Ping fallback error for %s: %s", cam_id, err)
                     self._cached_status[cam_id] = status
                 else:
                     status = self._cached_status.get(cam_id, "UNKNOWN")
@@ -532,6 +571,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     data[cam_id_key]["audioAlarm"] = await r.json()
                     except Exception as err:
                         _LOGGER.debug("AudioAlarm fetch error for %s: %s", cam_id_key, err)
+
+                    # Firmware status (short form — includes updating/status fields)
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/firmware",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    self._firmware_cache[cam_id_key] = await r.json()
+                                elif r.status == 444:
+                                    _LOGGER.debug("firmware: camera %s offline (444)", cam_id_key)
+                    except Exception as err:
+                        _LOGGER.debug("Firmware fetch error for %s: %s", cam_id_key, err)
 
                     # Recording options
                     try:

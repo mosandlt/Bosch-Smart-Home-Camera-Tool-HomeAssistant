@@ -125,12 +125,23 @@ class BoschCameraStatusSensor(_BoschSensorBase):
     @property
     def extra_state_attributes(self) -> dict:
         info = self._cam_data.get("info", {})
-        return {
+        comm = self.coordinator._commissioned_cache.get(self._cam_id, {})
+        fw = self.coordinator._firmware_cache.get(self._cam_id, {})
+        attrs = {
             "camera_id": self._cam_id,
             "model":     info.get("hardwareVersion", ""),
             "firmware":  info.get("firmwareVersion", ""),
             "mac":       info.get("macAddress", ""),
         }
+        if comm:
+            attrs["configured"] = comm.get("configured")
+            attrs["connected"] = comm.get("connected")
+            attrs["commissioned"] = comm.get("commissioned")
+        if fw:
+            attrs["firmware_updating"] = fw.get("updating", False)
+            attrs["firmware_update_status"] = fw.get("status", "")
+            attrs["firmware_up_to_date"] = fw.get("upToDate", True)
+        return attrs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +230,7 @@ class BoschWifiSignalSensor(_BoschSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name                       = f"Bosch {self._cam_title} WiFi Signal"
         self._attr_unique_id                  = f"bosch_shc_wifi_signal_{cam_id.lower()}"
-        self._attr_device_class               = SensorDeviceClass.SIGNAL_STRENGTH
+        # No device_class — Bosch API returns percentage (0-100), not dBm
         self._attr_state_class                = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "%"
         self._attr_icon                       = "mdi:wifi"
