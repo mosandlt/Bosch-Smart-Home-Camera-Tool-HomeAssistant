@@ -1611,6 +1611,31 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
 
+        # ── SMB upload (immediate, alongside alert) ────────────────────────
+        if opts.get("enable_smb_upload") and opts.get("smb_server") and cam_id:
+            try:
+                # Build a minimal data dict for _sync_smb_upload with just this event
+                ev_data = {
+                    "timestamp": timestamp,
+                    "eventType": event_type,
+                    "id": self._last_event_ids.get(cam_id, "unknown"),
+                    "imageUrl": image_url,
+                    "videoClipUrl": found_clip_url if found_clip_url else "",
+                    "videoClipUploadStatus": "Done" if found_clip_url else "",
+                }
+                smb_data = {
+                    cam_id: {
+                        "info": {"title": cam_name},
+                        "events": [ev_data],
+                    }
+                }
+                await self.hass.async_add_executor_job(
+                    self._sync_smb_upload, smb_data, self.token
+                )
+                _LOGGER.debug("Alert: SMB upload triggered for %s", cam_name)
+            except Exception as err:
+                _LOGGER.debug("Alert: SMB upload failed: %s", err)
+
         # ── Cleanup local files ───────────────────────────────────────────────
         if delete_after and files_to_cleanup:
             await asyncio.sleep(5)  # give Signal time to read the files
