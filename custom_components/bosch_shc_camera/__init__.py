@@ -168,6 +168,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
         # Unread events count cache — keyed by cam_id, populated from GET /unread_events_count
         self._unread_events_cache: dict[str, int] = {}
+        # Privacy sound override cache — keyed by cam_id, populated from GET /privacy_sound_override
+        self._privacy_sound_cache: dict[str, bool | None] = {}
+        # Commissioned status cache — keyed by cam_id, populated from GET /commissioned
+        self._commissioned_cache: dict[str, dict] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -574,6 +578,39 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     )
                     except Exception as err:
                         _LOGGER.debug("Unread events count fetch error for %s: %s", cam_id_key, err)
+
+                    # Privacy sound override (CAMERA_360 / INDOOR only, returns 442 on outdoor)
+                    hw = cam_raw.get("hardwareVersion", "")
+                    if hw in ("INDOOR", "CAMERA_360"):
+                        try:
+                            async with async_timeout.timeout(5):
+                                async with session.get(
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/privacy_sound_override",
+                                    headers=headers,
+                                ) as r:
+                                    if r.status == 200:
+                                        ps_data = await r.json()
+                                        self._privacy_sound_cache[cam_id_key] = ps_data.get("result", False)
+                                    elif r.status == 442:
+                                        pass  # Not supported on this model
+                                    elif r.status == 444:
+                                        _LOGGER.debug("privacy_sound_override: camera offline (444)")
+                        except Exception as err:
+                            _LOGGER.debug("Privacy sound fetch error for %s: %s", cam_id_key, err)
+
+                    # Commissioned status
+                    try:
+                        async with async_timeout.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/commissioned",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    self._commissioned_cache[cam_id_key] = await r.json()
+                                elif r.status == 444:
+                                    _LOGGER.debug("commissioned: camera offline (444)")
+                    except Exception as err:
+                        _LOGGER.debug("Commissioned fetch error for %s: %s", cam_id_key, err)
 
                     # Autofollow (only CAMERA_360 with panLimit > 0)
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
@@ -1533,6 +1570,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             clip_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.mp4")
             auth_headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
             found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
+
+            # Try direct clip.mp4 download first (faster than polling)
+            if not found_clip_url:
+                event_id = self._last_event_ids.get(cam_id, "")
+                if event_id:
+                    try:
+                        async with async_timeout.timeout(10):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/events/{event_id}/clip.mp4",
+                                headers={"Authorization": f"Bearer {self.token}", "Accept": "*/*"},
+                            ) as r:
+                                if r.status == 200 and "video" in r.headers.get("Content-Type", ""):
+                                    found_clip_url = f"{CLOUD_API}/v11/events/{event_id}/clip.mp4"
+                                    _LOGGER.debug("Alert: direct clip.mp4 available for %s", cam_name)
+                    except Exception:
+                        pass
 
             if not found_clip_url and clip_status == "Unavailable":
                 _LOGGER.debug(
