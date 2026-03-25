@@ -80,6 +80,8 @@ DEFAULT_OPTIONS = {
     "smb_base_path": "Bosch-Kameras",  # Base folder on the share
     "smb_folder_pattern": "{year}/{month}",  # Subfolder pattern (default: YYYY/MM)
     "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",  # File name pattern
+    "smb_retention_days": 180,  # Delete files older than N days (0 = keep forever)
+    "smb_disk_warn_mb": 5120,   # Alert when free space on SMB share falls below N MB (0 = disable)
 }
 
 
@@ -175,6 +177,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
+        # SMB maintenance — last run timestamps (monotonic)
+        self._last_smb_cleanup: float = 0.0     # last daily cleanup run
+        self._last_smb_disk_check: float = 0.0  # last disk-free check
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -760,6 +765,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 await self.hass.async_add_executor_job(
                     self._sync_smb_upload, data, token
                 )
+
+            # ── 8. SMB daily cleanup (retention) ──────────────────────────────
+            _SMB_CLEANUP_INTERVAL = 86400  # once per day
+            if (
+                opts.get("enable_smb_upload")
+                and opts.get("smb_server")
+                and opts.get("smb_retention_days", 180) > 0
+                and (time.monotonic() - self._last_smb_cleanup) >= _SMB_CLEANUP_INTERVAL
+            ):
+                self._last_smb_cleanup = time.monotonic()
+                await self.hass.async_add_executor_job(self._sync_smb_cleanup)
+
+            # ── 9. SMB disk-free check (hourly) ───────────────────────────────
+            _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
+            if (
+                opts.get("enable_smb_upload")
+                and opts.get("smb_server")
+                and opts.get("smb_disk_warn_mb", 500) > 0
+                and (time.monotonic() - self._last_smb_disk_check) >= _SMB_DISK_CHECK_INTERVAL
+            ):
+                self._last_smb_disk_check = time.monotonic()
+                await self.hass.async_add_executor_job(self._sync_smb_disk_check)
 
             return data
 
@@ -2656,8 +2683,136 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 except OSError:
                     pass  # May exist due to race condition
 
+    # ── SMB retention cleanup (runs in executor thread, once per day) ────────
+    def _sync_smb_cleanup(self) -> None:
+        """Delete files on the SMB share that are older than smb_retention_days."""
+        try:
+            from smbclient import register_session, scandir, remove, stat as smb_stat
+        except ImportError:
+            return
 
-# ─────────────────────────────────────────────────────────────────────────────
+        opts = self.options
+        server = opts.get("smb_server", "").strip()
+        share = opts.get("smb_share", "").strip()
+        username = opts.get("smb_username", "").strip()
+        password = opts.get("smb_password", "")
+        base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
+        retention_days = int(opts.get("smb_retention_days", 180))
+
+        if not server or not share or retention_days <= 0:
+            return
+
+        try:
+            register_session(server, username=username, password=password)
+        except Exception as err:
+            _LOGGER.warning("SMB cleanup: session to %s failed: %s", server, err)
+            return
+
+        cutoff = time.time() - retention_days * 86400
+        root = f"\\\\{server}\\{share}\\{base_path}"
+        deleted = 0
+
+        def _walk_and_delete(path: str) -> None:
+            nonlocal deleted
+            try:
+                entries = list(scandir(path))
+            except Exception:
+                return
+            for entry in entries:
+                full = f"{path}\\{entry.name}"
+                if entry.is_dir():
+                    _walk_and_delete(full)
+                else:
+                    try:
+                        st = smb_stat(full)
+                        if st.st_mtime < cutoff:
+                            remove(full)
+                            deleted += 1
+                            _LOGGER.debug("SMB cleanup: deleted %s", entry.name)
+                    except Exception as err:
+                        _LOGGER.debug("SMB cleanup: error on %s: %s", entry.name, err)
+
+        _walk_and_delete(root)
+        if deleted:
+            _LOGGER.info(
+                "SMB cleanup: deleted %d file(s) older than %d days from %s",
+                deleted, retention_days, root,
+            )
+
+    # ── SMB disk-free check (runs in executor thread, once per hour) ─────────
+    def _sync_smb_disk_check(self) -> None:
+        """Check free space on the SMB share and fire an HA alert if low."""
+        try:
+            from smbclient import register_session
+            import smbclient._io as _smb_io  # noqa: F401 — ensure smbclient loaded
+        except ImportError:
+            return
+
+        import ctypes
+
+        opts = self.options
+        server = opts.get("smb_server", "").strip()
+        share = opts.get("smb_share", "").strip()
+        username = opts.get("smb_username", "").strip()
+        password = opts.get("smb_password", "")
+        warn_mb = int(opts.get("smb_disk_warn_mb", 500))
+        notify_service = opts.get("alert_notify_service", "").strip()
+
+        if not server or not share or warn_mb <= 0:
+            return
+
+        try:
+            register_session(server, username=username, password=password)
+        except Exception as err:
+            _LOGGER.warning("SMB disk check: session to %s failed: %s", server, err)
+            return
+
+        # Use smbclient's statvfs to get free space
+        try:
+            import smbclient
+            vfs = smbclient.statvfs(f"\\\\{server}\\{share}")
+            free_mb = (vfs.f_bavail * vfs.f_frsize) // (1024 * 1024)
+        except Exception as err:
+            _LOGGER.debug("SMB disk check: statvfs failed: %s", err)
+            return
+
+        if free_mb < warn_mb:
+            msg = (
+                f"Bosch Camera NAS: Wenig Speicherplatz auf \\\\{server}\\{share} — "
+                f"noch {free_mb} MB frei (Warnschwelle: {warn_mb} MB)"
+            )
+            _LOGGER.warning(msg)
+            # Fire alert via HA event loop
+            self.hass.loop.call_soon_threadsafe(
+                self.hass.async_create_task,
+                self._async_smb_disk_alert(msg, notify_service),
+            )
+
+    async def _async_smb_disk_alert(self, message: str, notify_service: str) -> None:
+        """Send disk-full warning via notify service or HA persistent notification."""
+        services = [s.strip() for s in notify_service.split(",") if s.strip()]
+        sent = False
+        for svc in services:
+            domain, _, name = svc.partition(".")
+            if self.hass.services.has_service(domain, name):
+                try:
+                    await self.hass.services.async_call(
+                        domain, name,
+                        {"message": message, "title": "Bosch Kamera — Speicherwarnung"},
+                    )
+                    sent = True
+                except Exception as err:
+                    _LOGGER.debug("SMB disk alert via %s failed: %s", svc, err)
+        if not sent:
+            # Fall back to HA persistent notification
+            await self.hass.services.async_call(
+                "persistent_notification", "create",
+                {
+                    "title": "Bosch Kamera — Speicherwarnung",
+                    "message": message,
+                    "notification_id": "bosch_smb_disk_warn",
+                },
+            )
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
     return True

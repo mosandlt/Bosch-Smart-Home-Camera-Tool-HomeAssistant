@@ -245,10 +245,29 @@ To use your FRITZ!Box as a NAS for camera event storage:
    | SMB Base Path | Folder on NAS | `Bosch-Kameras` |
    | SMB Folder Pattern | Subfolder structure | `{year}/{month}` |
    | SMB File Pattern | File naming | `{camera}_{date}_{time}_{type}_{id}` |
+   | Retention (days) | Delete files older than N days | `180` (6 months) |
+   | Low disk warning (MB) | Alert below this free space | `5120` (5 GB) |
 
 4. **Verify:** After the next camera event, check your NAS at `FRITZ.NAS/Bosch-Kameras/` — snapshots (.jpg) and video clips (.mp4) should appear automatically.
 
 > **Tip:** Works with any SMB-compatible device. For Synology, use the share name from **Control Panel → Shared Folder**. For Windows, use the shared folder name (e.g. `\\PC-NAME\SharedFolder`).
+
+#### Automatic Cleanup (Retention)
+
+Set **Retention period (days)** to automatically delete old files from the NAS. Default: **180 days (6 months)**. Set to `0` to keep files forever.
+
+- Cleanup runs **once per day** in the background
+- Deletes `.jpg` and `.mp4` files older than the configured retention period
+- Only runs when SMB upload is enabled and configured
+
+#### Low Disk Space Warning
+
+Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs low on storage. Default: **500 MB**.
+
+- Checked **once per hour**
+- If free space drops below the threshold, an alert is sent via:
+  1. The configured **notify service** (e.g. Signal, mobile app) if set
+  2. **HA persistent notification** as fallback (always shown in the sidebar)
 
 ### HA Events
 
@@ -338,6 +357,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.3.0** | SMB retention: auto-delete files older than N days (default 180 / 6 months), runs daily. SMB disk-free check: HA alert when NAS free space falls below threshold (default 500 MB, configurable), falls back to HA persistent notification if no notify service configured. Both settings in Configure → SMB. |
 | **v6.2.3** | Fix mark-as-read: wrong field name (`isSeen` → `isRead`) and wrong individual fallback endpoint (`PUT /v11/events/{id}` → `PUT /v11/events`). On startup, all currently unread events are now marked as read (clears backlog in the Bosch app). |
 | **v6.2.2** | Replace deprecated `async_timeout` with `asyncio.timeout`, HACS v2, `loggers` field in manifest |
 | **v6.2.1** | Status sensor shows ONLINE immediately on startup (force first-tick fetch), `/commissioned` as primary health check with `/ping` fallback, commissioned + firmware attributes on status sensor, WiFi signal unit fix (no invalid device_class) |

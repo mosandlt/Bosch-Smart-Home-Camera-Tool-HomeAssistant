@@ -353,6 +353,14 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "smb_file_pattern",
                     default=str(opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}")),
                 ): str,
+                vol.Optional(
+                    "smb_retention_days",
+                    default=int(opts.get("smb_retention_days", 180)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3650)),
+                vol.Optional(
+                    "smb_disk_warn_mb",
+                    default=int(opts.get("smb_disk_warn_mb", 5120)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={
