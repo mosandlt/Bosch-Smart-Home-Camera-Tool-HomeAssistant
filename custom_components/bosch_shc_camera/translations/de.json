@@ -119,6 +119,18 @@
       "cannot_connect":        "Verbindung zu Bosch-Servern fehlgeschlagen."
     }
   },
+  "entity": {
+    "switch": {
+      "privacy_sound": {
+        "name": "Datenschutz-Ton"
+      }
+    },
+    "sensor": {
+      "commissioned": {
+        "name": "Inbetriebnahme-Status"
+      }
+    }
+  },
   "services": {
     "trigger_snapshot": {
       "name": "Snapshot aktualisieren",

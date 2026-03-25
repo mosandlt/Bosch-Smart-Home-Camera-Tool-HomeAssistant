@@ -65,6 +65,8 @@ async def async_setup_entry(
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
+        # Commissioned status (diagnostic, disabled by default)
+        entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -653,3 +655,51 @@ class BoschUnreadEventsCountSensor(_BoschSensorBase):
             self.coordinator.last_update_success
             and self.coordinator._unread_events_cache.get(self._cam_id) is not None
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschCommissionedSensor(_BoschSensorBase):
+    """Sensor: commissioned status from GET /v11/video_inputs/{id}/commissioned.
+
+    Response: {"configured": true, "connected": true, "commissioned": true}
+    Displays: "Commissioned" / "Not commissioned" / "Not connected"
+    Diagnostic, disabled by default.
+    """
+
+    _attr_icon = "mdi:check-network"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Commissioned"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_commissioned"
+
+    @property
+    def native_value(self) -> str | None:
+        data = self.coordinator._commissioned_cache.get(self._cam_id)
+        if data is None:
+            return None
+        if not data.get("connected", False):
+            return "Not connected"
+        if data.get("commissioned", False):
+            return "Commissioned"
+        return "Not commissioned"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._commissioned_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator._commissioned_cache.get(self._cam_id)
+        if not data:
+            return {}
+        return {
+            "configured": data.get("configured"),
+            "connected": data.get("connected"),
+            "commissioned": data.get("commissioned"),
+        }

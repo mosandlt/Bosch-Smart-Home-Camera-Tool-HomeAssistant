@@ -4,6 +4,8 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as f
 
 > **No official API.** This integration uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
 
+<a href="https://buymeacoffee.com/mosandlts"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=mosandlts&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+
 ---
 
 ## Disclaimer
@@ -130,6 +132,8 @@ title: Garten
 | Audio alarm detected | `binary_sensor` | disabled by default |
 | Person detected | `binary_sensor` | disabled by default |
 | Unread events count | `sensor` | disabled by default |
+| Privacy sound (360 only) | `switch` | enabled (config category) |
+| Commissioned status | `sensor` | diagnostic, disabled by default |
 | Acoustic alarm (siren, 360 only) | `button` | disabled by default |
 | Live stream (30fps H.264 + AAC) | `camera` | via Live Stream switch |
 
@@ -174,7 +178,7 @@ Upload event snapshots and video clips directly to a SMB/CIFS network share (FRI
 **How it works:**
 - When an event is detected (via FCM push or polling), the integration downloads the snapshot and video clip
 - Files are uploaded to the configured SMB share using the folder and file naming patterns
-- Supports any SMB-compatible NAS or router with USB storage
+- Supports any SMB-compatible NAS or router with USB storage (FRITZ!Box, Synology, QNAP, Windows shares)
 
 **Configuration:** Go to **Settings → Integrations → Bosch Smart Home Camera → Configure** and enable **SMB Upload**. Then fill in the server, share, and credentials.
 
@@ -183,10 +187,44 @@ Upload event snapshots and video clips directly to a SMB/CIFS network share (FRI
 
 Example file path on NAS:
 ```
-\\192.168.1.1\cameras\bosch_cameras\2026\03\Garten_2026-03-23_14-32-05_MOVEMENT_abc123.jpg
+\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\2026\03\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.jpg
+\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\2026\03\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
 ```
 
 > Requires the `smbprotocol` Python package, which is auto-installed via `manifest.json`.
+
+#### FRITZ!Box NAS Setup
+
+To use your FRITZ!Box as a NAS for camera event storage:
+
+1. **Enable NAS on FRITZ!Box:**
+   - Open `http://fritz.box` → **Heimnetz → USB / Speicher → USB-Speicher**
+   - Enable **Speicher (NAS) aktiv**
+   - Note the share name (default: `FRITZ.NAS`)
+
+2. **Create a FRITZ!Box user with NAS access:**
+   - **System → FRITZ!Box-Benutzer → Benutzer hinzufügen**
+   - Give the user a username and password
+   - Under **Berechtigungen**, enable **Zugang zu NAS-Inhalten**
+
+3. **Configure in Home Assistant:**
+   - Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**
+   - Enable **SMB Upload**
+   - Fill in:
+
+   | Field | Value | Example |
+   |-------|-------|---------|
+   | SMB Server | FRITZ!Box IP | `192.168.1.1` |
+   | SMB Share | NAS share name | `FRITZ.NAS` |
+   | SMB Username | FRITZ!Box NAS user | `nas_user` |
+   | SMB Password | User password | `your_password` |
+   | SMB Base Path | Folder on NAS | `Bosch-Kameras` |
+   | SMB Folder Pattern | Subfolder structure | `{year}/{month}` |
+   | SMB File Pattern | File naming | `{camera}_{date}_{time}_{type}_{id}` |
+
+4. **Verify:** After the next camera event, check your NAS at `FRITZ.NAS/Bosch-Kameras/` — snapshots (.jpg) and video clips (.mp4) should appear automatically.
+
+> **Tip:** Works with any SMB-compatible device. For Synology, use the share name from **Control Panel → Shared Folder**. For Windows, use the shared folder name (e.g. `\\PC-NAME\SharedFolder`).
 
 ### HA Events
 
@@ -276,6 +314,8 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.2.0** | Privacy sound switch (CAMERA_360 only), commissioned diagnostic sensor, direct clip.mp4 download for faster alerts, HTTP 444 error handling (camera offline/unavailable) |
+| v6.1.0 | SHC local API as offline fallback for privacy + light (cloud primary ~150ms, SHC ~1100ms), SHC health tracking, motion revert documentation |
 | **v6.0.0** | FCM Push mode selection (Auto/iOS/Android/Polling) with iOS-first fallback order, intercom switch (two-way audio, disabled by default), speaker level number entity (disabled by default), SMB/NAS upload for event snapshots + video clips (FRITZ!Box, Synology, etc.), configurable folder/file patterns, person detection binary sensor (disabled by default), acoustic alarm / siren button (CAMERA_360 only, disabled by default), unread events count sensor (disabled by default), `bosch_shc_camera_person` HA event, mark-as-read (events auto-marked after alerts/downloads), last_event fast-path to reduce API calls, bug fixes (FCM auto-start default corrected, events --limit fixed), Lovelace card v1.8.0 with intercom toggle |
 | v5.1.3 | Skip video clip polling when status is Unavailable |
 | v5.1.2 | Alert files saved to `/media/bosch_alerts/` |

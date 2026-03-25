@@ -2529,9 +2529,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     coordinator = BoschCameraCoordinator(hass, entry)
+
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "coordinator": coordinator,
+        "_last_options": dict(entry.options),
+    }
 
     opts = get_options(entry)
     platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
@@ -2566,7 +2570,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when options are changed."""
+    """Reload the config entry when options are changed.
+
+    Skip reload if only data (tokens) changed — the coordinator handles
+    token refresh internally without needing a full reload.
+    """
+    # Check if actual options changed (not just token data)
+    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    prev_opts = edata.get("_last_options")
+    curr_opts = dict(entry.options)
+    if prev_opts is not None and prev_opts == curr_opts:
+        _LOGGER.debug("Only token data changed — skipping reload")
+        return
+    edata["_last_options"] = curr_opts
     await hass.config_entries.async_reload(entry.entry_id)
 
 

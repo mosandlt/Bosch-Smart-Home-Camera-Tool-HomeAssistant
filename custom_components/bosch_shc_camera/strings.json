@@ -119,6 +119,18 @@
       "cannot_connect":        "Cannot connect to Bosch servers."
     }
   },
+  "entity": {
+    "switch": {
+      "privacy_sound": {
+        "name": "Privacy Sound"
+      }
+    },
+    "sensor": {
+      "commissioned": {
+        "name": "Commissioned"
+      }
+    }
+  },
   "services": {
     "trigger_snapshot": {
       "name": "Trigger Snapshot Refresh",

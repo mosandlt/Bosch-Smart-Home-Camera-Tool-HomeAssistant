@@ -108,6 +108,11 @@ async def async_setup_entry(
             entities.append(BoschAutoFollowSwitch(coordinator, cam_id, config_entry))
         # Intercom (two-way audio) — disabled by default
         entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
+        # Privacy sound — only for cameras where the endpoint returns 200 (not 442)
+        # Indoor CAMERA_360 supports it, outdoor CAMERA_EYES returns 442
+        hw_version = cam_info.get("hardwareVersion", "")
+        if hw_version == "CAMERA_360":
+            entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -580,3 +585,44 @@ class BoschIntercomSwitch(_BoschSwitchBase):
         except Exception as err:
             _LOGGER.warning("Intercom OFF error for %s: %s", self._cam_title, err)
         self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPrivacySoundSwitch(_BoschSwitchBase):
+    """Switch: ON = privacy sound override active, OFF = privacy sound off.
+
+    When enabled, the camera plays an audible tone when privacy mode changes.
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/privacy_sound_override
+    Body: {"result": true/false}
+    Only available on CAMERA_360 (indoor) — outdoor cameras return 442.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Privacy Sound"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_privacy_sound"
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self.coordinator.data.get(self._cam_id, {}).get("privacy_sound_override")
+        if data is None:
+            return None
+        return data.get("result", False)
+
+    @property
+    def icon(self) -> str:
+        return "mdi:volume-high" if self.is_on else "mdi:volume-off"
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "privacy_sound_override", {"result": True}
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "privacy_sound_override", {"result": False}
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
