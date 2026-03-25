@@ -382,7 +382,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     if events:
                         newest_id = events[0].get("id", "")
                         prev_id   = self._last_event_ids.get(cam_id)
-                        if prev_id is not None and newest_id and newest_id != prev_id:
+                        if prev_id is None:
+                            # First tick after startup — mark all fetched unread events as read
+                            # to clear the backlog visible in the Bosch app.
+                            unread_ids = [
+                                ev.get("id") for ev in events
+                                if ev.get("id") and not ev.get("isRead", False)
+                            ]
+                            if unread_ids:
+                                _LOGGER.debug(
+                                    "Startup: marking %d unread event(s) as read for %s",
+                                    len(unread_ids), cam_id,
+                                )
+                                try:
+                                    await self.async_mark_events_read(unread_ids)
+                                except Exception:
+                                    pass
+                        elif newest_id and newest_id != prev_id:
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
                                 cam_id, newest_id,
@@ -1759,7 +1775,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         # Try bulk update
         try:
-            body = {"events": [{"id": eid, "isSeen": True} for eid in event_ids]}
+            body = {"events": [{"id": eid, "isRead": True} for eid in event_ids]}
             async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/events/bulk", headers=headers, json=body
@@ -1771,14 +1787,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.debug("Bulk mark-read error: %s — trying individual", err)
 
-        # Fallback: individual
+        # Fallback: individual PUT /v11/events with {"id": eid, "isRead": true}
         success = False
         for eid in event_ids:
             try:
                 async with asyncio.timeout(5):
                     async with session.put(
-                        f"{CLOUD_API}/v11/events/{eid}",
-                        headers=headers, json={"isSeen": True},
+                        f"{CLOUD_API}/v11/events",
+                        headers=headers, json={"id": eid, "isRead": True},
                     ) as resp:
                         if resp.status in (200, 204):
                             success = True
