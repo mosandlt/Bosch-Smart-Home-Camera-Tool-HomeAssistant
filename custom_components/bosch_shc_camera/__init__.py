@@ -127,6 +127,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._shc_state_cache: dict[str, dict] = {}
         self._shc_devices_raw: list = []       # cached GET /smarthome/devices response
         self._last_shc_fetch: float = 0.0      # last time SHC devices were fetched
+        # SHC health tracking — skip SHC calls when offline to avoid latency
+        self._shc_available: bool = True        # assume available until proven otherwise
+        self._shc_fail_count: int = 0           # consecutive failures
+        self._shc_last_check: float = 0.0       # last time we probed SHC after it went offline
+        _SHC_MAX_FAILS = 3                      # mark offline after this many consecutive failures
+        _SHC_RETRY_INTERVAL = 120               # seconds — retry SHC after this long when offline
+        self._SHC_MAX_FAILS = _SHC_MAX_FAILS
+        self._SHC_RETRY_INTERVAL = _SHC_RETRY_INTERVAL
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
         self._pan_cache: dict[str, int | None] = {}
         # WiFi info cache — keyed by cam_id, populated from GET /wifiinfo
@@ -417,10 +425,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if do_slow:
                 self._last_slow = now
 
-            # ── 4. Read privacy mode + light support from cloud API response ─────
-            # privacyMode and featureSupport are already in the /v11/video_inputs
-            # response — no extra request needed. Populate _shc_state_cache from
-            # cloud data so the privacy switch works without SHC configured.
+            # ── 4. Read privacy mode + light from cloud API response (primary) ──
+            # Cloud API is ~10x faster than SHC local API (113ms vs 1122ms).
+            # privacyMode and featureSupport are already in /v11/video_inputs —
+            # no extra request needed. SHC (step 5) supplements as fallback.
             for cam_id_key, cam_entry in data.items():
                 cam_raw = cam_entry.get("info", {})
                 privacy_str  = cam_raw.get("privacyMode", "")
@@ -436,14 +444,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "has_light":           False,
                     "notifications_status": None,
                 })
-                # Always update privacy from cloud API (authoritative, fast, no SHC needed)
+                # Cloud is authoritative for privacy (fast, always available)
                 if privacy_str:
                     cache["privacy_mode"] = (privacy_str.upper() == "ON")
                 cache["has_light"] = has_light
-                # Use cloud featureStatus for light state only if SHC hasn't set it yet
-                # (SHC CameraLight service is more accurate for the current LED state)
-                if light_on is not None and cache.get("camera_light") is None:
+                # Use cloud featureStatus for light state; SHC supplements if available
+                if light_on is not None:
                     cache["camera_light"] = light_on
+                elif cache.get("camera_light") is None:
+                    cache["camera_light"] = None
                 # Read notifications status from cloud API response
                 notif_status = cam_raw.get("notificationsEnabledStatus", "")
                 if notif_status:
@@ -622,10 +631,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("RCP update skipped for %s: %s", cam_id_key, err)
 
-            # ── 5. SHC states (camera light current state) ────────────────────
-            # Privacy mode is now read from cloud API above (step 4).
-            # SHC is only used for camera light state + control (no cloud API found).
-            if opts.get("shc_ip", "").strip():
+            # ── 5. SHC states (supplementary + offline fallback) ────────────────
+            # Cloud is primary (step 4, ~113ms). SHC supplements with camera
+            # light state and serves as fallback when cloud is unreachable.
+            if self.shc_ready:
                 try:
                     await self._async_update_shc_states(data)
                 except Exception as err:
@@ -1951,6 +1960,53 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return False
 
     # ── SHC local API (camera light + privacy mode) ───────────────────────────
+
+    @property
+    def shc_configured(self) -> bool:
+        """True if SHC local API is fully configured (IP + certs)."""
+        opts = self.options
+        return bool(
+            opts.get("shc_ip", "").strip()
+            and opts.get("shc_cert_path", "").strip()
+            and opts.get("shc_key_path", "").strip()
+        )
+
+    @property
+    def shc_ready(self) -> bool:
+        """True if SHC is configured AND currently considered available.
+
+        When SHC is offline (too many consecutive failures), returns False
+        unless the retry interval has elapsed.
+        """
+        if not self.shc_configured:
+            return False
+        if self._shc_available:
+            return True
+        # SHC is offline — check if retry interval has passed
+        now = time.monotonic()
+        if now - self._shc_last_check >= self._SHC_RETRY_INTERVAL:
+            return True  # allow one retry
+        return False
+
+    def _shc_mark_success(self) -> None:
+        """Mark SHC as healthy after a successful request."""
+        if not self._shc_available:
+            _LOGGER.info("SHC local API is back online")
+        self._shc_available = True
+        self._shc_fail_count = 0
+
+    def _shc_mark_failure(self) -> None:
+        """Track a failed SHC request; mark offline after N consecutive failures."""
+        self._shc_fail_count += 1
+        self._shc_last_check = time.monotonic()
+        if self._shc_fail_count >= self._SHC_MAX_FAILS and self._shc_available:
+            self._shc_available = False
+            _LOGGER.warning(
+                "SHC local API marked offline after %d consecutive failures — "
+                "will retry in %ds. Falling back to cloud API.",
+                self._shc_fail_count, self._SHC_RETRY_INTERVAL,
+            )
+
     async def _async_shc_request(
         self, method: str, path: str, body: dict | None = None
     ) -> dict | list | None:
@@ -1958,6 +2014,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         Returns parsed JSON on success, None on failure.
         Requires shc_ip, shc_cert_path, shc_key_path in options.
+        Tracks SHC health — marks offline after repeated failures.
         """
         import ssl
         opts      = self.options
@@ -1973,6 +2030,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             ctx.load_cert_chain(cert_path, key_path)
         except Exception as err:
             _LOGGER.warning("SHC TLS setup failed (check cert/key paths): %s", err)
+            self._shc_mark_failure()
             return None
 
         url     = f"https://{shc_ip}:8444/smarthome{path}"
@@ -1984,28 +2042,38 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     if method == "GET":
                         async with s.get(url, headers=headers) as r:
                             if r.status == 200:
+                                self._shc_mark_success()
                                 return await r.json()
                             _LOGGER.debug("SHC GET %s → HTTP %d", path, r.status)
+                            self._shc_mark_failure()
                     elif method == "PUT":
                         async with s.put(url, json=body, headers=headers) as r:
                             _LOGGER.debug("SHC PUT %s → HTTP %d", path, r.status)
+                            if r.status in (200, 201, 204):
+                                self._shc_mark_success()
+                            else:
+                                self._shc_mark_failure()
                             return {"status": r.status, "ok": r.status in (200, 201, 204)}
         except asyncio.TimeoutError:
             _LOGGER.debug("SHC request timeout: %s %s", method, path)
+            self._shc_mark_failure()
         except aiohttp.ClientError as err:
             _LOGGER.debug("SHC request error %s %s: %s", method, path, err)
+            self._shc_mark_failure()
         except Exception as err:
             _LOGGER.debug("SHC unexpected error %s %s: %s", method, path, err)
+            self._shc_mark_failure()
         return None
 
     async def _async_update_shc_states(self, data: dict) -> None:
         """Fetch CameraLight and PrivacyMode states from SHC for each camera.
 
+        SHC is the PRIMARY source for privacy + light state when configured.
+        Values from SHC overwrite any cloud-sourced values from step 4.
         Matches SHC devices to cloud cameras by device name (title).
         Refreshes the SHC device list at most once per 60 seconds.
         """
-        opts = self.options
-        if not opts.get("shc_ip", "").strip():
+        if not self.shc_configured:
             return
 
         # Re-fetch device list at most once per 60 s
@@ -2040,7 +2108,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             })
             entry["device_id"] = device_id
 
-            # Fetch CameraLight service state
+            # Fetch CameraLight service state (SHC is authoritative)
             svc = await self._async_shc_request(
                 "GET", f"/devices/{device_id}/services/CameraLight"
             )
@@ -2048,7 +2116,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 val = svc.get("state", {}).get("value", "")
                 entry["camera_light"] = (val.upper() == "ON")
 
-            # Fetch PrivacyMode service state
+            # Fetch PrivacyMode service state (SHC is authoritative)
             svc = await self._async_shc_request(
                 "GET", f"/devices/{device_id}/services/PrivacyMode"
             )
@@ -2097,95 +2165,101 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return False
 
     async def async_cloud_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
-        """Enable (True) or disable (False) privacy mode via Bosch cloud API.
+        """Enable (True) or disable (False) privacy mode.
 
-        Uses PUT /v11/video_inputs/{id}/privacy — no SHC local API needed.
-        Falls back to SHC API if cloud call fails and SHC is configured.
+        Strategy: Cloud API first (~150ms), SHC local API fallback (~1100ms).
+        Cloud is 10x faster due to connection pooling; SHC requires fresh mTLS
+        handshake per request on an embedded controller.
+        SHC fallback ensures control when cloud is unreachable (offline mode).
         """
+        # ── Cloud API (primary — fast) ───────────────────────────────────────
         token = self.token
-        if not token:
-            _LOGGER.warning("cloud_set_privacy_mode: no token for %s", cam_id)
-            return False
+        if token:
+            session = async_get_clientsession(self.hass, verify_ssl=False)
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+            }
+            url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
+            body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
 
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
-        }
-        url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
-        body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
-
-        try:
-            async with async_timeout.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
-                        self.async_update_listeners()
-                        _LOGGER.debug(
-                            "cloud_set_privacy_mode: %s → %s (HTTP %d)",
-                            cam_id, "ON" if enabled else "OFF", resp.status,
+            try:
+                async with async_timeout.timeout(10):
+                    async with session.put(url, json=body, headers=headers) as resp:
+                        if resp.status in (200, 201, 204):
+                            self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
+                            self.async_update_listeners()
+                            _LOGGER.debug(
+                                "cloud_set_privacy_mode: %s → %s (HTTP %d)",
+                                cam_id, "ON" if enabled else "OFF", resp.status,
+                            )
+                            self.hass.async_create_task(self.async_request_refresh())
+                            if not enabled:
+                                cam = self._camera_entities.get(cam_id)
+                                if cam:
+                                    self.hass.async_create_task(
+                                        cam._async_trigger_image_refresh(delay=1.5)
+                                    )
+                            return True
+                        _LOGGER.warning(
+                            "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
                         )
-                        self.hass.async_create_task(self.async_request_refresh())
-                        if not enabled:
-                            cam = self._camera_entities.get(cam_id)
-                            if cam:
-                                self.hass.async_create_task(
-                                    cam._async_trigger_image_refresh(delay=1.5)
-                                )
-                        return True
-                    _LOGGER.warning(
-                        "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
-                    )
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
+            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
 
-        # Fallback to SHC if cloud API fails and SHC is configured
-        if self.options.get("shc_ip", "").strip():
-            _LOGGER.debug("cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id)
+        # ── SHC local API fallback (offline mode) ────────────────────────────
+        if self.shc_ready:
+            _LOGGER.info("cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id)
             return await self.async_shc_set_privacy_mode(cam_id, enabled)
         return False
 
     async def async_cloud_set_camera_light(self, cam_id: str, on: bool) -> bool:
-        """Turn the camera light on (True) or off (False) via Bosch cloud API.
+        """Turn the camera light on (True) or off (False).
 
-        Uses PUT /v11/video_inputs/{id}/lighting_override — no SHC local API needed.
+        Strategy: Cloud API first (~150ms), SHC local API fallback (~1100ms).
+        SHC fallback ensures control when cloud is unreachable (offline mode).
+        Note: SHC CameraLight service only exists for cameras with physical lights
+        (Garten/CAMERA_EYES). For cameras without it, SHC fallback will fail silently.
         """
+        # ── Cloud API (primary — fast) ───────────────────────────────────────
         token = self.token
-        if not token:
-            _LOGGER.warning("cloud_set_camera_light: no token for %s", cam_id)
-            return False
+        if token:
+            session = async_get_clientsession(self.hass, verify_ssl=False)
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+            }
+            url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
+            body = (
+                {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 1.0}
+                if on else
+                {"frontLightOn": False, "wallwasherOn": False}
+            )
 
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
-        }
-        url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
-        body = (
-            {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 1.0}
-            if on else
-            {"frontLightOn": False, "wallwasherOn": False}
-        )
-
-        try:
-            async with async_timeout.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
-                        self.async_update_listeners()
-                        _LOGGER.debug(
-                            "cloud_set_camera_light: %s → %s (HTTP %d)",
-                            cam_id, "ON" if on else "OFF", resp.status,
+            try:
+                async with async_timeout.timeout(10):
+                    async with session.put(url, json=body, headers=headers) as resp:
+                        if resp.status in (200, 201, 204):
+                            self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
+                            self.async_update_listeners()
+                            _LOGGER.debug(
+                                "cloud_set_camera_light: %s → %s (HTTP %d)",
+                                cam_id, "ON" if on else "OFF", resp.status,
+                            )
+                            self.hass.async_create_task(self.async_request_refresh())
+                            return True
+                        _LOGGER.warning(
+                            "cloud_set_camera_light: HTTP %d for %s", resp.status, cam_id
                         )
-                        self.hass.async_create_task(self.async_request_refresh())
-                        return True
-                    _LOGGER.warning(
-                        "cloud_set_camera_light: HTTP %d for %s", resp.status, cam_id
-                    )
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
+            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
+
+        # ── SHC local API fallback (offline mode) ────────────────────────────
+        if self.shc_ready:
+            _LOGGER.info("cloud_set_camera_light: cloud failed, falling back to SHC for %s", cam_id)
+            return await self.async_shc_set_camera_light(cam_id, on)
         return False
 
     async def async_cloud_set_notifications(self, cam_id: str, enabled: bool) -> bool:

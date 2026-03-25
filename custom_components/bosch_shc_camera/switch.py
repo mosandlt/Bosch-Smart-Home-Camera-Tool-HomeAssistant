@@ -362,7 +362,15 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschMotionEnabledSwitch(_BoschSwitchBase):
-    """Toggle motion detection on/off."""
+    """Toggle motion detection on/off.
+
+    KNOWN LIMITATION: The camera firmware has an internal IVA rules engine that
+    enforces motion detection settings independently. Changes via this switch
+    (cloud API PUT /motion) are accepted but may be reverted within ~1 second
+    by the camera's on-device automation rules. Settings controlled via the SHC
+    (privacy mode, camera light) are NOT affected by this issue.
+    See: GET /v11/video_inputs/{id}/rules (returns [] — rules stored on-device).
+    """
 
     _attr_icon = "mdi:motion-sensor"
     _attr_entity_registry_enabled_default = False
