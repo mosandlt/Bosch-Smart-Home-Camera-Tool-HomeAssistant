@@ -180,6 +180,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # SMB maintenance — last run timestamps (monotonic)
         self._last_smb_cleanup: float = 0.0     # last daily cleanup run
         self._last_smb_disk_check: float = 0.0  # last disk-free check
+        # Token refresh failure tracking — alert once, not every 80s
+        self._token_alert_sent: bool = False     # True after first alert sent
+        self._token_fail_count: int = 0          # consecutive refresh failures
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -208,6 +211,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         from .config_flow import _do_refresh
         refresh = getattr(self, "_refreshed_refresh", None) or self.refresh_token
         if not refresh:
+            await self._async_token_failure_alert(
+                "Kein Refresh-Token vorhanden — bitte unter Einstellungen → Integrationen → "
+                "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
+            )
             raise UpdateFailed("No refresh token — go to Settings → Integrations → Configure → Force new login")
         session = async_get_clientsession(self.hass, verify_ssl=False)
         tokens = await _do_refresh(session, refresh)
@@ -215,9 +222,48 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             self._refreshed_token = tokens.get("access_token", "")
             self._refreshed_refresh = tokens.get("refresh_token", refresh)
             _LOGGER.info("Bearer token renewed silently via refresh_token")
+            # Reset failure tracking on success
+            if self._token_fail_count > 0:
+                _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
+            self._token_fail_count = 0
+            self._token_alert_sent = False
             return self._refreshed_token
-        _LOGGER.warning("Silent token renewal failed")
+        self._token_fail_count += 1
+        _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
+        await self._async_token_failure_alert(
+            "Token-Erneuerung fehlgeschlagen — bitte unter Einstellungen → Integrationen → "
+            "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
+        )
         raise UpdateFailed("Token refresh failed — check network or re-login")
+
+    async def _async_token_failure_alert(self, message: str) -> None:
+        """Send a one-time alert when token refresh fails (notify + persistent notification)."""
+        if self._token_alert_sent:
+            return
+        self._token_alert_sent = True
+        title = "⚠️ Bosch Kamera — Token abgelaufen"
+        # HA persistent notification (always — visible in sidebar)
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification", "create",
+                {"title": title, "message": message, "notification_id": "bosch_token_expired"},
+            )
+        except Exception as err:
+            _LOGGER.debug("Persistent notification failed: %s", err)
+        # Notify service (Signal, etc.) — same as alert_notify_service
+        notify_raw = self.options.get("alert_notify_service", "").strip()
+        if not notify_raw:
+            return
+        for svc in [s.strip() for s in notify_raw.split(",") if s.strip()]:
+            domain, _, name = svc.partition(".")
+            if self.hass.services.has_service(domain, name):
+                try:
+                    await self.hass.services.async_call(
+                        domain, name, {"message": message, "title": title},
+                    )
+                    _LOGGER.info("Token failure alert sent via %s", svc)
+                except Exception as err:
+                    _LOGGER.debug("Token failure alert via %s failed: %s", svc, err)
 
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
@@ -2813,8 +2859,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "notification_id": "bosch_smb_disk_warn",
                 },
             )
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
+    # Register services at domain level — ensures they are available even when
+    # the config entry is in setup_retry (e.g. token expired).
+    # Without this, the Lovelace card shows "action not found" errors.
+    _register_services(hass)
     return True
 
 
@@ -2836,9 +2887,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
-
-    # Register services (idempotent)
-    _register_services(hass)
 
     # Start FCM push listener (runs in background, non-blocking)
     if opts.get("enable_fcm_push", False):
