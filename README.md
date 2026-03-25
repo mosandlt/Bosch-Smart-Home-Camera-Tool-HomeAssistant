@@ -4,7 +4,29 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as f
 
 > **No official API.** This integration uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/mosandlts)
+[![GitHub Release][releases-shield]][releases]
+[![GitHub Activity][commits-shield]][commits]
+[![License][license-shield]](LICENSE)
+
+[![hacs][hacsbadge]][hacs]
+[![Project Maintenance][maintenance-shield]][user_profile]
+[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
+
+[![Community Forum][forum-shield]][forum]
+
+[releases-shield]: https://img.shields.io/github/release/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
+[releases]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases
+[commits-shield]: https://img.shields.io/github/commit-activity/y/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
+[commits]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/commits/main
+[license-shield]: https://img.shields.io/github/license/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
+[hacsbadge]: https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge
+[hacs]: https://hacs.xyz
+[maintenance-shield]: https://img.shields.io/badge/maintainer-%40mosandlt-blue.svg?style=for-the-badge
+[user_profile]: https://github.com/mosandlt
+[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
+[buymecoffee]: https://buymeacoffee.com/mosandlts
+[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
+[forum]: https://community.home-assistant.io/
 
 ---
 

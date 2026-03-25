@@ -13,6 +13,7 @@ Creates number entities per camera:
     Disabled by default.
 """
 
+import asyncio
 import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -228,7 +229,6 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write the new speaker level to the camera via cloud API."""
         import aiohttp
-        import async_timeout
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         level = int(round(value))
@@ -239,7 +239,7 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
         }
         body = {"SpeakerLevel": level}
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
                     headers=headers,

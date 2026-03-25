@@ -31,6 +31,7 @@ Creates switch entities per camera:
                            No SHC local API needed.
 """
 
+import asyncio
 import logging
 
 from homeassistant.components.switch import SwitchEntity
@@ -529,7 +530,6 @@ class BoschIntercomSwitch(_BoschSwitchBase):
     async def async_turn_on(self, **kwargs):
         """Enable intercom (two-way audio) with speaker level 50."""
         import aiohttp
-        import async_timeout
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -539,7 +539,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
         }
         body = {"audioEnabled": True, "SpeakerLevel": 50}
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
                     headers=headers,
@@ -559,7 +559,6 @@ class BoschIntercomSwitch(_BoschSwitchBase):
     async def async_turn_off(self, **kwargs):
         """Disable intercom (two-way audio)."""
         import aiohttp
-        import async_timeout
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -569,7 +568,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
         }
         body = {"audioEnabled": False}
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
                     headers=headers,

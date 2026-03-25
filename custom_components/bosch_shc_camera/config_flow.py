@@ -24,7 +24,6 @@ import secrets
 from urllib.parse import parse_qs, urlencode
 
 import aiohttp
-import async_timeout
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -85,7 +84,7 @@ def _extract_code(redirect_url: str) -> str | None:
 async def _exchange_code(session, code: str, verifier: str) -> dict | None:
     """Exchange auth code for access_token + refresh_token."""
     try:
-        async with async_timeout.timeout(15):
+        async with asyncio.timeout(15):
             async with session.post(
                 f"{KEYCLOAK_BASE}/token",
                 data={
@@ -109,7 +108,7 @@ async def _exchange_code(session, code: str, verifier: str) -> dict | None:
 async def _do_refresh(session, refresh_token: str) -> dict | None:
     """Silent renewal via saved refresh_token."""
     try:
-        async with async_timeout.timeout(15):
+        async with asyncio.timeout(15):
             async with session.post(
                 f"{KEYCLOAK_BASE}/token",
                 data={

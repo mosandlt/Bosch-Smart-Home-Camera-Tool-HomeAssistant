@@ -27,7 +27,6 @@ import time
 from datetime import timedelta
 
 import aiohttp
-import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -253,7 +252,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         try:
             # ── 1. List cameras (every tick — lightweight, needed for entity list) ──
-            async with async_timeout.timeout(15):
+            async with asyncio.timeout(15):
                 async with session.get(
                     f"{CLOUD_API}/v11/video_inputs", headers=headers
                 ) as resp:
@@ -268,7 +267,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
             # Retry after renewal if we got a 401
             if resp.status == 401:
-                async with async_timeout.timeout(15):
+                async with asyncio.timeout(15):
                     async with session.get(
                         f"{CLOUD_API}/v11/video_inputs", headers=headers
                     ) as resp2:
@@ -284,7 +283,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             # ── Feature flags (fetch once — rarely changes) ────────────────
             if not self._feature_flags:
                 try:
-                    async with async_timeout.timeout(5):
+                    async with asyncio.timeout(5):
                         async with session.get(
                             f"{CLOUD_API}/v11/feature_flags", headers=headers
                         ) as ff_resp:
@@ -306,7 +305,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     status = "UNKNOWN"
                     comm_ok = False
                     try:
-                        async with async_timeout.timeout(8):
+                        async with asyncio.timeout(8):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
                                 headers=headers,
@@ -327,7 +326,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # Fallback to /ping if /commissioned didn't work
                     if not comm_ok:
                         try:
-                            async with async_timeout.timeout(5):
+                            async with asyncio.timeout(5):
                                 async with session.get(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
                                     headers=headers,
@@ -347,7 +346,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # skip full events list fetch (saves bandwidth)
                     skip_full_fetch = False
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
                                 headers=headers,
@@ -368,7 +367,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     if not skip_full_fetch:
                         try:
                             url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-                            async with async_timeout.timeout(15):
+                            async with asyncio.timeout(15):
                                 async with session.get(url, headers=headers) as r:
                                     if r.status == 200:
                                         events = await r.json()
@@ -497,7 +496,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
                 if pan_limit:
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/pan",
                                 headers=headers,
@@ -514,7 +513,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if do_slow:
                     # WiFi info (signal strength, IP, SSID)
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/wifiinfo",
                                 headers=headers,
@@ -530,7 +529,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Ambient light sensor level
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/ambient_light_sensor_level",
                                 headers=headers,
@@ -550,7 +549,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Motion detection settings
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/motion",
                                 headers=headers,
@@ -562,7 +561,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Audio alarm settings
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/audioAlarm",
                                 headers=headers,
@@ -574,7 +573,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Firmware status (short form — includes updating/status fields)
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/firmware",
                                 headers=headers,
@@ -588,7 +587,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Recording options
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/recording_options",
                                 headers=headers,
@@ -600,7 +599,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Unread events count
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/unread_events_count",
                                 headers=headers,
@@ -624,7 +623,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     hw = cam_raw.get("hardwareVersion", "")
                     if hw in ("INDOOR", "CAMERA_360"):
                         try:
-                            async with async_timeout.timeout(5):
+                            async with asyncio.timeout(5):
                                 async with session.get(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/privacy_sound_override",
                                     headers=headers,
@@ -641,7 +640,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Commissioned status
                     try:
-                        async with async_timeout.timeout(5):
+                        async with asyncio.timeout(5):
                             async with session.get(
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/commissioned",
                                 headers=headers,
@@ -657,7 +656,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
                     if pan_limit:
                         try:
-                            async with async_timeout.timeout(5):
+                            async with asyncio.timeout(5):
                                 async with session.get(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/autofollow",
                                     headers=headers,
@@ -681,7 +680,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "Accept":        "application/json",
                         }
                         try:
-                            async with async_timeout.timeout(10):
+                            async with asyncio.timeout(10):
                                 async with rcp_session.put(
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
                                     json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id_key)[0]},
@@ -788,7 +787,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             hq, inst = self.get_quality_params(cam_id)
             for type_val in LIVE_TYPE_CANDIDATES:
                 try:
-                    async with async_timeout.timeout(10):
+                    async with asyncio.timeout(10):
                         async with session.put(
                             url,
                             json={"type": type_val, "highQualityVideo": hq},
@@ -900,7 +899,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 del self._proxy_url_cache[cam_id]
 
             # Cache miss — call PUT /connection
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     conn_url,
                     json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
@@ -957,7 +956,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     )
 
             proxy_url = f"https://{url_entry}/snap.jpg"
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.get(proxy_url) as snap_resp:
                     ct = snap_resp.headers.get("Content-Type", "")
                     if snap_resp.status == 404:
@@ -971,7 +970,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         if not url_entry2:
                             return None
                         proxy_url2 = f"https://{url_entry2}/snap.jpg"
-                        async with async_timeout.timeout(10):
+                        async with asyncio.timeout(10):
                             async with session.get(proxy_url2) as snap_resp2:
                                 ct2 = snap_resp2.headers.get("Content-Type", "")
                                 if snap_resp2.status == 200 and "image" in ct2:
@@ -1021,7 +1020,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
 
         try:
-            async with async_timeout.timeout(15):
+            async with asyncio.timeout(15):
                 async with session.get(events_url, headers=headers) as resp:
                     if resp.status != 200:
                         _LOGGER.debug(
@@ -1042,7 +1041,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if not img_url:
                     continue
                 try:
-                    async with async_timeout.timeout(20):
+                    async with asyncio.timeout(20):
                         async with session.get(img_url, headers=img_headers) as snap_resp:
                             if snap_resp.status == 200:
                                 data = await snap_resp.read()
@@ -1084,7 +1083,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         result = None
         try:
-            async with async_timeout.timeout(15):
+            async with asyncio.timeout(15):
                 async with session.put(
                     url, json={"type": "LOCAL", "highQualityVideo": self.get_quality_params(cam_id)[0]}, headers=headers
                 ) as resp:
@@ -1162,7 +1161,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         go2rtc_src = f"{rtsps_url}#insecure=1"
 
         try:
-            async with async_timeout.timeout(5):
+            async with asyncio.timeout(5):
                 async with aiohttp.ClientSession() as s:
                     # go2rtc API: PUT /api/streams?src=URL&name=STREAM_NAME
                     resp = await s.put(
@@ -1182,7 +1181,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Remove the camera stream from go2rtc when the live session ends."""
         stream_name = f"bosch_shc_cam_{cam_id.lower()}"
         try:
-            async with async_timeout.timeout(3):
+            async with asyncio.timeout(3):
                 async with aiohttp.ClientSession() as s:
                     await s.delete(
                         f"http://localhost:1984/api/streams",
@@ -1214,7 +1213,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 "sdkVersion": "a:17.1.0",
                 "fid": "auto",
             }
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.post(url, json=body, headers={
                     "x-goog-api-key": "",  # empty — discovery request
                     "Content-Type": "application/json",
@@ -1378,7 +1377,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         body = {"deviceType": device_type, "deviceToken": self._fcm_token}
 
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.post(
                     f"{CLOUD_API}/v11/devices", headers=headers, json=body
                 ) as resp:
@@ -1422,7 +1421,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         for cam_id in list(self.data.keys()):
             try:
                 url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=5"
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     async with session.get(url, headers=headers) as r:
                         if r.status != 200:
                             continue
@@ -1562,7 +1561,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     if cdata.get("info", {}).get("title", "") == cam_name:
                         events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
                         break
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     async with session.get(events_url, headers=headers) as r:
                         if r.status == 200:
                             fresh_events = await r.json()
@@ -1581,7 +1580,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(5)
             snap_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.jpg")
             try:
-                async with async_timeout.timeout(15):
+                async with asyncio.timeout(15):
                     async with session.get(image_url, headers=headers) as resp:
                         if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
                             data = await resp.read()
@@ -1617,7 +1616,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 event_id = self._last_event_ids.get(cam_id, "")
                 if event_id:
                     try:
-                        async with async_timeout.timeout(10):
+                        async with asyncio.timeout(10):
                             async with session.get(
                                 f"{CLOUD_API}/v11/events/{event_id}/clip.mp4",
                                 headers={"Authorization": f"Bearer {self.token}", "Accept": "*/*"},
@@ -1638,7 +1637,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 for attempt in range(9):
                     await asyncio.sleep(10)
                     try:
-                        async with async_timeout.timeout(10):
+                        async with asyncio.timeout(10):
                             async with session.get(
                                 f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=3",
                                 headers=auth_headers,
@@ -1673,7 +1672,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if found_clip_url:
                 try:
                     dl_headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
-                    async with async_timeout.timeout(60):
+                    async with asyncio.timeout(60):
                         async with session.get(found_clip_url, headers=dl_headers) as resp:
                             if resp.status == 200:
                                 data = await resp.read()
@@ -1761,7 +1760,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Try bulk update
         try:
             body = {"events": [{"id": eid, "isSeen": True} for eid in event_ids]}
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/events/bulk", headers=headers, json=body
                 ) as resp:
@@ -1776,7 +1775,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         success = False
         for eid in event_ids:
             try:
-                async with async_timeout.timeout(5):
+                async with asyncio.timeout(5):
                     async with session.put(
                         f"{CLOUD_API}/v11/events/{eid}",
                         headers=headers, json={"isSeen": True},
@@ -1849,7 +1848,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "payload":   init_payload,
                 }
                 try:
-                    async with async_timeout.timeout(8):
+                    async with asyncio.timeout(8):
                         async with session.get(base, params=params1) as resp:
                             if resp.status != 200:
                                 _LOGGER.debug(
@@ -1880,7 +1879,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "sessionid": session_id,
                 }
                 try:
-                    async with async_timeout.timeout(8):
+                    async with asyncio.timeout(8):
                         async with session.get(base, params=params2) as resp2:
                             _LOGGER.debug(
                                 "_rcp_session: ACK HTTP %d for %s (sessionid=%s)",
@@ -1918,7 +1917,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         try:
-            async with async_timeout.timeout(8):
+            async with asyncio.timeout(8):
                 async with session.get(rcp_base, params=params) as resp:
                     if resp.status != 200:
                         _LOGGER.debug(
@@ -2072,7 +2071,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         session = async_get_clientsession(self.hass, verify_ssl=False)
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}",
                     headers=headers, json=payload,
@@ -2161,7 +2160,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         try:
             connector = aiohttp.TCPConnector(ssl=ctx)
             async with aiohttp.ClientSession(connector=connector) as s:
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     if method == "GET":
                         async with s.get(url, headers=headers) as r:
                             if r.status == 200:
@@ -2308,7 +2307,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
 
             try:
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     async with session.put(url, json=body, headers=headers) as resp:
                         if resp.status in (200, 201, 204):
                             self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
@@ -2362,7 +2361,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             )
 
             try:
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     async with session.put(url, json=body, headers=headers) as resp:
                         if resp.status in (200, 201, 204):
                             self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
@@ -2406,7 +2405,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         body   = {"enabledNotificationsStatus": status}
 
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["notifications_status"] = status
@@ -2443,7 +2442,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan"
 
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with session.put(url, json={"absolutePosition": position}, headers=headers) as resp:
                     if resp.status == 200:
                         data = await resp.json()

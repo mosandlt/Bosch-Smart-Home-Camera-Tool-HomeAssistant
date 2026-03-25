@@ -21,7 +21,6 @@ import logging
 import time
 
 import aiohttp
-import async_timeout
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
@@ -442,7 +441,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         proxy_url = live.get("proxyUrl", "")
         if proxy_url:
             try:
-                async with async_timeout.timeout(10):
+                async with asyncio.timeout(10):
                     async with session.get(proxy_url) as resp:
                         ct = resp.headers.get("Content-Type", "")
                         if resp.status == 200 and "image" in ct:
@@ -469,7 +468,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                 new_proxy_url = new_live.get("proxyUrl", "")
                                 if new_proxy_url:
                                     try:
-                                        async with async_timeout.timeout(10):
+                                        async with asyncio.timeout(10):
                                             async with session.get(new_proxy_url) as retry_resp:
                                                 ct2 = retry_resp.headers.get("Content-Type", "")
                                                 if retry_resp.status == 200 and "image" in ct2:
@@ -589,7 +588,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             if not img_url:
                 continue
             try:
-                async with async_timeout.timeout(20):
+                async with asyncio.timeout(20):
                     async with session.get(img_url, headers=headers_bearer) as resp:
                         if resp.status == 200:
                             self._cached_image = await resp.read()
