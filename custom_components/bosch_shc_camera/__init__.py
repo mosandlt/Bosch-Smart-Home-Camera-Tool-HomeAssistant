@@ -181,7 +181,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
     @property
     def refresh_token(self) -> str:
-        return self._entry.data.get("refresh_token", "")
+        return getattr(self, "_refreshed_refresh", None) or self._entry.data.get("refresh_token", "")
 
     @property
     def options(self) -> dict:
@@ -192,34 +192,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         Return a valid bearer token.
         Called ONLY when we get a 401 — not on every tick.
-        Refreshes via refresh_token and caches in memory + persists to disk.
+        Refreshes via refresh_token and caches ONLY in memory.
+        Never calls async_update_entry (that triggers reload → infinite loop).
+        Token persists across restarts because refresh_token in config entry
+        is used to get a fresh access_token on next boot.
         """
         from .config_flow import _do_refresh
-        refresh = self.refresh_token
+        refresh = getattr(self, "_refreshed_refresh", None) or self.refresh_token
         if not refresh:
             raise UpdateFailed("No refresh token — go to Settings → Integrations → Configure → Force new login")
         session = async_get_clientsession(self.hass, verify_ssl=False)
         tokens = await _do_refresh(session, refresh)
         if tokens:
-            new_access  = tokens.get("access_token", "")
-            new_refresh = tokens.get("refresh_token", refresh)
-            # Cache in memory to avoid triggering update listener
-            self._refreshed_token = new_access
-            self._refreshed_refresh = new_refresh
-            # Persist to disk without triggering reload — write directly
-            try:
-                self.hass.config_entries.async_update_entry(
-                    self._entry,
-                    data={
-                        **self._entry.data,
-                        "bearer_token":  new_access,
-                        "refresh_token": new_refresh,
-                    },
-                )
-            except Exception:
-                pass  # Non-critical — memory cache is enough
+            self._refreshed_token = tokens.get("access_token", "")
+            self._refreshed_refresh = tokens.get("refresh_token", refresh)
             _LOGGER.info("Bearer token renewed silently via refresh_token")
-            return new_access
+            return self._refreshed_token
         _LOGGER.warning("Silent token renewal failed")
         raise UpdateFailed("Token refresh failed — check network or re-login")
 
@@ -2614,10 +2602,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "_last_options": dict(entry.options),
-    }
+    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
 
     opts = get_options(entry)
     platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
@@ -2652,19 +2637,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when options are changed.
-
-    Skip reload if only data (tokens) changed — the coordinator handles
-    token refresh internally without needing a full reload.
-    """
-    # Check if actual options changed (not just token data)
-    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    prev_opts = edata.get("_last_options")
-    curr_opts = dict(entry.options)
-    if prev_opts is not None and prev_opts == curr_opts:
-        _LOGGER.debug("Only token data changed — skipping reload")
-        return
-    edata["_last_options"] = curr_opts
+    """Reload the config entry when user changes options in the UI."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
