@@ -172,7 +172,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     # ── Properties ────────────────────────────────────────────────────────────
     @property
     def token(self) -> str:
-        return self._entry.data.get("bearer_token", "")
+        # Prefer in-memory refreshed token over config entry (avoids stale reads)
+        return getattr(self, "_refreshed_token", None) or self._entry.data.get("bearer_token", "")
 
     @property
     def refresh_token(self) -> str:
@@ -186,34 +187,37 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     async def _ensure_valid_token(self) -> str:
         """
         Return a valid bearer token.
-        If the current token is expired (401), try silent renewal via refresh_token.
-        Updates the config entry data with the new tokens if renewed.
+        Called ONLY when we get a 401 — not on every tick.
+        Refreshes via refresh_token and caches in memory + persists to disk.
         """
         from .config_flow import _do_refresh
-        token = self.token
         refresh = self.refresh_token
-        if not token and not refresh:
-            raise UpdateFailed("Not authenticated — add the integration again to log in")
         if not refresh:
-            return token  # No refresh token — use whatever we have
-        # Try to renew silently
+            raise UpdateFailed("No refresh token — go to Settings → Integrations → Configure → Force new login")
         session = async_get_clientsession(self.hass, verify_ssl=False)
         tokens = await _do_refresh(session, refresh)
         if tokens:
-            new_access  = tokens.get("access_token", token)
+            new_access  = tokens.get("access_token", "")
             new_refresh = tokens.get("refresh_token", refresh)
-            self.hass.config_entries.async_update_entry(
-                self._entry,
-                data={
-                    **self._entry.data,
-                    "bearer_token":  new_access,
-                    "refresh_token": new_refresh,
-                },
-            )
-            _LOGGER.debug("Bearer token renewed silently via refresh_token")
+            # Cache in memory to avoid triggering update listener
+            self._refreshed_token = new_access
+            self._refreshed_refresh = new_refresh
+            # Persist to disk without triggering reload — write directly
+            try:
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    data={
+                        **self._entry.data,
+                        "bearer_token":  new_access,
+                        "refresh_token": new_refresh,
+                    },
+                )
+            except Exception:
+                pass  # Non-critical — memory cache is enough
+            _LOGGER.info("Bearer token renewed silently via refresh_token")
             return new_access
-        _LOGGER.warning("Silent token renewal failed — using existing token")
-        return token
+        _LOGGER.warning("Silent token renewal failed")
+        raise UpdateFailed("Token refresh failed — check network or re-login")
 
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
