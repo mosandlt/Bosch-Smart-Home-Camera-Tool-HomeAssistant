@@ -18,15 +18,17 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.8.0
+ * Version: 1.9.0
+ *
+ * Changes vs 1.8.0:
+ *   - Added 3 collapsible accordion sections below the quality dropdown:
+ *     1. Benachrichtigungs-Typen: movement/person/audio/trouble/alarm notification toggles
+ *     2. Erweitert: timestamp overlay, auto-follow, motion detection, record sound, privacy sound
+ *     3. Diagnose: WiFi signal, firmware, ambient light, movement/audio events today
+ *   - Accordion sections auto-hide when none of their entities exist
+ *   - All new toggle rows use existing _updateToggleBtn pattern
  *
  * Changes vs 1.7.6:
- *   - Added Intercom (Gegensprechanlage) toggle row — switch.bosch_{cam}_intercom
- *     Hidden when entity doesn't exist (disabled by default in HA integration).
- *   - Added Speaker Level display when intercom is active.
- *   - Updated debug line to v1.8.0
- *
- * Changes vs 1.7.5:
  *   - Fix: stale image shown for up to 60 s on page load. When localStorage cache
  *     restored an old image, _imageLoaded=true blocked the immediate fresh fetch on
  *     first hass assignment. Now always fetches fresh on first hass, with a subtle
@@ -159,6 +161,21 @@ class BoschCameraCard extends HTMLElement {
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
       last_event:   config.last_event_entity    || `sensor.${base}_last_event`,
+      timestamp:     config.timestamp_entity     || `switch.${base}_timestamp_overlay`,
+      autofollow:    config.autofollow_entity    || `switch.${base}_auto_follow`,
+      motion:        config.motion_entity        || `switch.${base}_motion_detection`,
+      recordSound:   config.record_sound_entity  || `switch.${base}_record_sound`,
+      privacySound:  config.privacy_sound_entity || `switch.${base}_privacy_sound`,
+      notifMovement: config.notif_movement_entity || `switch.${base}_movement_notifications`,
+      notifPerson:   config.notif_person_entity   || `switch.${base}_person_notifications`,
+      notifAudio:    config.notif_audio_entity    || `switch.${base}_audio_notifications`,
+      notifTrouble:  config.notif_trouble_entity  || `switch.${base}_trouble_notifications`,
+      notifAlarm:    config.notif_alarm_entity    || `switch.${base}_camera_alarm_notifications`,
+      wifi:          config.wifi_entity          || `sensor.${base}_wifi_signal`,
+      firmware:      config.firmware_entity      || `sensor.${base}_firmware_version`,
+      ambient:       config.ambient_entity       || `sensor.${base}_ambient_light`,
+      movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
+      audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
     };
 
     this._render();
@@ -355,9 +372,8 @@ class BoschCameraCard extends HTMLElement {
           opacity: 0; transition: opacity 0.3s; pointer-events: none;
         }
         .loading-overlay.visible { opacity: 1; }
-        /* Transparent overlay when refreshing an existing image — old image stays visible */
-        .loading-overlay.refreshing { background: rgba(0,0,0,.15); }
-        .loading-overlay.refreshing .loading-text { display: none; }
+        /* Semi-transparent overlay when refreshing an existing image — old image stays visible, spinner on top */
+        .loading-overlay.refreshing { background: rgba(0,0,0,.4); }
         .spinner {
           width: 36px; height: 36px;
           border: 3px solid rgba(255,255,255,.2);
@@ -492,6 +508,47 @@ class BoschCameraCard extends HTMLElement {
         .pan-btn:hover  { background: rgba(128,128,128,.25); }
         .pan-btn:active { background: rgba(128,128,128,.35); }
         .pan-pos { margin-left: auto; font-size: 12px; opacity: .7; color: var(--primary-text-color, #e5e5ea); white-space: nowrap; }
+
+        /* Accordion sections */
+        .accordion { border-top: 1px solid rgba(255,255,255,.06); }
+        .accordion-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 10px 14px; cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+          transition: background 0.15s;
+        }
+        .accordion-header:active { background: rgba(99,99,102,.08); }
+        .accordion-title {
+          font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+          color: var(--secondary-text-color, #8e8e93);
+        }
+        .accordion-chevron {
+          width: 16px; height: 16px; color: var(--secondary-text-color, #8e8e93);
+          transition: transform 0.25s ease;
+          flex-shrink: 0;
+        }
+        .accordion.open .accordion-chevron { transform: rotate(180deg); }
+        .accordion-body {
+          max-height: 0; overflow: hidden;
+          transition: max-height 0.3s ease;
+        }
+        .accordion.open .accordion-body { max-height: 600px; }
+        .accordion-content { padding: 0 12px 12px; }
+        .accordion-content .sw-row { padding: 7px 4px; }
+
+        /* Diagnostic row inside accordion */
+        .diag-row {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 6px 4px;
+        }
+        .diag-label {
+          font-size: 13px; color: var(--secondary-text-color, #8e8e93);
+          display: flex; align-items: center; gap: 8px;
+        }
+        .diag-label svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .diag-value {
+          font-size: 13px; color: var(--primary-text-color, #e5e5ea); font-weight: 500;
+        }
       </style>
 
       <ha-card>
@@ -682,7 +739,149 @@ class BoschCameraCard extends HTMLElement {
               </select>
             </div>
           </div>
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.8.0</div>
+
+          <!-- Accordion: Notification Types -->
+          <div class="accordion" id="acc-notif-types">
+            <div class="accordion-header" id="acc-notif-types-header">
+              <span class="accordion-title">Benachrichtigungs-Typen</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="sw-row" id="btn-notif-movement">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    <span>Bewegung</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-notif-person">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span>Person</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-notif-audio">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
+                    <span>Audio</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-notif-trouble">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>Störung</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-notif-alarm">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>Kamera-Alarm</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accordion: Advanced Controls -->
+          <div class="accordion" id="acc-advanced">
+            <div class="accordion-header" id="acc-advanced-header">
+              <span class="accordion-title">Erweitert</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="sw-row" id="btn-timestamp">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Zeitstempel</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-autofollow">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>
+                    <span>Auto-Follow</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-motion">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    <span>Bewegungserkennung</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-record-sound">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span>Ton aufnehmen</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="sw-row" id="btn-privacy-sound">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+                    <span>Privat-Ton</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accordion: Diagnostics -->
+          <div class="accordion" id="acc-diagnostics">
+            <div class="accordion-header" id="acc-diagnostics-header">
+              <span class="accordion-title">Diagnose</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="diag-row" id="diag-wifi">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                    WiFi
+                  </span>
+                  <span class="diag-value" id="diag-wifi-val">—</span>
+                </div>
+                <div class="diag-row" id="diag-firmware">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/></svg>
+                    Firmware
+                  </span>
+                  <span class="diag-value" id="diag-firmware-val">—</span>
+                </div>
+                <div class="diag-row" id="diag-ambient">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
+                    Umgebungslicht
+                  </span>
+                  <span class="diag-value" id="diag-ambient-val">—</span>
+                </div>
+                <div class="diag-row" id="diag-movement-today">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+                    Bewegung heute
+                  </span>
+                  <span class="diag-value" id="diag-movement-today-val">—</span>
+                </div>
+                <div class="diag-row" id="diag-audio-today">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
+                    Audio heute
+                  </span>
+                  <span class="diag-value" id="diag-audio-today-val">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.9.0</div>
       </ha-card>
     `;
 
@@ -751,6 +950,26 @@ class BoschCameraCard extends HTMLElement {
       qualitySel.addEventListener("change", () => this._onQualityChange(qualitySel.value));
     }
 
+    // Accordion toggle handlers
+    ["acc-notif-types", "acc-advanced", "acc-diagnostics"].forEach(id => {
+      this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
+        const acc = this.shadowRoot.getElementById(id);
+        if (acc) acc.classList.toggle("open");
+      });
+    });
+
+    // New toggle switches
+    this.shadowRoot.getElementById("btn-notif-movement")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifMovement));
+    this.shadowRoot.getElementById("btn-notif-person")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifPerson));
+    this.shadowRoot.getElementById("btn-notif-audio")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAudio));
+    this.shadowRoot.getElementById("btn-notif-trouble")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifTrouble));
+    this.shadowRoot.getElementById("btn-notif-alarm")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAlarm));
+    this.shadowRoot.getElementById("btn-timestamp")?.addEventListener("click", () => this._toggleSwitch(this._entities.timestamp));
+    this.shadowRoot.getElementById("btn-autofollow")?.addEventListener("click", () => this._toggleSwitch(this._entities.autofollow));
+    this.shadowRoot.getElementById("btn-motion")?.addEventListener("click", () => this._toggleSwitch(this._entities.motion));
+    this.shadowRoot.getElementById("btn-record-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.recordSound));
+    this.shadowRoot.getElementById("btn-privacy-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.privacySound));
+
     // Load the first image immediately
     this._imgTimestamp = Date.now();
     this._scheduleImageLoad(0);
@@ -808,7 +1027,7 @@ class BoschCameraCard extends HTMLElement {
       const isCache = src.startsWith("data:");
       const now = new Date().toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
-      dbg.textContent = `Card v1.7.6 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
+      dbg.textContent = `Card v1.9.0 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
     }
     // Store image to localStorage so next app launch shows it instantly
     if (img?.src && !img.src.startsWith("data:")) this._cacheImage(img.src);
@@ -1248,6 +1467,50 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-privacy",       ents.privacy,       hass.states[ents.privacy]);
     this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
     this._updateToggleBtn("btn-intercom",      ents.intercom,      hass.states[ents.intercom]);
+
+    // Accordion: notification type toggles
+    this._updateToggleBtn("btn-notif-movement", ents.notifMovement, hass.states[ents.notifMovement]);
+    this._updateToggleBtn("btn-notif-person",   ents.notifPerson,   hass.states[ents.notifPerson]);
+    this._updateToggleBtn("btn-notif-audio",    ents.notifAudio,    hass.states[ents.notifAudio]);
+    this._updateToggleBtn("btn-notif-trouble",  ents.notifTrouble,  hass.states[ents.notifTrouble]);
+    this._updateToggleBtn("btn-notif-alarm",    ents.notifAlarm,    hass.states[ents.notifAlarm]);
+
+    // Accordion: advanced controls
+    this._updateToggleBtn("btn-timestamp",     ents.timestamp,     hass.states[ents.timestamp]);
+    this._updateToggleBtn("btn-autofollow",    ents.autofollow,    hass.states[ents.autofollow]);
+    this._updateToggleBtn("btn-motion",        ents.motion,        hass.states[ents.motion]);
+    this._updateToggleBtn("btn-record-sound",  ents.recordSound,   hass.states[ents.recordSound]);
+    this._updateToggleBtn("btn-privacy-sound", ents.privacySound,  hass.states[ents.privacySound]);
+
+    // Accordion: diagnostics sensor values
+    const wifiVal = hass.states[ents.wifi];
+    const fwVal   = hass.states[ents.firmware];
+    const ambVal  = hass.states[ents.ambient];
+    const movVal  = hass.states[ents.movementToday];
+    const audVal  = hass.states[ents.audioToday];
+    const _dv = (id, st) => { const el = this.shadowRoot.getElementById(id); if (el) el.textContent = (st?.state && st.state !== "unavailable" && st.state !== "unknown") ? st.state : "\u2014"; };
+    _dv("diag-wifi-val", wifiVal);
+    _dv("diag-firmware-val", fwVal);
+    _dv("diag-ambient-val", ambVal);
+    _dv("diag-movement-today-val", movVal);
+    _dv("diag-audio-today-val", audVal);
+    // Add units
+    if (wifiVal?.state && wifiVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-wifi-val"); if (el) el.textContent = wifiVal.state + " %"; }
+    if (ambVal?.state && ambVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-ambient-val"); if (el) el.textContent = ambVal.state + " %"; }
+
+    // Hide entire accordion sections if ALL their toggle entities are missing
+    const _hideAccIf = (accId, entityIds) => {
+      const acc = this.shadowRoot.getElementById(accId);
+      if (!acc) return;
+      const anyExists = entityIds.some(eid => {
+        const st = hass.states[eid];
+        return st && st.state && st.state !== "unavailable" && st.state !== "unknown";
+      });
+      acc.style.display = anyExists ? "" : "none";
+    };
+    _hideAccIf("acc-notif-types", [ents.notifMovement, ents.notifPerson, ents.notifAudio, ents.notifTrouble, ents.notifAlarm]);
+    _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound]);
+    _hideAccIf("acc-diagnostics", [ents.wifi, ents.firmware, ents.ambient, ents.movementToday, ents.audioToday]);
 
     // Swap bell icon: bell when ON (notifications active), bell-off when OFF
     const notifState = this._getEffectiveState(ents.notifications);
