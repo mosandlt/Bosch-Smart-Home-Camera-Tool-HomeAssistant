@@ -67,6 +67,8 @@ async def async_setup_entry(
             entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
         # Commissioned status (diagnostic, disabled by default)
         entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
+        # Cloud rules count (diagnostic, disabled by default)
+        entities.append(BoschRulesCountSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -713,4 +715,54 @@ class BoschCommissionedSensor(_BoschSensorBase):
             "configured": data.get("configured"),
             "connected": data.get("connected"),
             "commissioned": data.get("commissioned"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschRulesCountSensor(_BoschSensorBase):
+    """Sensor: number of cloud-side schedule rules for this camera.
+
+    Data source: GET /v11/video_inputs/{id}/rules (fetched by coordinator, slow tier).
+    Attributes: list of rule names and active status.
+    """
+
+    _attr_icon = "mdi:calendar-clock"
+    _attr_native_unit_of_measurement = "rules"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Schedule Rules"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_rules_count"
+
+    @property
+    def native_value(self) -> int | None:
+        rules = self.coordinator._rules_cache.get(self._cam_id)
+        if rules is None:
+            return None
+        return len(rules)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rules_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rules = self.coordinator._rules_cache.get(self._cam_id, [])
+        return {
+            "rules": [
+                {
+                    "id": r.get("id", ""),
+                    "name": r.get("name", ""),
+                    "active": r.get("isActive", False),
+                    "start": r.get("startTime", ""),
+                    "end": r.get("endTime", ""),
+                    "weekdays": r.get("weekdays", []),
+                }
+                for r in rules
+            ],
         }

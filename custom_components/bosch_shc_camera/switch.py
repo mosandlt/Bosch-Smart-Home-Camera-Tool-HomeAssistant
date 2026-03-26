@@ -114,6 +114,11 @@ async def async_setup_entry(
         hw_version = cam_info.get("hardwareVersion", "")
         if hw_version == "CAMERA_360":
             entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
+        # Timestamp overlay — available for all cameras
+        entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
+        # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm
+        for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm"):
+            entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -625,3 +630,120 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
             self._cam_id, "privacy_sound_override", {"result": False}
         )
         self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschTimestampSwitch(_BoschSwitchBase):
+    """Switch: ON = time/date overlay visible on video, OFF = hidden.
+
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/timestamp
+    Body: {"result": true/false}
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Timestamp Overlay"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_timestamp"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._timestamp_cache.get(self._cam_id)
+
+    @property
+    def icon(self) -> str:
+        return "mdi:clock-outline" if self.is_on else "mdi:clock-remove-outline"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._timestamp_cache.get(self._cam_id) is not None
+        )
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "timestamp", {"result": True}
+        )
+        self.coordinator._timestamp_cache[self._cam_id] = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "timestamp", {"result": False}
+        )
+        self.coordinator._timestamp_cache[self._cam_id] = False
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+_NOTIF_TYPE_ICONS = {
+    "movement":    "mdi:motion-sensor",
+    "person":      "mdi:account-eye",
+    "audio":       "mdi:volume-high",
+    "trouble":     "mdi:alert-circle",
+    "cameraAlarm": "mdi:alarm-light",
+}
+
+_NOTIF_TYPE_LABELS = {
+    "movement":    "Movement Notifications",
+    "person":      "Person Notifications",
+    "audio":       "Audio Notifications",
+    "trouble":     "Trouble Notifications",
+    "cameraAlarm": "Camera Alarm Notifications",
+}
+
+
+class BoschNotificationTypeSwitch(_BoschSwitchBase):
+    """Per-type notification toggle (movement, person, audio, trouble, cameraAlarm).
+
+    Reads from GET /v11/video_inputs/{id}/notifications.
+    Writes via PUT /v11/video_inputs/{id}/notifications with all toggles.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry, ntype: str) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._ntype = ntype
+        label = _NOTIF_TYPE_LABELS.get(ntype, ntype)
+        self._attr_name      = f"Bosch {self._cam_title} {label}"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_notif_{ntype}"
+
+    @property
+    def is_on(self) -> bool | None:
+        data = self.coordinator._notifications_cache.get(self._cam_id, {})
+        if not data:
+            return None
+        return data.get(self._ntype, False)
+
+    @property
+    def icon(self) -> str:
+        return _NOTIF_TYPE_ICONS.get(self._ntype, "mdi:bell")
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._notifications_cache.get(self._cam_id))
+        )
+
+    async def _set_type(self, value: bool):
+        """Write updated notification toggles (preserving other types)."""
+        current = dict(self.coordinator._notifications_cache.get(self._cam_id, {}))
+        current[self._ntype] = value
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "notifications", current
+        )
+        if success:
+            self.coordinator._notifications_cache[self._cam_id] = current
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set_type(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set_type(False)

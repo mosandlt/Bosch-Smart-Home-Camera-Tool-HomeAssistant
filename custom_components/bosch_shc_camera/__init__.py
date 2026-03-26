@@ -38,7 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select"]
+ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select", "update"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
@@ -183,6 +183,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False     # True after first alert sent
         self._token_fail_count: int = 0          # consecutive refresh failures
+        # Timestamp overlay cache — keyed by cam_id, from GET /timestamp
+        self._timestamp_cache: dict[str, bool | None] = {}
+        # Notification type toggles cache — keyed by cam_id, from GET /notifications
+        self._notifications_cache: dict[str, dict] = {}
+        # Rules cache — keyed by cam_id, from GET /rules
+        self._rules_cache: dict[str, list] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -203,10 +209,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         Return a valid bearer token.
         Called ONLY when we get a 401 — not on every tick.
-        Refreshes via refresh_token and caches ONLY in memory.
-        Never calls async_update_entry (that triggers reload → infinite loop).
-        Token persists across restarts because refresh_token in config entry
-        is used to get a fresh access_token on next boot.
+        Refreshes via refresh_token with retry logic:
+          - 3 attempts with 2s delay between retries
+          - Persists new refresh token to config entry data (non-reloading)
+          - Only alerts after 3 consecutive complete failures
         """
         from .config_flow import _do_refresh
         refresh = getattr(self, "_refreshed_refresh", None) or self.refresh_token
@@ -217,11 +223,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             )
             raise UpdateFailed("No refresh token — go to Settings → Integrations → Configure → Force new login")
         session = async_get_clientsession(self.hass, verify_ssl=False)
-        tokens = await _do_refresh(session, refresh)
+        # Retry up to 3 times with 2s delay
+        tokens = None
+        for attempt in range(3):
+            tokens = await _do_refresh(session, refresh)
+            if tokens:
+                break
+            if attempt < 2:
+                _LOGGER.debug("Token refresh attempt %d failed, retrying in 2s...", attempt + 1)
+                await asyncio.sleep(2)
         if tokens:
             self._refreshed_token = tokens.get("access_token", "")
-            self._refreshed_refresh = tokens.get("refresh_token", refresh)
+            new_refresh = tokens.get("refresh_token", refresh)
+            self._refreshed_refresh = new_refresh
             _LOGGER.info("Bearer token renewed silently via refresh_token")
+            # Persist new refresh token to config entry (non-reloading update)
+            if new_refresh != self._entry.data.get("refresh_token", ""):
+                new_data = dict(self._entry.data)
+                new_data["refresh_token"] = new_refresh
+                new_data["bearer_token"] = self._refreshed_token
+                self.hass.config_entries.async_update_entry(
+                    self._entry, data=new_data,
+                )
+                _LOGGER.debug("Persisted new refresh token to config entry")
             # Reset failure tracking on success
             if self._token_fail_count > 0:
                 _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
@@ -230,10 +254,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return self._refreshed_token
         self._token_fail_count += 1
         _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
-        await self._async_token_failure_alert(
-            "Token-Erneuerung fehlgeschlagen — bitte unter Einstellungen → Integrationen → "
-            "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
-        )
+        # Only alert after 3 consecutive complete failures
+        if self._token_fail_count >= 3:
+            await self._async_token_failure_alert(
+                "Token-Erneuerung fehlgeschlagen — bitte unter Einstellungen → Integrationen → "
+                "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
+            )
         raise UpdateFailed("Token refresh failed — check network or re-login")
 
     async def _async_token_failure_alert(self, message: str) -> None:
@@ -736,6 +762,43 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         data[cam_id_key]["autofollow"] = await r.json()
                         except Exception as err:
                             _LOGGER.debug("Autofollow fetch error for %s: %s", cam_id_key, err)
+
+                    # Timestamp overlay
+                    try:
+                        async with asyncio.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/timestamp",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    ts_data = await r.json()
+                                    self._timestamp_cache[cam_id_key] = ts_data.get("result", False)
+                    except Exception as err:
+                        _LOGGER.debug("Timestamp fetch error for %s: %s", cam_id_key, err)
+
+                    # Notification type toggles
+                    try:
+                        async with asyncio.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/notifications",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    self._notifications_cache[cam_id_key] = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Notifications fetch error for %s: %s", cam_id_key, err)
+
+                    # Cloud rules
+                    try:
+                        async with asyncio.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/rules",
+                                headers=headers,
+                            ) as r:
+                                if r.status == 200:
+                                    self._rules_cache[cam_id_key] = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Rules fetch error for %s: %s", cam_id_key, err)
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -2934,7 +2997,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when user changes options in the UI."""
+    """Reload the config entry when user changes options in the UI.
+
+    This listener fires on any config entry update (data OR options).
+    We only reload if options actually changed — data-only updates
+    (e.g. persisting a refreshed token) should NOT trigger a reload.
+    """
+    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coord = edata.get("coordinator")
+    if coord:
+        prev_opts = coord.options
+        new_opts = get_options(entry)
+        if prev_opts == new_opts:
+            _LOGGER.debug("Config entry updated (data only) — skipping reload")
+            return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -2961,7 +3037,114 @@ def _register_services(hass: HomeAssistant) -> None:
                 if result:
                     _LOGGER.info("Live connection established: %s", result)
 
+    async def handle_create_rule(call: ServiceCall) -> None:
+        """Create a cloud-side schedule rule for a camera."""
+        cam_id = call.data.get("camera_id", "")
+        name = call.data.get("name", "HA Rule")
+        start_time = call.data.get("start_time", "00:00:00")
+        end_time = call.data.get("end_time", "23:59:00")
+        weekdays = call.data.get("weekdays", [0, 1, 2, 3, 4, 5, 6])
+        is_active = call.data.get("is_active", True)
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                payload = {
+                    "id": None, "name": name, "isActive": is_active,
+                    "startTime": start_time, "endTime": end_time,
+                    "weekdays": weekdays,
+                }
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.post(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
+                            headers=headers, json=payload,
+                        ) as resp:
+                            if resp.status in (200, 201):
+                                result = await resp.json()
+                                _LOGGER.info("Rule created: %s", result)
+                            else:
+                                _LOGGER.warning("Create rule failed: HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("Create rule error: %s", err)
+                break
+
+    async def handle_delete_rule(call: ServiceCall) -> None:
+        """Delete a cloud-side schedule rule."""
+        cam_id = call.data.get("camera_id", "")
+        rule_id = call.data.get("rule_id", "")
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.delete(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status == 204:
+                                _LOGGER.info("Rule %s deleted", rule_id)
+                            else:
+                                _LOGGER.warning("Delete rule failed: HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("Delete rule error: %s", err)
+                break
+
+    async def handle_download_clip(call: ServiceCall) -> None:
+        """Request and download an event video clip."""
+        event_id = call.data.get("event_id", "")
+        save_path = call.data.get("save_path", "/config/www/bosch_clips")
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                # Step 1: Request clip generation
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/events/{event_id}/request_clip",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status not in (200, 204):
+                                _LOGGER.warning("Request clip failed: HTTP %d", resp.status)
+                                return
+                except Exception as err:
+                    _LOGGER.warning("Request clip error: %s", err)
+                    return
+                # Step 2: Wait and download
+                clip_data = None
+                for _ in range(9):  # up to 90 seconds
+                    await asyncio.sleep(10)
+                    try:
+                        async with asyncio.timeout(15):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/events/{event_id}/clip.mp4",
+                                headers=headers,
+                            ) as resp:
+                                if resp.status == 200:
+                                    clip_data = await resp.read()
+                                    break
+                    except Exception:
+                        continue
+                if clip_data:
+                    os.makedirs(save_path, exist_ok=True)
+                    filepath = os.path.join(save_path, f"{event_id}.mp4")
+                    await hass.async_add_executor_job(
+                        lambda: open(filepath, "wb").write(clip_data)
+                    )
+                    _LOGGER.info("Clip saved: %s (%d bytes)", filepath, len(clip_data))
+                else:
+                    _LOGGER.warning("Clip download timed out for event %s", event_id)
+                break
+
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
         hass.services.async_register(DOMAIN, "open_live_connection", handle_open_live_connection)
+    if not hass.services.has_service(DOMAIN, "create_rule"):
+        hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
+    if not hass.services.has_service(DOMAIN, "delete_rule"):
+        hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+    if not hass.services.has_service(DOMAIN, "download_clip"):
+        hass.services.async_register(DOMAIN, "download_clip", handle_download_clip)

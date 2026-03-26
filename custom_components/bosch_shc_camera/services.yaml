@@ -26,3 +26,83 @@ open_live_connection:
       example: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
       selector:
         text:
+
+create_rule:
+  name: Create Schedule Rule
+  description: >
+    Create a cloud-side schedule rule for a camera (notification/privacy schedule).
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+    name:
+      name: Rule Name
+      required: false
+      default: "HA Rule"
+      selector:
+        text:
+    start_time:
+      name: Start Time
+      description: "HH:MM:SS format"
+      required: false
+      default: "00:00:00"
+      selector:
+        text:
+    end_time:
+      name: End Time
+      description: "HH:MM:SS format"
+      required: false
+      default: "23:59:00"
+      selector:
+        text:
+    weekdays:
+      name: Weekdays
+      description: "List of weekday numbers (0=Sunday, 6=Saturday)"
+      required: false
+      default: [0, 1, 2, 3, 4, 5, 6]
+      selector:
+        object:
+    is_active:
+      name: Active
+      required: false
+      default: true
+      selector:
+        boolean:
+
+delete_rule:
+  name: Delete Schedule Rule
+  description: >
+    Delete a cloud-side schedule rule by ID.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+    rule_id:
+      name: Rule ID
+      description: "The UUID of the rule to delete (see rules sensor attributes)"
+      required: true
+      selector:
+        text:
+
+download_clip:
+  name: Download Event Clip
+  description: >
+    Request and download a video clip for a specific event.
+    Triggers clip generation on the Bosch cloud, then downloads the MP4.
+  fields:
+    event_id:
+      name: Event ID
+      required: true
+      selector:
+        text:
+    save_path:
+      name: Save Path
+      description: "Directory to save the clip (default: /config/www/bosch_clips)"
+      required: false
+      default: "/config/www/bosch_clips"
+      selector:
+        text:

@@ -158,6 +158,14 @@ title: Garten
 | Commissioned status | `sensor` | diagnostic, disabled by default |
 | Acoustic alarm (siren, 360 only) | `button` | disabled by default |
 | Live stream (30fps H.264 + AAC) | `camera` | via Live Stream switch |
+| Timestamp overlay (clock on video) | `switch` | disabled by default |
+| Movement notifications | `switch` | disabled by default |
+| Person notifications | `switch` | disabled by default |
+| Audio notifications | `switch` | disabled by default |
+| Trouble notifications | `switch` | disabled by default |
+| Camera alarm notifications | `switch` | disabled by default |
+| Firmware update status | `update` | enabled — native HA update card |
+| Schedule rules count | `sensor` | diagnostic, disabled by default |
 
 > **SHC local API is not needed.** All features work with just the Bosch cloud API.
 
@@ -357,6 +365,9 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.4.0** | **New entities:** Timestamp overlay switch, per-type notification toggles (movement, person, audio, trouble, cameraAlarm), firmware update entity (native HA update card), schedule rules sensor. **New services:** `create_rule`, `delete_rule` (cloud-side schedule rules CRUD), `download_clip` (on-demand event clip download). **Token resilience:** 3x retry with 2s delay on refresh failure, persists new refresh token to config entry, only alerts after 3 consecutive failures. Skips HA reload on data-only config updates. |
+| **v6.3.3** | Fix duplicate alerts: update `_last_event_ids` before scheduling alert to prevent FCM push + polling race condition. |
+| **v6.3.2** | Auto-reload after re-auth + improved SMB upload logging. |
 | **v6.3.1** | Token refresh resilience: services (`trigger_snapshot`, `open_live_connection`) now register at domain level — available even when token is expired and integration is retrying. One-time token failure alert via configured notify services (Signal, etc.) + HA persistent notification. Auto-resets on successful refresh. |
 | **v6.3.0** | SMB retention: auto-delete files older than N days (default 180 / 6 months), runs daily. SMB disk-free check: HA alert when NAS free space falls below threshold (default 500 MB, configurable), falls back to HA persistent notification if no notify service configured. Both settings in Configure → SMB. |
 | **v6.2.3** | Fix mark-as-read: wrong field name (`isSeen` → `isRead`) and wrong individual fallback endpoint (`PUT /v11/events/{id}` → `PUT /v11/events`). On startup, all currently unread events are now marked as read (clears backlog in the Bosch app). |
