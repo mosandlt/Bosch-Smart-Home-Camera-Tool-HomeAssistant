@@ -28,8 +28,6 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as f
 [forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
 [forum]: https://community.home-assistant.io/
 
-![Bosch Camera Card Screenshot](card-screenshot.png)
-
 ---
 
 ## Disclaimer
@@ -297,6 +295,8 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 ---
 
 ## Lovelace Card
+
+![Bosch Camera Card Screenshot](card-screenshot.png)
 
 ### What the card shows
 
