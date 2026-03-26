@@ -195,8 +195,19 @@ class BoschCameraCard extends HTMLElement {
     // Always fetch fresh on first hass — even when localStorage cache is showing an
     // old image. Show a "refreshing" overlay so the user knows it's updating.
     if (firstHass) {
+      // Set flag so _onImageLoaded knows to show spinner until fresh image arrives
+      this._awaitingFresh = true;
       if (this._imageLoaded) {
-        this._setLoadingOverlay(true, "Aktualisiere…");
+        // Force spinner visible on top of cached image (with slight delay so DOM is ready)
+        setTimeout(() => {
+          const overlay = this.shadowRoot.getElementById("loading-overlay");
+          const loadText = this.shadowRoot.getElementById("loading-text");
+          if (overlay) {
+            overlay.classList.add("visible");
+            overlay.classList.add("refreshing");
+          }
+          if (loadText) loadText.textContent = "Aktualisiere…";
+        }, 50);
       }
       this._triggerFreshSnapshot();
     }
@@ -1014,23 +1025,33 @@ class BoschCameraCard extends HTMLElement {
   _onImageLoaded() {
     const img     = this.shadowRoot.getElementById("cam-img");
     const overlay = this.shadowRoot.getElementById("loading-overlay");
-    this._imageLoaded    = true;
-    this._loadRetries    = 0;   // reset retry counter on success
-    this._loadingOverlay = false;
-    if (img)     img.classList.remove("hidden");
-    if (overlay) { overlay.classList.remove("visible"); overlay.classList.remove("refreshing"); }
-    if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    const src     = img?.src || "";
+    const isCache = src.startsWith("data:");
+
+    this._imageLoaded = true;
+    this._loadRetries = 0;   // reset retry counter on success
+    if (img) img.classList.remove("hidden");
+
+    // Don't clear spinner when loading cached image and we're still waiting for fresh
+    if (isCache && this._awaitingFresh) {
+      // Cache loaded — keep spinner visible, fresh image will clear it
+    } else {
+      // Fresh image arrived (or no fresh pending) — clear spinner
+      this._awaitingFresh  = false;
+      this._loadingOverlay = false;
+      if (overlay) { overlay.classList.remove("visible"); overlay.classList.remove("refreshing"); }
+      if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    }
+
     // Debug: show load time on card
     const dbg = this.shadowRoot.getElementById("debug-line");
     if (dbg) {
-      const src = img?.src || "";
-      const isCache = src.startsWith("data:");
       const now = new Date().toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
-      dbg.textContent = `Card v1.9.0 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
+      dbg.textContent = `Card v1.9.1 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
     }
     // Store image to localStorage so next app launch shows it instantly
-    if (img?.src && !img.src.startsWith("data:")) this._cacheImage(img.src);
+    if (!isCache) this._cacheImage(src);
   }
 
   _onImageError() {

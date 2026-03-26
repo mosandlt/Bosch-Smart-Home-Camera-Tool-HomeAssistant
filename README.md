@@ -28,6 +28,8 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as f
 [forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
 [forum]: https://community.home-assistant.io/
 
+![Bosch Camera Card Screenshot](card-screenshot.png)
+
 ---
 
 ## Disclaimer
@@ -365,6 +367,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.4.1** | Lovelace card v1.9.1: visible refresh spinner on page load (cached image no longer hides loading state), anonymized screenshot for README. |
 | **v6.4.0** | **New entities:** Timestamp overlay switch, per-type notification toggles (movement, person, audio, trouble, cameraAlarm), firmware update entity (native HA update card), schedule rules sensor. **New services:** `create_rule`, `delete_rule` (cloud-side schedule rules CRUD), `download_clip` (on-demand event clip download). **Token resilience:** 3x retry with 2s delay on refresh failure, persists new refresh token to config entry, only alerts after 3 consecutive failures. Skips HA reload on data-only config updates. |
 | **v6.3.3** | Fix duplicate alerts: update `_last_event_ids` before scheduling alert to prevent FCM push + polling race condition. |
 | **v6.3.2** | Auto-reload after re-auth + improved SMB upload logging. |
