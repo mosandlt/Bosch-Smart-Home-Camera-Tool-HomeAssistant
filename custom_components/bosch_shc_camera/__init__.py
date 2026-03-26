@@ -450,6 +450,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 except Exception:
                                     pass
                         elif newest_id and newest_id != prev_id:
+                            # Update last event ID FIRST to prevent FCM push
+                            # from detecting the same event and sending duplicate alerts
+                            self._last_event_ids[cam_id] = newest_id
+
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
                                 cam_id, newest_id,
@@ -506,7 +510,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 await self.async_mark_events_read([newest_id])
                             except Exception:
                                 pass
-                        if newest_id:
+                        elif newest_id:
                             self._last_event_ids[cam_id] = newest_id
                 else:
                     events = self._cached_events.get(cam_id, [])
@@ -1523,6 +1527,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 prev_id   = self._last_event_ids.get(cam_id)
 
                 if prev_id is not None and newest_id and newest_id != prev_id:
+                    # Update last event ID FIRST to prevent polling from
+                    # detecting the same event and sending duplicate alerts
+                    self._last_event_ids[cam_id] = newest_id
+
                     newest_event = events[0]
                     event_type   = newest_event.get("eventType", "")
                     cam_name     = self.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
@@ -1580,7 +1588,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception:
                         pass
 
-                if newest_id:
+                elif newest_id:
                     self._last_event_ids[cam_id] = newest_id
 
             except Exception as err:
