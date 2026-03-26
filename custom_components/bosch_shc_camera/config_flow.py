@@ -405,7 +405,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                             "refresh_token": tokens.get("refresh_token", ""),
                         },
                     )
-                    _LOGGER.info("Token re-authenticated successfully")
+                    _LOGGER.info("Token re-authenticated successfully — reloading integration")
+                    self.hass.async_create_task(
+                        self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                    )
                     return self.async_create_entry(title="", data=self._pending_options)
 
         return self.async_show_form(

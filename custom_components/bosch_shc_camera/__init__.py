@@ -1797,10 +1797,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if opts.get("enable_smb_upload") and opts.get("smb_server") and cam_id:
             try:
                 # Build a minimal data dict for _sync_smb_upload with just this event
+                ev_id = self._last_event_ids.get(cam_id, "unknown")
                 ev_data = {
                     "timestamp": timestamp,
                     "eventType": event_type,
-                    "id": self._last_event_ids.get(cam_id, "unknown"),
+                    "id": ev_id,
                     "imageUrl": image_url,
                     "videoClipUrl": found_clip_url if found_clip_url else "",
                     "videoClipUploadStatus": "Done" if found_clip_url else "",
@@ -1811,12 +1812,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         "events": [ev_data],
                     }
                 }
+                _LOGGER.info(
+                    "Alert: SMB upload starting for %s (event=%s, img=%s, clip=%s)",
+                    cam_name, ev_id[:8] if ev_id else "?",
+                    bool(image_url), bool(found_clip_url),
+                )
                 await self.hass.async_add_executor_job(
                     self._sync_smb_upload, smb_data, self.token
                 )
-                _LOGGER.debug("Alert: SMB upload triggered for %s", cam_name)
+                _LOGGER.info("Alert: SMB upload completed for %s", cam_name)
             except Exception as err:
-                _LOGGER.debug("Alert: SMB upload failed: %s", err)
+                _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
 
         # ── Cleanup local files ───────────────────────────────────────────────
         if delete_after and files_to_cleanup:
@@ -2639,10 +2645,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         for cam_id, cam_data in data.items():
             cam_name = cam_data["info"].get("title", cam_id)
+            ev_list = cam_data.get("events", [])
+            _LOGGER.debug("SMB upload: %s has %d events", cam_name, len(ev_list))
 
-            for ev in cam_data.get("events", []):
+            for ev in ev_list:
                 ts = ev.get("timestamp", "")
                 if not ts or len(ts) < 19:
+                    _LOGGER.debug("SMB upload: skipping event with short/empty timestamp: %r", ts)
                     continue
 
                 # Parse timestamp for folder/file patterns
@@ -2672,7 +2681,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 try:
                     self._smb_makedirs(smb_folder, server, share, base_path, folder_parts)
                 except Exception as err:
-                    _LOGGER.debug("SMB mkdir error for %s: %s", smb_folder, err)
+                    _LOGGER.warning("SMB mkdir error for %s: %s", smb_folder, err)
                     continue
 
                 # Upload snapshot
@@ -2681,16 +2690,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     smb_path = f"{smb_folder}\\{file_base}.jpg"
                     try:
                         smb_stat(smb_path)
-                        # File exists — skip
+                        _LOGGER.debug("SMB skip (exists): %s", file_base + ".jpg")
                     except OSError:
                         try:
                             r = session.get(img_url, timeout=30)
                             if r.status_code == 200 and r.content:
                                 with open_file(smb_path, mode="wb") as f:
                                     f.write(r.content)
-                                _LOGGER.debug("SMB uploaded: %s", smb_path.split("\\")[-1])
+                                _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".jpg", len(r.content))
+                            else:
+                                _LOGGER.warning("SMB snapshot download failed: HTTP %d, %d bytes", r.status_code, len(r.content))
                         except Exception as err:
-                            _LOGGER.debug("SMB upload error for %s: %s", file_base, err)
+                            _LOGGER.warning("SMB upload error for %s: %s", file_base, err)
+                else:
+                    _LOGGER.debug("SMB: no imageUrl for event %s", ev.get("id", "?")[:8])
 
                 # Upload video clip
                 clip_url = ev.get("videoClipUrl")
@@ -2699,16 +2712,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     smb_path = f"{smb_folder}\\{file_base}.mp4"
                     try:
                         smb_stat(smb_path)
+                        _LOGGER.debug("SMB skip (exists): %s", file_base + ".mp4")
                     except OSError:
                         try:
                             r = session.get(clip_url, timeout=60, stream=True)
                             if r.status_code == 200:
+                                total = 0
                                 with open_file(smb_path, mode="wb") as f:
                                     for chunk in r.iter_content(65536):
                                         f.write(chunk)
-                                _LOGGER.debug("SMB uploaded: %s", smb_path.split("\\")[-1])
+                                        total += len(chunk)
+                                _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".mp4", total)
+                            else:
+                                _LOGGER.warning("SMB clip download failed: HTTP %d", r.status_code)
                         except Exception as err:
-                            _LOGGER.debug("SMB clip upload error for %s: %s", file_base, err)
+                            _LOGGER.warning("SMB clip upload error for %s: %s", file_base, err)
 
     @staticmethod
     def _smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder_parts: str) -> None:
