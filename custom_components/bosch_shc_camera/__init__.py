@@ -237,15 +237,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             new_refresh = tokens.get("refresh_token", refresh)
             self._refreshed_refresh = new_refresh
             _LOGGER.info("Bearer token renewed silently via refresh_token")
-            # Persist new refresh token to config entry (non-reloading update)
+            # Always persist both tokens to config entry so they survive reloads/restarts.
+            # Previously only saved when refresh_token changed — but Keycloak offline_access
+            # keeps the same refresh_token, so the new bearer_token was never persisted.
+            new_data = dict(self._entry.data)
+            needs_update = False
             if new_refresh != self._entry.data.get("refresh_token", ""):
-                new_data = dict(self._entry.data)
                 new_data["refresh_token"] = new_refresh
+                needs_update = True
+            if self._refreshed_token != self._entry.data.get("bearer_token", ""):
                 new_data["bearer_token"] = self._refreshed_token
-                self.hass.config_entries.async_update_entry(
-                    self._entry, data=new_data,
-                )
-                _LOGGER.debug("Persisted new refresh token to config entry")
+                needs_update = True
+            if needs_update:
+                self.hass.config_entries.async_update_entry(self._entry, data=new_data)
+                _LOGGER.debug("Persisted refreshed tokens to config entry")
+            # Schedule next proactive refresh before this token expires
+            self._schedule_token_refresh()
             # Reset failure tracking on success
             if self._token_fail_count > 0:
                 _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
@@ -290,6 +297,57 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("Token failure alert sent via %s", svc)
                 except Exception as err:
                     _LOGGER.debug("Token failure alert via %s failed: %s", svc, err)
+
+    # ── Proactive background token refresh ───────────────────────────────────
+
+    def _schedule_token_refresh(self) -> None:
+        """Schedule a proactive token refresh 5 minutes before the JWT expires.
+
+        Called after every successful token acquisition (startup + renewals).
+        Ensures the token is always valid when automations or action methods run,
+        eliminating the ~60s race window between token expiry and the next
+        coordinator tick that previously triggered reactive 401 handling.
+        """
+        import base64 as _b64
+        import json as _json
+        import time as _time
+        token = self.token
+        if not token:
+            return
+        try:
+            parts = token.split(".")
+            if len(parts) < 2:
+                return
+            # JWT payload is URL-safe base64 (no padding)
+            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            payload = _json.loads(_b64.urlsafe_b64decode(payload_b64))
+            exp = payload.get("exp", 0)
+            remaining = exp - _time.time()
+            # Refresh 5 minutes before expiry; at minimum 10s to avoid tight loops
+            refresh_in = max(remaining - 300, 10)
+            _LOGGER.debug(
+                "Token expires in %.0fs — proactive refresh scheduled in %.0fs",
+                remaining, refresh_in,
+            )
+            self.hass.loop.call_later(
+                refresh_in,
+                lambda: self.hass.async_create_task(self._proactive_refresh()),
+            )
+        except Exception as err:
+            _LOGGER.debug("_schedule_token_refresh: cannot parse token expiry: %s", err)
+
+    async def _proactive_refresh(self) -> None:
+        """Background task: refresh the token before it expires."""
+        _LOGGER.debug("Proactive token refresh triggered")
+        try:
+            await self._ensure_valid_token()
+            # _ensure_valid_token calls _schedule_token_refresh on success,
+            # so the next refresh is automatically rescheduled.
+        except Exception as err:
+            _LOGGER.warning(
+                "Proactive token refresh failed: %s — will retry via reactive 401 handling",
+                err,
+            )
 
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
@@ -2236,12 +2294,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         token = self.token
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         session = async_get_clientsession(self.hass, verify_ssl=False)
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
         try:
             async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}",
-                    headers=headers, json=payload,
-                ) as resp:
+                async with session.put(url, headers=headers, json=payload) as resp:
+                    if resp.status == 401:
+                        # Token expired — refresh and retry once
+                        _LOGGER.info("async_put_camera %s/%s: 401 — refreshing token", cam_id, endpoint)
+                        try:
+                            token = await self._ensure_valid_token()
+                            headers["Authorization"] = f"Bearer {token}"
+                        except Exception:
+                            return False
+                        async with asyncio.timeout(10):
+                            async with session.put(url, headers=headers, json=payload) as resp2:
+                                return resp2.status in (200, 204)
                     return resp.status in (200, 204)
         except Exception as err:
             _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
@@ -2475,6 +2542,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             try:
                 async with asyncio.timeout(10):
                     async with session.put(url, json=body, headers=headers) as resp:
+                        if resp.status == 401:
+                            # Token expired — refresh and retry once
+                            _LOGGER.info("cloud_set_privacy_mode: 401 — refreshing token and retrying")
+                            try:
+                                token = await self._ensure_valid_token()
+                                headers["Authorization"] = f"Bearer {token}"
+                            except Exception:
+                                pass  # fall through to SHC
                         if resp.status in (200, 201, 204):
                             self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
                             self.async_update_listeners()
@@ -2490,6 +2565,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         cam._async_trigger_image_refresh(delay=1.5)
                                     )
                             return True
+                        if resp.status == 401:
+                            # Retry with refreshed token
+                            async with asyncio.timeout(10):
+                                async with session.put(url, json=body, headers=headers) as resp2:
+                                    if resp2.status in (200, 201, 204):
+                                        self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
+                                        self.async_update_listeners()
+                                        self.hass.async_create_task(self.async_request_refresh())
+                                        if not enabled:
+                                            cam = self._camera_entities.get(cam_id)
+                                            if cam:
+                                                self.hass.async_create_task(
+                                                    cam._async_trigger_image_refresh(delay=1.5)
+                                                )
+                                        return True
                         _LOGGER.warning(
                             "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
                         )
@@ -2964,6 +3054,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BoschCameraCoordinator(hass, entry)
 
     await coordinator.async_config_entry_first_refresh()
+
+    # Start proactive background token refresh (5 min before JWT expiry)
+    coordinator._schedule_token_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
 
