@@ -227,7 +227,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
         When _force_image_refresh is set: 0.1 s — forces immediate cache expiry
         so HA's next proxy request fetches the new snapshot right away.
-        When streaming: 2 s — near-live refresh from the cloud proxy snap.jpg.
+        When streaming: 1 s — must be shorter than the card's 2 s setInterval so
+                        that every card poll triggers a fresh snap.jpg fetch. At 2 s,
+                        browser setInterval jitter (±50 ms early) caused HA to return
+                        cached frames → alternating 1 s / 3 s gaps instead of 2 s.
         When idle:      IDLE_FRAME_INTERVAL (60 s) — HA calls async_camera_image
                         every 60 s. The actual cloud fetch rate is governed by
                         CLOUD_SNAP_CACHE_TTL (30 s) inside async_camera_image:
@@ -238,7 +241,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         if getattr(self, "_force_image_refresh", False):
             return 0.1
         if self.is_streaming:
-            return 2.0
+            return 1.0
         return float(IDLE_FRAME_INTERVAL)
 
     @property
@@ -483,18 +486,39 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                     except (asyncio.TimeoutError, aiohttp.ClientError):
                                         pass
                         elif resp.status in (401, 403):
-                            # Only clear the session if it's old enough to have expired
-                            # naturally — avoids clearing fresh sessions for cameras
-                            # that require Digest auth for direct snap.jpg access (e.g. CAMERA_360)
                             opened_at = self.coordinator._live_opened_at.get(self._cam_id, 0)
                             age = time.monotonic() - opened_at
                             if age >= LIVE_SESSION_TTL:
+                                # Proxy hash expired — renew the session (same as 404 path).
+                                # Do NOT clear _live_connections: clearing makes is_streaming=False
+                                # which stops the card display ("disabled livestream").
                                 _LOGGER.debug(
-                                    "%s: proxy snapshot %d (age %.0fs) — session expired, clearing",
+                                    "%s: proxy snapshot %d (age %.0fs) — session expired, renewing connection",
                                     self._attr_name, resp.status, age,
                                 )
-                                self.coordinator._live_connections.pop(self._cam_id, None)
-                                self.coordinator._live_opened_at.pop(self._cam_id, None)
+                                new_live = await self.coordinator.try_live_connection(self._cam_id)
+                                if new_live:
+                                    new_proxy_url = new_live.get("proxyUrl", "")
+                                    if new_proxy_url:
+                                        try:
+                                            async with asyncio.timeout(10):
+                                                async with session.get(new_proxy_url) as retry_resp:
+                                                    ct2 = retry_resp.headers.get("Content-Type", "")
+                                                    if retry_resp.status == 200 and "image" in ct2:
+                                                        data = await retry_resp.read()
+                                                        if data:
+                                                            self._cached_image = data
+                                                            self._last_image_fetch = time.monotonic()
+                                                            return self._cached_image
+                                        except (asyncio.TimeoutError, aiohttp.ClientError):
+                                            pass
+                                else:
+                                    # Renewal failed — clear so is_streaming goes to False cleanly
+                                    _LOGGER.debug(
+                                        "%s: session renewal failed — clearing", self._attr_name
+                                    )
+                                    self.coordinator._live_connections.pop(self._cam_id, None)
+                                    self.coordinator._live_opened_at.pop(self._cam_id, None)
                             else:
                                 _LOGGER.debug(
                                     "%s: proxy snapshot %d (age %.0fs) — keeping session (camera requires auth for snap.jpg)",

@@ -18,7 +18,23 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.3
+ * Version: 1.9.4
+ *
+ * Changes vs 1.9.3:
+ *   - Fix: HLS live stream (Stream ON + Ton ON) ended after ~60 s without reconnecting.
+ *     Root cause: Bosch cloud proxy hash expires after ~60 s. When hls.js encountered a
+ *     fatal NETWORK_ERROR or MEDIA_ERROR, there was no error handler → video froze/went
+ *     black while card showed "disabled livestream".
+ *     Fix: hls.js ERROR handler added. NETWORK_ERROR → startLoad() (soft recover);
+ *     MEDIA_ERROR → recoverMediaError(); unrecoverable → stopLiveVideo() + reconnect after 2 s
+ *     if stream switch is still ON. Falls back to snapshot polling if audio is now OFF.
+ *   - Fix: Timing still irregular (1 s / 3 s gaps) in snapshot-streaming mode.
+ *     Root cause: frame_interval=2.0 s in the backend matched the card's 2 s setInterval
+ *     exactly. Browser setInterval jitter (±50 ms) caused HA to return cached frames on
+ *     ~50% of requests (elapsed < 2000 ms) → alternating fast/slow visible frame changes.
+ *     Fix: backend frame_interval lowered from 2.0 → 1.0 s (in camera.py) so every
+ *     2 s card poll finds the HA cache expired → consistent fresh snap.jpg per tick.
+ *     (Card unchanged — this was purely a backend fix.)
  *
  * Changes vs 1.9.2:
  *   - Fix: Unregelmäßige Snapshot-Abstände im Streaming-Modus (2s 3s 5s 1s 1s...).
@@ -1100,7 +1116,7 @@ class BoschCameraCard extends HTMLElement {
     if (dbg) {
       const now = new Date().toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
-      dbg.textContent = `Card v1.9.1 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
+      dbg.textContent = `Card v1.9.4 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
     }
     // Store image to localStorage so next app launch shows it instantly.
     // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
@@ -1250,6 +1266,26 @@ class BoschCameraCard extends HTMLElement {
         this._hls = hls;
         // Play only after manifest is parsed and source buffers are ready
         hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
+        // Recover from fatal errors — Bosch proxy hash expires after ~60 s.
+        // Network errors → try startLoad() first; media errors → recoverMediaError();
+        // unrecoverable → restart the whole live video pipeline.
+        hls.on(Hls.Events.ERROR, (_ev, data) => {
+          if (!data.fatal) return;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            // Unrecoverable — reconnect if stream switch is still ON
+            console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
+            this._stopLiveVideo();
+            if (this._isStreaming() && this._getEffectiveState(this._entities.audio) === "on") {
+              setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 2000);
+            } else if (this._isStreaming()) {
+              this._startRefreshTimer();
+            }
+          }
+        });
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
       } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
