@@ -296,6 +296,8 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 
 ## Lovelace Card
 
+> **Card version: v1.9.4**
+
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
 ### What the card shows
@@ -313,14 +315,43 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 │  [ 🎙 Gegensprechanlage ]             │
 │  [ ◀ ] [     ■     ] [ ▶ ]  ← pan    │
 │  Qualität: [Auto ▼]                   │
+│  ▼ Benachrichtigungs-Typen            │
+│  ▼ Erweitert                          │
+│  ▼ Diagnose                           │
 └──────────────────────────────────┘
 ```
 
 ### Card modes
 
-- **Stream OFF** → snapshot image, auto-refreshed every 60s (visible) / 30min (background tab)
-- **Stream ON + Ton OFF** → snapshot polling every 2s (near-real-time, no audio)
-- **Stream ON + Ton ON** → live HLS video with audio (30fps H.264 + AAC)
+| Mode | Description |
+|------|-------------|
+| **Stream OFF** | Snapshot image, auto-refreshed every **60 s** (visible) / **30 min** (background tab). Immediate refresh on tab focus. |
+| **Stream ON + Ton OFF** | Snapshot polling every **2 s** — near-real-time view without audio. Each poll returns a fresh snap.jpg from the Bosch cloud proxy. |
+| **Stream ON + Ton ON** | Live **HLS video** with audio (30fps H.264 + AAC-LC). Uses go2rtc and HA's camera stream WS. Auto-recovers from stream disconnects. |
+
+### Controls
+
+| Button | Function |
+|--------|----------|
+| 📸 Snapshot | Force-fetch a fresh image immediately |
+| 📹 Live Stream | Toggle stream ON/OFF |
+| 🔊 Ton | Toggle audio in live stream |
+| 💡 Licht | Toggle camera LED light (outdoor camera) |
+| 🔒 Privat | Toggle privacy mode (covers lens) |
+| 🔔 Benachrichtigungen | Toggle push notifications |
+| 🎙 Gegensprechanlage | Toggle intercom / two-way audio |
+| ◀ ▶ Pan | Pan left/right (CAMERA_360 only) |
+
+**Collapsible accordion sections** (auto-hidden when entities not available):
+- **Benachrichtigungs-Typen** — per-type notification toggles: movement, person, audio, trouble, camera alarm
+- **Erweitert** — timestamp overlay, auto-follow, motion detection, record sound, privacy sound
+- **Diagnose** — WiFi signal %, firmware version, ambient light %, movement/audio events today
+
+### Reliability (v1.9.4)
+
+- **Consistent 2 s snapshot intervals** — backend `frame_interval` is 1 s (shorter than the 2 s poll), so every card request always gets a fresh frame. Eliminates the 1 s / 3 s jitter from v1.9.3 and earlier.
+- **HLS auto-recovery** — if the live stream drops (e.g. Bosch proxy hash expiry after ~60 s), hls.js errors are handled: soft errors recover automatically, fatal errors trigger a full reconnect after 2 s.
+- **Session renewal** — when the proxy hash expires, the backend automatically opens a new connection and the stream continues uninterrupted.
 
 ### Card YAML
 
@@ -333,11 +364,10 @@ camera_entity: camera.bosch_garten
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 title: Garten
-refresh_interval_streaming: 2
-quality_entity: select.bosch_xxx_video_quality
+refresh_interval_streaming: 2   # snapshot poll interval in Stream+no-audio mode (default: 2)
 ```
 
-All entity IDs are auto-derived from `camera_entity`. Buttons are hidden when entities don't exist.
+All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist.
 
 ### Two-camera dashboard
 
