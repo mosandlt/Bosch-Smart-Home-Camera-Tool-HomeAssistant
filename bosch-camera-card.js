@@ -18,7 +18,20 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.0
+ * Version: 1.9.2
+ *
+ * Changes vs 1.9.1:
+ *   - Fix: Snapshot-Streaming stoppt nach ~30 s. Root cause: Der setInterval-Timer rief
+ *     _triggerFreshSnapshot() auf, das trigger_snapshot-Service auslöst, welches
+ *     async_request_refresh() alle 2 s feuerte → GET /v11/video_inputs alle 2 s →
+ *     Bosch-API Rate Limit (-307) → Coordinator-Fehler → Entities "unavailable" →
+ *     Stream-Switch las als "off" statt "on" → Stream stoppte visuell.
+ *     Fix: Im Streaming-Modus wird _scheduleImageLoad(0) aufgerufen statt
+ *     _triggerFreshSnapshot(). HA's frame_interval=2s sorgt automatisch für
+ *     Live-Proxy-Snapshots ohne API-Flooding.
+ *   - Fix: Zwei Bilder in rascher Folge beim Streaming. Root cause: Jeder Timer-Call
+ *     plante Bild-Loads bei +1.5s UND +4s. Mit 2s-Intervall kamen T+4s (Call N) und
+ *     T+3.5s (Call N+1) gleichzeitig an. Behoben durch obigen Fix (nur ein Load/Tick).
  *
  * Changes vs 1.8.0:
  *   - Added 3 collapsible accordion sections below the quality dropdown:
@@ -240,7 +253,17 @@ class BoschCameraCard extends HTMLElement {
       interval = 60;   // 1 min — page is visible
     }
     this._refreshTimer = setInterval(() => {
-      this._triggerFreshSnapshot();
+      if (this._isStreaming()) {
+        // Streaming snapshot mode: load image directly — no trigger_snapshot service call.
+        // In streaming mode, async_camera_image() (frame_interval=2s) fetches live proxy
+        // snap.jpg automatically. Calling trigger_snapshot every 2s would invoke
+        // async_request_refresh() on every tick → GET /v11/video_inputs every 2s →
+        // Bosch API rate limit (-307) → coordinator fails → entities go unavailable →
+        // stream switch reports "unavailable" instead of "on" → stream appears to stop.
+        this._scheduleImageLoad(0);
+      } else {
+        this._triggerFreshSnapshot();
+      }
     }, interval * 1000);
   }
 

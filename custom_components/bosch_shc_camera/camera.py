@@ -182,7 +182,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
             # Last resort: fetch fresh events from Bosch API and use the latest imageUrl.
             # Bypasses stale/expired coordinator-cached event URLs.
-            if not image:
+            # Skip when streaming — fetching events in streaming mode is unnecessary (the live
+            # proxy snap.jpg already provides a current frame via async_camera_image path 1)
+            # and would overwrite _cached_image with a stale event still, corrupting live frames.
+            if not image and not self.is_streaming:
                 image = await self.coordinator.async_fetch_fresh_event_snapshot(self._cam_id)
 
             if image:
