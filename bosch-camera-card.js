@@ -18,7 +18,22 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.2
+ * Version: 1.9.3
+ *
+ * Changes vs 1.9.2:
+ *   - Fix: Unregelmäßige Snapshot-Abstände im Streaming-Modus (2s 3s 5s 1s 1s...).
+ *     Root cause: _updateImage() verwendet Preloading. Da HA Cache-Control: no-store sendet,
+ *     hat der Browser keinen Cache-Hit bei img.src nach dem Preload → 2 HTTP-Requests/Tick.
+ *     _cacheImage in _onImageLoaded fügte einen 3. Request hinzu. Drei gleichzeitige
+ *     Requests mit leicht versetzten snap.jpg-Frames → variable Anzeigeabstände.
+ *     Fix: Neuer _streamingImageLoad() setzt img.src direkt (kein Preload) → genau
+ *     1 Request/Tick → konsistente 2s-Abstände.
+ *   - Fix: _cacheImage wird im Streaming-Modus übersprungen (per-Frame-I/O unnötig).
+ *     Nach Stream-Stopp ist _isStreaming()=false → das Post-Stop-Bild wird gespeichert
+ *     → localStorage bleibt so aktuell wie möglich mit minimalem I/O.
+ *   - Fix: Stream-Stopp: trigger_snapshot explizit aufgerufen + Delay 2s→3.5s damit
+ *     Backend genug Zeit hat, einen frischen Snapshot zu holen (async_trigger_image_refresh
+ *     delay=2s + ~1s Fetch). _onImageLoaded → _cacheImage speichert das frische Bild.
  *
  * Changes vs 1.9.1:
  *   - Fix: Snapshot-Streaming stoppt nach ~30 s. Root cause: Der setInterval-Timer rief
@@ -254,13 +269,13 @@ class BoschCameraCard extends HTMLElement {
     }
     this._refreshTimer = setInterval(() => {
       if (this._isStreaming()) {
-        // Streaming snapshot mode: load image directly — no trigger_snapshot service call.
-        // In streaming mode, async_camera_image() (frame_interval=2s) fetches live proxy
-        // snap.jpg automatically. Calling trigger_snapshot every 2s would invoke
-        // async_request_refresh() on every tick → GET /v11/video_inputs every 2s →
-        // Bosch API rate limit (-307) → coordinator fails → entities go unavailable →
-        // stream switch reports "unavailable" instead of "on" → stream appears to stop.
-        this._scheduleImageLoad(0);
+        // Streaming snapshot mode: single direct img.src update — no preloading, no service call.
+        // _updateImage() preloads + sets img.src → 2 HTTP requests per tick (preload +
+        // img.src, because HA uses Cache-Control: no-store so no browser cache hit).
+        // _cacheImage in _onImageLoaded would add a 3rd. Three requests per 2s tick causes
+        // variable snap.jpg fetch timing → irregular intervals (2s 3s 5s 1s 1s...).
+        // Direct src update: exactly 1 request/tick → consistent 2s spacing.
+        this._streamingImageLoad();
       } else {
         this._triggerFreshSnapshot();
       }
@@ -1023,6 +1038,20 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
+  _streamingImageLoad() {
+    // Single-request live frame update for snapshot-streaming mode.
+    // Does NOT preload (avoids double HTTP request from preload+img.src with Cache-Control: no-store).
+    // img.onload fires via the existing listener → _onImageLoaded() updates debug line.
+    // _cacheImage is skipped in _onImageLoaded when streaming to avoid per-frame I/O.
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (!img || !this._hass) return;
+    const camEntity = this._entities.camera;
+    const token = this._hass.states[camEntity]?.attributes?.access_token || "";
+    const dispW = Math.round(this.offsetWidth || 640);
+    this._imgTimestamp = Date.now();
+    img.src = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}&width=${dispW}`;
+  }
+
   _updateImage() {
     const img = this.shadowRoot.getElementById("cam-img");
     if (!img || !this._hass) return;
@@ -1073,8 +1102,11 @@ class BoschCameraCard extends HTMLElement {
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
       dbg.textContent = `Card v1.9.1 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
     }
-    // Store image to localStorage so next app launch shows it instantly
-    if (!isCache) this._cacheImage(src);
+    // Store image to localStorage so next app launch shows it instantly.
+    // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
+    // After stream stops, _isStreaming() returns false → the post-stop refresh image
+    // IS saved, keeping localStorage as fresh as possible without excess writes.
+    if (!isCache && !this._isStreaming()) this._cacheImage(src);
   }
 
   _onImageError() {
@@ -1443,11 +1475,17 @@ class BoschCameraCard extends HTMLElement {
     const isAudioOn  = this._getEffectiveState(ents.audio) === "on";
     const shouldVideo = isStreaming && isAudioOn;
 
-    // Stream just stopped → stop video, refresh snapshot
+    // Stream just stopped → stop video, fetch fresh snapshot for current + next session.
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._scheduleImageLoad(2000);
+      // Tell backend to fetch a fresh live snapshot immediately (sets _force_image_refresh=True
+      // + opens PUT /connection → snap.jpg). Delay card load to 3.5 s so the backend
+      // (async_trigger_image_refresh delay=2 + ~1s fetch) has time to finish.
+      // _onImageLoaded (called when fresh image arrives) → _cacheImage → localStorage updated
+      // (streaming=false at this point → per-session and next-session image both fresh).
+      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
     this._lastStreaming = isStreaming;
