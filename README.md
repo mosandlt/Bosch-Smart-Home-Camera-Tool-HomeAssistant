@@ -296,7 +296,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 
 ## Lovelace Card
 
-> **Card version: v1.9.4**
+> **Card version: v1.9.5**
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -352,6 +352,10 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 - **Consistent 2 s snapshot intervals** — backend `frame_interval` is 1 s (shorter than the 2 s poll), so every card request always gets a fresh frame. Eliminates the 1 s / 3 s jitter from v1.9.3 and earlier.
 - **HLS auto-recovery** — if the live stream drops (e.g. Bosch proxy hash expiry after ~60 s), hls.js errors are handled: soft errors recover automatically, fatal errors trigger a full reconnect after 2 s.
 - **Session renewal** — when the proxy hash expires, the backend automatically opens a new connection and the stream continues uninterrupted.
+- **"Connecting" badge** (v1.9.5) — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays.
+- **Stream uptime counter** (v1.9.5) — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
+- **Frame Δt in debug line** (v1.9.5) — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
+- **Snap error retry** (v1.9.5) — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
 
 ### Card YAML
 
@@ -397,6 +401,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.4.6** | Card v1.9.5: "connecting" amber badge while HLS negotiates (was misleading "idle"); frame Δt in debug line shows actual ms between frames (e.g. `Δ2003ms`) — live proof of consistent 2 s intervals; stream uptime counter in badge (`00:47`) proves session renewal keeps stream alive past 60 s; one immediate 500 ms retry on snap.jpg error during streaming instead of waiting for next 2 s timer tick. |
 | **v6.4.5** | Fix irregular snapshot intervals (1 s / 3 s gaps): `frame_interval` reduced from 2.0 → 1.0 s when streaming — browser setInterval jitter caused HA to return cached frames on ~50% of polls. Fix live stream ending unexpectedly ("disabled livestream") after ~55 s: proxy hash expiry now triggers automatic connection renewal instead of clearing the session. Card v1.9.4: hls.js error handler added — `NETWORK_ERROR` → `startLoad()`, `MEDIA_ERROR` → `recoverMediaError()`, unrecoverable → auto-reconnect after 2 s. |
 | **v6.4.4** | Card v1.9.3: Fix irregular snapshot intervals in streaming mode. Root cause: `_updateImage()` preload + img.src + `_cacheImage` = 3 HTTP requests/tick causing variable frame timing. New `_streamingImageLoad()` uses direct img.src (1 request/tick). `_cacheImage` skipped during streaming (I/O optimization). |
 | **v6.4.3** | Card v1.9.2: Fix snapshot streaming stopping after ~30 s. Root cause: timer called `trigger_snapshot` every 2 s → `async_request_refresh()` every 2 s → Bosch API rate limit → entities unavailable → stream switch read as off. Fix: use `_scheduleImageLoad()` during streaming instead of `_triggerFreshSnapshot()`. |

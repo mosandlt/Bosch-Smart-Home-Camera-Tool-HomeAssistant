@@ -18,7 +18,21 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.4
+ * Version: 1.9.5
+ *
+ * Changes vs 1.9.4:
+ *   - "connecting" badge state: while HLS is negotiating (startingLiveVideo=true),
+ *     badge shows amber "connecting" instead of misleading "idle". CSS: orange dot
+ *     with faster pulse (0.8 s). Clears to "streaming" once video plays.
+ *   - Frame Δt in debug line: shows actual ms since last frame load
+ *     (e.g. "fresh 14:23:05 Δ2003ms | 1920×1080") — live proof that 2 s intervals
+ *     are now consistent. Only tracked for fresh frames (not cache restores).
+ *   - Stream uptime counter: badge label updates to "00:47" / "1:23" while streaming,
+ *     refreshing every frame (2 s). Proves session renewal is working — stream stays
+ *     alive past 60 s. Resets when stream stops.
+ *   - Retry on image error during streaming: transient snap.jpg failures (network
+ *     glitch, proxy hiccup) now trigger one immediate retry after 500 ms instead of
+ *     silently showing the previous frame forever.
  *
  * Changes vs 1.9.3:
  *   - Fix: HLS live stream (Stream ON + Ton ON) ended after ~60 s without reconnecting.
@@ -167,6 +181,8 @@ class BoschCameraCard extends HTMLElement {
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
     this._visibilityHandler = null;  // bound visibilitychange listener
     this._lastEventState    = null;  // last known last_event sensor value — for event detection
+    this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
+    this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -370,11 +386,13 @@ class BoschCameraCard extends HTMLElement {
           text-transform: uppercase; padding: 3px 8px; border-radius: 20px;
           transition: all 0.3s; white-space: nowrap;
         }
-        .stream-badge.idle      { background: rgba(99,99,102,.25); color: #8e8e93; }
-        .stream-badge.streaming { background: rgba(0,122,255,.2); color: #0a84ff; box-shadow: 0 0 0 1px rgba(0,122,255,.3); }
+        .stream-badge.idle       { background: rgba(99,99,102,.25); color: #8e8e93; }
+        .stream-badge.streaming  { background: rgba(0,122,255,.2); color: #0a84ff; box-shadow: 0 0 0 1px rgba(0,122,255,.3); }
+        .stream-badge.connecting { background: rgba(255,159,10,.2); color: #ff9f0a; box-shadow: 0 0 0 1px rgba(255,159,10,.3); }
         .stream-badge .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-        .stream-badge.idle .dot      { background: #636366; }
-        .stream-badge.streaming .dot { background: #0a84ff; animation: pulse 1.5s infinite; }
+        .stream-badge.idle .dot       { background: #636366; }
+        .stream-badge.streaming .dot  { background: #0a84ff; animation: pulse 1.5s infinite; }
+        .stream-badge.connecting .dot { background: #ff9f0a; animation: pulse 0.8s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
         /* Push status badge */
@@ -1111,12 +1129,23 @@ class BoschCameraCard extends HTMLElement {
       if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
     }
 
-    // Debug: show load time on card
+    // Debug: show load time + frame interval on card
     const dbg = this.shadowRoot.getElementById("debug-line");
     if (dbg) {
       const now = new Date().toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
-      dbg.textContent = `Card v1.9.4 | ${isCache ? "cache" : "fresh"} ${now} | ${w}×${h}`;
+      const nowMs = Date.now();
+      const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
+      if (!isCache) this._lastFrameTime = nowMs;
+      dbg.textContent = `Card v1.9.5 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+    }
+    // Update stream badge uptime counter while streaming (refreshes every 2 s per frame)
+    if (!isCache && this._isStreaming() && this._streamStartTime) {
+      const s = Math.floor((Date.now() - this._streamStartTime) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, "0");
+      const ss = String(s % 60).padStart(2, "0");
+      const label = this.shadowRoot.getElementById("stream-label");
+      if (label) label.textContent = `${mm}:${ss}`;
     }
     // Store image to localStorage so next app launch shows it instantly.
     // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
@@ -1142,7 +1171,13 @@ class BoschCameraCard extends HTMLElement {
       }
       return;
     }
-    // If we already had an image, keep showing the old one (don't blank it)
+    // If we already had an image, keep showing the old one (don't blank it).
+    // In streaming mode: one immediate retry for transient snap.jpg failures
+    // (network glitch, proxy hiccup) — the next setInterval tick is 2s away.
+    if (this._isStreaming()) {
+      setTimeout(() => this._streamingImageLoad(), 500);
+      return;
+    }
     this._setLoadingOverlay(false);
   }
 
@@ -1501,10 +1536,19 @@ class BoschCameraCard extends HTMLElement {
     const btnStream    = this.shadowRoot.getElementById("btn-stream");
     const btnStreamLbl = this.shadowRoot.getElementById("btn-stream-label");
 
-    if (badge)        badge.className = "stream-badge " + (isStreaming ? "streaming" : "idle");
-    if (streamLabel)  streamLabel.textContent = isStreaming ? "streaming" : "idle";
+    // "connecting" while HLS is negotiating (startingLiveVideo), "streaming" once live,
+    // "idle" when off. Badge label shows uptime counter once streaming (updated per frame).
+    const streamBadgeState = this._startingLiveVideo ? "connecting"
+                           : (isStreaming ? "streaming" : "idle");
+    if (badge)        badge.className = "stream-badge " + streamBadgeState;
+    if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState; // "idle"/"connecting"
+    // "streaming" label text is updated by _onImageLoaded() with uptime counter
     if (btnStream)    btnStream.className = "btn btn-stream" + (isStreaming ? " active" : "");
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
+
+    // Track stream session start time for uptime counter in the badge
+    if (isStreaming && !this._lastStreaming) this._streamStartTime = Date.now();
+    if (!isStreaming) this._streamStartTime = 0;
 
     // shouldVideo: only show HLS live video when stream is ON AND Ton (audio) is ON.
     // Stream ON + Ton OFF → snapshot polling (img). Stream ON + Ton ON → HLS video.
