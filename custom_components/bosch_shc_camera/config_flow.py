@@ -306,6 +306,22 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     default=str(opts.get("alert_notify_service", "")),
                 ): str,
                 vol.Optional(
+                    "alert_notify_system",
+                    default=str(opts.get("alert_notify_system", "")),
+                ): str,
+                vol.Optional(
+                    "alert_notify_information",
+                    default=str(opts.get("alert_notify_information", "")),
+                ): str,
+                vol.Optional(
+                    "alert_notify_screenshot",
+                    default=str(opts.get("alert_notify_screenshot", "")),
+                ): str,
+                vol.Optional(
+                    "alert_notify_video",
+                    default=str(opts.get("alert_notify_video", "")),
+                ): str,
+                vol.Optional(
                     "alert_save_snapshots",
                     default=bool(opts.get("alert_save_snapshots", False)),
                 ): bool,

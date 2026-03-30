@@ -68,6 +68,11 @@ DEFAULT_OPTIONS = {
     "enable_binary_sensors": True,
     "enable_fcm_push": False,  # FCM push notifications for near-instant event detection (opt-in)
     "alert_notify_service": "",   # notify service for alerts (e.g. "notify.signal_messenger"), empty = disabled
+    # Per-type notification routing (empty = falls back to alert_notify_service for backward compat)
+    "alert_notify_system": "",      # System alerts (token failure, disk warning) — empty = uses alert_notify_service
+    "alert_notify_information": "", # Step 1: text event notification — empty = uses alert_notify_service
+    "alert_notify_screenshot": "",  # Step 2: snapshot image — empty = uses alert_notify_service
+    "alert_notify_video": "",       # Step 3: video clip — empty = uses alert_notify_service
     "alert_save_snapshots": False, # save event snapshots locally to /config/www/bosch_alerts/
     "alert_delete_after_send": True, # delete local snapshot after sending (only when alert_save_snapshots=False)
     "fcm_push_mode": "auto",  # "auto" (ios→android→polling fallback), "android", "ios", "polling"
@@ -283,11 +288,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             )
         except Exception as err:
             _LOGGER.debug("Persistent notification failed: %s", err)
-        # Notify service (Signal, etc.) — same as alert_notify_service
-        notify_raw = self.options.get("alert_notify_service", "").strip()
-        if not notify_raw:
-            return
-        for svc in [s.strip() for s in notify_raw.split(",") if s.strip()]:
+        # Notify service (Signal, mobile_app, etc.) — uses system services
+        for svc in self._get_alert_services("system"):
             domain, _, name = svc.partition(".")
             if self.hass.services.has_service(domain, name):
                 try:
@@ -1715,6 +1717,49 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
 
+    def _get_alert_services(self, type_key: str) -> list[str]:
+        """Return notify services for a given alert type key.
+
+        Falls back to alert_notify_service if the type-specific field is empty.
+        type_key: "system" | "information" | "screenshot" | "video"
+        """
+        opts = self.options
+        raw = opts.get(f"alert_notify_{type_key}", "").strip()
+        if not raw:
+            raw = opts.get("alert_notify_service", "").strip()
+        return [s.strip() for s in raw.split(",") if s.strip()]
+
+    @staticmethod
+    def _build_notify_data(
+        svc: str, message: str, file_path: str | None = None, title: str | None = None,
+    ) -> dict:
+        """Build notify service call data with correct attachment format per service type.
+
+        mobile_app (iOS + Android HA Companion): image served from /local/bosch_alerts/
+        telegram_bot: uses photo field
+        All others (Signal, email, …): file path in data.attachments
+        """
+        data: dict = {"message": message}
+        if title:
+            data["title"] = title
+        if not file_path:
+            return data
+        fname = os.path.basename(file_path)
+        if "mobile_app" in svc:
+            # HA Companion App — image URL served without auth from /config/www/
+            # Files deleted within seconds when alert_delete_after_send=True
+            notify_data: dict = {
+                "image": f"/local/bosch_alerts/{fname}",
+                "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
+            }
+            data["data"] = notify_data
+        elif "telegram" in svc.lower():
+            data["data"] = {"photo": file_path, "caption": message}
+        else:
+            # Signal, email, generic — local file path attachment
+            data["data"] = {"attachments": [file_path]}
+        return data
+
     async def _async_send_alert(
         self, cam_name: str, event_type: str, timestamp: str,
         image_url: str, clip_url: str = "", clip_status: str = "",
@@ -1726,14 +1771,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Step 3: Download video clip (after 15s total), send as attachment
         """
         opts = self.options
-        notify_raw = opts.get("alert_notify_service", "").strip()
-        if not notify_raw:
-            return
 
-        # Support multiple comma-separated notify services
-        notify_services = [s.strip() for s in notify_raw.split(",") if s.strip()]
-        if not notify_services:
-            return
+        # Per-type service routing: information/screenshot/video each fall back to alert_notify_service
+        info_svcs  = self._get_alert_services("information")
+        if not info_svcs:
+            return  # Nothing to send if no information services configured
 
         save_snapshots = opts.get("alert_save_snapshots", False)
         delete_after   = opts.get("alert_delete_after_send", True)
@@ -1742,28 +1784,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm", "PERSON": "Person erkannt"}.get(event_type, event_type)
         type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a", "PERSON": "\U0001f9d1"}.get(event_type, "\u26a0\ufe0f")
 
-        alert_dir = os.path.join(self.hass.config.config_dir, "media", "bosch_alerts")
+        # www/bosch_alerts/ is served as /local/bosch_alerts/ — needed for mobile_app notifications
+        alert_dir = os.path.join(self.hass.config.config_dir, "www", "bosch_alerts")
         await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
         ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
         files_to_cleanup: list[str] = []
 
-        async def _notify_all(data: dict) -> None:
-            """Send notification to all configured services."""
-            for svc in notify_services:
+        async def _notify_type(type_key: str, message: str, file_path: str | None = None) -> None:
+            """Send to services configured for this alert type (information/screenshot/video)."""
+            for svc in self._get_alert_services(type_key):
                 try:
                     domain, service = svc.split(".", 1)
-                    await self.hass.services.async_call(domain, service, data)
+                    call_data = self._build_notify_data(svc, message, file_path)
+                    await self.hass.services.async_call(domain, service, call_data)
                 except Exception as err:
-                    _LOGGER.warning("Alert send failed for %s: %s", svc, err)
+                    _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)
 
         # ── Step 1: Instant text alert ────────────────────────────────────────
         try:
-            await _notify_all(
-                {"message": f"{type_icon} {cam_name}: {type_label} ({ts_short})"}
-            )
-            _LOGGER.debug("Alert step 1 (text) sent to %d services", len(notify_services))
+            await _notify_type("information", f"{type_icon} {cam_name}: {type_label} ({ts_short})")
+            _LOGGER.debug("Alert step 1 (text) sent to %d services", len(info_svcs))
         except Exception as err:
             _LOGGER.warning("Alert step 1 failed: %s", err)
             return
@@ -1804,11 +1846,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             data = await resp.read()
                             if data:
                                 await self.hass.async_add_executor_job(self._write_file, snap_path, data)
-                                await _notify_all({
-                                    "message": f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
-                                    "data": {"attachments": [snap_path]},
-                                })
-                                _LOGGER.debug("Alert step 2 (snapshot) sent: %s", snap_path)
+                                await _notify_type(
+                                    "screenshot",
+                                    f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
+                                    snap_path,
+                                )
+                                _LOGGER.debug("Alert step 2 (screenshot) sent: %s", snap_path)
                                 if not save_snapshots:
                                     files_to_cleanup.append(snap_path)
             except Exception as err:
@@ -1899,10 +1942,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         self._write_file, clip_path, data
                                     )
                                     size_kb = len(data) // 1024
-                                    await _notify_all({
-                                        "message": f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
-                                        "data": {"attachments": [clip_path]},
-                                    })
+                                    await _notify_type(
+                                        "video",
+                                        f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
+                                        clip_path,
+                                    )
                                     _LOGGER.info(
                                         "Alert step 3 (video) sent: %s (%d KB)", clip_path, size_kb
                                     )
@@ -2981,7 +3025,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         username = opts.get("smb_username", "").strip()
         password = opts.get("smb_password", "")
         warn_mb = int(opts.get("smb_disk_warn_mb", 500))
-        notify_service = opts.get("alert_notify_service", "").strip()
+        # Use system services for disk alerts (falls back to alert_notify_service if empty)
+        system_raw = opts.get("alert_notify_system", "").strip()
+        notify_service = system_raw or opts.get("alert_notify_service", "").strip()
 
         if not server or not share or warn_mb <= 0:
             return

@@ -86,8 +86,8 @@ All settings have descriptions in the UI. Key options:
 |---|---|---|
 | **FCM Push** | Near-instant (~2s) event detection via Firebase Cloud Messaging | OFF |
 | **FCM Push Mode** | `Auto` (iOS → Android → polling), `iOS`, `Android`, or `Polling` | Auto |
-| **Alert services** | Comma-separated notify services for alerts (e.g. `notify.signal_messenger, notify.mobile_app_iphone`) | empty (disabled) |
-| **Save alert snapshots** | Keep event images/videos locally in `/media/bosch_alerts/` | OFF |
+| **Alert services (default)** | Fallback notify services; per-step overrides available (text/screenshot/video/system) | empty (disabled) |
+| **Save alert snapshots** | Keep event images/videos locally in `/www/bosch_alerts/` | OFF |
 | **Event check interval** | How often to poll for events (FCM Push makes this a fallback only) | 300s (5 min) |
 | **SMB Upload** | Upload event snapshots + video clips to SMB/CIFS share | OFF |
 | **SMB Server** | IP/hostname of SMB share (e.g. `192.168.1.1`) | empty |
@@ -177,12 +177,19 @@ No automations needed — the integration sends alerts directly:
 2. **Snapshot image:** `📸 Kamera Snapshot` + JPEG — sent ~5s later
 3. **Video clip:** `🎬 Kamera Video (245 KB)` + MP4 — sent ~30-90s later (polls until Bosch uploads the clip)
 
-Alerts are sent to **all configured notify services** (comma-separated). Supports Signal, Telegram, iOS push, or any HA notify service.
+**Per-step routing** (v6.5.0+): each step can go to different services, multiple recipients at once. Supports Signal, Telegram, iOS/Android Companion App, or any HA notify service.
 
-Configure in **Settings → Configure:**
-- `Alert services` — e.g. `notify.signal_messenger, notify.mobile_app_iphone`
-- `Save alert snapshots` — keep files locally or delete after sending
-- `Delete after send` — cleanup local files after notification sent
+| Setting | Description | Example |
+|---|---|---|
+| `Alert services — default fallback` | Used for all steps unless overridden below | `notify.signal_messenger` |
+| `System alerts` | Token expiry, disk warnings | `notify.signal_messenger` |
+| `Step 1 — text notification` | Instant text on event | `notify.signal_messenger, notify.mobile_app_iphone17, notify.mobile_app_pixel9` |
+| `Step 2 — snapshot image` | JPEG inline in notification | `notify.signal_messenger, notify.mobile_app_iphone17` |
+| `Step 3 — video clip` | MP4 attachment | `notify.signal_messenger` |
+| `Save alert snapshots` | Keep files locally or delete after sending | OFF |
+| `Delete after send` | Cleanup local files after notification sent | ON |
+
+**iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are saved to `/www/bosch_alerts/` (served as `/local/bosch_alerts/`) and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
 
 ### Mark-as-Read & Last Event Fast-Path
 
@@ -401,6 +408,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v6.5.0** | Per-service notification type routing: each alert step (text / screenshot / video) can be sent to different notify services. Dedicated **System alerts** field for token/disk warnings. **iOS + Android Companion App** support: `mobile_app_*` services receive snapshot inline in push notification (image in `/local/bosch_alerts/`); Signal/Telegram/others receive file attachment. Multiple services per step supported simultaneously (e.g. Signal + iPhone + Android at once). Alert files moved to `www/bosch_alerts/` (auto-deleted within seconds if `alert_delete_after_send=True`). Backward compatible: leave type-specific fields empty to use existing default field. |
 | **v6.4.6** | Card v1.9.5: "connecting" amber badge while HLS negotiates (was misleading "idle"); frame Δt in debug line shows actual ms between frames (e.g. `Δ2003ms`) — live proof of consistent 2 s intervals; stream uptime counter in badge (`00:47`) proves session renewal keeps stream alive past 60 s; one immediate 500 ms retry on snap.jpg error during streaming instead of waiting for next 2 s timer tick. |
 | **v6.4.5** | Fix irregular snapshot intervals (1 s / 3 s gaps): `frame_interval` reduced from 2.0 → 1.0 s when streaming — browser setInterval jitter caused HA to return cached frames on ~50% of polls. Fix live stream ending unexpectedly ("disabled livestream") after ~55 s: proxy hash expiry now triggers automatic connection renewal instead of clearing the session. Card v1.9.4: hls.js error handler added — `NETWORK_ERROR` → `startLoad()`, `MEDIA_ERROR` → `recoverMediaError()`, unrecoverable → auto-reconnect after 2 s. |
 | **v6.4.4** | Card v1.9.3: Fix irregular snapshot intervals in streaming mode. Root cause: `_updateImage()` preload + img.src + `_cacheImage` = 3 HTTP requests/tick causing variable frame timing. New `_streamingImageLoad()` uses direct img.src (1 request/tick). `_cacheImage` skipped during streaming (I/O optimization). |
