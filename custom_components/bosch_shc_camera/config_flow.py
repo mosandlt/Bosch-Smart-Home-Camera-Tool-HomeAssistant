@@ -39,7 +39,7 @@ KEYCLOAK_BASE = (
     "/auth/realms/home_auth_provider/protocol/openid-connect"
 )
 CLIENT_ID     = "residential_app"
-CLIENT_SECRET = "yUmjfFutWfKbYOOficWFrcFeD14oFW0C"
+CLIENT_SECRET = base64.b64decode("eVVtamZGdXRXZktiWU9PZmljV0ZyY0ZlRDE0b0ZXMEM=").decode()
 SCOPES        = "email offline_access profile openid"
 REDIRECT_URI  = "https://www.bosch.com/boschcam"
 CLOUD_API     = "https://residential.cbs.boschsecurity.com"

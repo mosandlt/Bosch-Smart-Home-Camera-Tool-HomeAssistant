@@ -194,6 +194,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._notifications_cache: dict[str, dict] = {}
         # Rules cache — keyed by cam_id, from GET /rules
         self._rules_cache: dict[str, list] = {}
+        # Write-lock timestamps — prevent coordinator from overwriting optimistic state
+        # with stale cloud data in the seconds after a successful API write.
+        # Keyed by cam_id, value is monotonic time of last successful write.
+        self._light_set_at: dict[str, float] = {}      # lighting_override write timestamp
+        self._notif_set_at: dict[str, float] = {}      # enable_notifications write timestamp
+        _WRITE_LOCK_SECS = 5.0                         # seconds to hold write lock
+        self._WRITE_LOCK_SECS = _WRITE_LOCK_SECS
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -639,14 +646,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if privacy_str:
                     cache["privacy_mode"] = (privacy_str.upper() == "ON")
                 cache["has_light"] = has_light
-                # Use cloud featureStatus for light state; SHC supplements if available
-                if light_on is not None:
+                # Use cloud featureStatus for light state; SHC supplements if available.
+                # Skip overwrite if a write happened within _WRITE_LOCK_SECS — the cloud
+                # API returns stale data briefly after a PUT /lighting_override, which
+                # would flip the switch back to OFF right after the user turned it ON.
+                light_locked = (
+                    cam_id_key in self._light_set_at
+                    and (time.monotonic() - self._light_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
+                )
+                if light_on is not None and not light_locked:
                     cache["camera_light"] = light_on
                 elif cache.get("camera_light") is None:
                     cache["camera_light"] = None
-                # Read notifications status from cloud API response
+                # Read notifications status from cloud API response.
+                # Skip overwrite if written recently (same propagation-delay race as light).
                 notif_status = cam_raw.get("notificationsEnabledStatus", "")
-                if notif_status:
+                notif_locked = (
+                    cam_id_key in self._notif_set_at
+                    and (time.monotonic() - self._notif_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
+                )
+                if notif_status and not notif_locked:
                     cache["notifications_status"] = notif_status
 
                 # Fetch pan position for cameras that support it
@@ -2665,6 +2684,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     async with session.put(url, json=body, headers=headers) as resp:
                         if resp.status in (200, 201, 204):
                             self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
+                            # Write-lock: prevent the next coordinator refresh from overwriting
+                            # the optimistic state with stale cloud data (Bosch API propagation delay).
+                            self._light_set_at[cam_id] = time.monotonic()
                             self.async_update_listeners()
                             _LOGGER.debug(
                                 "cloud_set_camera_light: %s → %s (HTTP %d)",
@@ -2709,6 +2731,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
                         self._shc_state_cache.setdefault(cam_id, {})["notifications_status"] = status
+                        self._notif_set_at[cam_id] = time.monotonic()
                         self.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_notifications: %s → %s (HTTP %d)",
