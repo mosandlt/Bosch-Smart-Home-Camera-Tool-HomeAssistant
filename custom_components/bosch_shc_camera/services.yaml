@@ -87,22 +87,3 @@ delete_rule:
       required: true
       selector:
         text:
-
-download_clip:
-  name: Download Event Clip
-  description: >
-    Request and download a video clip for a specific event.
-    Triggers clip generation on the Bosch cloud, then downloads the MP4.
-  fields:
-    event_id:
-      name: Event ID
-      required: true
-      selector:
-        text:
-    save_path:
-      name: Save Path
-      description: "Directory to save the clip (default: /config/www/bosch_clips)"
-      required: false
-      default: "/config/www/bosch_clips"
-      selector:
-        text:

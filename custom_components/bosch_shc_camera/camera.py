@@ -14,6 +14,9 @@ Stream URL format:
 Note: HA's stream component must support rtsps:// (RTSP over TLS).
 The stream requires -tls_verify 0 / insecure TLS (Bosch private CA).
 If HA cannot open rtsps://, use ffplay from the Python CLI tool instead.
+
+Stream session limit: Bosch enforces maxSessionDuration=3600 (60 minutes).
+After 60 minutes the stream stops and must be restarted manually.
 """
 
 import asyncio

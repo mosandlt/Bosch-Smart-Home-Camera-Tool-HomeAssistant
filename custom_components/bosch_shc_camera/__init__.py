@@ -668,9 +668,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if notif_status and not notif_locked:
                     cache["notifications_status"] = notif_status
 
-                # Fetch pan position for cameras that support it
+                # Camera online check — skip expensive API calls for offline cameras
+                cam_status = data[cam_id_key].get("status", "UNKNOWN")
+                is_online = cam_status == "ONLINE"
+
+                # Fetch pan position for cameras that support it (skip if offline)
                 pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
-                if pan_limit:
+                if pan_limit and is_online:
                     try:
                         async with asyncio.timeout(5):
                             async with session.get(
@@ -686,7 +690,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
                 # These values change rarely — fetching every tick wastes bandwidth.
-                if do_slow:
+                # Skipped entirely when camera is offline — all endpoints return 444.
+                if do_slow and not is_online:
+                    _LOGGER.debug("Slow-tier skipped for %s (offline)", cam_id_key)
+                if do_slow and is_online:
                     # WiFi info (signal strength, IP, SSID)
                     try:
                         async with asyncio.timeout(5):
@@ -882,8 +889,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
                 # Only when camera is ONLINE and slow-tier interval elapsed.
-                cam_status = self._cached_status.get(cam_id_key, "UNKNOWN")
-                if cam_status == "ONLINE" and do_slow:
+                if is_online and do_slow:
                     try:
                         rcp_connector = aiohttp.TCPConnector(ssl=False)
                         rcp_session   = aiohttp.ClientSession(connector=rcp_connector)
@@ -3253,53 +3259,6 @@ def _register_services(hass: HomeAssistant) -> None:
                     _LOGGER.warning("Delete rule error: %s", err)
                 break
 
-    async def handle_download_clip(call: ServiceCall) -> None:
-        """Request and download an event video clip."""
-        event_id = call.data.get("event_id", "")
-        save_path = call.data.get("save_path", "/config/www/bosch_clips")
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
-                session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}"}
-                # Step 1: Request clip generation
-                try:
-                    async with asyncio.timeout(10):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/events/{event_id}/request_clip",
-                            headers=headers,
-                        ) as resp:
-                            if resp.status not in (200, 204):
-                                _LOGGER.warning("Request clip failed: HTTP %d", resp.status)
-                                return
-                except Exception as err:
-                    _LOGGER.warning("Request clip error: %s", err)
-                    return
-                # Step 2: Wait and download
-                clip_data = None
-                for _ in range(9):  # up to 90 seconds
-                    await asyncio.sleep(10)
-                    try:
-                        async with asyncio.timeout(15):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/events/{event_id}/clip.mp4",
-                                headers=headers,
-                            ) as resp:
-                                if resp.status == 200:
-                                    clip_data = await resp.read()
-                                    break
-                    except Exception:
-                        continue
-                if clip_data:
-                    os.makedirs(save_path, exist_ok=True)
-                    filepath = os.path.join(save_path, f"{event_id}.mp4")
-                    await hass.async_add_executor_job(
-                        lambda: open(filepath, "wb").write(clip_data)
-                    )
-                    _LOGGER.info("Clip saved: %s (%d bytes)", filepath, len(clip_data))
-                else:
-                    _LOGGER.warning("Clip download timed out for event %s", event_id)
-                break
-
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
@@ -3308,5 +3267,3 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
-    if not hass.services.has_service(DOMAIN, "download_clip"):
-        hass.services.async_register(DOMAIN, "download_clip", handle_download_clip)
