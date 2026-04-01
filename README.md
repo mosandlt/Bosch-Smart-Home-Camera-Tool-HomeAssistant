@@ -147,7 +147,8 @@ title: Garten
 | Pan position (360 camera) | `number` | enabled (±120°) |
 | Audio alarm threshold | `number` | disabled by default |
 | Speaker level (intercom volume) | `number` | disabled by default (0–100) |
-| Stream quality | `select` | Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps |
+| Stream quality | `select` | Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps (persists across restarts) |
+| Stream mode | `select` | Auto (Lokal → Cloud) / Nur Lokal / Nur Cloud |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
 | FCM Push mode | `select` | Auto / iOS / Android / Polling |
 | Motion detected | `binary_sensor` | disabled by default |
@@ -303,7 +304,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 
 ## Lovelace Card
 
-> **Card version: v1.9.5**
+> **Card version: v1.9.6**
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -317,7 +318,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 │  │ Last: 2026-03-19 09:32     │  │
 │  └────────────────────────────┘  │
 │  [ 📸 Snapshot ] [ 📹 Stream ] [ ⛶ ] │
-│  [ 🔊 Ton ] [ 💡 Licht ] [ 🔒 Privat ] │
+│  [ 🔊 ton / video ] [ 💡 Licht ] [ 🔒 Privat ] │
 │  [ 🔔 Benachrichtigungen ]            │
 │  [ 🎙 Gegensprechanlage ]             │
 │  [ ◀ ] [     ■     ] [ ▶ ]  ← pan    │
@@ -333,8 +334,8 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 | Mode | Description |
 |------|-------------|
 | **Stream OFF** | Snapshot image, auto-refreshed every **60 s** (visible) / **30 min** (background tab). Immediate refresh on tab focus. |
-| **Stream ON + Ton OFF** | Snapshot polling every **2 s** — near-real-time view without audio. Each poll returns a fresh snap.jpg from the Bosch cloud proxy. |
-| **Stream ON + Ton ON** | Live **HLS video** with audio (30fps H.264 + AAC-LC). Uses go2rtc and HA's camera stream WS. Auto-recovers from stream disconnects. |
+| **Stream ON + ton/video OFF** | Snapshot polling every **2 s** — near-real-time view without audio. Each poll returns a fresh snap.jpg from the Bosch cloud proxy. |
+| **Stream ON + ton/video ON** | Live **HLS video** with audio (30fps H.264 + AAC-LC). Uses go2rtc and HA's camera stream WS. Auto-recovers from stream disconnects. |
 
 ### Controls
 
@@ -342,7 +343,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 |--------|----------|
 | 📸 Snapshot | Force-fetch a fresh image immediately |
 | 📹 Live Stream | Toggle stream ON/OFF |
-| 🔊 Ton | Toggle audio in live stream |
+| 🔊 ton / video | Toggle audio + HLS live video (ON = 30fps H.264+AAC, OFF = snapshot polling) |
 | 💡 Licht | Toggle camera LED light (outdoor camera) |
 | 🔒 Privat | Toggle privacy mode (covers lens) |
 | 🔔 Benachrichtigungen | Toggle push notifications |
@@ -363,6 +364,17 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 - **Stream uptime counter** (v1.9.5) — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
 - **Frame Δt in debug line** (v1.9.5) — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
 - **Snap error retry** (v1.9.5) — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
+- **Connection type badge** (v1.9.6) — shows "LAN" (green) or "Cloud" (gray) in the header while streaming.
+
+### Stream Connection Types
+
+The integration supports three connection modes, configurable in **Settings → Configure → Stream connection type** or at runtime via the **Stream Modus** select entity:
+
+| Mode | Description |
+|------|-------------|
+| **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
+| **Local** | Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s. |
+| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. Best default when HA is not on the same LAN. |
 
 ### Card YAML
 
@@ -408,6 +420,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v7.0.0** | **Local LAN streaming:** Stream mode select entity (Auto / Lokal / Cloud) — direct RTSP on LAN without cloud proxy. Auto-renewal every 50 s for uninterrupted local streams. Connection type badge (LAN/Cloud) in Lovelace card header. **Privacy mode write-lock** (8 s) — privacy, camera light, and notifications switches no longer flip back after toggling. **Video quality persistence** — quality selection survives HA restarts via RestoreEntity. **RCP guard** — skip cloud proxy connection when a local stream is active (prevents the coordinator from killing the LAN session). Card v1.9.6: "ton / video" label, LAN/Cloud badge. Stream connection type configurable in Settings with detailed description (auto/local/remote with speed comparison). |
 | **v6.5.3** | Live stream session management: Bosch proxy sessions run for up to 60 minutes (`maxSessionDuration=3600`). The integration now handles session expiry cleanly — the stream stops gracefully and can be restarted with one tap. Stream uptime is shown in the card badge so you always know where you are in the session. Offline camera guard extended: all slow-tier API calls are skipped for offline cameras (consistent with v6.5.2 for remaining endpoints). |
 | **v6.5.2** | Skip all slow-tier API calls (WiFi signal, ambient light, motion, audio alarm, firmware, recording options, unread events, privacy sound, commissioned, autofollow, timestamp overlay, notifications, pan position) for offline cameras — endpoints return HTTP 444 anyway, saving ~50–60 wasted API calls per hour per offline camera. The RCP proxy block already had this guard; now the entire slow tier is consistent. |
 | **v6.5.1** | Fix camera light and notifications switches flipping back to their previous state immediately after being toggled while the live stream is active. Root cause: the coordinator's next refresh fetched stale cloud data (Bosch API propagation delay ~1–3 s) and overwrote the optimistic state. Fix: 5-second write-lock (`_light_set_at`, `_notif_set_at`) prevents the coordinator from overwriting recently written values. |

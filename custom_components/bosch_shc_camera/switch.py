@@ -148,9 +148,11 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     @property
     def extra_state_attributes(self) -> dict:
         live = self.coordinator._live_connections.get(self._cam_id, {})
+        conn_type = live.get("_connection_type", "REMOTE") if live else ""
         return {
-            "rtsps_url":      live.get("rtspsUrl", ""),
-            "proxy_snap_url": live.get("proxyUrl", ""),
+            "connection_type":  conn_type,
+            "rtsps_url":        live.get("rtspsUrl", ""),
+            "proxy_snap_url":   live.get("proxyUrl", ""),
         }
 
     async def async_turn_on(self, **kwargs) -> None:
@@ -164,12 +166,16 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             )
         else:
             _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Clear the live session immediately."""
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
+        # Update state immediately so the UI reflects OFF without waiting for
+        # the go2rtc unregister (up to 3s) + coordinator refresh.
+        self.async_write_ha_state()
         await self.coordinator._unregister_go2rtc_stream(self._cam_id)
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 

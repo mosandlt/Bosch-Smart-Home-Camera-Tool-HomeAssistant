@@ -83,6 +83,10 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
 
+        # Force TCP interleaved RTSP transport — required for LOCAL TLS proxy.
+        self.stream_options = {"rtsp_transport": "tcp"}
+        _LOGGER.info("Camera %s stream_options set: %s (id=%d)", cam_id[:8], self.stream_options, id(self))
+
         self._cam_id = cam_id
         self._entry  = entry
         self._cached_image: bytes | None = None
@@ -300,16 +304,13 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
     # ── Live stream ───────────────────────────────────────────────────────────
     async def stream_source(self) -> str | None:
-        """Return rtsps:// URL when a live proxy connection has been opened.
+        """Return RTSP URL when a live connection has been opened.
 
-        HA 2026.x calls this as a coroutine during WebRTC provider detection.
+        LOCAL streams use a local TLS proxy (rtsp://127.0.0.1:PORT/...) so
+        FFmpeg can connect via plain TCP while the proxy handles TLS to the camera.
+        REMOTE streams use rtsps:// directly (Bosch cloud proxy has valid certs).
+
         Returns None when no live session is active (switch is OFF).
-
-        The #insecure fragment tells go2rtc to skip TLS certificate verification,
-        which is required for Bosch's private CA (self-signed certificate).
-
-        Audio is included only when the Audio switch is ON (default: OFF).
-        Stream: H.264 1920×1080 30fps + optional AAC-LC 16kHz mono via rtsps://:443
         """
         live = self._cam_data.get("live", {})
         url = live.get("rtspsUrl") or live.get("rtspUrl") or None
@@ -318,7 +319,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         # Strip audio param if audio switch is OFF (default)
         if not self.coordinator._audio_enabled.get(self._cam_id, False):
             url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
-        return f"{url}#insecure"
+        return url
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────
     def _yuv422_to_jpeg(self, data: bytes) -> bytes | None:
@@ -449,6 +450,40 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         live = self.coordinator._live_connections.get(self._cam_id, {})
         proxy_url = live.get("proxyUrl", "")
         if proxy_url:
+            # LOCAL connection: snap.jpg requires HTTP Digest auth
+            if live.get("_connection_type") == "LOCAL":
+                local_user = live.get("_local_user", "")
+                local_pass = live.get("_local_password", "")
+                if local_user and local_pass:
+                    def _fetch_local_snap() -> bytes | None:
+                        import requests as req
+                        import urllib3
+                        urllib3.disable_warnings()
+                        try:
+                            r = req.get(
+                                proxy_url,
+                                auth=req.auth.HTTPDigestAuth(local_user, local_pass),
+                                verify=False,
+                                timeout=10,
+                            )
+                            if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
+                                return r.content
+                        except Exception:
+                            pass
+                        return None
+                    try:
+                        async with asyncio.timeout(12):
+                            data = await self.hass.async_add_executor_job(_fetch_local_snap)
+                        if data:
+                            self._cached_image = data
+                            self._last_image_fetch = time.monotonic()
+                            _LOGGER.debug(
+                                "%s: LOCAL live snap %d bytes",
+                                self._attr_name, len(data),
+                            )
+                            return self._cached_image
+                    except asyncio.TimeoutError:
+                        pass
             try:
                 async with asyncio.timeout(10):
                     async with session.get(proxy_url) as resp:

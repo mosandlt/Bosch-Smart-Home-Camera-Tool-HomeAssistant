@@ -29,6 +29,9 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    SelectSelector, SelectSelectorConfig, SelectSelectorMode, SelectOptionDict,
+)
 
 from . import DOMAIN, DEFAULT_OPTIONS
 
@@ -293,6 +296,17 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "high_quality_video",
                     default=bool(opts.get("high_quality_video", False)),
                 ): bool,
+                vol.Optional(
+                    "stream_connection_type",
+                    default=str(opts.get("stream_connection_type", "auto")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="auto", label="Auto (Lokal → Cloud Fallback)"),
+                        SelectOptionDict(value="local", label="Nur Lokal (LAN direkt)"),
+                        SelectOptionDict(value="remote", label="Nur Cloud (Bosch Proxy)"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
                 vol.Optional(
                     "enable_binary_sensors",
                     default=bool(opts.get("enable_binary_sensors", True)),

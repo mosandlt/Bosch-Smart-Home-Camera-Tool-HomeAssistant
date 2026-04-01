@@ -18,7 +18,12 @@
  *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
  *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.5
+ * Version: 1.9.6
+ *
+ * Changes vs 1.9.5:
+ *   - Renamed "Ton" → "ton" (lowercase label)
+ *   - Connection type badge: shows "LAN" (green) or "Cloud" (gray) in the header
+ *     while streaming, reads from switch entity's connection_type attribute
  *
  * Changes vs 1.9.4:
  *   - "connecting" badge state: while HLS is negotiating (startingLiveVideo=true),
@@ -408,6 +413,16 @@ class BoschCameraCard extends HTMLElement {
         .push-badge.fcm .pdot  { background: #30d158; }
         .push-badge.poll .pdot { background: #636366; }
 
+        /* Connection type badge (LAN / Cloud) */
+        .conn-badge {
+          display: inline-flex; align-items: center; gap: 4px;
+          font-size: 10px; font-weight: 600; letter-spacing: .3px;
+          padding: 2px 7px; border-radius: 12px; white-space: nowrap;
+        }
+        .conn-badge.local  { background: rgba(48,209,88,.15); color: #30d158; }
+        .conn-badge.remote { background: rgba(99,99,102,.2); color: #8e8e93; }
+        .conn-badge.hidden { display: none; }
+
         /* Camera image area */
         .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; aspect-ratio: 16/9; }
         .cam-img {
@@ -645,6 +660,7 @@ class BoschCameraCard extends HTMLElement {
               <div class="pdot"></div>
               <span id="push-label">poll</span>
             </div>
+            <div class="conn-badge hidden" id="conn-badge"></div>
             <div class="stream-badge idle" id="stream-badge">
               <div class="dot"></div>
               <span id="stream-label">idle</span>
@@ -716,7 +732,7 @@ class BoschCameraCard extends HTMLElement {
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                   <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
                 </svg>
-                <span>Ton</span>
+                <span>Ton / Video</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
@@ -1545,6 +1561,18 @@ class BoschCameraCard extends HTMLElement {
     // "streaming" label text is updated by _onImageLoaded() with uptime counter
     if (btnStream)    btnStream.className = "btn btn-stream" + (isStreaming ? " active" : "");
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
+
+    // Connection type badge (LAN / Cloud)
+    const connType  = hass.states[ents.switch]?.attributes?.connection_type || "";
+    const connBadge = this.shadowRoot.getElementById("conn-badge");
+    if (connBadge) {
+      if (isStreaming && connType) {
+        connBadge.className = "conn-badge " + (connType === "LOCAL" ? "local" : "remote");
+        connBadge.textContent = connType === "LOCAL" ? "LAN" : "Cloud";
+      } else {
+        connBadge.className = "conn-badge hidden";
+      }
+    }
 
     // Track stream session start time for uptime counter in the badge
     if (isStreaming && !this._lastStreaming) this._streamStartTime = Date.now();

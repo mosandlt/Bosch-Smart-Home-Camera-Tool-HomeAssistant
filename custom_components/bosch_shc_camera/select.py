@@ -19,10 +19,19 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import BoschCameraCoordinator, DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
+
+STREAM_MODE_OPTIONS = ["Auto (Lokal → Cloud)", "Nur Lokal", "Nur Cloud"]
+STREAM_MODE_MAP     = {
+    "Auto (Lokal → Cloud)": "auto",
+    "Nur Lokal":            "local",
+    "Nur Cloud":            "remote",
+}
+STREAM_MODE_MAP_REVERSE = {v: k for k, v in STREAM_MODE_MAP.items()}
 
 QUALITY_OPTIONS = ["Auto", "Hoch (30 Mbps)", "Niedrig (1.9 Mbps)"]
 QUALITY_MAP = {
@@ -49,14 +58,15 @@ async def async_setup_entry(
     for cam_id in coordinator.data:
         entities.append(BoschVideoQualitySelect(coordinator, cam_id, config_entry))
         entities.append(BoschMotionSensitivitySelect(coordinator, cam_id, config_entry))
-    # Integration-level FCM Push Mode select (one per integration, not per camera)
+    # Integration-level selects (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
         entities.append(BoschFcmPushModeSelect(coordinator, first_cam_id, config_entry))
+        entities.append(BoschStreamModeSelect(coordinator, first_cam_id, config_entry))
     async_add_entities(entities)
 
 
-class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity):
+class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity to choose the RTSPS stream quality (inst + highQualityVideo)."""
 
     _attr_icon = "mdi:video-high-definition"
@@ -76,6 +86,15 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity):
         self._entry = entry
         self._attr_name      = f"Bosch {self._cam_title} Video Quality"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_video_quality"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last quality selection after HA restart."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in QUALITY_MAP:
+            quality_key = QUALITY_MAP[last_state.state]
+            self.coordinator.set_quality(self._cam_id, quality_key)
+            _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
 
     @property
     def device_info(self):
@@ -256,4 +275,65 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
         self.coordinator._fcm_push_mode = "unknown"
         if self.coordinator.options.get("enable_fcm_push", False):
             self.hass.async_create_task(self.coordinator.async_start_fcm_push())
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
+    """Select entity to choose the live stream connection mode.
+
+    Options:
+      "Auto (Lokal → Cloud)" — try LOCAL first, fall back to REMOTE cloud proxy
+      "Nur Lokal"            — direct LAN only (no internet required)
+      "Nur Cloud"            — cloud proxy only (always REMOTE)
+
+    Changes _stream_type_override in-memory — no integration reload needed.
+    Takes effect on the next live stream activation.
+    One per integration (not per camera).
+    """
+
+    _attr_icon             = "mdi:home-network"
+    _attr_options          = STREAM_MODE_OPTIONS
+    _attr_entity_category  = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = cam_info.get("title", cam_id)
+        self._attr_name      = "Bosch Camera Stream Modus"
+        self._attr_unique_id = "bosch_shc_camera_stream_mode"
+
+    @property
+    def device_info(self) -> dict:
+        cam_data = self.coordinator.data.get(self._cam_id, {})
+        cam_info = cam_data.get("info", {})
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name":        f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":       cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version":  cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str:
+        """Return the current stream mode label."""
+        # In-memory override takes priority; fall back to options default
+        mode = self.coordinator._stream_type_override
+        if mode is None:
+            mode = get_options(self._entry).get("stream_connection_type", "auto")
+        return STREAM_MODE_MAP_REVERSE.get(mode, "Auto (Lokal → Cloud)")
+
+    async def async_select_option(self, option: str) -> None:
+        """Handle stream mode selection — update in-memory preference immediately."""
+        mode = STREAM_MODE_MAP.get(option, "auto")
+        self.coordinator._stream_type_override = mode
+        _LOGGER.info("Stream mode set to %s (%s)", option, mode)
         self.async_write_ha_state()
