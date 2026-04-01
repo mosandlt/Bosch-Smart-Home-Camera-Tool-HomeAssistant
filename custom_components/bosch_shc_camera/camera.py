@@ -311,14 +311,26 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         REMOTE streams use rtsps:// directly (Bosch cloud proxy has valid certs).
 
         Returns None when no live session is active (switch is OFF).
+        Always reads from _live_connections (real-time) instead of coordinator
+        data cache to avoid stale URLs after session renewal or mode switch.
         """
-        live = self._cam_data.get("live", {})
+        # Read from _live_connections (updated immediately) instead of
+        # coordinator data cache (updated on next refresh cycle)
+        live = self.coordinator._live_connections.get(self._cam_id, {})
+        if not live:
+            return None
         url = live.get("rtspsUrl") or live.get("rtspUrl") or None
         if not url:
             return None
         # Strip audio param if audio switch is OFF (default)
         if not self.coordinator._audio_enabled.get(self._cam_id, False):
             url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
+        # Invalidate HA's cached stream so it picks up URL changes
+        # (e.g. after session renewal with new credentials)
+        if hasattr(self, '_stream') and self._stream:
+            prev_src = getattr(self._stream, 'source', '')
+            if prev_src and prev_src != url:
+                self._stream = None
         return url
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────
