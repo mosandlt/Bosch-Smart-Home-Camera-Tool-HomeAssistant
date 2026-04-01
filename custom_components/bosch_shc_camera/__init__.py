@@ -710,197 +710,81 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if do_slow and not is_online:
                     _LOGGER.debug("Slow-tier skipped for %s (offline)", cam_id_key)
                 if do_slow and is_online:
-                    # WiFi info (signal strength, IP, SSID)
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/wifiinfo",
-                                headers=headers,
-                            ) as wifi_resp:
-                                if wifi_resp.status == 200:
-                                    self._wifiinfo_cache[cam_id_key] = await wifi_resp.json()
-                                else:
-                                    _LOGGER.debug(
-                                        "wifiinfo HTTP %d for %s", wifi_resp.status, cam_id_key
-                                    )
-                    except Exception as err:
-                        _LOGGER.debug("WiFi info fetch error for %s: %s", cam_id_key, err)
-
-                    # Ambient light sensor level
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/ambient_light_sensor_level",
-                                headers=headers,
-                            ) as al_resp:
-                                if al_resp.status == 200:
-                                    al_data = await al_resp.json()
-                                    self._ambient_light_cache[cam_id_key] = al_data.get(
-                                        "ambientLightSensorLevel"
-                                    )
-                                else:
-                                    _LOGGER.debug(
-                                        "ambient_light_sensor_level HTTP %d for %s",
-                                        al_resp.status, cam_id_key,
-                                    )
-                    except Exception as err:
-                        _LOGGER.debug("Ambient light fetch error for %s: %s", cam_id_key, err)
-
-                    # Motion detection settings
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/motion",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    data[cam_id_key]["motion"] = await r.json()
-                    except Exception as err:
-                        _LOGGER.debug("Motion fetch error for %s: %s", cam_id_key, err)
-
-                    # Audio alarm settings
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/audioAlarm",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    data[cam_id_key]["audioAlarm"] = await r.json()
-                    except Exception as err:
-                        _LOGGER.debug("AudioAlarm fetch error for %s: %s", cam_id_key, err)
-
-                    # Firmware status (short form — includes updating/status fields)
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/firmware",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    self._firmware_cache[cam_id_key] = await r.json()
-                                elif r.status == 444:
-                                    _LOGGER.debug("firmware: camera %s offline (444)", cam_id_key)
-                    except Exception as err:
-                        _LOGGER.debug("Firmware fetch error for %s: %s", cam_id_key, err)
-
-                    # Recording options
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/recording_options",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    data[cam_id_key]["recordingOptions"] = await r.json()
-                    except Exception as err:
-                        _LOGGER.debug("Recording options fetch error for %s: %s", cam_id_key, err)
-
-                    # Unread events count
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/unread_events_count",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    ue_data = await r.json()
-                                    # API may return {"count": N} or just a number
-                                    if isinstance(ue_data, dict):
-                                        self._unread_events_cache[cam_id_key] = int(ue_data.get("count", ue_data.get("result", 0)))
-                                    elif isinstance(ue_data, (int, float)):
-                                        self._unread_events_cache[cam_id_key] = int(ue_data)
-                                else:
-                                    _LOGGER.debug(
-                                        "unread_events_count HTTP %d for %s",
-                                        r.status, cam_id_key,
-                                    )
-                    except Exception as err:
-                        _LOGGER.debug("Unread events count fetch error for %s: %s", cam_id_key, err)
-
-                    # Privacy sound override (CAMERA_360 / INDOOR only, returns 442 on outdoor)
+                    # ── Parallel slow-tier fetch ──────────────────────────────
+                    # All endpoints are independent — fetch in parallel with
+                    # asyncio.gather() instead of sequentially.
+                    # Reduces slow-tier from ~13×5s = 65s to ~5s (single timeout).
                     hw = cam_raw.get("hardwareVersion", "")
-                    if hw in ("INDOOR", "CAMERA_360"):
-                        try:
-                            async with asyncio.timeout(5):
-                                async with session.get(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/privacy_sound_override",
-                                    headers=headers,
-                                ) as r:
-                                    if r.status == 200:
-                                        ps_data = await r.json()
-                                        self._privacy_sound_cache[cam_id_key] = ps_data.get("result", False)
-                                    elif r.status == 442:
-                                        pass  # Not supported on this model
-                                    elif r.status == 444:
-                                        _LOGGER.debug("privacy_sound_override: camera offline (444)")
-                        except Exception as err:
-                            _LOGGER.debug("Privacy sound fetch error for %s: %s", cam_id_key, err)
-
-                    # Commissioned status
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/commissioned",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    self._commissioned_cache[cam_id_key] = await r.json()
-                                elif r.status == 444:
-                                    _LOGGER.debug("commissioned: camera offline (444)")
-                    except Exception as err:
-                        _LOGGER.debug("Commissioned fetch error for %s: %s", cam_id_key, err)
-
-                    # Autofollow (only CAMERA_360 with panLimit > 0)
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
-                    if pan_limit:
+
+                    async def _fetch(endpoint: str) -> tuple[str, int, any]:
+                        """Fetch a single slow-tier endpoint. Returns (endpoint, status, data)."""
                         try:
-                            async with asyncio.timeout(5):
+                            async with asyncio.timeout(8):
                                 async with session.get(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/autofollow",
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/{endpoint}",
                                     headers=headers,
                                 ) as r:
                                     if r.status == 200:
-                                        data[cam_id_key]["autofollow"] = await r.json()
+                                        return (endpoint, 200, await r.json())
+                                    return (endpoint, r.status, None)
                         except Exception as err:
-                            _LOGGER.debug("Autofollow fetch error for %s: %s", cam_id_key, err)
+                            _LOGGER.debug("%s fetch error for %s: %s", endpoint, cam_id_key, err)
+                            return (endpoint, 0, None)
 
-                    # Timestamp overlay
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/timestamp",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    ts_data = await r.json()
-                                    self._timestamp_cache[cam_id_key] = ts_data.get("result", False)
-                    except Exception as err:
-                        _LOGGER.debug("Timestamp fetch error for %s: %s", cam_id_key, err)
+                    # Build task list (skip endpoints not applicable to this camera)
+                    endpoints = [
+                        "wifiinfo", "ambient_light_sensor_level", "motion",
+                        "audioAlarm", "firmware", "recording_options",
+                        "unread_events_count", "commissioned", "timestamp",
+                        "notifications", "rules",
+                    ]
+                    if hw in ("INDOOR", "CAMERA_360"):
+                        endpoints.append("privacy_sound_override")
+                    if pan_limit:
+                        endpoints.append("autofollow")
 
-                    # Notification type toggles
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/notifications",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    self._notifications_cache[cam_id_key] = await r.json()
-                    except Exception as err:
-                        _LOGGER.debug("Notifications fetch error for %s: %s", cam_id_key, err)
+                    results = await asyncio.gather(
+                        *[_fetch(ep) for ep in endpoints],
+                        return_exceptions=True,
+                    )
 
-                    # Cloud rules
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/rules",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    self._rules_cache[cam_id_key] = await r.json()
-                    except Exception as err:
-                        _LOGGER.debug("Rules fetch error for %s: %s", cam_id_key, err)
+                    # Process results
+                    for result in results:
+                        if isinstance(result, Exception):
+                            continue
+                        ep, status, ep_data = result
+                        if status != 200 or ep_data is None:
+                            continue
+                        if ep == "wifiinfo":
+                            self._wifiinfo_cache[cam_id_key] = ep_data
+                        elif ep == "ambient_light_sensor_level":
+                            self._ambient_light_cache[cam_id_key] = ep_data.get("ambientLightSensorLevel")
+                        elif ep == "motion":
+                            data[cam_id_key]["motion"] = ep_data
+                        elif ep == "audioAlarm":
+                            data[cam_id_key]["audioAlarm"] = ep_data
+                        elif ep == "firmware":
+                            self._firmware_cache[cam_id_key] = ep_data
+                        elif ep == "recording_options":
+                            data[cam_id_key]["recordingOptions"] = ep_data
+                        elif ep == "unread_events_count":
+                            if isinstance(ep_data, dict):
+                                self._unread_events_cache[cam_id_key] = int(ep_data.get("count", ep_data.get("result", 0)))
+                            elif isinstance(ep_data, (int, float)):
+                                self._unread_events_cache[cam_id_key] = int(ep_data)
+                        elif ep == "privacy_sound_override":
+                            self._privacy_sound_cache[cam_id_key] = ep_data.get("result", False)
+                        elif ep == "commissioned":
+                            self._commissioned_cache[cam_id_key] = ep_data
+                        elif ep == "autofollow":
+                            data[cam_id_key]["autofollow"] = ep_data
+                        elif ep == "timestamp":
+                            self._timestamp_cache[cam_id_key] = ep_data.get("result", False)
+                        elif ep == "notifications":
+                            self._notifications_cache[cam_id_key] = ep_data
+                        elif ep == "rules":
+                            self._rules_cache[cam_id_key] = ep_data
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
