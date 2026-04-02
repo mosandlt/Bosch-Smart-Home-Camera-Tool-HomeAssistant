@@ -193,12 +193,14 @@ class BoschAudioSwitch(_BoschSwitchBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Audio"
         self._attr_unique_id = f"bosch_shc_audio_{cam_id.lower()}"
-        # Default: audio OFF (silent stream)
-        coordinator._audio_enabled.setdefault(cam_id, False)
+        # Default from options (configurable in integration settings)
+        opts = coordinator.options
+        audio_default = opts.get("audio_default_on", True)
+        coordinator._audio_enabled.setdefault(cam_id, audio_default)
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator._audio_enabled.get(self._cam_id, False)
+        return self.coordinator._audio_enabled.get(self._cam_id, True)
 
     @property
     def icon(self) -> str:

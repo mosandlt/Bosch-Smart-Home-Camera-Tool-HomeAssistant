@@ -97,6 +97,7 @@ All settings have descriptions in the UI. Key options:
 | **SMB Base Path** | Base path on the share (e.g. `bosch_cameras`) | empty |
 | **SMB Folder Pattern** | Subfolder pattern: `{year}/{month}` | `{year}/{month}` |
 | **SMB File Pattern** | File naming: `{camera}_{date}_{time}_{type}_{id}` | `{camera}_{date}_{time}_{type}_{id}` |
+| **Audio default ON** | Audio switch starts ON (stream with sound) or OFF (muted) | ON |
 | **Binary sensors** | Motion / Audio alarm binary sensors (ON for 30s after event) | ON |
 
 ### Step 3 — Add the Lovelace Card
@@ -304,7 +305,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 
 ## Lovelace Card
 
-> **Card version: v1.9.6**
+> **Card version: v2.0.0**
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -334,8 +335,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 | Mode | Description |
 |------|-------------|
 | **Stream OFF** | Snapshot image, auto-refreshed every **60 s** (visible) / **30 min** (background tab). Immediate refresh on tab focus. |
-| **Stream ON + ton/video OFF** | Snapshot polling every **2 s** — near-real-time view without audio. Each poll returns a fresh snap.jpg from the Bosch cloud proxy. |
-| **Stream ON + ton/video ON** | Live **HLS video** with audio (30fps H.264 + AAC-LC). Uses go2rtc and HA's camera stream WS. Auto-recovers from stream disconnects. |
+| **Stream ON** | Live **HLS video** (30fps H.264 + AAC-LC). Uses go2rtc and HA's camera stream WS. Audio toggle controls mute/unmute. Loading overlay with status updates during connection. Auto-recovers from stream disconnects. |
 
 ### Controls
 
@@ -343,7 +343,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 |--------|----------|
 | 📸 Snapshot | Force-fetch a fresh image immediately |
 | 📹 Live Stream | Toggle stream ON/OFF |
-| 🔊 ton / video | Toggle audio + HLS live video (ON = 30fps H.264+AAC, OFF = snapshot polling) |
+| 🔊 Ton | Toggle audio mute/unmute during live stream |
 | 💡 Licht | Toggle camera LED light (outdoor camera) |
 | 🔒 Privat | Toggle privacy mode (covers lens) |
 | 🔔 Benachrichtigungen | Toggle push notifications |
@@ -387,7 +387,6 @@ camera_entity: camera.bosch_garten
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 title: Garten
-refresh_interval_streaming: 2   # snapshot poll interval in Stream+no-audio mode (default: 2)
 ```
 
 All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist.
@@ -420,6 +419,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v7.2.0** | **Parallel camera processing:** Status checks and event fetches for all cameras now run in parallel via `asyncio.gather` — significantly faster coordinator ticks with 2+ cameras. **Local TCP health check:** Quick TCP ping to camera port 443 on LAN (~5 ms) skips the cloud `/commissioned` API call (~200 ms) when the camera is locally reachable. **Smart offline intervals:** Cameras offline for >15 min are checked every 15 min instead of 5 min, reducing unnecessary cloud API calls. **Pre-warm RTSP improved:** Authenticated DESCRIBE with proper Digest auth helper; pre-warm and go2rtc registration now run in parallel. **Audio default configurable:** New `audio_default_on` option in integration settings — controls whether audio starts ON or OFF when a stream begins. Default: ON. **Card v2.0.0:** Stream always uses HLS video (no more snapshot-polling mode). Loading overlay with status updates during stream startup ("Verbindung wird aufgebaut…" → "Kamera wird aufgeweckt…" → "Stream wird gestartet…"). Overlay stays visible until first video frame renders (no more black screen). Audio toggle only controls mute/unmute. Stream uptime counter runs independently via own interval. |
 | **v7.1.0** | **10× faster startup:** Slow-tier API calls (WiFi, motion, firmware, etc.) now run in parallel via `asyncio.gather()` instead of sequentially — startup reduced from ~120s to ~20s. Stream source reads from real-time connection data to prevent stale URLs after session renewal. |
 | **v7.0.0** | **Local LAN streaming:** Stream mode select entity (Auto / Lokal / Cloud) — direct RTSP on LAN without cloud proxy. Auto-renewal every 50 s for uninterrupted local streams. Connection type badge (LAN/Cloud) in Lovelace card header. **Privacy mode write-lock** (8 s) — privacy, camera light, and notifications switches no longer flip back after toggling. **Video quality persistence** — quality selection survives HA restarts via RestoreEntity. **RCP guard** — skip cloud proxy connection when a local stream is active (prevents the coordinator from killing the LAN session). Card v1.9.6: "ton / video" label, LAN/Cloud badge. Stream connection type configurable in Settings with detailed description (auto/local/remote with speed comparison). |
 | **v6.5.3** | Live stream session management: Bosch proxy sessions run for up to 60 minutes (`maxSessionDuration=3600`). The integration now handles session expiry cleanly — the stream stops gracefully and can be restarted with one tap. Stream uptime is shown in the card badge so you always know where you are in the session. Offline camera guard extended: all slow-tier API calls are skipped for offline cameras (consistent with v6.5.2 for remaining endpoints). |

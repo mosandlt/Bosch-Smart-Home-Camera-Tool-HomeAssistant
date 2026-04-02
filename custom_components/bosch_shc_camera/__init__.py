@@ -28,6 +28,29 @@ from datetime import timedelta
 
 import aiohttp
 
+from .fcm import (
+    fetch_firebase_config as _fcm_fetch_firebase_config,
+    async_start_fcm_push as _fcm_async_start_fcm_push,
+    register_fcm_with_bosch as _fcm_register_fcm_with_bosch,
+    async_stop_fcm_push as _fcm_async_stop_fcm_push,
+    async_handle_fcm_push as _fcm_async_handle_fcm_push,
+    async_send_alert as _fcm_async_send_alert,
+    async_mark_events_read as _fcm_async_mark_events_read,
+    get_alert_services as _fcm_get_alert_services,
+    build_notify_data as _fcm_build_notify_data,
+    _write_file as _fcm_write_file,
+)
+from .smb import (
+    sync_download,
+    sync_smb_upload,
+    sync_smb_cleanup,
+    sync_smb_disk_check,
+    async_smb_disk_alert,
+)
+from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_tls_proxy
+from . import shc as shc_mod
+from .rcp import async_update_rcp_data, get_cached_rcp_session
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -45,12 +68,6 @@ ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "numbe
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 
-# Firebase Cloud Messaging — push notifications from Bosch CBS
-# Config stored in integration data (populated on first FCM registration)
-FCM_SENDER_ID     = "404630424405"
-
-# iOS FCM config (different API key + app ID than Android)
-FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
 
 DEFAULT_OPTIONS = {
     "scan_interval":      60,    # coordinator tick interval (seconds)
@@ -78,6 +95,7 @@ DEFAULT_OPTIONS = {
     "alert_save_snapshots": False, # save event snapshots locally to /config/www/bosch_alerts/
     "alert_delete_after_send": True, # delete local snapshot after sending (only when alert_save_snapshots=False)
     "fcm_push_mode": "auto",  # "auto" (ios→android→polling fallback), "android", "ios", "polling"
+    "audio_default_on": True,  # Audio default ON when starting a live stream
     "enable_intercom": False,  # Two-way audio (intercom) switch — disabled by default
     "enable_smb_upload": False,  # Upload events to SMB/NAS share (opt-in)
     "smb_server": "",            # SMB server IP/hostname (e.g. 192.168.1.1 for FRITZ!Box)
@@ -122,7 +140,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # In-memory stream type override — changed by BoschStreamModeSwitch without reload.
         # None = use options setting; "local" / "auto" / "remote" = override.
         self._stream_type_override: str | None = None
-        # Per-camera audio setting — True = audio on (default), False = muted
+        # Per-camera audio setting — True = audio+video on (default), False = snapshot-only
         self._audio_enabled:    dict[str, bool]  = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict = {}
@@ -211,6 +229,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
+        # Pre-create SSL context for TLS proxy (blocking call — must not run in event loop)
+        import ssl
+        # SSL context created lazily on first use (ssl.create_default_context
+        # is blocking I/O — must not run in the event loop)
+        self._tls_ssl_ctx = None
+        # Offline tracking — per camera, monotonic timestamp when first detected offline.
+        # Used to extend status check intervals for persistently offline cameras.
+        self._offline_since: dict[str, float] = {}
+        # Extended offline interval: cameras offline for >15 min are checked every 15 min
+        # instead of the normal interval_status (5 min), reducing unnecessary cloud calls.
+        _OFFLINE_EXTENDED_INTERVAL = 900  # 15 minutes
+        self._OFFLINE_EXTENDED_INTERVAL = _OFFLINE_EXTENDED_INTERVAL
+        # Per-camera status check timestamps (for extended offline intervals)
+        self._per_cam_status_at: dict[str, float] = {}
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -368,6 +400,41 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 err,
             )
 
+    # ── Local health check ────────────────────────────────────────────────────
+    async def _async_local_tcp_ping(self, cam_id: str, timeout: float = 1.5) -> bool:
+        """Quick TCP connect to camera port 443 on LAN — returns True if reachable.
+
+        Uses cached LAN IP from RCP (0x0a36) or known network config.
+        Much faster than cloud /commissioned check (~5ms vs ~200ms).
+        """
+        cam_ip = self._rcp_lan_ip_cache.get(cam_id)
+        if not cam_ip:
+            return False  # no known LAN IP — can't ping locally
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(cam_ip, 443),
+                timeout=timeout,
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (OSError, asyncio.TimeoutError):
+            return False
+
+    def _should_check_status(self, cam_id: str, now: float, interval_status: int) -> bool:
+        """Determine if this camera needs a status check this tick.
+
+        - Normal cameras: check every interval_status seconds.
+        - Persistently offline cameras (>15 min): check every _OFFLINE_EXTENDED_INTERVAL.
+        """
+        last = self._last_status
+        offline_since = self._offline_since.get(cam_id)
+        if offline_since and (now - offline_since) > self._OFFLINE_EXTENDED_INTERVAL:
+            # Camera has been offline for a while — use extended interval
+            per_cam_last = self._per_cam_status_at.get(cam_id, -86400.0)
+            return (now - per_cam_last) >= self._OFFLINE_EXTENDED_INTERVAL
+        return (now - last) >= interval_status
+
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
         """
@@ -449,174 +516,208 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
             data: dict = {}
 
+            # ── Build camera ID list ─────────────────────────────────────────
+            cam_ids = []
+            cam_by_id: dict[str, dict] = {}
             for cam in cam_list:
-                cam_id = cam.get("id", "")
-                if not cam_id:
-                    continue
+                cid = cam.get("id", "")
+                if cid:
+                    cam_ids.append(cid)
+                    cam_by_id[cid] = cam
 
-                # ── 2. Status via /commissioned (primary) + /ping (fallback) ────
-                if do_status:
-                    status = "UNKNOWN"
-                    comm_ok = False
-                    try:
-                        async with asyncio.timeout(8):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    comm = await r.json()
-                                    self._commissioned_cache[cam_id] = comm
-                                    comm_ok = True
-                                    if comm.get("connected") and comm.get("commissioned"):
-                                        status = "ONLINE"
-                                    elif comm.get("configured"):
-                                        status = "OFFLINE"
-                                elif r.status == 444:
+            # ── 2. Status — parallel across all cameras ──────────────────────
+            # Local TCP ping + cloud /commissioned run in parallel for all cameras.
+            # Local ping (~5ms) can skip the cloud call (~200ms) when camera is reachable.
+            interval_status = int(opts.get("interval_status", 60))
+
+            async def _check_status(cam_id: str) -> tuple[str, str]:
+                """Check single camera status. Returns (cam_id, status)."""
+                if not self._should_check_status(cam_id, now, interval_status):
+                    return (cam_id, self._cached_status.get(cam_id, "UNKNOWN"))
+
+                # Fast path: local TCP ping — if camera is reachable on LAN,
+                # it's definitely ONLINE (skip cloud /commissioned call).
+                if await self._async_local_tcp_ping(cam_id):
+                    self._per_cam_status_at[cam_id] = now
+                    self._offline_since.pop(cam_id, None)  # clear offline tracking
+                    _LOGGER.debug("Local TCP ping OK for %s — ONLINE (cloud check skipped)", cam_id[:8])
+                    return (cam_id, "ONLINE")
+
+                # Cloud path: /commissioned (primary) + /ping (fallback)
+                status = "UNKNOWN"
+                comm_ok = False
+                try:
+                    async with asyncio.timeout(8):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
+                            headers=headers,
+                        ) as r:
+                            if r.status == 200:
+                                comm = await r.json()
+                                self._commissioned_cache[cam_id] = comm
+                                comm_ok = True
+                                if comm.get("connected") and comm.get("commissioned"):
+                                    status = "ONLINE"
+                                elif comm.get("configured"):
                                     status = "OFFLINE"
-                                    comm_ok = True
-                    except Exception as err:
-                        _LOGGER.debug("Commissioned check error for %s: %s", cam_id, err)
-                    # Fallback to /ping if /commissioned didn't work
-                    if not comm_ok:
-                        try:
-                            async with asyncio.timeout(5):
-                                async with session.get(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
-                                    headers=headers,
-                                ) as pr:
-                                    if pr.status == 200:
-                                        status = (await pr.text()).strip().strip('"')
-                        except Exception as err:
-                            _LOGGER.debug("Ping fallback error for %s: %s", cam_id, err)
-                    self._cached_status[cam_id] = status
-                else:
-                    status = self._cached_status.get(cam_id, "UNKNOWN")
-
-                # ── 3. Events — only when interval_events elapsed ─────────────
-                if do_events:
-                    events: list = []
-                    # Fast-path: check /last_event first — if ID matches cached,
-                    # skip full events list fetch (saves bandwidth)
-                    skip_full_fetch = False
+                            elif r.status == 444:
+                                status = "OFFLINE"
+                                comm_ok = True
+                except Exception as err:
+                    _LOGGER.debug("Commissioned check error for %s: %s", cam_id, err)
+                if not comm_ok:
                     try:
                         async with asyncio.timeout(5):
                             async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
                                 headers=headers,
-                            ) as le_resp:
-                                if le_resp.status == 200:
-                                    last_ev = await le_resp.json()
-                                    last_ev_id = last_ev.get("id", "")
-                                    if last_ev_id and last_ev_id == self._last_event_ids.get(cam_id):
-                                        skip_full_fetch = True
-                                        events = self._cached_events.get(cam_id, [])
-                                        _LOGGER.debug(
-                                            "last_event unchanged for %s (id=%s) — skipping full fetch",
-                                            cam_id, last_ev_id[:8],
-                                        )
+                            ) as pr:
+                                if pr.status == 200:
+                                    status = (await pr.text()).strip().strip('"')
                     except Exception as err:
-                        _LOGGER.debug("last_event check error for %s: %s — falling back to full fetch", cam_id, err)
+                        _LOGGER.debug("Ping fallback error for %s: %s", cam_id, err)
 
-                    if not skip_full_fetch:
-                        try:
-                            url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-                            async with asyncio.timeout(15):
-                                async with session.get(url, headers=headers) as r:
-                                    if r.status == 200:
-                                        events = await r.json()
-                        except Exception as err:
-                            _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
-                    self._cached_events[cam_id] = events
+                self._per_cam_status_at[cam_id] = now
+                # Track offline duration for extended interval
+                if status == "OFFLINE":
+                    if cam_id not in self._offline_since:
+                        self._offline_since[cam_id] = now
+                else:
+                    self._offline_since.pop(cam_id, None)
+                return (cam_id, status)
 
-                    # ── Event-driven snapshot refresh ─────────────────────────
-                    # When a new event arrives (newest event ID changed), trigger
-                    # an immediate image refresh so the card shows the motion frame
-                    # without waiting for the next 60 s card timer tick.
-                    if events:
-                        newest_id = events[0].get("id", "")
-                        prev_id   = self._last_event_ids.get(cam_id)
-                        if prev_id is None:
-                            # First tick after startup — mark all fetched unread events as read
-                            # to clear the backlog visible in the Bosch app.
-                            unread_ids = [
-                                ev.get("id") for ev in events
-                                if ev.get("id") and not ev.get("isRead", False)
-                            ]
-                            if unread_ids:
-                                _LOGGER.debug(
-                                    "Startup: marking %d unread event(s) as read for %s",
-                                    len(unread_ids), cam_id,
-                                )
-                                try:
-                                    await self.async_mark_events_read(unread_ids)
-                                except Exception:
-                                    pass
-                        elif newest_id and newest_id != prev_id:
-                            # Update last event ID FIRST to prevent FCM push
-                            # from detecting the same event and sending duplicate alerts
-                            self._last_event_ids[cam_id] = newest_id
+            # Run all status checks in parallel
+            status_results = await asyncio.gather(
+                *[_check_status(cid) for cid in cam_ids],
+                return_exceptions=True,
+            )
+            any_status_checked = False
+            for result in status_results:
+                if isinstance(result, Exception):
+                    continue
+                cid, status = result
+                self._cached_status[cid] = status
+                if self._should_check_status(cid, now, interval_status):
+                    any_status_checked = True
 
+            # ── 3. Events — parallel across all cameras ──────────────────────
+            async def _fetch_events(cam_id: str) -> tuple[str, list]:
+                """Fetch events for single camera. Returns (cam_id, events)."""
+                events: list = []
+                skip_full_fetch = False
+                try:
+                    async with asyncio.timeout(5):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
+                            headers=headers,
+                        ) as le_resp:
+                            if le_resp.status == 200:
+                                last_ev = await le_resp.json()
+                                last_ev_id = last_ev.get("id", "")
+                                if last_ev_id and last_ev_id == self._last_event_ids.get(cam_id):
+                                    skip_full_fetch = True
+                                    events = self._cached_events.get(cam_id, [])
+                                    _LOGGER.debug(
+                                        "last_event unchanged for %s (id=%s) — skipping full fetch",
+                                        cam_id, last_ev_id[:8],
+                                    )
+                except Exception as err:
+                    _LOGGER.debug("last_event check error for %s: %s — falling back to full fetch", cam_id, err)
+
+                if not skip_full_fetch:
+                    try:
+                        url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
+                        async with asyncio.timeout(15):
+                            async with session.get(url, headers=headers) as r:
+                                if r.status == 200:
+                                    events = await r.json()
+                    except Exception as err:
+                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+                return (cam_id, events)
+
+            if do_events:
+                # Run all event fetches in parallel
+                event_results = await asyncio.gather(
+                    *[_fetch_events(cid) for cid in cam_ids],
+                    return_exceptions=True,
+                )
+                for result in event_results:
+                    if isinstance(result, Exception):
+                        continue
+                    cid, events = result
+                    self._cached_events[cid] = events
+
+            # ── Build data dict + process new events (must be sequential) ─────
+            for cam_id in cam_ids:
+                cam = cam_by_id[cam_id]
+                status = self._cached_status.get(cam_id, "UNKNOWN")
+                events = self._cached_events.get(cam_id, [])
+
+                if do_events and events:
+                    newest_id = events[0].get("id", "")
+                    prev_id   = self._last_event_ids.get(cam_id)
+                    if prev_id is None:
+                        unread_ids = [
+                            ev.get("id") for ev in events
+                            if ev.get("id") and not ev.get("isRead", False)
+                        ]
+                        if unread_ids:
                             _LOGGER.debug(
-                                "New event detected for %s (id=%s) — triggering snapshot refresh",
-                                cam_id, newest_id,
+                                "Startup: marking %d unread event(s) as read for %s",
+                                len(unread_ids), cam_id,
                             )
-                            cam_entity = self._camera_entities.get(cam_id)
-                            if cam_entity:
-                                self.hass.async_create_task(
-                                    cam_entity._async_trigger_image_refresh(delay=2)
-                                )
-                            # Fire HA event bus so automations can trigger on motion/audio
-                            newest_event  = events[0]
-                            event_type    = newest_event.get("eventType", "")
-                            cam_name      = cam.get("title", cam_id)
-                            event_payload = {
-                                "camera_id":   cam_id,
-                                "camera_name": cam_name,
-                                "timestamp":   newest_event.get("timestamp", ""),
-                                "image_url":   newest_event.get("imageUrl", ""),
-                                "event_id":    newest_id,
-                            }
-                            if event_type == "MOVEMENT":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_motion", event_payload
-                                )
-                                _LOGGER.debug(
-                                    "Fired bosch_shc_camera_motion for %s", cam_id
-                                )
-                            elif event_type == "AUDIO_ALARM":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_audio_alarm", event_payload
-                                )
-                                _LOGGER.debug(
-                                    "Fired bosch_shc_camera_audio_alarm for %s", cam_id
-                                )
-                            elif event_type == "PERSON":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_person", event_payload
-                                )
-                                _LOGGER.debug(
-                                    "Fired bosch_shc_camera_person for %s", cam_id
-                                )
-                            # Send alert notification (2-step: text + snapshot)
-                            self.hass.async_create_task(
-                                self._async_send_alert(
-                                    cam_name, event_type,
-                                    newest_event.get("timestamp", ""),
-                                    newest_event.get("imageUrl", ""),
-                                    newest_event.get("videoClipUrl", ""),
-                                    newest_event.get("videoClipUploadStatus", ""),
-                                )
-                            )
-                            # Mark new event as read on the Bosch cloud
                             try:
-                                await self.async_mark_events_read([newest_id])
+                                await self.async_mark_events_read(unread_ids)
                             except Exception:
                                 pass
-                        elif newest_id:
-                            self._last_event_ids[cam_id] = newest_id
-                else:
-                    events = self._cached_events.get(cam_id, [])
+                    elif newest_id and newest_id != prev_id:
+                        self._last_event_ids[cam_id] = newest_id
+                        _LOGGER.debug(
+                            "New event detected for %s (id=%s) — triggering snapshot refresh",
+                            cam_id, newest_id,
+                        )
+                        cam_entity = self._camera_entities.get(cam_id)
+                        if cam_entity:
+                            self.hass.async_create_task(
+                                cam_entity._async_trigger_image_refresh(delay=2)
+                            )
+                        newest_event  = events[0]
+                        event_type    = newest_event.get("eventType", "")
+                        cam_name      = cam.get("title", cam_id)
+                        event_payload = {
+                            "camera_id":   cam_id,
+                            "camera_name": cam_name,
+                            "timestamp":   newest_event.get("timestamp", ""),
+                            "image_url":   newest_event.get("imageUrl", ""),
+                            "event_id":    newest_id,
+                        }
+                        if event_type == "MOVEMENT":
+                            self.hass.bus.async_fire(
+                                "bosch_shc_camera_motion", event_payload
+                            )
+                        elif event_type == "AUDIO_ALARM":
+                            self.hass.bus.async_fire(
+                                "bosch_shc_camera_audio_alarm", event_payload
+                            )
+                        elif event_type == "PERSON":
+                            self.hass.bus.async_fire(
+                                "bosch_shc_camera_person", event_payload
+                            )
+                        self.hass.async_create_task(
+                            self._async_send_alert(
+                                cam_name, event_type,
+                                newest_event.get("timestamp", ""),
+                                newest_event.get("imageUrl", ""),
+                                newest_event.get("videoClipUrl", ""),
+                                newest_event.get("videoClipUploadStatus", ""),
+                            )
+                        )
+                        try:
+                            await self.async_mark_events_read([newest_id])
+                        except Exception:
+                            pass
+                    elif newest_id:
+                        self._last_event_ids[cam_id] = newest_id
 
                 data[cam_id] = {
                     "info":   cam,
@@ -626,7 +727,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 }
 
             # Update timestamps only after successful fetches
-            if do_status:
+            if any_status_checked:
                 self._last_status = now
             if do_events:
                 self._last_events = now
@@ -850,7 +951,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             # ── 6. Auto-download new event files ──────────────────────────────
             if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
                 await self.hass.async_add_executor_job(
-                    self._sync_download, data, token, opts["download_path"]
+                    sync_download, self, data, token, opts["download_path"]
                 )
                 # Mark all downloaded events as read
                 dl_event_ids = []
@@ -868,7 +969,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             # ── 7. SMB/NAS upload ─────────────────────────────────────────────
             if do_events and opts.get("enable_smb_upload") and opts.get("smb_server"):
                 await self.hass.async_add_executor_job(
-                    self._sync_smb_upload, data, token
+                    sync_smb_upload, self, data, token
                 )
 
             # ── 8. SMB daily cleanup (retention) ──────────────────────────────
@@ -880,7 +981,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 and (time.monotonic() - self._last_smb_cleanup) >= _SMB_CLEANUP_INTERVAL
             ):
                 self._last_smb_cleanup = time.monotonic()
-                await self.hass.async_add_executor_job(self._sync_smb_cleanup)
+                await self.hass.async_add_executor_job(sync_smb_cleanup, self)
 
             # ── 9. SMB disk-free check (hourly) ───────────────────────────────
             _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
@@ -891,7 +992,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 and (time.monotonic() - self._last_smb_disk_check) >= _SMB_DISK_CHECK_INTERVAL
             ):
                 self._last_smb_disk_check = time.monotonic()
-                await self.hass.async_add_executor_job(self._sync_smb_disk_check)
+                await self.hass.async_add_executor_job(sync_smb_disk_check, self)
 
             return data
 
@@ -965,7 +1066,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 _LOGGER.info(
                                     "Live connection opened! type=%s → %s", type_val, result
                                 )
-                                audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, False) else ""
+                                audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
                                 # LOCAL response: {"user": "...", "password": "...", "urls": ["192.168.x.x:443"]}
                                 # Embed credentials in RTSP URL for direct LAN access.
                                 local_user = result.get("user", "")
@@ -1018,16 +1119,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
                                 self._live_opened_at[cam_id]   = time.monotonic()
+                                # Run go2rtc registration and pre-warm in parallel
+                                # — both are independent and best-effort.
+                                parallel_tasks: list[asyncio.Task] = []
                                 rtsps_url = result.get("rtspsUrl", "")
                                 if rtsps_url:
-                                    await self._register_go2rtc_stream(cam_id, rtsps_url)
-                                # LOCAL sessions expire after ~60s — schedule auto-renewal at 50s
-                                # so we get fresh credentials and re-register go2rtc before the
-                                # camera kills the RTSP session.
-                                if type_val == "LOCAL":
-                                    async def _renew_cb(_now, _cid=cam_id) -> None:
-                                        await self._auto_renew_local_session(_cid)
-                                    async_call_later(self.hass, 50, _renew_cb)
+                                    parallel_tasks.append(
+                                        asyncio.create_task(self._register_go2rtc_stream(cam_id, rtsps_url))
+                                    )
+                                if type_val == "LOCAL" and local_user and local_pass:
+                                    proxy_port_val = self._tls_proxy_ports.get(cam_id)
+                                    if proxy_port_val:
+                                        parallel_tasks.append(
+                                            asyncio.create_task(
+                                                pre_warm_rtsp(proxy_port_val, local_user, local_pass, cam_addr.split(":")[0])
+                                            )
+                                        )
+                                if parallel_tasks:
+                                    await asyncio.gather(*parallel_tasks, return_exceptions=True)
+                                # LOCAL: camera respects maxSessionDuration=3600 in our URL
+                                # (tested: stream survives 70s+ without renewal).
+                                # Auto-renewal DISABLED — each PUT /connection invalidates
+                                # the previous session's credentials, causing 401 errors.
                                 self.hass.async_create_task(self.async_request_refresh())
                                 return result
                             elif resp.status == 401:
@@ -1366,9 +1479,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         stream_name, resp.status, go2rtc_src[:80],
                     )
         except asyncio.TimeoutError:
-            _LOGGER.warning("go2rtc API not reachable (timeout) — live stream only via snap.jpg")
+            _LOGGER.debug("go2rtc API not reachable (timeout) — using TLS proxy instead")
         except aiohttp.ClientError as err:
-            _LOGGER.warning("go2rtc API not reachable (%s) — live stream only via snap.jpg", err)
+            _LOGGER.debug("go2rtc API not reachable (%s) — using TLS proxy instead", err)
 
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
         """Remove the camera stream from go2rtc when the live session ends."""
@@ -1385,105 +1498,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             pass  # go2rtc may not be running — silently ignore
 
     async def _start_tls_proxy(self, cam_id: str, cam_host: str, cam_port: int) -> int:
-        """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
+        """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
+        # Lazy-init SSL context in executor (blocking I/O, must not run in event loop)
+        if self._tls_ssl_ctx is None:
+            self._tls_ssl_ctx = await self.hass.async_add_executor_job(self._create_ssl_ctx)
+        return start_tls_proxy(
+            self._tls_ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports
+        )
 
-        Bosch cameras use RTSPS (RTSP over TLS) with a self-signed certificate
-        and Digest auth. FFmpeg/HA's stream component can't handle this combination.
-        This proxy accepts plain TCP connections and forwards to the camera over TLS.
-        FFmpeg handles Digest auth itself — the proxy only unwraps TLS.
-
-        Uses threading (not asyncio) because HA's stream_worker runs in a separate
-        thread and the asyncio event loop may be busy during stream negotiation.
-
-        Returns the local proxy port number.
-        """
+    @staticmethod
+    def _create_ssl_ctx():
+        """Create SSL context for TLS proxy (blocking — runs in executor)."""
         import ssl
-        import socket
-        import threading
-        import select as _select
-
-        # Reuse existing proxy if already running for this camera
-        if cam_id in self._tls_proxy_ports:
-            port = self._tls_proxy_ports[cam_id]
-            # Quick check if port is still listening
-            try:
-                test = socket.create_connection(("127.0.0.1", port), timeout=0.5)
-                test.close()
-                return port  # proxy still alive
-            except OSError:
-                pass  # proxy dead, start new one
-            self._tls_proxy_ports.pop(cam_id, None)
-
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", 0))
-        port = srv.getsockname()[1]
-        srv.listen(4)
-        srv.settimeout(None)
-
-        def _proxy_thread():
-            while True:
-                try:
-                    client, _ = srv.accept()
-                except OSError:
-                    break
-                try:
-                    raw = socket.create_connection((cam_host, cam_port), timeout=10)
-                    tls = ctx.wrap_socket(raw, server_hostname=cam_host)
-                except Exception:
-                    client.close()
-                    continue
-
-                def _pipe(src, dst, rewrite_transport=False):
-                    """Forward bytes. If rewrite_transport=True, intercept RTSP
-                    SETUP requests and force TCP interleaved transport so FFmpeg
-                    doesn't try UDP (which can't work through the TCP proxy)."""
-                    try:
-                        while True:
-                            r, _, _ = _select.select([src], [], [], 60)
-                            if not r:
-                                break
-                            data = src.recv(65536)
-                            if not data:
-                                break
-                            if rewrite_transport and b"SETUP " in data:
-                                # Replace UDP transport with TCP interleaved
-                                import re as _re
-                                text = data.decode("utf-8", errors="replace")
-                                text = _re.sub(
-                                    r"Transport:\s*RTP/AVP[^;\r\n]*;unicast;client_port=[^\r\n]+",
-                                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1",
-                                    text,
-                                )
-                                data = text.encode("utf-8")
-                            dst.sendall(data)
-                    except Exception:
-                        pass
-                    finally:
-                        try: src.close()
-                        except Exception: pass
-                        try: dst.close()
-                        except Exception: pass
-
-                # client→camera: rewrite SETUP Transport to force TCP interleaved
-                t1 = threading.Thread(target=_pipe, args=(client, tls, True), daemon=True)
-                t2 = threading.Thread(target=_pipe, args=(tls, client, False), daemon=True)
-                t1.start()
-                t2.start()
-
-        t = threading.Thread(target=_proxy_thread, daemon=True, name=f"tls_proxy_{cam_id[:8]}")
-        t.start()
-        self._tls_proxy_ports[cam_id] = port
-        _LOGGER.info("TLS proxy for %s started on 127.0.0.1:%d → %s:%d (threading)", cam_id[:8], port, cam_host, cam_port)
-        return port
+        return ctx
 
     async def _stop_tls_proxy(self, cam_id: str) -> None:
         """Stop the TLS proxy for a camera."""
-        self._tls_proxy_ports.pop(cam_id, None)
+        stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
     async def _auto_renew_local_session(self, cam_id: str) -> None:
         """Renew a LOCAL live session before the 60s camera timeout.
@@ -1499,670 +1533,55 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Auto-renewing LOCAL session for %s", cam_id)
         await self.try_live_connection(cam_id)
 
-    # ── FCM push notifications (near-instant event detection) ────────────────
+    # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:
-        """Fetch Firebase config for the Bosch Smart Camera app.
-
-        Uses Google's public Firebase installations API to get the API key,
-        project ID, and app ID for FCM registration. This avoids hardcoding
-        the Firebase API key in the source code.
-        """
-        # These are public app identifiers (not secrets) — same for every user
-        project_id = "bosch-smart-cameras"
-        app_id = f"1:{FCM_SENDER_ID}:android:9e5b6b58e4c70075"
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        try:
-            # Fetch API key via Firebase Installations API
-            url = f"https://firebaseinstallations.googleapis.com/v1/projects/{project_id}/installations"
-            body = {
-                "appId": app_id,
-                "authVersion": "FIS_v2",
-                "sdkVersion": "a:17.1.0",
-                "fid": "auto",
-            }
-            async with asyncio.timeout(10):
-                async with session.post(url, json=body, headers={
-                    "x-goog-api-key": "",  # empty — discovery request
-                    "Content-Type": "application/json",
-                }) as resp:
-                    # The installations API may not return the key directly,
-                    # but we can extract it from the Android app's public config.
-                    pass
-        except Exception:
-            pass
-
-        # Fallback: use well-known Firebase config values for this project.
-        # These are public app-level identifiers embedded in every copy of the
-        # Bosch Smart Camera APK — they identify the app to Firebase, not the user.
-        # The API key is restricted by Firebase project rules (not by secrecy).
-        import base64
-        _k = base64.b64decode("QUl6YVN5QS1WOGEzR3hsZ1A0NTRzbzY3QzFJaDBQakpDd3pFMEFJ").decode()
-        return {
-            "project_id": project_id,
-            "app_id": app_id,
-            "api_key": _k,
-        }
+        """Fetch Firebase config (delegated to fcm.py)."""
+        return await _fcm_fetch_firebase_config(self.hass)
 
     async def async_start_fcm_push(self) -> None:
-        """Start the FCM push listener for near-instant motion/audio event detection.
-
-        Flow:
-          1. Register with Google FCM (get a device token)
-          2. Register the token with Bosch CBS (POST /v11/devices)
-          3. Listen for silent push notifications from Bosch
-          4. On push → immediately fetch events → fire HA events + update sensors
-
-        FCM credentials are stored in the config entry data and reused across restarts.
-        The push is a silent wake-up signal (no payload) — event data comes from /v11/events.
-        """
-        if self._fcm_running:
-            return
-        if not self.options.get("enable_fcm_push", False):
-            _LOGGER.debug("FCM push disabled in options")
-            return
-
-        try:
-            from firebase_messaging import FcmPushClient, FcmRegisterConfig
-        except ImportError:
-            _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
-            return
-
-        # Determine push mode
-        push_mode = self.options.get("fcm_push_mode", "auto")
-
-        # Build FCM config based on mode
-        async def _build_fcm_cfg(mode: str) -> dict:
-            """Return FCM config dict for the given mode (android or ios)."""
-            if mode == "ios":
-                import base64
-                return {
-                    "project_id": "bosch-smart-cameras",
-                    "app_id": FCM_IOS_APP_ID,
-                    "api_key": base64.b64decode("QUl6YVN5QmxyN1o0ZmpaM0lmcnhsN1VRZFE4eGZRd3g5WFJBYnBJ").decode(),
-                }
-            else:
-                # Android mode — use stored config or fetch from Firebase
-                cfg = self._entry.data.get("fcm_config") or {}
-                if not cfg:
-                    cfg = await self._fetch_firebase_config()
-                    if cfg:
-                        self.hass.config_entries.async_update_entry(
-                            self._entry,
-                            data={**self._entry.data, "fcm_config": cfg},
-                        )
-                return cfg
-
-        async def _try_fcm_with_mode(mode: str) -> bool:
-            """Attempt FCM registration and start with the given mode. Returns True on success."""
-            fcm_cfg = await _build_fcm_cfg(mode)
-            if not fcm_cfg.get("api_key"):
-                _LOGGER.warning("FCM: could not obtain Firebase config for mode '%s'", mode)
-                return False
-
-            fcm_config = FcmRegisterConfig(
-                project_id=fcm_cfg["project_id"],
-                app_id=fcm_cfg["app_id"],
-                api_key=fcm_cfg["api_key"],
-                messaging_sender_id=FCM_SENDER_ID,
-            )
-
-            # Load saved FCM credentials from config entry (survives HA restarts)
-            saved_fcm_creds = self._entry.data.get("fcm_credentials")
-
-            def _on_creds_updated(creds):
-                """Save FCM credentials to config entry for persistence."""
-                self.hass.config_entries.async_update_entry(
-                    self._entry,
-                    data={**self._entry.data, "fcm_credentials": creds},
-                )
-                _LOGGER.debug("FCM credentials saved to config entry")
-
-            self._fcm_client = FcmPushClient(
-                callback=self._on_fcm_push,
-                fcm_config=fcm_config,
-                credentials=saved_fcm_creds,
-                credentials_updated_callback=_on_creds_updated,
-            )
-
-            try:
-                self._fcm_token = await self._fcm_client.checkin_or_register()
-                _LOGGER.info("FCM registered (mode=%s) — token: %s...", mode, self._fcm_token[:40])
-            except Exception as err:
-                _LOGGER.warning("FCM registration failed (mode=%s): %s", mode, err)
-                self._fcm_client = None
-                return False
-
-            # Register FCM token with Bosch CBS API
-            await self._register_fcm_with_bosch()
-
-            # Start listening for pushes
-            try:
-                await self._fcm_client.start()
-                self._fcm_running = True
-                self._fcm_healthy = True
-                self._fcm_push_mode = mode
-                _LOGGER.info("FCM push listener started (mode=%s) — near-instant event detection active", mode)
-                return True
-            except Exception as err:
-                _LOGGER.warning("FCM push listener failed to start (mode=%s): %s", mode, err)
-                self._fcm_client = None
-                return False
-
-        if push_mode == "polling":
-            _LOGGER.info("FCM push mode set to 'polling' — using standard API polling only")
-            return
-        elif push_mode == "auto":
-            # Try iOS first, fall back to Android, then polling
-            if not await _try_fcm_with_mode("ios"):
-                _LOGGER.info("FCM auto mode: iOS failed, trying Android fallback")
-                if not await _try_fcm_with_mode("android"):
-                    _LOGGER.warning("FCM auto mode: both iOS and Android failed — falling back to standard polling")
-        elif push_mode in ("android", "ios"):
-            await _try_fcm_with_mode(push_mode)
-        else:
-            _LOGGER.warning("FCM: unknown push mode '%s' — defaulting to ios", push_mode)
-            await _try_fcm_with_mode("ios")
+        """Start the FCM push listener (delegated to fcm.py)."""
+        return await _fcm_async_start_fcm_push(self)
 
     async def _register_fcm_with_bosch(self) -> bool:
-        """Register our FCM token with Bosch CBS so it sends us push notifications.
+        """Register FCM token with Bosch CBS (delegated to fcm.py)."""
+        return await _fcm_register_fcm_with_bosch(self)
 
-        Endpoint: POST /v11/devices {"deviceType": "ANDROID"|"IOS", "deviceToken": token}
-        Response: HTTP 204 on success.
-        deviceType must match the FCM platform used for registration.
-        """
-        if not self._fcm_token or not self.token:
-            return False
-
-        # Determine device type from active push mode
-        device_type = "IOS" if self._fcm_push_mode == "ios" else "ANDROID"
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type":  "application/json",
-        }
-        body = {"deviceType": device_type, "deviceToken": self._fcm_token}
-
-        try:
-            async with asyncio.timeout(10):
-                async with session.post(
-                    f"{CLOUD_API}/v11/devices", headers=headers, json=body
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
-                        return True
-                    _LOGGER.warning(
-                        "FCM token registration failed: HTTP %d", resp.status
-                    )
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("FCM token registration error: %s", err)
-        return False
-
-    def _on_fcm_push(self, notification: dict, persistent_id: str, obj=None) -> None:
-        """Called when a push notification arrives from Bosch CBS.
-
-        The push is a silent wake-up signal with no event payload.
-        We immediately trigger an event fetch + snapshot refresh for all cameras.
-        """
-        self._fcm_last_push = time.monotonic()
-        self._fcm_healthy = True
-        _LOGGER.info(
-            "FCM push received (id=%s, from=%s) — fetching events",
-            persistent_id, notification.get("from", "?"),
-        )
-        # Schedule immediate event fetch + snapshot refresh on the HA event loop
-        self.hass.loop.call_soon_threadsafe(
-            self.hass.async_create_task,
-            self._async_handle_fcm_push(),
-        )
+    async def async_stop_fcm_push(self) -> None:
+        """Stop the FCM push listener (delegated to fcm.py)."""
+        return await _fcm_async_stop_fcm_push(self)
 
     async def _async_handle_fcm_push(self) -> None:
-        """Handle an FCM push — fetch fresh events for all cameras and fire HA events."""
-        token = self.token
-        if not token:
-            return
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-
-        for cam_id in list(self.data.keys()):
-            try:
-                url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=5"
-                async with asyncio.timeout(10):
-                    async with session.get(url, headers=headers) as r:
-                        if r.status != 200:
-                            continue
-                        events = await r.json()
-
-                if not events:
-                    continue
-
-                newest_id = events[0].get("id", "")
-                prev_id   = self._last_event_ids.get(cam_id)
-
-                if prev_id is not None and newest_id and newest_id != prev_id:
-                    # Update last event ID FIRST to prevent polling from
-                    # detecting the same event and sending duplicate alerts
-                    self._last_event_ids[cam_id] = newest_id
-
-                    newest_event = events[0]
-                    event_type   = newest_event.get("eventType", "")
-                    cam_name     = self.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-
-                    _LOGGER.info(
-                        "FCM push → new %s event for %s (id=%s)",
-                        event_type, cam_name, newest_id[:8],
-                    )
-
-                    # Update cached events
-                    if cam_id in self.data:
-                        self.data[cam_id]["events"] = events
-                    self._cached_events[cam_id] = events
-
-                    # Fire HA event bus
-                    event_payload = {
-                        "camera_id":   cam_id,
-                        "camera_name": cam_name,
-                        "timestamp":   newest_event.get("timestamp", ""),
-                        "image_url":   newest_event.get("imageUrl", ""),
-                        "event_id":    newest_id,
-                        "source":      "fcm_push",
-                    }
-                    if event_type == "MOVEMENT":
-                        self.hass.bus.async_fire("bosch_shc_camera_motion", event_payload)
-                    elif event_type == "AUDIO_ALARM":
-                        self.hass.bus.async_fire("bosch_shc_camera_audio_alarm", event_payload)
-                    elif event_type == "PERSON":
-                        self.hass.bus.async_fire("bosch_shc_camera_person", event_payload)
-
-                    # Send alert notification (3-step: text + snapshot + video)
-                    self.hass.async_create_task(
-                        self._async_send_alert(
-                            cam_name, event_type,
-                            newest_event.get("timestamp", ""),
-                            newest_event.get("imageUrl", ""),
-                            newest_event.get("videoClipUrl", ""),
-                            newest_event.get("videoClipUploadStatus", ""),
-                        )
-                    )
-
-                    # Trigger snapshot refresh
-                    cam_entity = self._camera_entities.get(cam_id)
-                    if cam_entity:
-                        self.hass.async_create_task(
-                            cam_entity._async_trigger_image_refresh(delay=2)
-                        )
-
-                    # Notify all entity listeners
-                    self.async_update_listeners()
-
-                    # Mark new event as read on the Bosch cloud
-                    try:
-                        await self.async_mark_events_read([newest_id])
-                    except Exception:
-                        pass
-
-                elif newest_id:
-                    self._last_event_ids[cam_id] = newest_id
-
-            except Exception as err:
-                _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
+        """Handle an FCM push (delegated to fcm.py)."""
+        return await _fcm_async_handle_fcm_push(self)
 
     def _get_alert_services(self, type_key: str) -> list[str]:
-        """Return notify services for a given alert type key.
-
-        Falls back to alert_notify_service if the type-specific field is empty.
-        type_key: "system" | "information" | "screenshot" | "video"
-        """
-        opts = self.options
-        raw = opts.get(f"alert_notify_{type_key}", "").strip()
-        if not raw:
-            raw = opts.get("alert_notify_service", "").strip()
-        return [s.strip() for s in raw.split(",") if s.strip()]
+        """Return notify services for a given alert type (delegated to fcm.py)."""
+        return _fcm_get_alert_services(self, type_key)
 
     @staticmethod
     def _build_notify_data(
         svc: str, message: str, file_path: str | None = None, title: str | None = None,
     ) -> dict:
-        """Build notify service call data with correct attachment format per service type.
-
-        mobile_app (iOS + Android HA Companion): image served from /local/bosch_alerts/
-        telegram_bot: uses photo field
-        All others (Signal, email, …): file path in data.attachments
-        """
-        data: dict = {"message": message}
-        if title:
-            data["title"] = title
-        if not file_path:
-            return data
-        fname = os.path.basename(file_path)
-        if "mobile_app" in svc:
-            # HA Companion App — image URL served without auth from /config/www/
-            # Files deleted within seconds when alert_delete_after_send=True
-            notify_data: dict = {
-                "image": f"/local/bosch_alerts/{fname}",
-                "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
-            }
-            data["data"] = notify_data
-        elif "telegram" in svc.lower():
-            data["data"] = {"photo": file_path, "caption": message}
-        else:
-            # Signal, email, generic — local file path attachment
-            data["data"] = {"attachments": [file_path]}
-        return data
+        """Build notify service call data (delegated to fcm.py)."""
+        return _fcm_build_notify_data(svc, message, file_path, title)
 
     async def _async_send_alert(
         self, cam_name: str, event_type: str, timestamp: str,
         image_url: str, clip_url: str = "", clip_status: str = "",
     ) -> None:
-        """Send a 3-step alert: instant text, snapshot image, video clip.
-
-        Step 1: Immediate text notification (no delay)
-        Step 2: Download snapshot from Bosch cloud (after 5s), send with image
-        Step 3: Download video clip (after 15s total), send as attachment
-        """
-        opts = self.options
-
-        # Per-type service routing: information/screenshot/video each fall back to alert_notify_service
-        info_svcs  = self._get_alert_services("information")
-        if not info_svcs:
-            return  # Nothing to send if no information services configured
-
-        save_snapshots = opts.get("alert_save_snapshots", False)
-        delete_after   = opts.get("alert_delete_after_send", True)
-        ts_short       = timestamp[11:19] if len(timestamp) >= 19 else timestamp
-
-        type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm", "PERSON": "Person erkannt"}.get(event_type, event_type)
-        type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a", "PERSON": "\U0001f9d1"}.get(event_type, "\u26a0\ufe0f")
-
-        # www/bosch_alerts/ is served as /local/bosch_alerts/ — needed for mobile_app notifications
-        alert_dir = os.path.join(self.hass.config.config_dir, "www", "bosch_alerts")
-        await self.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
-        ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
-        files_to_cleanup: list[str] = []
-
-        async def _notify_type(type_key: str, message: str, file_path: str | None = None) -> None:
-            """Send to services configured for this alert type (information/screenshot/video)."""
-            for svc in self._get_alert_services(type_key):
-                try:
-                    domain, service = svc.split(".", 1)
-                    call_data = self._build_notify_data(svc, message, file_path)
-                    await self.hass.services.async_call(domain, service, call_data)
-                except Exception as err:
-                    _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)
-
-        # ── Step 1: Instant text alert ────────────────────────────────────────
-        try:
-            await _notify_type("information", f"{type_icon} {cam_name}: {type_label} ({ts_short})")
-            _LOGGER.debug("Alert step 1 (text) sent to %d services", len(info_svcs))
-        except Exception as err:
-            _LOGGER.warning("Alert step 1 failed: %s", err)
-            return
-
-        # ── Step 2: Snapshot image (after 5s) ─────────────────────────────────
-        # If image_url is empty (event just created), re-fetch events to get it
-        if not image_url:
-            await asyncio.sleep(5)
-            try:
-                events_url = f"{CLOUD_API}/v11/events?videoInputId=&limit=5"
-                # Find cam_id from cam_name in coordinator data
-                for cid, cdata in self.data.items():
-                    if cdata.get("info", {}).get("title", "") == cam_name:
-                        events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
-                        break
-                async with asyncio.timeout(10):
-                    async with session.get(events_url, headers=headers) as r:
-                        if r.status == 200:
-                            fresh_events = await r.json()
-                            if fresh_events:
-                                image_url = fresh_events[0].get("imageUrl", "")
-                                clip_url = fresh_events[0].get("videoClipUrl", "") or clip_url
-                                clip_status = fresh_events[0].get("videoClipUploadStatus", "") or clip_status
-                                _LOGGER.debug("Alert: re-fetched image_url=%s", image_url[:60] if image_url else "empty")
-            except Exception as err:
-                _LOGGER.debug("Alert: re-fetch events failed: %s", err)
-
-        if image_url:
-            if not image_url.startswith("http"):
-                _LOGGER.debug("Alert: invalid image_url: %s", image_url[:60])
-            else:
-                await asyncio.sleep(5)
-            snap_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.jpg")
-            try:
-                async with asyncio.timeout(15):
-                    async with session.get(image_url, headers=headers) as resp:
-                        if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
-                            data = await resp.read()
-                            if data:
-                                await self.hass.async_add_executor_job(self._write_file, snap_path, data)
-                                await _notify_type(
-                                    "screenshot",
-                                    f"\U0001f4f8 {cam_name} Snapshot ({ts_short})",
-                                    snap_path,
-                                )
-                                _LOGGER.debug("Alert step 2 (screenshot) sent: %s", snap_path)
-                                if not save_snapshots:
-                                    files_to_cleanup.append(snap_path)
-            except Exception as err:
-                _LOGGER.warning("Alert step 2 failed: %s", err)
-
-        # ── Step 3: Video clip — poll until ready, then download + send ─────
-        # Bosch uploads clips asynchronously. The event initially has
-        # clip_status=Pending (or no clipUrl at all). We poll the events API
-        # every 10s for up to 90s until videoClipUploadStatus=Done.
-        cam_id = None
-        for cid, cdata in self.data.items():
-            if cdata.get("info", {}).get("title", "") == cam_name:
-                cam_id = cid
-                break
-
-        if cam_id:
-            clip_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.mp4")
-            auth_headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
-            found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
-
-            # Try direct clip.mp4 download first (faster than polling)
-            if not found_clip_url:
-                event_id = self._last_event_ids.get(cam_id, "")
-                if event_id:
-                    try:
-                        async with asyncio.timeout(10):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/events/{event_id}/clip.mp4",
-                                headers={"Authorization": f"Bearer {self.token}", "Accept": "*/*"},
-                            ) as r:
-                                if r.status == 200 and "video" in r.headers.get("Content-Type", ""):
-                                    found_clip_url = f"{CLOUD_API}/v11/events/{event_id}/clip.mp4"
-                                    _LOGGER.debug("Alert: direct clip.mp4 available for %s", cam_name)
-                    except Exception:
-                        pass
-
-            if not found_clip_url and clip_status == "Unavailable":
-                _LOGGER.debug(
-                    "Alert: clip status Unavailable from start — skipping poll for %s", cam_name,
-                )
-            elif not found_clip_url:
-                # Poll for clip readiness (10s intervals, up to 90s)
-                clip_unavailable = False
-                for attempt in range(9):
-                    await asyncio.sleep(10)
-                    try:
-                        async with asyncio.timeout(10):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=3",
-                                headers=auth_headers,
-                            ) as r:
-                                if r.status != 200:
-                                    continue
-                                fresh = await r.json()
-                                for ev in fresh:
-                                    if ev.get("timestamp", "")[:19] == timestamp[:19]:
-                                        status = ev.get("videoClipUploadStatus", "")
-                                        url = ev.get("videoClipUrl", "")
-                                        if status == "Done" and url:
-                                            found_clip_url = url
-                                        elif status == "Unavailable":
-                                            clip_unavailable = True
-                                            _LOGGER.debug(
-                                                "Alert: clip Unavailable after %ds — stop polling for %s",
-                                                (attempt + 1) * 10, cam_name,
-                                            )
-                                        break
-                        if found_clip_url:
-                            _LOGGER.debug(
-                                "Alert: clip ready after %ds for %s",
-                                (attempt + 1) * 10, cam_name,
-                            )
-                            break
-                        if clip_unavailable:
-                            break
-                    except Exception:
-                        continue
-
-            if found_clip_url:
-                try:
-                    dl_headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
-                    async with asyncio.timeout(60):
-                        async with session.get(found_clip_url, headers=dl_headers) as resp:
-                            if resp.status == 200:
-                                data = await resp.read()
-                                if data and len(data) > 1000:
-                                    await self.hass.async_add_executor_job(
-                                        self._write_file, clip_path, data
-                                    )
-                                    size_kb = len(data) // 1024
-                                    await _notify_type(
-                                        "video",
-                                        f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)",
-                                        clip_path,
-                                    )
-                                    _LOGGER.info(
-                                        "Alert step 3 (video) sent: %s (%d KB)", clip_path, size_kb
-                                    )
-                                    if not save_snapshots:
-                                        files_to_cleanup.append(clip_path)
-                except Exception as err:
-                    _LOGGER.warning("Alert step 3 (video) failed: %s", err)
-            else:
-                _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
-
-        # ── Mark event as read ─────────────────────────────────────────────
-        if cam_id:
-            event_id = self._last_event_ids.get(cam_id, "")
-            if event_id:
-                try:
-                    await self.async_mark_events_read([event_id])
-                except Exception:
-                    pass
-
-        # ── SMB upload (immediate, alongside alert) ────────────────────────
-        if opts.get("enable_smb_upload") and opts.get("smb_server") and cam_id:
-            try:
-                # Build a minimal data dict for _sync_smb_upload with just this event
-                ev_id = self._last_event_ids.get(cam_id, "unknown")
-                ev_data = {
-                    "timestamp": timestamp,
-                    "eventType": event_type,
-                    "id": ev_id,
-                    "imageUrl": image_url,
-                    "videoClipUrl": found_clip_url if found_clip_url else "",
-                    "videoClipUploadStatus": "Done" if found_clip_url else "",
-                }
-                smb_data = {
-                    cam_id: {
-                        "info": {"title": cam_name},
-                        "events": [ev_data],
-                    }
-                }
-                _LOGGER.info(
-                    "Alert: SMB upload starting for %s (event=%s, img=%s, clip=%s)",
-                    cam_name, ev_id[:8] if ev_id else "?",
-                    bool(image_url), bool(found_clip_url),
-                )
-                await self.hass.async_add_executor_job(
-                    self._sync_smb_upload, smb_data, self.token
-                )
-                _LOGGER.info("Alert: SMB upload completed for %s", cam_name)
-            except Exception as err:
-                _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
-
-        # ── Cleanup local files ───────────────────────────────────────────────
-        if delete_after and files_to_cleanup:
-            await asyncio.sleep(5)  # give Signal time to read the files
-            for fpath in files_to_cleanup:
-                try:
-                    await self.hass.async_add_executor_job(os.remove, fpath)
-                except OSError:
-                    pass
+        """Send a 3-step alert (delegated to fcm.py)."""
+        return await _fcm_async_send_alert(
+            self, cam_name, event_type, timestamp, image_url, clip_url, clip_status,
+        )
 
     async def async_mark_events_read(self, event_ids: list[str]) -> bool:
-        """Mark events as read/seen on the Bosch cloud.
-
-        Tries PUT /v11/events/bulk first, falls back to individual PUT.
-        Best-effort — never raises.
-        """
-        if not event_ids:
-            return True
-
-        token = self.token
-        if not token:
-            return False
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-
-        # Try bulk update
-        try:
-            body = {"events": [{"id": eid, "isRead": True} for eid in event_ids]}
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/events/bulk", headers=headers, json=body
-                ) as resp:
-                    if resp.status in (200, 204):
-                        _LOGGER.debug("Marked %d events as read (bulk)", len(event_ids))
-                        return True
-                    _LOGGER.debug("Bulk mark-read HTTP %d — trying individual", resp.status)
-        except Exception as err:
-            _LOGGER.debug("Bulk mark-read error: %s — trying individual", err)
-
-        # Fallback: individual PUT /v11/events with {"id": eid, "isRead": true}
-        success = False
-        for eid in event_ids:
-            try:
-                async with asyncio.timeout(5):
-                    async with session.put(
-                        f"{CLOUD_API}/v11/events",
-                        headers=headers, json={"id": eid, "isRead": True},
-                    ) as resp:
-                        if resp.status in (200, 204):
-                            success = True
-            except Exception:
-                pass
-
-        if success:
-            _LOGGER.debug("Marked events as read (individual)")
-        return success
+        """Mark events as read on the Bosch cloud (delegated to fcm.py)."""
+        return await _fcm_async_mark_events_read(self, event_ids)
 
     @staticmethod
     def _write_file(path: str, data: bytes) -> None:
-        with open(path, "wb") as f:
-            f.write(data)
-
-    async def async_stop_fcm_push(self) -> None:
-        """Stop the FCM push listener."""
-        if self._fcm_client and self._fcm_running:
-            try:
-                await self._fcm_client.stop()
-            except Exception:
-                pass
-            self._fcm_running = False
-            _LOGGER.info("FCM push listener stopped")
+        """Write binary data to file (delegated to fcm.py)."""
+        _fcm_write_file(path, data)
 
     # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
     async def _get_cached_rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
@@ -2460,739 +1879,52 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
             return False
 
-    # ── SHC local API (camera light + privacy mode) ───────────────────────────
+    # ── SHC local API + Cloud API setters ────────────────────────────────────
+    # Implementation lives in shc.py — these are thin delegation wrappers.
 
     @property
     def shc_configured(self) -> bool:
         """True if SHC local API is fully configured (IP + certs)."""
-        opts = self.options
-        return bool(
-            opts.get("shc_ip", "").strip()
-            and opts.get("shc_cert_path", "").strip()
-            and opts.get("shc_key_path", "").strip()
-        )
+        return shc_mod.shc_configured(self)
 
     @property
     def shc_ready(self) -> bool:
-        """True if SHC is configured AND currently considered available.
-
-        When SHC is offline (too many consecutive failures), returns False
-        unless the retry interval has elapsed.
-        """
-        if not self.shc_configured:
-            return False
-        if self._shc_available:
-            return True
-        # SHC is offline — check if retry interval has passed
-        now = time.monotonic()
-        if now - self._shc_last_check >= self._SHC_RETRY_INTERVAL:
-            return True  # allow one retry
-        return False
+        """True if SHC is configured AND currently considered available."""
+        return shc_mod.shc_ready(self)
 
     def _shc_mark_success(self) -> None:
-        """Mark SHC as healthy after a successful request."""
-        if not self._shc_available:
-            _LOGGER.info("SHC local API is back online")
-        self._shc_available = True
-        self._shc_fail_count = 0
+        shc_mod._shc_mark_success(self)
 
     def _shc_mark_failure(self) -> None:
-        """Track a failed SHC request; mark offline after N consecutive failures."""
-        self._shc_fail_count += 1
-        self._shc_last_check = time.monotonic()
-        if self._shc_fail_count >= self._SHC_MAX_FAILS and self._shc_available:
-            self._shc_available = False
-            _LOGGER.warning(
-                "SHC local API marked offline after %d consecutive failures — "
-                "will retry in %ds. Falling back to cloud API.",
-                self._shc_fail_count, self._SHC_RETRY_INTERVAL,
-            )
+        shc_mod._shc_mark_failure(self)
 
     async def _async_shc_request(
         self, method: str, path: str, body: dict | None = None
     ) -> dict | list | None:
-        """Make a request to the SHC local API using mutual TLS.
-
-        Returns parsed JSON on success, None on failure.
-        Requires shc_ip, shc_cert_path, shc_key_path in options.
-        Tracks SHC health — marks offline after repeated failures.
-        """
-        import ssl
-        opts      = self.options
-        shc_ip    = opts.get("shc_ip", "").strip()
-        cert_path = opts.get("shc_cert_path", "").strip()
-        key_path  = opts.get("shc_key_path", "").strip()
-        if not shc_ip or not cert_path or not key_path:
-            return None
-        try:
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.check_hostname = False
-            ctx.verify_mode    = ssl.CERT_NONE
-            ctx.load_cert_chain(cert_path, key_path)
-        except Exception as err:
-            _LOGGER.warning("SHC TLS setup failed (check cert/key paths): %s", err)
-            self._shc_mark_failure()
-            return None
-
-        url     = f"https://{shc_ip}:8444/smarthome{path}"
-        headers = {"api-version": "3.2", "Content-Type": "application/json"}
-        try:
-            connector = aiohttp.TCPConnector(ssl=ctx)
-            async with aiohttp.ClientSession(connector=connector) as s:
-                async with asyncio.timeout(10):
-                    if method == "GET":
-                        async with s.get(url, headers=headers) as r:
-                            if r.status == 200:
-                                self._shc_mark_success()
-                                return await r.json()
-                            _LOGGER.debug("SHC GET %s → HTTP %d", path, r.status)
-                            self._shc_mark_failure()
-                    elif method == "PUT":
-                        async with s.put(url, json=body, headers=headers) as r:
-                            _LOGGER.debug("SHC PUT %s → HTTP %d", path, r.status)
-                            if r.status in (200, 201, 204):
-                                self._shc_mark_success()
-                            else:
-                                self._shc_mark_failure()
-                            return {"status": r.status, "ok": r.status in (200, 201, 204)}
-        except asyncio.TimeoutError:
-            _LOGGER.debug("SHC request timeout: %s %s", method, path)
-            self._shc_mark_failure()
-        except aiohttp.ClientError as err:
-            _LOGGER.debug("SHC request error %s %s: %s", method, path, err)
-            self._shc_mark_failure()
-        except Exception as err:
-            _LOGGER.debug("SHC unexpected error %s %s: %s", method, path, err)
-            self._shc_mark_failure()
-        return None
+        return await shc_mod.async_shc_request(self, method, path, body)
 
     async def _async_update_shc_states(self, data: dict) -> None:
-        """Fetch CameraLight and PrivacyMode states from SHC for each camera.
-
-        SHC is the PRIMARY source for privacy + light state when configured.
-        Values from SHC overwrite any cloud-sourced values from step 4.
-        Matches SHC devices to cloud cameras by device name (title).
-        Refreshes the SHC device list at most once per 60 seconds.
-        """
-        if not self.shc_configured:
-            return
-
-        # Re-fetch device list at most once per 60 s
-        now = time.monotonic()
-        if now - self._last_shc_fetch >= 60 or not self._shc_devices_raw:
-            devices = await self._async_shc_request("GET", "/devices")
-            if isinstance(devices, list):
-                self._shc_devices_raw = devices
-                self._last_shc_fetch  = now
-
-        shc_devices = self._shc_devices_raw
-        if not shc_devices:
-            return
-
-        for cam_id, cam in data.items():
-            title = cam.get("info", {}).get("title", "").lower().strip()
-
-            # Match SHC device by name (case-insensitive)
-            device_id = None
-            for dev in shc_devices:
-                if dev.get("name", "").lower().strip() == title:
-                    device_id = dev.get("id")
-                    break
-            if not device_id:
-                _LOGGER.debug("SHC: no device found matching camera title '%s'", title)
-                continue
-
-            entry = self._shc_state_cache.setdefault(cam_id, {
-                "device_id":    device_id,
-                "camera_light": None,
-                "privacy_mode": None,
-            })
-            entry["device_id"] = device_id
-
-            # Fetch CameraLight service state (SHC is authoritative)
-            svc = await self._async_shc_request(
-                "GET", f"/devices/{device_id}/services/CameraLight"
-            )
-            if isinstance(svc, dict):
-                val = svc.get("state", {}).get("value", "")
-                entry["camera_light"] = (val.upper() == "ON")
-
-            # Fetch PrivacyMode service state (SHC is authoritative)
-            svc = await self._async_shc_request(
-                "GET", f"/devices/{device_id}/services/PrivacyMode"
-            )
-            if isinstance(svc, dict):
-                val = svc.get("state", {}).get("value", "")
-                entry["privacy_mode"] = (val.upper() == "ENABLED")
+        return await shc_mod.async_update_shc_states(self, data)
 
     async def async_shc_set_camera_light(self, cam_id: str, on: bool) -> bool:
-        """Turn the camera indicator LED on (True) or off (False) via SHC API."""
-        device_id = self._shc_state_cache.get(cam_id, {}).get("device_id")
-        if not device_id:
-            _LOGGER.warning("SHC: no device_id cached for %s — cannot control light", cam_id)
-            return False
-        result = await self._async_shc_request(
-            "PUT",
-            f"/devices/{device_id}/services/CameraLight/state",
-            {"@type": "cameraLightState", "value": "ON" if on else "OFF"},
-        )
-        if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
-            self._shc_state_cache[cam_id]["camera_light"] = on
-            self.async_update_listeners()
-            self.hass.async_create_task(self.async_request_refresh())
-            return True
-        return False
+        return await shc_mod.async_shc_set_camera_light(self, cam_id, on)
 
     async def async_shc_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
-        """Enable (True) or disable (False) privacy mode via SHC API (legacy fallback)."""
-        device_id = self._shc_state_cache.get(cam_id, {}).get("device_id")
-        if not device_id:
-            _LOGGER.warning("SHC: no device_id cached for %s — cannot set privacy mode", cam_id)
-            return False
-        result = await self._async_shc_request(
-            "PUT",
-            f"/devices/{device_id}/services/PrivacyMode/state",
-            {"@type": "privacyModeState", "value": "ENABLED" if enabled else "DISABLED"},
-        )
-        if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
-            self._shc_state_cache[cam_id]["privacy_mode"] = enabled
-            self._privacy_set_at[cam_id] = time.monotonic()
-            self.async_update_listeners()
-            self.hass.async_create_task(self.async_request_refresh())
-            if not enabled:
-                cam = self._camera_entities.get(cam_id)
-                if cam:
-                    self.hass.async_create_task(cam._async_trigger_image_refresh(delay=1.5))
-            return True
-        return False
+        return await shc_mod.async_shc_set_privacy_mode(self, cam_id, enabled)
 
     async def async_cloud_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
-        """Enable (True) or disable (False) privacy mode.
-
-        Strategy: Cloud API first (~150ms), SHC local API fallback (~1100ms).
-        Cloud is 10x faster due to connection pooling; SHC requires fresh mTLS
-        handshake per request on an embedded controller.
-        SHC fallback ensures control when cloud is unreachable (offline mode).
-        """
-        # ── Cloud API (primary — fast) ───────────────────────────────────────
-        token = self.token
-        if token:
-            session = async_get_clientsession(self.hass, verify_ssl=False)
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type":  "application/json",
-                "Accept":        "application/json",
-            }
-            url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
-            body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
-
-            try:
-                async with asyncio.timeout(10):
-                    async with session.put(url, json=body, headers=headers) as resp:
-                        if resp.status == 401:
-                            # Token expired — refresh and retry once
-                            _LOGGER.info("cloud_set_privacy_mode: 401 — refreshing token and retrying")
-                            try:
-                                token = await self._ensure_valid_token()
-                                headers["Authorization"] = f"Bearer {token}"
-                            except Exception:
-                                pass  # fall through to SHC
-                        if resp.status in (200, 201, 204):
-                            self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
-                            self._privacy_set_at[cam_id] = time.monotonic()
-                            self.async_update_listeners()
-                            _LOGGER.debug(
-                                "cloud_set_privacy_mode: %s → %s (HTTP %d)",
-                                cam_id, "ON" if enabled else "OFF", resp.status,
-                            )
-                            self.hass.async_create_task(self.async_request_refresh())
-                            if not enabled:
-                                cam = self._camera_entities.get(cam_id)
-                                if cam:
-                                    self.hass.async_create_task(
-                                        cam._async_trigger_image_refresh(delay=1.5)
-                                    )
-                            return True
-                        if resp.status == 401:
-                            # Retry with refreshed token
-                            async with asyncio.timeout(10):
-                                async with session.put(url, json=body, headers=headers) as resp2:
-                                    if resp2.status in (200, 201, 204):
-                                        self._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = enabled
-                                        self._privacy_set_at[cam_id] = time.monotonic()
-                                        self.async_update_listeners()
-                                        self.hass.async_create_task(self.async_request_refresh())
-                                        if not enabled:
-                                            cam = self._camera_entities.get(cam_id)
-                                            if cam:
-                                                self.hass.async_create_task(
-                                                    cam._async_trigger_image_refresh(delay=1.5)
-                                                )
-                                        return True
-                        _LOGGER.warning(
-                            "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
-                        )
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
-
-        # ── SHC local API fallback (offline mode) ────────────────────────────
-        if self.shc_ready:
-            _LOGGER.info("cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id)
-            return await self.async_shc_set_privacy_mode(cam_id, enabled)
-        return False
+        return await shc_mod.async_cloud_set_privacy_mode(self, cam_id, enabled)
 
     async def async_cloud_set_camera_light(self, cam_id: str, on: bool) -> bool:
-        """Turn the camera light on (True) or off (False).
-
-        Strategy: Cloud API first (~150ms), SHC local API fallback (~1100ms).
-        SHC fallback ensures control when cloud is unreachable (offline mode).
-        Note: SHC CameraLight service only exists for cameras with physical lights
-        (Garten/CAMERA_EYES). For cameras without it, SHC fallback will fail silently.
-        """
-        # ── Cloud API (primary — fast) ───────────────────────────────────────
-        token = self.token
-        if token:
-            session = async_get_clientsession(self.hass, verify_ssl=False)
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type":  "application/json",
-                "Accept":        "application/json",
-            }
-            url  = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
-            body = (
-                {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 1.0}
-                if on else
-                {"frontLightOn": False, "wallwasherOn": False}
-            )
-
-            try:
-                async with asyncio.timeout(10):
-                    async with session.put(url, json=body, headers=headers) as resp:
-                        if resp.status in (200, 201, 204):
-                            self._shc_state_cache.setdefault(cam_id, {})["camera_light"] = on
-                            # Write-lock: prevent the next coordinator refresh from overwriting
-                            # the optimistic state with stale cloud data (Bosch API propagation delay).
-                            self._light_set_at[cam_id] = time.monotonic()
-                            self.async_update_listeners()
-                            _LOGGER.debug(
-                                "cloud_set_camera_light: %s → %s (HTTP %d)",
-                                cam_id, "ON" if on else "OFF", resp.status,
-                            )
-                            self.hass.async_create_task(self.async_request_refresh())
-                            return True
-                        _LOGGER.warning(
-                            "cloud_set_camera_light: HTTP %d for %s", resp.status, cam_id
-                        )
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
-
-        # ── SHC local API fallback (offline mode) ────────────────────────────
-        if self.shc_ready:
-            _LOGGER.info("cloud_set_camera_light: cloud failed, falling back to SHC for %s", cam_id)
-            return await self.async_shc_set_camera_light(cam_id, on)
-        return False
+        return await shc_mod.async_cloud_set_camera_light(self, cam_id, on)
 
     async def async_cloud_set_notifications(self, cam_id: str, enabled: bool) -> bool:
-        """Enable (FOLLOW_CAMERA_SCHEDULE) or disable (ALWAYS_OFF) notifications via cloud API.
-
-        Uses PUT /v11/video_inputs/{id}/enable_notifications.
-        """
-        token = self.token
-        if not token:
-            _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
-            return False
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
-        }
-        url    = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
-        status = "FOLLOW_CAMERA_SCHEDULE" if enabled else "ALWAYS_OFF"
-        body   = {"enabledNotificationsStatus": status}
-
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._shc_state_cache.setdefault(cam_id, {})["notifications_status"] = status
-                        self._notif_set_at[cam_id] = time.monotonic()
-                        self.async_update_listeners()
-                        _LOGGER.debug(
-                            "cloud_set_notifications: %s → %s (HTTP %d)",
-                            cam_id, status, resp.status,
-                        )
-                        self.hass.async_create_task(self.async_request_refresh())
-                        return True
-                    _LOGGER.warning(
-                        "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
-                    )
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
-        return False
+        return await shc_mod.async_cloud_set_notifications(self, cam_id, enabled)
 
     async def async_cloud_set_pan(self, cam_id: str, position: int) -> bool:
-        """Pan the 360 camera to an absolute position (-120 to +120 degrees).
+        return await shc_mod.async_cloud_set_pan(self, cam_id, position)
 
-        Uses PUT /v11/video_inputs/{id}/pan — no SHC local API needed.
-        """
-        token = self.token
-        if not token:
-            _LOGGER.warning("cloud_set_pan: no token for %s", cam_id)
-            return False
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
-        }
-        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan"
-
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(url, json={"absolutePosition": position}, headers=headers) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        actual = data.get("currentAbsolutePosition", position)
-                        self._pan_cache[cam_id] = actual
-                        _LOGGER.debug(
-                            "cloud_set_pan: %s → %d° (HTTP %d, ETA %dms)",
-                            cam_id, actual, resp.status,
-                            data.get("estimatedTimeToCompletion", 0),
-                        )
-                        self.hass.async_create_task(self.async_request_refresh())
-                        return True
-                    _LOGGER.warning("cloud_set_pan: HTTP %d for %s", resp.status, cam_id)
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_pan error for %s: %s", cam_id, err)
-        return False
-
-    # ── Auto-download (runs in executor thread) ───────────────────────────────
-    def _sync_download(self, data: dict, token: str, download_path: str) -> None:
-        """Download new event files to download_path/{camera_name}/."""
-        import requests  # sync requests — only used in executor
-        import urllib3
-        urllib3.disable_warnings()
-
-        session = requests.Session()
-        session.headers["Authorization"] = f"Bearer {token}"
-        session.verify = False
-
-        for cam_id, cam_data in data.items():
-            cam_name = cam_data["info"].get("title", cam_id)
-            folder   = os.path.join(download_path, cam_name)
-            os.makedirs(folder, exist_ok=True)
-
-            for ev in cam_data.get("events", []):
-                self._download_one(session, ev, folder, "jpg", ev.get("imageUrl"))
-                if ev.get("videoClipUploadStatus") == "Done":
-                    self._download_one(session, ev, folder, "mp4", ev.get("videoClipUrl"))
-
-    @staticmethod
-    def _download_one(
-        session, ev: dict, folder: str, ext: str, url: str | None
-    ) -> None:
-        if not url:
-            return
-        ts    = ev.get("timestamp", "")[:19].replace(":", "-").replace("T", "_")
-        etype = ev.get("eventType", "EVENT")
-        ev_id = ev.get("id", "")[:8]
-        path  = os.path.join(folder, f"{ts}_{etype}_{ev_id}.{ext}")
-        if os.path.exists(path):
-            return
-        try:
-            r = session.get(url, timeout=60, stream=True)
-            if r.status_code == 200:
-                with open(path, "wb") as f:
-                    for chunk in r.iter_content(65536):
-                        f.write(chunk)
-                _LOGGER.debug("Downloaded: %s", os.path.basename(path))
-        except Exception as err:
-            _LOGGER.warning("Download failed for %s: %s", os.path.basename(path), err)
-
-    # ── SMB/NAS upload (runs in executor thread) ────────────────────────────
-    def _sync_smb_upload(self, data: dict, token: str) -> None:
-        """Upload new event files to SMB/NAS share.
-
-        Folder structure: {smb_base_path}/{year}/{month}/{camera_name}_{date}_{time}_{type}.{ext}
-        Uses smbprotocol for cross-platform SMB access.
-        """
-        import requests as req
-        import urllib3
-        urllib3.disable_warnings()
-
-        opts = self.options
-        server = opts.get("smb_server", "").strip()
-        share = opts.get("smb_share", "").strip()
-        username = opts.get("smb_username", "").strip()
-        password = opts.get("smb_password", "")
-        base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-        folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}").strip()
-        file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
-
-        if not server or not share:
-            return
-
-        try:
-            from smbclient import (
-                register_session, mkdir, open_file, stat as smb_stat
-            )
-            import smbclient  # noqa: F401
-        except ImportError:
-            _LOGGER.warning(
-                "smbprotocol not installed — SMB upload disabled. "
-                "Install with: pip install smbprotocol"
-            )
-            return
-
-        try:
-            register_session(server, username=username, password=password)
-        except Exception as err:
-            _LOGGER.warning("SMB session to %s failed: %s", server, err)
-            return
-
-        session = req.Session()
-        session.headers["Authorization"] = f"Bearer {token}"
-        session.verify = False
-
-        for cam_id, cam_data in data.items():
-            cam_name = cam_data["info"].get("title", cam_id)
-            ev_list = cam_data.get("events", [])
-            _LOGGER.debug("SMB upload: %s has %d events", cam_name, len(ev_list))
-
-            for ev in ev_list:
-                ts = ev.get("timestamp", "")
-                if not ts or len(ts) < 19:
-                    _LOGGER.debug("SMB upload: skipping event with short/empty timestamp: %r", ts)
-                    continue
-
-                # Parse timestamp for folder/file patterns
-                year = ts[:4]
-                month = ts[5:7]
-                day = ts[8:10]
-                date_str = f"{year}-{month}-{day}"
-                time_str = ts[11:19].replace(":", "-")
-                etype = ev.get("eventType", "EVENT")
-                ev_id = ev.get("id", "")[:8]
-
-                # Build folder path from pattern
-                folder_parts = folder_pattern.format(
-                    year=year, month=month, day=day,
-                    camera=cam_name, type=etype,
-                )
-                smb_folder = f"\\\\{server}\\{share}\\{base_path}\\{folder_parts}"
-                smb_folder = smb_folder.replace("/", "\\")
-
-                # Build file name from pattern
-                file_base = file_pattern.format(
-                    camera=cam_name, date=date_str, time=time_str,
-                    type=etype, id=ev_id, year=year, month=month, day=day,
-                )
-
-                # Ensure folder exists (create recursively)
-                try:
-                    self._smb_makedirs(smb_folder, server, share, base_path, folder_parts)
-                except Exception as err:
-                    _LOGGER.warning("SMB mkdir error for %s: %s", smb_folder, err)
-                    continue
-
-                # Upload snapshot
-                img_url = ev.get("imageUrl")
-                if img_url:
-                    smb_path = f"{smb_folder}\\{file_base}.jpg"
-                    try:
-                        smb_stat(smb_path)
-                        _LOGGER.debug("SMB skip (exists): %s", file_base + ".jpg")
-                    except OSError:
-                        try:
-                            r = session.get(img_url, timeout=30)
-                            if r.status_code == 200 and r.content:
-                                with open_file(smb_path, mode="wb") as f:
-                                    f.write(r.content)
-                                _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".jpg", len(r.content))
-                            else:
-                                _LOGGER.warning("SMB snapshot download failed: HTTP %d, %d bytes", r.status_code, len(r.content))
-                        except Exception as err:
-                            _LOGGER.warning("SMB upload error for %s: %s", file_base, err)
-                else:
-                    _LOGGER.debug("SMB: no imageUrl for event %s", ev.get("id", "?")[:8])
-
-                # Upload video clip
-                clip_url = ev.get("videoClipUrl")
-                clip_status = ev.get("videoClipUploadStatus", "")
-                if clip_url and clip_status == "Done":
-                    smb_path = f"{smb_folder}\\{file_base}.mp4"
-                    try:
-                        smb_stat(smb_path)
-                        _LOGGER.debug("SMB skip (exists): %s", file_base + ".mp4")
-                    except OSError:
-                        try:
-                            r = session.get(clip_url, timeout=60, stream=True)
-                            if r.status_code == 200:
-                                total = 0
-                                with open_file(smb_path, mode="wb") as f:
-                                    for chunk in r.iter_content(65536):
-                                        f.write(chunk)
-                                        total += len(chunk)
-                                _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".mp4", total)
-                            else:
-                                _LOGGER.warning("SMB clip download failed: HTTP %d", r.status_code)
-                        except Exception as err:
-                            _LOGGER.warning("SMB clip upload error for %s: %s", file_base, err)
-
-    @staticmethod
-    def _smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder_parts: str) -> None:
-        """Create SMB directories recursively."""
-        from smbclient import mkdir, stat as smb_stat
-
-        # Build path incrementally
-        parts = [p for p in f"{base_path}\\{folder_parts}".replace("/", "\\").split("\\") if p]
-        current = f"\\\\{server}\\{share}"
-
-        for part in parts:
-            current = f"{current}\\{part}"
-            try:
-                smb_stat(current)
-            except OSError:
-                try:
-                    mkdir(current)
-                except OSError:
-                    pass  # May exist due to race condition
-
-    # ── SMB retention cleanup (runs in executor thread, once per day) ────────
-    def _sync_smb_cleanup(self) -> None:
-        """Delete files on the SMB share that are older than smb_retention_days."""
-        try:
-            from smbclient import register_session, scandir, remove, stat as smb_stat
-        except ImportError:
-            return
-
-        opts = self.options
-        server = opts.get("smb_server", "").strip()
-        share = opts.get("smb_share", "").strip()
-        username = opts.get("smb_username", "").strip()
-        password = opts.get("smb_password", "")
-        base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-        retention_days = int(opts.get("smb_retention_days", 180))
-
-        if not server or not share or retention_days <= 0:
-            return
-
-        try:
-            register_session(server, username=username, password=password)
-        except Exception as err:
-            _LOGGER.warning("SMB cleanup: session to %s failed: %s", server, err)
-            return
-
-        cutoff = time.time() - retention_days * 86400
-        root = f"\\\\{server}\\{share}\\{base_path}"
-        deleted = 0
-
-        def _walk_and_delete(path: str) -> None:
-            nonlocal deleted
-            try:
-                entries = list(scandir(path))
-            except Exception:
-                return
-            for entry in entries:
-                full = f"{path}\\{entry.name}"
-                if entry.is_dir():
-                    _walk_and_delete(full)
-                else:
-                    try:
-                        st = smb_stat(full)
-                        if st.st_mtime < cutoff:
-                            remove(full)
-                            deleted += 1
-                            _LOGGER.debug("SMB cleanup: deleted %s", entry.name)
-                    except Exception as err:
-                        _LOGGER.debug("SMB cleanup: error on %s: %s", entry.name, err)
-
-        _walk_and_delete(root)
-        if deleted:
-            _LOGGER.info(
-                "SMB cleanup: deleted %d file(s) older than %d days from %s",
-                deleted, retention_days, root,
-            )
-
-    # ── SMB disk-free check (runs in executor thread, once per hour) ─────────
-    def _sync_smb_disk_check(self) -> None:
-        """Check free space on the SMB share and fire an HA alert if low."""
-        try:
-            from smbclient import register_session
-            import smbclient._io as _smb_io  # noqa: F401 — ensure smbclient loaded
-        except ImportError:
-            return
-
-        import ctypes
-
-        opts = self.options
-        server = opts.get("smb_server", "").strip()
-        share = opts.get("smb_share", "").strip()
-        username = opts.get("smb_username", "").strip()
-        password = opts.get("smb_password", "")
-        warn_mb = int(opts.get("smb_disk_warn_mb", 500))
-        # Use system services for disk alerts (falls back to alert_notify_service if empty)
-        system_raw = opts.get("alert_notify_system", "").strip()
-        notify_service = system_raw or opts.get("alert_notify_service", "").strip()
-
-        if not server or not share or warn_mb <= 0:
-            return
-
-        try:
-            register_session(server, username=username, password=password)
-        except Exception as err:
-            _LOGGER.warning("SMB disk check: session to %s failed: %s", server, err)
-            return
-
-        # Use smbclient's statvfs to get free space
-        try:
-            import smbclient
-            vfs = smbclient.statvfs(f"\\\\{server}\\{share}")
-            free_mb = (vfs.f_bavail * vfs.f_frsize) // (1024 * 1024)
-        except Exception as err:
-            _LOGGER.debug("SMB disk check: statvfs failed: %s", err)
-            return
-
-        if free_mb < warn_mb:
-            msg = (
-                f"Bosch Camera NAS: Wenig Speicherplatz auf \\\\{server}\\{share} — "
-                f"noch {free_mb} MB frei (Warnschwelle: {warn_mb} MB)"
-            )
-            _LOGGER.warning(msg)
-            # Fire alert via HA event loop
-            self.hass.loop.call_soon_threadsafe(
-                self.hass.async_create_task,
-                self._async_smb_disk_alert(msg, notify_service),
-            )
-
-    async def _async_smb_disk_alert(self, message: str, notify_service: str) -> None:
-        """Send disk-full warning via notify service or HA persistent notification."""
-        services = [s.strip() for s in notify_service.split(",") if s.strip()]
-        sent = False
-        for svc in services:
-            domain, _, name = svc.partition(".")
-            if self.hass.services.has_service(domain, name):
-                try:
-                    await self.hass.services.async_call(
-                        domain, name,
-                        {"message": message, "title": "Bosch Kamera — Speicherwarnung"},
-                    )
-                    sent = True
-                except Exception as err:
-                    _LOGGER.debug("SMB disk alert via %s failed: %s", svc, err)
-        if not sent:
-            # Fall back to HA persistent notification
-            await self.hass.services.async_call(
-                "persistent_notification", "create",
-                {
-                    "title": "Bosch Kamera — Speicherwarnung",
-                    "message": message,
-                    "notification_id": "bosch_smb_disk_warn",
-                },
-            )
+    # SMB/NAS upload, download, cleanup, and disk-check functions are in smb.py
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})

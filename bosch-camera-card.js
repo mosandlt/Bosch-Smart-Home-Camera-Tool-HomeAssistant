@@ -293,29 +293,18 @@ class BoschCameraCard extends HTMLElement {
   // ── Timer ─────────────────────────────────────────────────────────────────
   _startRefreshTimer() {
     this._stopRefreshTimer();
-    // No snapshot polling when live video is playing
-    if (this._liveVideoActive) return;
+    // No snapshot polling when live video (HLS) is playing or starting
+    if (this._liveVideoActive || this._startingLiveVideo) return;
+    // When streaming is active, HLS handles video — no snapshot polling needed.
+    if (this._isStreaming()) return;
     let interval;
-    if (this._isStreaming()) {
-      // Snapshot-mode streaming (Stream ON + Ton OFF): fast polling
-      interval = this._config.refresh_interval_streaming;
-    } else if (document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden") {
       interval = 1800; // 30 min — page is in background, save resources
     } else {
       interval = 60;   // 1 min — page is visible
     }
     this._refreshTimer = setInterval(() => {
-      if (this._isStreaming()) {
-        // Streaming snapshot mode: single direct img.src update — no preloading, no service call.
-        // _updateImage() preloads + sets img.src → 2 HTTP requests per tick (preload +
-        // img.src, because HA uses Cache-Control: no-store so no browser cache hit).
-        // _cacheImage in _onImageLoaded would add a 3rd. Three requests per 2s tick causes
-        // variable snap.jpg fetch timing → irregular intervals (2s 3s 5s 1s 1s...).
-        // Direct src update: exactly 1 request/tick → consistent 2s spacing.
-        this._streamingImageLoad();
-      } else {
-        this._triggerFreshSnapshot();
-      }
+      this._triggerFreshSnapshot();
     }, interval * 1000);
   }
 
@@ -457,19 +446,29 @@ class BoschCameraCard extends HTMLElement {
           z-index: 9999 !important; background: #000 !important;
           display: flex !important; align-items: center !important; justify-content: center !important;
         }
+        /* Hide header, controls and other elements in fullscreen */
+        :host(.fs-active) .header,
+        :host(.fs-active) .info-row,
+        :host(.fs-active) .btn-row,
+        :host(.fs-active) .switch-rows,
+        :host(.fs-active) .quality-section,
+        :host(.fs-active) .accordion { display: none !important; }
+        :host(.fs-active) .img-wrapper { aspect-ratio: unset; width: 100vw; height: 100vh; }
+        :host(.fs-active) .cam-img,
+        :host(.fs-active) .cam-video { object-fit: contain; min-height: unset; }
         :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }
         :host(.fs-active) .cam-img,
         :host(.fs-active) .cam-video { width: 100vw; height: 100vh; object-fit: contain; min-height: unset; }
 
-        /* Loading overlay */
+        /* Loading overlay — must be above both cam-img and cam-video */
         .loading-overlay {
-          position: absolute; inset: 0;
+          position: absolute; inset: 0; z-index: 10;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: rgba(0,0,0,.75);
+          background: rgba(0,0,0,.85);
           gap: 12px;
           opacity: 0; transition: opacity 0.3s; pointer-events: none;
         }
-        .loading-overlay.visible { opacity: 1; }
+        .loading-overlay.visible { opacity: 1; pointer-events: auto; }
         /* Semi-transparent overlay when refreshing an existing image — old image stays visible, spinner on top */
         .loading-overlay.refreshing { background: rgba(0,0,0,.4); }
         .spinner {
@@ -1134,6 +1133,12 @@ class BoschCameraCard extends HTMLElement {
     this._loadRetries = 0;   // reset retry counter on success
     if (img) img.classList.remove("hidden");
 
+    // Clear stream-connecting overlay when first real frame arrives
+    if (!isCache && this._streamConnecting) {
+      this._streamConnecting = false;
+      if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+    }
+
     // Don't clear spinner when loading cached image and we're still waiting for fresh
     if (isCache && this._awaitingFresh) {
       // Cache loaded — keep spinner visible, fresh image will clear it
@@ -1153,16 +1158,9 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v1.9.5 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.0.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
-    // Update stream badge uptime counter while streaming (refreshes every 2 s per frame)
-    if (!isCache && this._isStreaming() && this._streamStartTime) {
-      const s = Math.floor((Date.now() - this._streamStartTime) / 1000);
-      const mm = String(Math.floor(s / 60)).padStart(2, "0");
-      const ss = String(s % 60).padStart(2, "0");
-      const label = this.shadowRoot.getElementById("stream-label");
-      if (label) label.textContent = `${mm}:${ss}`;
-    }
+    // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
     // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
     // After stream stops, _isStreaming() returns false → the post-stop refresh image
@@ -1188,12 +1186,6 @@ class BoschCameraCard extends HTMLElement {
       return;
     }
     // If we already had an image, keep showing the old one (don't blank it).
-    // In streaming mode: one immediate retry for transient snap.jpg failures
-    // (network glitch, proxy hiccup) — the next setInterval tick is 2s away.
-    if (this._isStreaming()) {
-      setTimeout(() => this._streamingImageLoad(), 500);
-      return;
-    }
     this._setLoadingOverlay(false);
   }
 
@@ -1351,7 +1343,20 @@ class BoschCameraCard extends HTMLElement {
       if (img) img.style.display = "none";
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
-      this._setLoadingOverlay(false);
+      // Keep loading overlay visible until first video frame renders.
+      // The 'playing' event fires when the video actually starts playing
+      // (after decoder receives first keyframe). This avoids the black screen.
+      const clearOverlay = () => {
+        this._setLoadingOverlay(false);
+        if (this._streamConnecting) {
+          this._streamConnecting = false;
+          if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+        }
+        video.removeEventListener("playing", clearOverlay);
+      };
+      video.addEventListener("playing", clearOverlay);
+      // Safety: clear overlay after 15s even if 'playing' never fires
+      setTimeout(() => { clearOverlay(); }, 15000);
 
     } catch (e) {
       if (attempt < 3) {
@@ -1373,12 +1378,16 @@ class BoschCameraCard extends HTMLElement {
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
       video.pause();
-      video.src = "";
+      video.removeAttribute("src");
+      video.load();  // reset video element fully
       video.style.display = "none";
     }
     if (img) img.style.display = "block";
     this._liveVideoActive   = false;
     this._startingLiveVideo = false;
+    // Clean up stream-connecting state
+    this._streamConnecting = false;
+    if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
@@ -1575,44 +1584,52 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Track stream session start time for uptime counter in the badge
-    if (isStreaming && !this._lastStreaming) this._streamStartTime = Date.now();
-    if (!isStreaming) this._streamStartTime = 0;
+    if (isStreaming && !this._lastStreaming) {
+      this._streamStartTime = Date.now();
+      // Start uptime counter interval (1s updates)
+      if (this._uptimeTimer) clearInterval(this._uptimeTimer);
+      this._uptimeTimer = setInterval(() => {
+        if (!this._streamStartTime) return;
+        const s = Math.floor((Date.now() - this._streamStartTime) / 1000);
+        const mm = String(Math.floor(s / 60)).padStart(2, "0");
+        const ss = String(s % 60).padStart(2, "0");
+        const label = this.shadowRoot?.getElementById("stream-label");
+        if (label) label.textContent = `${mm}:${ss}`;
+      }, 1000);
+    }
+    if (!isStreaming) {
+      this._streamStartTime = 0;
+      if (this._uptimeTimer) { clearInterval(this._uptimeTimer); this._uptimeTimer = null; }
+    }
 
-    // shouldVideo: only show HLS live video when stream is ON AND Ton (audio) is ON.
-    // Stream ON + Ton OFF → snapshot polling (img). Stream ON + Ton ON → HLS video.
-    const isAudioOn  = this._getEffectiveState(ents.audio) === "on";
-    const shouldVideo = isStreaming && isAudioOn;
+    // shouldVideo: always use HLS video when stream is ON.
+    // Audio toggle only controls mute/unmute — no more snapshot-polling mode.
+    const isAudioOn   = this._getEffectiveState(ents.audio) === "on";
+    const shouldVideo = isStreaming;
 
     // Stream just stopped → stop video, fetch fresh snapshot for current + next session.
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      // Tell backend to fetch a fresh live snapshot immediately (sets _force_image_refresh=True
-      // + opens PUT /connection → snap.jpg). Delay card load to 3.5 s so the backend
-      // (async_trigger_image_refresh delay=2 + ~1s fetch) has time to finish.
-      // _onImageLoaded (called when fresh image arrives) → _cacheImage → localStorage updated
-      // (streaming=false at this point → per-session and next-session image both fresh).
       this._callService("bosch_shc_camera", "trigger_snapshot", {});
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
     this._lastStreaming = isStreaming;
 
-    // Start video when shouldVideo becomes true (stream ON + audio ON)
+    // Start HLS video when stream turns ON
     if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo) {
       this._startLiveVideo();
     }
-    // Stop video when shouldVideo becomes false (audio turned OFF while streaming)
+    // Stop video when stream turns OFF
     if (!shouldVideo && this._liveVideoActive) {
       this._stopLiveVideo();
-      if (isStreaming) this._startRefreshTimer(); // stream still on → use snapshot polling
     }
 
-    // Sync refresh timer interval (idle vs streaming) when not in live video mode.
-    // This ensures the timer runs at 3s when stream is ON+Ton OFF, 30s when stream is OFF.
-    if (!this._liveVideoActive && !this._startingLiveVideo) {
-      if (this._timerStreaming !== isStreaming) {
-        this._timerStreaming = isStreaming;
+    // Sync refresh timer when not in live video mode (idle snapshot polling).
+    if (!this._liveVideoActive && !this._startingLiveVideo && !isStreaming) {
+      if (this._timerStreaming !== false) {
+        this._timerStreaming = false;
         this._startRefreshTimer();
       }
     }
@@ -1798,6 +1815,17 @@ class BoschCameraCard extends HTMLElement {
     const isOn = this._isStreaming();
     // Optimistic update — badge and button update instantly
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
+    if (!isOn) {
+      // Starting stream → show loading overlay with status updates
+      this._streamConnecting = true;
+      this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
+      // Step-by-step status updates while waiting for first frame
+      this._connectSteps = [
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera wird aufgeweckt…"); }, 2000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Stream wird gestartet…"); }, 4500),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Warte auf erstes Bild…"); }, 7000),
+      ];
+    }
     this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });
   }
 
@@ -1807,8 +1835,7 @@ class BoschCameraCard extends HTMLElement {
     const state = this._hass.states[entityId]?.state;
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
-    // Optimistic update → calls _update() which starts/stops video based on
-    // shouldVideo = isStreaming && isAudioOn, and syncs video.muted accordingly.
+    // Optimistic update → calls _update() which syncs video.muted state.
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     // Persist to HA (affects rtsps URL for next stream open)
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });

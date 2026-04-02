@@ -83,9 +83,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
 
-        # Force TCP interleaved RTSP transport — required for LOCAL TLS proxy.
-        self.stream_options = {"rtsp_transport": "tcp"}
-        _LOGGER.info("Camera %s stream_options set: %s (id=%d)", cam_id[:8], self.stream_options, id(self))
+        # Note: TCP interleaved transport is forced by the TLS proxy's RTSP
+        # SETUP rewrite (see _start_tls_proxy), not by stream_options here.
+        # HA's propcache.cached_property ignores instance __dict__ overrides.
 
         self._cam_id = cam_id
         self._entry  = entry
@@ -323,14 +323,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         if not url:
             return None
         # Strip audio param if audio switch is OFF (default)
-        if not self.coordinator._audio_enabled.get(self._cam_id, False):
+        if not self.coordinator._audio_enabled.get(self._cam_id, True):
             url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
-        # Invalidate HA's cached stream so it picks up URL changes
-        # (e.g. after session renewal with new credentials)
-        if hasattr(self, '_stream') and self._stream:
-            prev_src = getattr(self._stream, 'source', '')
-            if prev_src and prev_src != url:
-                self._stream = None
         return url
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────

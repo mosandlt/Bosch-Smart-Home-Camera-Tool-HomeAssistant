@@ -226,7 +226,8 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "enable_snapshot_button", "enable_auto_download",
                       "high_quality_video", "enable_binary_sensors",
                       "enable_fcm_push", "alert_save_snapshots",
-                      "alert_delete_after_send", "enable_intercom",
+                      "alert_delete_after_send", "audio_default_on",
+                      "enable_intercom",
                       "enable_smb_upload"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
@@ -347,6 +348,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "fcm_push_mode",
                     default=str(opts.get("fcm_push_mode", "auto")),
                 ): vol.In(["auto", "android", "ios", "polling"]),
+                vol.Optional(
+                    "audio_default_on",
+                    default=bool(opts.get("audio_default_on", True)),
+                ): bool,
                 vol.Optional(
                     "enable_intercom",
                     default=bool(opts.get("enable_intercom", False)),
