@@ -69,6 +69,12 @@ async def async_setup_entry(
         entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
         # Cloud rules count (diagnostic, disabled by default)
         entities.append(BoschRulesCountSensor(coordinator, cam_id, config_entry))
+        # Phase 2 RCP sensors (diagnostic, disabled by default)
+        entities.append(BoschAlarmCatalogSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschMotionZonesSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschTlsCertSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschNetworkServicesSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschIvaCatalogSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -765,4 +771,229 @@ class BoschRulesCountSensor(_BoschSensorBase):
                 }
                 for r in rules
             ],
+        }
+
+
+# ── Phase 2: RCP Deep Dive Sensors ──────────────────────────────────────────
+
+
+class BoschAlarmCatalogSensor(_BoschSensorBase):
+    """Sensor: alarm types supported by camera firmware (RCP 0x0c38).
+
+    Displays count of supported alarm types. Attributes list all types
+    with name and category (virtual, flame, smoke, audio, motion, etc.).
+    """
+
+    _attr_icon = "mdi:alarm-light"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Alarm Catalog"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_catalog"
+
+    @property
+    def native_value(self) -> int | None:
+        alarms = self.coordinator._rcp_alarm_catalog_cache.get(self._cam_id)
+        if alarms is None:
+            return None
+        return len(alarms)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "types"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_alarm_catalog_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        alarms = self.coordinator._rcp_alarm_catalog_cache.get(self._cam_id, [])
+        return {
+            "alarm_types": [a["name"] for a in alarms],
+            "alarm_details": alarms,
+            "categories": list({a["type"] for a in alarms}),
+        }
+
+
+class BoschMotionZonesSensor(_BoschSensorBase):
+    """Sensor: motion detection zones from camera firmware (RCP 0x0c00 + 0x0c0a).
+
+    Displays number of zones. Attributes contain zone coordinates
+    as normalized x/y pairs (-1.0 to 1.0) for overlay visualization.
+    """
+
+    _attr_icon = "mdi:vector-square"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Motion Zones"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_zones"
+
+    @property
+    def native_value(self) -> int | None:
+        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id)
+        if zones is None:
+            return None
+        return len(zones)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "zones"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_motion_zones_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
+        coords = self.coordinator._rcp_motion_coords_cache.get(self._cam_id, [])
+        return {
+            "zones": zones,
+            "coordinates": coords,
+            "coordinate_count": len(coords),
+        }
+
+
+class BoschTlsCertSensor(_BoschSensorBase):
+    """Sensor: TLS certificate info from camera (RCP 0x0b91).
+
+    Displays certificate expiry date. Attributes contain issuer, subject,
+    key size, and serial number.
+    """
+
+    _attr_icon = "mdi:certificate"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} TLS Certificate"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_tls_cert"
+
+    @property
+    def native_value(self) -> datetime | None:
+        cert = self.coordinator._rcp_tls_cert_cache.get(self._cam_id)
+        if not cert or "not_after" not in cert:
+            return None
+        try:
+            return datetime.fromisoformat(cert["not_after"])
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_tls_cert_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        cert = self.coordinator._rcp_tls_cert_cache.get(self._cam_id, {})
+        return {
+            "issuer": cert.get("issuer", ""),
+            "subject": cert.get("subject", ""),
+            "key_size": cert.get("key_size"),
+            "serial": cert.get("serial", ""),
+            "not_before": cert.get("not_before", ""),
+            "not_after": cert.get("not_after", ""),
+            "signature_algorithm": cert.get("signature_algorithm", ""),
+        }
+
+
+class BoschNetworkServicesSensor(_BoschSensorBase):
+    """Sensor: network services running on camera (RCP 0x0c62).
+
+    Displays count of active services. Attributes list all services
+    (HTTP, HTTPS, RTSP, SNMP, UPnP, NTP, ONVIF, etc.).
+    """
+
+    _attr_icon = "mdi:server-network"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Network Services"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_network_services"
+
+    @property
+    def native_value(self) -> int | None:
+        services = self.coordinator._rcp_network_services_cache.get(self._cam_id)
+        if services is None:
+            return None
+        return len(services)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "services"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_network_services_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        services = self.coordinator._rcp_network_services_cache.get(self._cam_id, [])
+        return {"services": services}
+
+
+class BoschIvaCatalogSensor(_BoschSensorBase):
+    """Sensor: IVA analytics modules from camera firmware (RCP 0x0b60).
+
+    Displays count of analytics modules. Attributes list all modules with
+    ID, version, flags, and active state.
+    """
+
+    _attr_icon = "mdi:brain"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} IVA Analytics"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_iva_catalog"
+
+    @property
+    def native_value(self) -> int | None:
+        modules = self.coordinator._rcp_iva_catalog_cache.get(self._cam_id)
+        if modules is None:
+            return None
+        return len(modules)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "modules"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_iva_catalog_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        modules = self.coordinator._rcp_iva_catalog_cache.get(self._cam_id, [])
+        active = [m for m in modules if m.get("active")]
+        return {
+            "modules": modules,
+            "active_count": len(active),
+            "active_modules": active,
         }

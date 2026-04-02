@@ -286,3 +286,228 @@ async def async_update_rcp_data(
             _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
     except Exception as err:
         _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
+
+    # ── Phase 2 RCP reads ────────────────────────────────────────────────────
+
+    # Read alarm catalog (0x0c38) -- UTF-16-BE, ~1366 bytes
+    # Contains all alarm types the camera firmware supports (virtual 0-15,
+    # flame, smoke, glass break, audio, storage, etc.)
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0c38", session_id, type_="P_OCTET")
+        if raw and len(raw) > 10:
+            alarms = _parse_alarm_catalog(raw)
+            coordinator._rcp_alarm_catalog_cache[cam_id] = alarms
+            _LOGGER.debug("RCP alarm catalog for %s: %d types", cam_id, len(alarms))
+    except Exception as err:
+        _LOGGER.debug("RCP alarm catalog read error for %s: %s", cam_id, err)
+
+    # Read motion detection zones (0x0c00) -- 5 zones × 28 bytes
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0c00", session_id, type_="P_OCTET")
+        if raw and len(raw) >= 28:
+            zones = _parse_motion_zones(raw)
+            coordinator._rcp_motion_zones_cache[cam_id] = zones
+            _LOGGER.debug("RCP motion zones for %s: %d zones", cam_id, len(zones))
+    except Exception as err:
+        _LOGGER.debug("RCP motion zones read error for %s: %s", cam_id, err)
+
+    # Read motion zone coordinates (0x0c0a) -- int32 normalized ±1.0 as ×2^31
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0c0a", session_id, type_="P_OCTET")
+        if raw and len(raw) >= 16:
+            coords = _parse_motion_coords(raw)
+            coordinator._rcp_motion_coords_cache[cam_id] = coords
+            _LOGGER.debug("RCP motion coords for %s: %d points", cam_id, len(coords))
+    except Exception as err:
+        _LOGGER.debug("RCP motion coords read error for %s: %s", cam_id, err)
+
+    # Read TLS certificate (0x0b91) -- DER X.509, ~455 bytes
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0b91", session_id, type_="P_OCTET")
+        if raw and len(raw) > 50:
+            cert_info = _parse_tls_cert(raw)
+            coordinator._rcp_tls_cert_cache[cam_id] = cert_info
+            _LOGGER.debug("RCP TLS cert for %s: %s", cam_id, cert_info)
+    except Exception as err:
+        _LOGGER.debug("RCP TLS cert read error for %s: %s", cam_id, err)
+
+    # Read network services (0x0c62) -- TLV list, ~469 bytes
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0c62", session_id, type_="P_OCTET")
+        if raw and len(raw) > 10:
+            services = _parse_network_services(raw)
+            coordinator._rcp_network_services_cache[cam_id] = services
+            _LOGGER.debug("RCP network services for %s: %s", cam_id, services)
+    except Exception as err:
+        _LOGGER.debug("RCP network services read error for %s: %s", cam_id, err)
+
+    # Read IVA analytics catalog (0x0b60) -- 65 entries × 6B
+    try:
+        raw = await rcp_read(hass, rcp_base, "0x0b60", session_id, type_="P_OCTET")
+        if raw and len(raw) >= 6:
+            analytics = _parse_iva_catalog(raw)
+            coordinator._rcp_iva_catalog_cache[cam_id] = analytics
+            _LOGGER.debug("RCP IVA catalog for %s: %d modules", cam_id, len(analytics))
+    except Exception as err:
+        _LOGGER.debug("RCP IVA catalog read error for %s: %s", cam_id, err)
+
+
+# ── Phase 2 parsers ─────────────────────────────────────────────────────────
+
+
+def _parse_alarm_catalog(raw: bytes) -> list[dict]:
+    """Parse alarm catalog (0x0c38) from UTF-16-BE encoded TLV data.
+
+    Returns list of dicts: [{"id": 0, "name": "Virtual Alarm 0", "type": "virtual"}, ...]
+    """
+    alarms = []
+    try:
+        # The raw data contains TLV entries with alarm names in UTF-16-BE.
+        # Each entry: 2B id + 2B length + UTF-16-BE name
+        # Fallback: try decoding entire blob as UTF-16-BE and split by null chars
+        text = raw.decode("utf-16-be", errors="replace")
+        # Split by null characters and filter empty strings
+        parts = [p.strip() for p in text.split("\x00") if p.strip()]
+        for i, name in enumerate(parts):
+            # Clean up control characters
+            name = "".join(c for c in name if c.isprintable() or c == " ")
+            if name and len(name) > 1:
+                alarm_type = "unknown"
+                name_lower = name.lower()
+                if "virtual alarm" in name_lower:
+                    alarm_type = "virtual"
+                elif "flame" in name_lower:
+                    alarm_type = "flame"
+                elif "smoke" in name_lower:
+                    alarm_type = "smoke"
+                elif "audio" in name_lower:
+                    alarm_type = "audio"
+                elif "signal" in name_lower or "loss" in name_lower:
+                    alarm_type = "signal"
+                elif "storage" in name_lower or "disk" in name_lower:
+                    alarm_type = "storage"
+                elif "motion" in name_lower or "resilmotion" in name_lower or "resimotion" in name_lower:
+                    alarm_type = "motion"
+                elif "reference" in name_lower:
+                    alarm_type = "reference"
+                elif "config" in name_lower:
+                    alarm_type = "config"
+                elif "global" in name_lower:
+                    alarm_type = "global_change"
+                elif "task" in name_lower:
+                    alarm_type = "task"
+                alarms.append({"id": i, "name": name, "type": alarm_type})
+    except Exception as err:
+        _LOGGER.debug("_parse_alarm_catalog error: %s", err)
+    return alarms
+
+
+def _parse_motion_zones(raw: bytes) -> list[dict]:
+    """Parse motion detection zones (0x0c00) — 5 zones × 28 bytes each.
+
+    Returns list of dicts with zone info (id, enabled, sensitivity fields).
+    """
+    zones = []
+    zone_size = 28
+    n_zones = min(len(raw) // zone_size, 5)
+    for i in range(n_zones):
+        chunk = raw[i * zone_size : (i + 1) * zone_size]
+        if len(chunk) < zone_size:
+            break
+        # First bytes contain zone config, exact struct is camera-specific
+        # Expose raw hex for diagnostics, plus zone index
+        zones.append({
+            "zone_id": i,
+            "raw_hex": chunk.hex(),
+            "size": len(chunk),
+        })
+    return zones
+
+
+def _parse_motion_coords(raw: bytes) -> list[dict]:
+    """Parse motion region boundary coordinates (0x0c0a).
+
+    Coordinates are int32 big-endian, normalized ±1.0 as value × 2^31.
+    Returns list of {x, y} pairs as floats (-1.0 to 1.0).
+    """
+    coords = []
+    n = len(raw) // 4
+    values = [struct.unpack(">i", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
+    # Pairs of (x, y) coordinates
+    scale = 2 ** 31
+    for j in range(0, len(values) - 1, 2):
+        coords.append({
+            "x": round(values[j] / scale, 4),
+            "y": round(values[j + 1] / scale, 4),
+        })
+    return coords
+
+
+def _parse_tls_cert(raw: bytes) -> dict:
+    """Parse DER X.509 certificate (0x0b91) and extract key info.
+
+    Falls back to raw hex if pyOpenSSL/cryptography is not available.
+    """
+    info: dict = {"raw_size": len(raw)}
+    try:
+        from cryptography import x509
+        cert = x509.load_der_x509_certificate(raw)
+        info["issuer"] = cert.issuer.rfc4514_string()
+        info["subject"] = cert.subject.rfc4514_string()
+        info["serial"] = format(cert.serial_number, "x")
+        info["not_before"] = cert.not_valid_before_utc.isoformat()
+        info["not_after"] = cert.not_valid_after_utc.isoformat()
+        info["key_size"] = cert.public_key().key_size
+        info["signature_algorithm"] = cert.signature_algorithm_oid.dotted_string
+    except ImportError:
+        _LOGGER.debug("cryptography package not available — TLS cert raw only")
+        info["raw_hex"] = raw[:40].hex() + "..."
+    except Exception as err:
+        _LOGGER.debug("TLS cert parse error: %s", err)
+        info["raw_hex"] = raw[:40].hex() + "..."
+    return info
+
+
+def _parse_network_services(raw: bytes) -> list[str]:
+    """Parse network services catalog (0x0c62) — TLV with service names.
+
+    Returns list of service name strings.
+    """
+    services = []
+    try:
+        # TLV data contains ASCII service names separated by null bytes
+        text = raw.decode("ascii", errors="replace")
+        parts = [p.strip() for p in text.split("\x00") if p.strip()]
+        for name in parts:
+            clean = "".join(c for c in name if c.isprintable() or c == " ")
+            if clean and len(clean) > 1:
+                services.append(clean)
+    except Exception as err:
+        _LOGGER.debug("_parse_network_services error: %s", err)
+    return services
+
+
+def _parse_iva_catalog(raw: bytes) -> list[dict]:
+    """Parse IVA analytics module catalog (0x0b60) — 65 entries × 6B.
+
+    Returns list of dicts with module info.
+    """
+    modules = []
+    entry_size = 6
+    n = min(len(raw) // entry_size, 65)
+    for i in range(n):
+        chunk = raw[i * entry_size : (i + 1) * entry_size]
+        if len(chunk) < entry_size:
+            break
+        # Each entry: 2B module_id + 2B version + 2B flags
+        module_id = struct.unpack(">H", chunk[:2])[0]
+        version = struct.unpack(">H", chunk[2:4])[0]
+        flags = struct.unpack(">H", chunk[4:6])[0]
+        if module_id > 0:  # skip empty entries
+            modules.append({
+                "module_id": module_id,
+                "version": version,
+                "flags": flags,
+                "active": bool(flags & 0x01),
+            })
+    return modules

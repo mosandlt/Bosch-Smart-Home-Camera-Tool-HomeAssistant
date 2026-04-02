@@ -177,6 +177,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._rcp_lan_ip_cache: dict[str, str | None] = {}          # camera LAN IP via RCP 0x0a36
         self._rcp_product_name_cache: dict[str, str | None] = {}    # camera product name via RCP 0x0aea
         self._rcp_bitrate_cache: dict[str, list[int]] = {}          # bitrate ladder kbps from 0x0c81
+        # Phase 2 RCP caches
+        self._rcp_alarm_catalog_cache: dict[str, list[dict]] = {}  # alarm types from 0x0c38
+        self._rcp_motion_zones_cache: dict[str, list[dict]] = {}   # motion zones from 0x0c00
+        self._rcp_motion_coords_cache: dict[str, list[dict]] = {}  # zone coords from 0x0c0a
+        self._rcp_tls_cert_cache: dict[str, dict] = {}             # TLS cert info from 0x0b91
+        self._rcp_network_services_cache: dict[str, list[str]] = {} # network services from 0x0c62
+        self._rcp_iva_catalog_cache: dict[str, list[dict]] = {}    # IVA analytics from 0x0b60
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
