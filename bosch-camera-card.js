@@ -171,6 +171,10 @@ class BoschCameraCard extends HTMLElement {
     this._refreshTimer   = null;
     this._imgTimestamp   = Date.now();
     this._lastStreaming   = null;    // last known streaming state (true/false/null)
+    this._streamConnecting = false;  // true while stream is connecting (overlay shown)
+    this._connectSteps     = null;   // setTimeout IDs for progressive overlay text
+    this._waitingForStream = false;  // true while waiting for backend stream ready
+    this._lastMotionCoordKey = null; // memoization key for motion zone SVG
     this._lastPrivacy    = null;    // last known privacy state (true/false/null)
     this._imageLoaded    = false;   // did we ever successfully load an image?
     this._loadingOverlay = false;   // is the "Wird geladen" overlay active?
@@ -205,6 +209,7 @@ class BoschCameraCard extends HTMLElement {
       camera_entity:              config.camera_entity,
       title:                      config.title || null,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
+      show_motion_zones:         config.show_motion_zones ?? false,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -241,6 +246,7 @@ class BoschCameraCard extends HTMLElement {
       ambient:       config.ambient_entity       || `sensor.${base}_ambient_light`,
       movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
+      motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
     };
 
     this._render();
@@ -459,6 +465,24 @@ class BoschCameraCard extends HTMLElement {
         :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }
         :host(.fs-active) .cam-img,
         :host(.fs-active) .cam-video { width: 100vw; height: 100vh; object-fit: contain; min-height: unset; }
+
+        /* Motion zones SVG overlay */
+        .motion-zones-overlay {
+          position: absolute; inset: 0; z-index: 5;
+          width: 100%; height: 100%;
+          pointer-events: none; opacity: 0;
+          transition: opacity 0.3s;
+        }
+        .motion-zones-overlay.visible { opacity: 1; }
+        .motion-zones-overlay rect {
+          fill: rgba(0, 122, 255, 0.15);
+          stroke: rgba(0, 122, 255, 0.6);
+          stroke-width: 0.5;
+        }
+        .motion-zones-overlay rect:nth-child(2) { fill: rgba(52, 199, 89, 0.15); stroke: rgba(52, 199, 89, 0.6); }
+        .motion-zones-overlay rect:nth-child(3) { fill: rgba(255, 159, 10, 0.15); stroke: rgba(255, 159, 10, 0.6); }
+        .motion-zones-overlay rect:nth-child(4) { fill: rgba(255, 69, 58, 0.15); stroke: rgba(255, 69, 58, 0.6); }
+        .motion-zones-overlay rect:nth-child(5) { fill: rgba(175, 82, 222, 0.15); stroke: rgba(175, 82, 222, 0.6); }
 
         /* Loading overlay — must be above both cam-img and cam-video */
         .loading-overlay {
@@ -681,6 +705,7 @@ class BoschCameraCard extends HTMLElement {
             </svg>
             <span>Privat-Modus aktiv</span>
           </div>
+          <svg class="motion-zones-overlay" id="motion-zones-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
           <div class="img-overlay">
             <span class="last-event-overlay" id="last-event-overlay"></span>
             <span class="events-overlay" id="events-overlay"></span>
@@ -979,7 +1004,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v1.9.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.1.0</div>
       </ha-card>
     `;
 
@@ -1158,7 +1183,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.0.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.1.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1268,84 +1293,17 @@ class BoschCameraCard extends HTMLElement {
     const img   = this.shadowRoot.getElementById("cam-img");
     if (!video) return;
 
-    // Stop snapshot polling immediately — don't wait for video to be ready
     this._stopRefreshTimer();
     this._startingLiveVideo = true;
 
-    try {
-      const result = await this._hass.callWS({
-        type:      "camera/stream",
-        entity_id: this._entities.camera,
-      });
-      if (!result?.url) throw new Error("no url");
+    const audioOn = this._getEffectiveState(this._entities.audio) === "on";
 
-      const hlsUrl  = result.url;
-      const audioOn = this._getEffectiveState(this._entities.audio) === "on";
-      // Always start muted — autoplay policy blocks unmuted autoplay.
-      // After play() resolves, unmute if Ton is ON (safe: changing muted on a
-      // playing video does not require a user gesture).
-      video.muted = true;
-
-      // startPlay: called when the pipeline is ready.
-      // For hls.js → called from MANIFEST_PARSED (source buffers are set up).
-      // For native HLS → called immediately after video.src is set.
-      // Re-mute before play() in case _update() already unmuted while waiting for MANIFEST_PARSED.
-      const startPlay = () => {
-        video.muted = true; // ensure muted before play() — autoplay policy
-        video.play()
-          .then(() => { video.muted = !audioOn; })
-          .catch(() => {});
-      };
-
-      // Standard hls.js recommendation:
-      //   1. Hls.isSupported() → MSE available (Chrome/Firefox/Edge) → use hls.js
-      //   2. canPlayType → Safari/iOS native HLS
-      //   3. Neither → can't play, fall back to snapshots
-      const Hls = await this._loadHlsJs();
-      if (Hls.isSupported()) {
-        // Chrome / Firefox / Edge — use hls.js via MSE
-        if (this._hls) { this._hls.destroy(); this._hls = null; }
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-        this._hls = hls;
-        // Play only after manifest is parsed and source buffers are ready
-        hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
-        // Recover from fatal errors — Bosch proxy hash expires after ~60 s.
-        // Network errors → try startLoad() first; media errors → recoverMediaError();
-        // unrecoverable → restart the whole live video pipeline.
-        hls.on(Hls.Events.ERROR, (_ev, data) => {
-          if (!data.fatal) return;
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
-          } else {
-            // Unrecoverable — reconnect if stream switch is still ON
-            console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
-            this._stopLiveVideo();
-            if (this._isStreaming() && this._getEffectiveState(this._entities.audio) === "on") {
-              setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 2000);
-            } else if (this._isStreaming()) {
-              this._startRefreshTimer();
-            }
-          }
-        });
-        hls.loadSource(hlsUrl);
-        hls.attachMedia(video);
-      } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
-        // Safari / iOS — native HLS (MSE not needed)
-        video.src = hlsUrl;
-        startPlay();
-      } else {
-        throw new Error("HLS not supported by this browser");
-      }
-
+    // Helper: activate video element with overlay management
+    const activateVideo = () => {
       video.style.display = "block";
       if (img) img.style.display = "none";
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
-      // Keep loading overlay visible until first video frame renders.
-      // The 'playing' event fires when the video actually starts playing
-      // (after decoder receives first keyframe). This avoids the black screen.
       const clearOverlay = () => {
         this._setLoadingOverlay(false);
         if (this._streamConnecting) {
@@ -1355,16 +1313,66 @@ class BoschCameraCard extends HTMLElement {
         video.removeEventListener("playing", clearOverlay);
       };
       video.addEventListener("playing", clearOverlay);
-      // Safety: clear overlay after 15s even if 'playing' never fires
-      setTimeout(() => { clearOverlay(); }, 15000);
+      setTimeout(() => { clearOverlay(); }, 45000);
+    };
+
+    // ── WebRTC (deferred — needs active stream_source before go2rtc can offer it) ──
+    // go2rtc provides WebRTC but only after stream_source returns an RTSP URL.
+    // On-demand streams (Bosch) don't have a permanent RTSP URL — it's created
+    // when the live switch is turned ON. HLS starts the stream, then WebRTC
+    // could be used for subsequent reconnects. TODO: implement WebRTC upgrade.
+
+    // ── HLS via camera/stream ───────────────────────────────────────────
+    try {
+      const result = await this._hass.callWS({
+        type:      "camera/stream",
+        entity_id: this._entities.camera,
+      });
+      if (!result?.url) throw new Error("no url");
+
+      video.muted = true;
+      const startPlay = () => {
+        video.muted = true;
+        video.play()
+          .then(() => { video.muted = !audioOn; })
+          .catch(() => {});
+      };
+
+      const Hls = await this._loadHlsJs();
+      if (Hls.isSupported()) {
+        if (this._hls) { this._hls.destroy(); this._hls = null; }
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        this._hls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
+        hls.on(Hls.Events.ERROR, (_ev, data) => {
+          if (!data.fatal) return;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
+            this._stopLiveVideo();
+            if (this._isStreaming()) {
+              setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 2000);
+            }
+          }
+        });
+        hls.loadSource(result.url);
+        hls.attachMedia(video);
+      } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+        video.src = result.url;
+        startPlay();
+      } else {
+        throw new Error("HLS not supported");
+      }
+      activateVideo();
 
     } catch (e) {
       if (attempt < 3) {
-        // Retry — go2rtc may still be starting the RTSP session
         setTimeout(() => this._startLiveVideo(attempt + 1), 1000);
       } else {
-        // Fall back to fast snapshot polling
-        console.warn("bosch-camera-card: HLS stream not available, using snapshot fallback", e);
+        console.warn("bosch-camera-card: stream not available", e);
         this._liveVideoActive   = false;
         this._startingLiveVideo = false;
         this._startRefreshTimer();
@@ -1378,8 +1386,9 @@ class BoschCameraCard extends HTMLElement {
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
       video.pause();
+      video.srcObject = null;
       video.removeAttribute("src");
-      video.load();  // reset video element fully
+      video.load();
       video.style.display = "none";
     }
     if (img) img.style.display = "block";
@@ -1617,9 +1626,17 @@ class BoschCameraCard extends HTMLElement {
     }
     this._lastStreaming = isStreaming;
 
-    // Start HLS video when stream turns ON
+    // Start HLS video when stream turns ON.
+    // Wait until camera entity actually reports streaming (stream_source set)
+    // to avoid "does not support play stream" errors from premature WS calls.
     if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo) {
-      this._startLiveVideo();
+      if (!this._waitingForStream) {
+        this._waitingForStream = true;
+        this._waitForStreamReady();
+      }
+    }
+    if (!shouldVideo) {
+      this._waitingForStream = false;
     }
     // Stop video when stream turns OFF
     if (!shouldVideo && this._liveVideoActive) {
@@ -1760,6 +1777,9 @@ class BoschCameraCard extends HTMLElement {
     }
     this._lastPrivacy = privacyOn;
 
+    // Motion zones overlay — SVG polygons from RCP 0x0c00/0x0c0a sensor data
+    this._updateMotionZones(hass, ents);
+
     // Pan section — only visible when the pan number entity exists and has a valid state
     const panState   = hass.states[ents.pan];
     const panSection = this.shadowRoot.getElementById("pan-section");
@@ -1811,19 +1831,91 @@ class BoschCameraCard extends HTMLElement {
     return this._hass?.states[entityId]?.state;
   }
 
+  _waitForStreamReady(attempt = 0) {
+    // Poll until the switch entity (real, not optimistic) confirms ON.
+    // Backend needs ~5s for PUT /connection + TLS proxy + pre-warm.
+    // Only then call camera/stream WS to avoid "does not support play stream"
+    // errors and wasted retries that add 10-20s to startup.
+    if (!this._waitingForStream || !this._hass) return;
+
+    const switchState = this._hass.states[this._entities.switch];
+    const reallyOn = switchState?.state === "on";
+    // Also check if camera entity has streaming attributes set
+    const cam = this._hass.states[this._entities.camera];
+    const camReady = cam?.state === "streaming"
+                  || cam?.attributes?.streaming_state === "active"
+                  || (reallyOn && switchState?.attributes?.connection_type);
+
+    if (camReady || (reallyOn && attempt >= 5)) {
+      // Stream is ready or switch confirmed ON after 5s — start HLS
+      this._waitingForStream = false;
+      this._startLiveVideo();
+      return;
+    }
+    if (attempt > 30) {
+      this._waitingForStream = false;
+      this._streamConnecting = false;
+      if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+      this._setLoadingOverlay(false);
+      return;
+    }
+    setTimeout(() => this._waitForStreamReady(attempt + 1), 1000);
+  }
+
+  _updateMotionZones(hass, ents) {
+    const svg = this.shadowRoot.getElementById("motion-zones-overlay");
+    if (!svg) return;
+
+    // Read coordinates from the motion zones sensor attributes
+    const zoneState = hass.states[ents.motionZones];
+    const coords = zoneState?.attributes?.coordinates;
+
+    // Only show overlay when config option is set and data is available
+    const showZones = this._config.show_motion_zones && coords && coords.length > 0;
+    svg.classList.toggle("visible", showZones);
+    if (!showZones) return;
+
+    // Only re-render if coordinates changed (avoid DOM thrashing)
+    const coordKey = JSON.stringify(coords);
+    if (this._lastMotionCoordKey === coordKey) return;
+    this._lastMotionCoordKey = coordKey;
+
+    // Coordinates are zone rectangles: {x1, y1, x2, y2} in percent (0-100).
+    // ViewBox is 0-100, so coords map directly.
+    svg.innerHTML = "";
+    for (let z = 0; z < coords.length; z++) {
+      const c = coords[z];
+      if (c.x1 == null || c.y1 == null || c.x2 == null || c.y2 == null) continue;
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", c.x1);
+      rect.setAttribute("y", c.y1);
+      rect.setAttribute("width", c.x2 - c.x1);
+      rect.setAttribute("height", c.y2 - c.y1);
+      svg.appendChild(rect);
+    }
+  }
+
   _toggleStream() {
     const isOn = this._isStreaming();
     // Optimistic update — badge and button update instantly
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
-    if (!isOn) {
-      // Starting stream → show loading overlay with status updates
+    if (isOn) {
+      // Stopping stream — clean up connecting state immediately
+      this._streamConnecting = false;
+      this._waitingForStream = false;
+      if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+    } else if (!this._streamConnecting) {
+      // Starting stream → show loading overlay with progressive status updates
+      // Timeline: PUT /connection ~2s, TLS proxy ~0.5s, pre-warm ~3s,
+      // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s, first frame ~25-35s total.
       this._streamConnecting = true;
       this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
-      // Step-by-step status updates while waiting for first frame
       this._connectSteps = [
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera wird aufgeweckt…"); }, 2000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Stream wird gestartet…"); }, 4500),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Warte auf erstes Bild…"); }, 7000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera wird aufgeweckt…"); }, 3000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Stream wird vorbereitet…"); }, 7000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "HLS wird gestartet…"); }, 12000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Warte auf erstes Bild…"); }, 20000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Gleich geschafft…"); }, 28000),
       ];
     }
     this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });

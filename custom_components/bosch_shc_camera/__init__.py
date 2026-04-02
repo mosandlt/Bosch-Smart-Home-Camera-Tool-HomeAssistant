@@ -1716,91 +1716,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
     async def _async_update_rcp_data(self, cam_id: str, proxy_host: str, proxy_hash: str) -> None:
-        """Fetch RCP data (LED dimmer, privacy state) for a camera via cloud proxy.
+        """Fetch all RCP data for a camera via cloud proxy.
 
-        Opens a fresh RCP session, reads 0x0c22 (LED dimmer) and 0x0d00 (privacy mask),
-        and caches the results. Gracefully skips on any failure — RCP is read-only
-        supplementary data and must never block the main coordinator update.
+        Delegates to rcp.py's async_update_rcp_data() which reads:
+          Phase 1: LED dimmer, privacy mask, clock, LAN IP, product name, bitrate
+          Phase 2: alarm catalog, motion zones/coords, TLS cert, network services, IVA catalog
         """
-        session_id = await self._get_cached_rcp_session(proxy_host, proxy_hash)
-        if not session_id:
-            _LOGGER.debug("_async_update_rcp_data: could not open RCP session for %s", cam_id)
-            return
-
-        rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
-
-        # Read LED dimmer (0x0c22) — T_WORD, num=1 → integer 0–100
-        try:
-            raw = await self._rcp_read(rcp_base, "0x0c22", session_id, type_="T_WORD", num=1)
-            if raw and len(raw) >= 2:
-                import struct as _struct
-                dimmer_val = _struct.unpack(">H", raw[:2])[0]
-                self._rcp_dimmer_cache[cam_id] = int(dimmer_val)
-                _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
-        except Exception as err:
-            _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
-
-        # Read privacy mask (0x0d00) — P_OCTET 4B → byte[1]=1 means ON
-        try:
-            raw = await self._rcp_read(rcp_base, "0x0d00", session_id, type_="P_OCTET")
-            if raw and len(raw) >= 2:
-                self._rcp_privacy_cache[cam_id] = int(raw[1])
-                _LOGGER.debug(
-                    "RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1]
-                )
-        except Exception as err:
-            _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
-
-        # Read camera clock (0x0a0f) — 8 bytes → compute offset vs server time
-        try:
-            import datetime as _dt
-            raw = await self._rcp_read(rcp_base, "0x0a0f", session_id, type_="P_OCTET")
-            if raw and len(raw) >= 8:
-                # RCP clock format: year(2B big-endian) month(1B) day(1B) hour(1B) min(1B) sec(1B) weekday(1B)
-                import struct as _struct2
-                year, month, day, hour, minute, second, _ = _struct2.unpack(">HBBBBBB", raw[:8])
-                cam_dt = _dt.datetime(year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc)
-                server_dt = _dt.datetime.now(_dt.timezone.utc)
-                offset = (cam_dt - server_dt).total_seconds()
-                self._rcp_clock_offset_cache[cam_id] = round(offset, 1)
-                _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
-        except Exception as err:
-            _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
-
-        # Read LAN IP via RCP (0x0a36) — 4 bytes IPv4 or ASCII string
-        try:
-            raw = await self._rcp_read(rcp_base, "0x0a36", session_id, type_="P_OCTET")
-            if raw:
-                if len(raw) == 4:
-                    ip_str = ".".join(str(b) for b in raw)
-                else:
-                    ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-                self._rcp_lan_ip_cache[cam_id] = ip_str
-                _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
-        except Exception as err:
-            _LOGGER.debug("RCP LAN IP read error for %s: %s", cam_id, err)
-
-        # Read product name via RCP (0x0aea) — null-terminated ASCII
-        try:
-            raw = await self._rcp_read(rcp_base, "0x0aea", session_id, type_="P_OCTET")
-            if raw:
-                name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-                self._rcp_product_name_cache[cam_id] = name_str
-                _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
-        except Exception as err:
-            _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
-
-        # Read bitrate ladder (0x0c81) — series of big-endian uint32 kbps values
-        try:
-            import struct as _struct3
-            raw = await self._rcp_read(rcp_base, "0x0c81", session_id, type_="P_OCTET")
-            if raw and len(raw) >= 4:
-                n = len(raw) // 4
-                ladder = [_struct3.unpack(">I", raw[i*4:(i+1)*4])[0] for i in range(n)]
-                self._rcp_bitrate_cache[cam_id] = ladder
-                _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
-        except Exception as err:
-            _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
+        await async_update_rcp_data(self, cam_id, proxy_host, proxy_hash)
 
     def clock_offset(self, cam_id: str) -> float | None:
         """Return clock offset in seconds (camera time − server time), or None."""

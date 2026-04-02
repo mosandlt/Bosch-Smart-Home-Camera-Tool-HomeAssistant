@@ -110,6 +110,14 @@ async def rcp_session(
                 return None
             session_id = m.group(1)
 
+            # Validate session ID before ACK — 0x00000000 means proxy rejected
+            if session_id == "0x00000000":
+                _LOGGER.debug(
+                    "rcp_session: invalid session 0x00000000 for %s — proxy rejected",
+                    proxy_host,
+                )
+                return None
+
             # Step 2: ACK the session
             params2 = {
                 "command": "0xff0d",
@@ -130,7 +138,6 @@ async def rcp_session(
                 _LOGGER.debug(
                     "rcp_session: step2 error for %s: %s", proxy_host, err
                 )
-                # Session may still be valid -- return it anyway
 
             return session_id
     finally:
@@ -148,10 +155,15 @@ async def rcp_read(
     type_: str = "P_OCTET",
     num: int = 0,
 ) -> bytes | None:
-    """READ an RCP command and return the raw payload bytes, or None on failure.
+    """READ an RCP command and return the payload bytes, or None on failure.
 
-    Uses the HA shared session (verify_ssl=False) to avoid creating a new
-    connector+session per RCP command (prevents socket exhaustion).
+    The RCP endpoint returns XML like:
+      <rcp ... ><payload>0a1b2c3d...</payload></rcp>
+    or for errors:
+      <rcp ... ><err>0xa0</err></rcp>
+
+    This function extracts the hex payload and returns it as bytes.
+    Uses the HA shared session (verify_ssl=False) to avoid socket exhaustion.
     """
     params: dict[str, str] = {
         "command": command,
@@ -171,7 +183,38 @@ async def rcp_read(
                         "rcp_read: command=%s HTTP %d", command, resp.status
                     )
                     return None
-                return await resp.read()
+                raw = await resp.read()
+                # RCP returns XML: <rcp ...><payload>HEX</payload></rcp>
+                # or error: <rcp ...><err>0xa0</err></rcp>
+                # Parse raw bytes with regex to avoid UTF-8 decode issues.
+
+                # Check for error response
+                err_m = _re.search(rb"<err>(\S+)</err>", raw, _re.IGNORECASE)
+                if err_m:
+                    _LOGGER.debug(
+                        "rcp_read: command=%s error=%s", command,
+                        err_m.group(1).decode("ascii", errors="replace"),
+                    )
+                    return None
+
+                # Extract hex payload from XML — Bosch uses <str> or <payload> tag
+                # depending on firmware version / request context
+                payload_m = (
+                    _re.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE)
+                    or _re.search(rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE)
+                )
+                if payload_m:
+                    return bytes.fromhex(payload_m.group(1).decode("ascii"))
+
+                # Fallback: raw binary response (non-XML, e.g. JPEG)
+                if raw and not raw.startswith(b"<"):
+                    return raw
+
+                _LOGGER.debug(
+                    "rcp_read: command=%s no payload in response (%d bytes): %.100s",
+                    command, len(raw), raw[:100],
+                )
+                return None
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.debug("rcp_read: command=%s error: %s", command, err)
         return None
@@ -427,20 +470,28 @@ def _parse_motion_zones(raw: bytes) -> list[dict]:
 def _parse_motion_coords(raw: bytes) -> list[dict]:
     """Parse motion region boundary coordinates (0x0c0a).
 
-    Coordinates are int32 big-endian, normalized ±1.0 as value × 2^31.
-    Returns list of {x, y} pairs as floats (-1.0 to 1.0).
+    Each zone is 8 bytes: x1(2B) y1(2B) x2(2B) y2(2B) in 0-10000 units.
+    Returns list of zone rectangles as {x1, y1, x2, y2} in percent (0-100).
     """
-    coords = []
-    n = len(raw) // 4
-    values = [struct.unpack(">i", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
-    # Pairs of (x, y) coordinates
-    scale = 2 ** 31
-    for j in range(0, len(values) - 1, 2):
-        coords.append({
-            "x": round(values[j] / scale, 4),
-            "y": round(values[j + 1] / scale, 4),
+    zones = []
+    zone_size = 8
+    n_zones = len(raw) // zone_size
+    for z in range(n_zones):
+        chunk = raw[z * zone_size : (z + 1) * zone_size]
+        if len(chunk) < 8:
+            break
+        x1 = struct.unpack(">H", chunk[0:2])[0]
+        y1 = struct.unpack(">H", chunk[2:4])[0]
+        x2 = struct.unpack(">H", chunk[4:6])[0]
+        y2 = struct.unpack(">H", chunk[6:8])[0]
+        # Convert 0-10000 to 0-100 percent
+        zones.append({
+            "x1": round(x1 / 100, 1),
+            "y1": round(y1 / 100, 1),
+            "x2": round(x2 / 100, 1),
+            "y2": round(y2 / 100, 1),
         })
-    return coords
+    return zones
 
 
 def _parse_tls_cert(raw: bytes) -> dict:

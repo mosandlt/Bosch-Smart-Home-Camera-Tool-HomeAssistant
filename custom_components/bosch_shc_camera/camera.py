@@ -229,6 +229,38 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         return False
 
     @property
+    def motion_detection_enabled(self) -> bool:
+        """Whether motion detection is currently enabled on this camera.
+
+        Reads from the same cloud API data as the Motion Detection switch.
+        Enables the standard HA camera.enable/disable_motion_detection services.
+        """
+        settings = self.coordinator.motion_settings(self._cam_id)
+        if not settings:
+            return False
+        return settings.get("enabled", False)
+
+    async def async_enable_motion_detection(self, **kwargs) -> None:
+        """Enable motion detection via standard HA camera service."""
+        settings = self.coordinator.motion_settings(self._cam_id)
+        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        await self.coordinator.async_put_camera(
+            self._cam_id, "motion",
+            {"enabled": True, "motionAlarmConfiguration": sensitivity},
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+    async def async_disable_motion_detection(self, **kwargs) -> None:
+        """Disable motion detection via standard HA camera service."""
+        settings = self.coordinator.motion_settings(self._cam_id)
+        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        await self.coordinator.async_put_camera(
+            self._cam_id, "motion",
+            {"enabled": False, "motionAlarmConfiguration": sensitivity},
+        )
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
+
+    @property
     def frame_interval(self) -> float:
         """How often (seconds) HA requests a fresh image from this camera.
 
