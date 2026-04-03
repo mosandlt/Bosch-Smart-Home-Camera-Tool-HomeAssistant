@@ -47,7 +47,7 @@ from .smb import (
     sync_smb_disk_check,
     async_smb_disk_alert,
 )
-from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_tls_proxy
+from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy
 from . import shc as shc_mod
 from .rcp import async_update_rcp_data, get_cached_rcp_session
 
@@ -1126,6 +1126,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         result["rtspUrl"] = result["rtspsUrl"]
                                 self._live_connections[cam_id] = result
                                 self._live_opened_at[cam_id]   = time.monotonic()
+                                # Stop HA's internal stream object so it re-reads stream_source()
+                                # with the new URL/port on the next camera/stream WS request.
+                                # Without this, stream_worker keeps using the old cached URL.
+                                cam_entity = self._camera_entities.get(cam_id)
+                                if cam_entity is not None:
+                                    try:
+                                        await cam_entity.async_stop_stream()
+                                    except Exception:
+                                        pass
                                 # Run go2rtc registration and pre-warm in parallel
                                 # — both are independent and best-effort.
                                 parallel_tasks: list[asyncio.Task] = []
@@ -1144,10 +1153,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         )
                                 if parallel_tasks:
                                     await asyncio.gather(*parallel_tasks, return_exceptions=True)
-                                # LOCAL: camera respects maxSessionDuration=3600 in our URL
-                                # (tested: stream survives 70s+ without renewal).
-                                # Auto-renewal DISABLED — each PUT /connection invalidates
-                                # the previous session's credentials, causing 401 errors.
+                                # LOCAL: camera enforces 60s session timeout regardless of
+                                # maxSessionDuration in the URL. Schedule a keepalive every
+                                # 30s (RTSP OPTIONS) to reset the inactivity timer.
+                                if type_val == "LOCAL" and local_user and local_pass:
+                                    proxy_port_keepalive = self._tls_proxy_ports.get(cam_id)
+                                    if proxy_port_keepalive:
+                                        self.hass.async_create_task(
+                                            self._rtsp_keepalive_loop(cam_id, proxy_port_keepalive, local_user, local_pass)
+                                        )
                                 self.hass.async_create_task(self.async_request_refresh())
                                 return result
                             elif resp.status == 401:
@@ -1526,19 +1540,40 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Stop the TLS proxy for a camera."""
         stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
-    async def _auto_renew_local_session(self, cam_id: str) -> None:
-        """Renew a LOCAL live session before the 60s camera timeout.
+    async def _rtsp_keepalive_loop(
+        self, cam_id: str, proxy_port: int, user: str, password: str
+    ) -> None:
+        """Send RTSP OPTIONS every 30s to prevent camera 60s session timeout.
 
-        Scheduled via async_call_later(50, ...) after every LOCAL connection open.
-        Gets fresh Digest credentials from Bosch cloud and re-registers go2rtc
-        with the new URL so the RTSP session continues seamlessly.
-        Does nothing if the stream has been turned off or switched to REMOTE.
+        The Bosch camera closes the TCP connection after 60s of inactivity
+        regardless of maxSessionDuration in the RTSP URL.  This loop sends an
+        authenticated OPTIONS request through the TLS proxy every 30s to reset
+        the inactivity timer and keep the stream alive indefinitely.
+
+        Stops automatically when the live stream is turned off or the proxy port
+        changes (indicating a new session has started).
         """
-        conn = self._live_connections.get(cam_id)
-        if not conn or conn.get("_connection_type") != "LOCAL":
-            return  # stream turned off or switched to REMOTE — nothing to do
-        _LOGGER.debug("Auto-renewing LOCAL session for %s", cam_id)
-        await self.try_live_connection(cam_id)
+        _LOGGER.debug("RTSP keepalive loop started for %s on port %d", cam_id[:8], proxy_port)
+        while True:
+            await asyncio.sleep(30)
+            # Stop if stream was turned off or a new session started on a different port
+            if cam_id not in self._live_connections:
+                _LOGGER.debug("RTSP keepalive: stream off for %s — stopping loop", cam_id[:8])
+                break
+            current_port = self._tls_proxy_ports.get(cam_id)
+            if current_port != proxy_port:
+                _LOGGER.debug(
+                    "RTSP keepalive: port changed for %s (%d→%s) — stopping loop",
+                    cam_id[:8], proxy_port, current_port,
+                )
+                break
+            ok = await rtsp_keepalive(proxy_port, user, password, cam_id)
+            if not ok:
+                _LOGGER.debug(
+                    "RTSP keepalive failed for %s on port %d — proxy may have stopped",
+                    cam_id[:8], proxy_port,
+                )
+                break
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:

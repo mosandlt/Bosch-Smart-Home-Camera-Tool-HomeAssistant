@@ -171,6 +171,75 @@ def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
             pass
 
 
+async def rtsp_keepalive(
+    proxy_port: int, user: str, password: str, cam_id: str
+) -> bool:
+    """Send an RTSP OPTIONS keepalive through the proxy to prevent 60s timeout.
+
+    The Bosch camera enforces a 60-second session timeout regardless of
+    maxSessionDuration in the URL.  Sending an authenticated OPTIONS every
+    ~30s resets the inactivity timer and keeps the TCP connection alive for
+    FFmpeg/go2rtc.
+
+    Returns True if the keepalive succeeded (camera replied 200 OK).
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", proxy_port), timeout=5
+        )
+        uri = f"rtsp://127.0.0.1:{proxy_port}/rtsp_tunnel"
+
+        # Step 1: OPTIONS without auth → 401 + realm/nonce
+        writer.write(
+            f"OPTIONS {uri} RTSP/1.0\r\n"
+            f"CSeq: 1\r\n"
+            f"\r\n".encode()
+        )
+        await writer.drain()
+        resp1 = await asyncio.wait_for(reader.read(4096), timeout=5)
+        resp1_str = resp1.decode("utf-8", errors="replace")
+
+        nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
+        realm_m = re.search(r'realm="([^"]+)"', resp1_str)
+        if not (nonce_m and realm_m):
+            # Camera may respond 200 without auth challenge — that's fine too
+            if "200 OK" in resp1_str:
+                _LOGGER.debug("Keepalive OPTIONS 200 OK (no auth needed) on port %d", proxy_port)
+                writer.close()
+                return True
+            _LOGGER.debug(
+                "Keepalive: no nonce/realm on port %d (%.100s)", proxy_port, resp1_str
+            )
+            writer.close()
+            return False
+
+        nonce, realm = nonce_m.group(1), realm_m.group(1)
+        auth = _digest_auth(user, password, "OPTIONS", uri, realm, nonce)
+
+        # Step 2: authenticated OPTIONS
+        writer.write(
+            f"OPTIONS {uri} RTSP/1.0\r\n"
+            f"CSeq: 2\r\n"
+            f"Authorization: {auth}\r\n"
+            f"\r\n".encode()
+        )
+        await writer.drain()
+        resp2 = await asyncio.wait_for(reader.read(4096), timeout=5)
+        resp2_str = resp2.decode("utf-8", errors="replace")
+        writer.close()
+
+        if "200 OK" in resp2_str:
+            _LOGGER.debug("Keepalive OPTIONS 200 OK on port %d", proxy_port)
+            return True
+        _LOGGER.debug(
+            "Keepalive: unexpected response on port %d: %.100s", proxy_port, resp2_str
+        )
+        return False
+    except Exception as exc:
+        _LOGGER.debug("Keepalive failed on port %d: %s", proxy_port, exc)
+        return False
+
+
 def _digest_auth(
     user: str, password: str, method: str, uri: str,
     realm: str, nonce: str,

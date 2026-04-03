@@ -15,15 +15,13 @@
  *   type: custom:bosch-camera-card
  *   camera_entity: camera.bosch_garten        # required
  *   title: Garten                             # optional
- *   refresh_interval_streaming: 2             # seconds during stream-without-audio (default 2)
- *   # Note: idle refresh is now automatic: 60 s visible / 1800 s background (Page Visibility API)
+ *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 1.9.6
+ * Version: 2.1.1
  *
- * Changes vs 1.9.5:
- *   - Renamed "Ton" → "ton" (lowercase label)
- *   - Connection type badge: shows "LAN" (green) or "Cloud" (gray) in the header
- *     while streaming, reads from switch entity's connection_type attribute
+ * Changes vs 2.1.0:
+ *   - Removed dead _streamingImageLoad() method (snapshot-streaming mode removed in v2.0.0)
+ *   - Cleaned up outdated snapshot-polling changelog entries
  *
  * Changes vs 1.9.4:
  *   - "connecting" badge state: while HLS is negotiating (startingLiveVideo=true),
@@ -39,49 +37,11 @@
  *     glitch, proxy hiccup) now trigger one immediate retry after 500 ms instead of
  *     silently showing the previous frame forever.
  *
- * Changes vs 1.9.3:
- *   - Fix: HLS live stream (Stream ON + Ton ON) ended after ~60 s without reconnecting.
- *     Root cause: Bosch cloud proxy hash expires after ~60 s. When hls.js encountered a
- *     fatal NETWORK_ERROR or MEDIA_ERROR, there was no error handler → video froze/went
- *     black while card showed "disabled livestream".
- *     Fix: hls.js ERROR handler added. NETWORK_ERROR → startLoad() (soft recover);
- *     MEDIA_ERROR → recoverMediaError(); unrecoverable → stopLiveVideo() + reconnect after 2 s
- *     if stream switch is still ON. Falls back to snapshot polling if audio is now OFF.
- *   - Fix: Timing still irregular (1 s / 3 s gaps) in snapshot-streaming mode.
- *     Root cause: frame_interval=2.0 s in the backend matched the card's 2 s setInterval
- *     exactly. Browser setInterval jitter (±50 ms) caused HA to return cached frames on
- *     ~50% of requests (elapsed < 2000 ms) → alternating fast/slow visible frame changes.
- *     Fix: backend frame_interval lowered from 2.0 → 1.0 s (in camera.py) so every
- *     2 s card poll finds the HA cache expired → consistent fresh snap.jpg per tick.
- *     (Card unchanged — this was purely a backend fix.)
- *
- * Changes vs 1.9.2:
- *   - Fix: Unregelmäßige Snapshot-Abstände im Streaming-Modus (2s 3s 5s 1s 1s...).
- *     Root cause: _updateImage() verwendet Preloading. Da HA Cache-Control: no-store sendet,
- *     hat der Browser keinen Cache-Hit bei img.src nach dem Preload → 2 HTTP-Requests/Tick.
- *     _cacheImage in _onImageLoaded fügte einen 3. Request hinzu. Drei gleichzeitige
- *     Requests mit leicht versetzten snap.jpg-Frames → variable Anzeigeabstände.
- *     Fix: Neuer _streamingImageLoad() setzt img.src direkt (kein Preload) → genau
- *     1 Request/Tick → konsistente 2s-Abstände.
- *   - Fix: _cacheImage wird im Streaming-Modus übersprungen (per-Frame-I/O unnötig).
- *     Nach Stream-Stopp ist _isStreaming()=false → das Post-Stop-Bild wird gespeichert
- *     → localStorage bleibt so aktuell wie möglich mit minimalem I/O.
- *   - Fix: Stream-Stopp: trigger_snapshot explizit aufgerufen + Delay 2s→3.5s damit
- *     Backend genug Zeit hat, einen frischen Snapshot zu holen (async_trigger_image_refresh
- *     delay=2s + ~1s Fetch). _onImageLoaded → _cacheImage speichert das frische Bild.
- *
- * Changes vs 1.9.1:
- *   - Fix: Snapshot-Streaming stoppt nach ~30 s. Root cause: Der setInterval-Timer rief
- *     _triggerFreshSnapshot() auf, das trigger_snapshot-Service auslöst, welches
- *     async_request_refresh() alle 2 s feuerte → GET /v11/video_inputs alle 2 s →
- *     Bosch-API Rate Limit (-307) → Coordinator-Fehler → Entities "unavailable" →
- *     Stream-Switch las als "off" statt "on" → Stream stoppte visuell.
- *     Fix: Im Streaming-Modus wird _scheduleImageLoad(0) aufgerufen statt
- *     _triggerFreshSnapshot(). HA's frame_interval=2s sorgt automatisch für
- *     Live-Proxy-Snapshots ohne API-Flooding.
- *   - Fix: Zwei Bilder in rascher Folge beim Streaming. Root cause: Jeder Timer-Call
- *     plante Bild-Loads bei +1.5s UND +4s. Mit 2s-Intervall kamen T+4s (Call N) und
- *     T+3.5s (Call N+1) gleichzeitig an. Behoben durch obigen Fix (nur ein Load/Tick).
+ * Changes vs 1.9.4:
+ *   - "connecting" badge state while HLS negotiates (faster pulse 0.8s) → clears to "streaming"
+ *   - Frame Δt in debug line (e.g. "Δ2003ms") — proof of consistent 2s intervals
+ *   - Stream uptime counter in badge ("00:47") — proves session renewal working
+ *   - Retry on snap.jpg error during streaming: immediate 500ms retry
  *
  * Changes vs 1.8.0:
  *   - Added 3 collapsible accordion sections below the quality dropdown:
@@ -1110,20 +1070,6 @@ class BoschCameraCard extends HTMLElement {
         this._updateImage();
       }, delayMs);
     }
-  }
-
-  _streamingImageLoad() {
-    // Single-request live frame update for snapshot-streaming mode.
-    // Does NOT preload (avoids double HTTP request from preload+img.src with Cache-Control: no-store).
-    // img.onload fires via the existing listener → _onImageLoaded() updates debug line.
-    // _cacheImage is skipped in _onImageLoaded when streaming to avoid per-frame I/O.
-    const img = this.shadowRoot.getElementById("cam-img");
-    if (!img || !this._hass) return;
-    const camEntity = this._entities.camera;
-    const token = this._hass.states[camEntity]?.attributes?.access_token || "";
-    const dispW = Math.round(this.offsetWidth || 640);
-    this._imgTimestamp = Date.now();
-    img.src = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}&width=${dispW}`;
   }
 
   _updateImage() {
