@@ -1129,10 +1129,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 # Stop HA's internal stream object so it re-reads stream_source()
                                 # with the new URL/port on the next camera/stream WS request.
                                 # Without this, stream_worker keeps using the old cached URL.
+                                # Also null out _stream so HA creates a fresh Stream object
+                                # instead of restarting the old one with the cached stale URL.
                                 cam_entity = self._camera_entities.get(cam_id)
                                 if cam_entity is not None:
                                     try:
                                         await cam_entity.async_stop_stream()
+                                    except Exception:
+                                        pass
+                                    try:
+                                        cam_entity._stream = None
                                     except Exception:
                                         pass
                                 # Run go2rtc registration and pre-warm in parallel
