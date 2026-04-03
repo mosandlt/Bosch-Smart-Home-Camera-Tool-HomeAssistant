@@ -152,6 +152,7 @@ class BoschCameraCard extends HTMLElement {
     this._lastEventState    = null;  // last known last_event sensor value — for event detection
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
+    this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -226,19 +227,13 @@ class BoschCameraCard extends HTMLElement {
     // Always fetch fresh on first hass — even when localStorage cache is showing an
     // old image. Show a "refreshing" overlay so the user knows it's updating.
     if (firstHass) {
-      // Set flag so _onImageLoaded knows to show spinner until fresh image arrives
+      // _awaitingFresh is already true if _restoreCachedImage found a cache.
+      // For the no-cache case, set it now before triggering any image loads.
       this._awaitingFresh = true;
+      // If cache already showed the "refreshing" overlay, this is a no-op.
+      // If no cache, this shows the full spinner.
       if (this._imageLoaded) {
-        // Force spinner visible on top of cached image (with slight delay so DOM is ready)
-        setTimeout(() => {
-          const overlay = this.shadowRoot.getElementById("loading-overlay");
-          const loadText = this.shadowRoot.getElementById("loading-text");
-          if (overlay) {
-            overlay.classList.add("visible");
-            overlay.classList.add("refreshing");
-          }
-          if (loadText) loadText.textContent = "Aktualisiere…";
-        }, 50);
+        this._setLoadingOverlay(true, "Aktualisiere…");
       }
       this._triggerFreshSnapshot();
     }
@@ -964,7 +959,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.1.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.2.0</div>
       </ha-card>
     `;
 
@@ -1096,7 +1091,6 @@ class BoschCameraCard extends HTMLElement {
 
   _onImageLoaded() {
     const img     = this.shadowRoot.getElementById("cam-img");
-    const overlay = this.shadowRoot.getElementById("loading-overlay");
     const src     = img?.src || "";
     const isCache = src.startsWith("data:");
 
@@ -1110,15 +1104,23 @@ class BoschCameraCard extends HTMLElement {
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
     }
 
-    // Don't clear spinner when loading cached image and we're still waiting for fresh
+    // Overlay management:
+    // - Cache image + awaitingFresh → keep "refreshing" overlay visible
+    // - Fresh image (non-cache) → always clear overlay
+    // - Cache image + NOT awaitingFresh → clear overlay (normal idle refresh)
     if (isCache && this._awaitingFresh) {
-      // Cache loaded — keep spinner visible, fresh image will clear it
+      // Cache loaded — keep spinner visible, fresh image will clear it.
+      // But ensure the overlay is in "refreshing" mode (semi-transparent)
+      // so the cached image is visible underneath.
+      const overlay = this.shadowRoot.getElementById("loading-overlay");
+      if (overlay) {
+        overlay.classList.add("visible");
+        overlay.classList.add("refreshing");
+      }
     } else {
       // Fresh image arrived (or no fresh pending) — clear spinner
-      this._awaitingFresh  = false;
-      this._loadingOverlay = false;
-      if (overlay) { overlay.classList.remove("visible"); overlay.classList.remove("refreshing"); }
-      if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+      this._awaitingFresh = false;
+      this._setLoadingOverlay(false);
     }
 
     // Debug: show load time + frame interval on card
@@ -1129,7 +1131,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.1.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.2.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1185,16 +1187,28 @@ class BoschCameraCard extends HTMLElement {
 
   // ── Image caching (localStorage — persists across iOS app restarts) ────────
   _restoreCachedImage() {
-    // Immediately show last known image from localStorage — no wait for proxy
+    // Immediately show last known image from localStorage — no wait for proxy.
+    // Shows the cached image underneath a semi-transparent "refreshing" overlay
+    // so the user sees something while we fetch a fresh image.
     if (!this._storageKey) return;
     try {
       const cached = localStorage.getItem(this._storageKey);
       if (!cached) return;
-      const img     = this.shadowRoot.getElementById("cam-img");
-      const overlay = this.shadowRoot.getElementById("loading-overlay");
+      const img = this.shadowRoot.getElementById("cam-img");
       if (img) { img.src = cached; img.classList.remove("hidden"); }
-      if (overlay) overlay.classList.remove("visible");
       this._imageLoaded = true;
+      // Mark that we'll need a fresh image — set hass() will show the
+      // "refreshing" overlay and trigger a snapshot fetch.
+      this._awaitingFresh = true;
+      // Switch from full-black spinner to semi-transparent "refreshing" overlay
+      // so the cached image is visible underneath.
+      const overlay = this.shadowRoot.getElementById("loading-overlay");
+      if (overlay) {
+        overlay.classList.add("visible");
+        overlay.classList.add("refreshing");
+      }
+      const loadText = this.shadowRoot.getElementById("loading-text");
+      if (loadText) loadText.textContent = "Aktualisiere…";
     } catch (_) {}
   }
 
@@ -1811,7 +1825,8 @@ class BoschCameraCard extends HTMLElement {
       this._startLiveVideo();
       return;
     }
-    if (attempt > 30) {
+    if (attempt > 90) {
+      // Give up after 90s — camera likely unreachable
       this._waitingForStream = false;
       this._streamConnecting = false;
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
@@ -1869,12 +1884,19 @@ class BoschCameraCard extends HTMLElement {
       // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s, first frame ~25-35s total.
       this._streamConnecting = true;
       this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
+      // Progressive status messages — each _setLoadingOverlay resets the 15s
+      // safety timeout, so messages must be spaced <15s apart to keep the
+      // spinner alive. LOCAL streams can take up to 60s on first connect.
       this._connectSteps = [
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera wird aufgeweckt…"); }, 3000),
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Stream wird vorbereitet…"); }, 7000),
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "HLS wird gestartet…"); }, 12000),
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Warte auf erstes Bild…"); }, 20000),
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Gleich geschafft…"); }, 28000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera braucht etwas…"); }, 40000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Verbindung wird aufgebaut…"); }, 52000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Fast fertig…"); }, 65000),
+        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Noch einen Moment…"); }, 78000),
       ];
     }
     this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });

@@ -37,43 +37,17 @@ def start_tls_proxy(
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
-    If a proxy is already running for this cam_id, returns the existing
-    port without restarting.  The proxy doesn't handle auth — it just
-    forwards bytes — so credential changes don't require a restart.
-    This keeps the port stable across session renewals, preventing HA's
-    stream worker from losing its cached RTSP URL.
+    Always creates a fresh proxy on each session — credential changes from
+    PUT /connection require a new port so HA's stream worker builds a fresh
+    RTSP URL with the new credentials instead of retrying cached old ones.
     """
-    # If proxy is already running, reuse it — port never changes.
-    existing_port = port_cache.get(cam_id)
-    existing_srv = _proxy_servers.get(cam_id)
-    if existing_srv is not None and existing_port is not None:
-        try:
-            existing_srv.fileno()  # Verify socket is still alive.
-            _LOGGER.debug(
-                "TLS proxy %s: reusing existing proxy on port %d",
-                cam_id[:8], existing_port,
-            )
-            return existing_port
-        except Exception:
-            _LOGGER.debug("TLS proxy %s: server socket dead — recreating", cam_id[:8])
-            _proxy_servers.pop(cam_id, None)
-            port_cache.pop(cam_id, None)
-
-    old_port = port_cache.get(cam_id)
-    # Clean up any leftover state
-    if cam_id in port_cache:
+    # Always stop any existing proxy first — fresh start per session
+    if cam_id in port_cache or cam_id in _proxy_servers:
         stop_tls_proxy(cam_id, port_cache)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # Try to reuse old port so HA's cached stream URL stays valid
-    if old_port:
-        try:
-            srv.bind(("127.0.0.1", old_port))
-        except OSError:
-            srv.bind(("127.0.0.1", 0))
-    else:
-        srv.bind(("127.0.0.1", 0))
+    srv.bind(("127.0.0.1", 0))
     port = srv.getsockname()[1]
     srv.listen(4)
     srv.settimeout(None)

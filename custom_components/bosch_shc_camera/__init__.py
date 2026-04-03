@@ -142,6 +142,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._stream_type_override: str | None = None
         # Per-camera audio setting — True = audio+video on (default), False = snapshot-only
         self._audio_enabled:    dict[str, bool]  = {}
+        # Guard against duplicate auto-renew loops per camera
+        self._auto_renew_active: set[str] = set()
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict = {}
         # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
@@ -973,11 +975,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception:
                         pass
 
-            # ── 7. SMB/NAS upload ─────────────────────────────────────────────
-            if do_events and opts.get("enable_smb_upload") and opts.get("smb_server"):
-                await self.hass.async_add_executor_job(
-                    sync_smb_upload, self, data, token
-                )
+            # ── 7. SMB/NAS upload — triggered by FCM push only (not coordinator) ──
+            # Removed from coordinator tick: the full event scan took ~90s on
+            # startup (checking hundreds of existing files via SMB). New events
+            # are uploaded immediately when FCM push triggers alert processing.
 
             # ── 8. SMB daily cleanup (retention) ──────────────────────────────
             _SMB_CLEANUP_INTERVAL = 86400  # once per day
@@ -1051,135 +1052,135 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 candidates = ["REMOTE"]
 
             for type_val in candidates:
-                # LOCAL: default to best quality (no bandwidth limit on LAN)
-                # unless user explicitly chose a lower quality setting
+                # Reset quality params for each candidate — LOCAL override
+                # must not leak into the REMOTE fallback.
+                hq, inst = self.get_quality_params(cam_id)
                 if type_val == "LOCAL" and self.get_quality(cam_id) == "auto":
+                    # LOCAL: default to best quality (no bandwidth limit on LAN)
                     hq, inst = True, 1
+                elif type_val == "REMOTE" and inst == 4:
+                    # REMOTE proxy doesn't support inst=4 (returns 400).
+                    # Fall back to inst=2 (balanced, ~7.5 Mbps).
+                    inst = 2
                 try:
+                    # Timeout covers only the HTTP call — pre-warm runs after.
                     async with asyncio.timeout(10):
-                        async with session.put(
+                        resp = await session.put(
                             url,
                             json={"type": type_val, "highQualityVideo": hq},
                             headers=headers,
-                        ) as resp:
-                            body = await resp.text()
-                            _LOGGER.debug(
-                                "PUT /connection type=%s → HTTP %d: %s",
-                                type_val, resp.status, body[:200],
-                            )
-                            if resp.status in (200, 201):
-                                import json as _json
-                                result = _json.loads(body)
-                                _LOGGER.info(
-                                    "Live connection opened! type=%s → %s", type_val, result
+                        )
+                        body = await resp.text()
+                    _LOGGER.debug(
+                        "PUT /connection type=%s → HTTP %d: %s",
+                        type_val, resp.status, body[:200],
+                    )
+                    if resp.status in (200, 201):
+                        import json as _json
+                        result = _json.loads(body)
+                        _LOGGER.info(
+                            "Live connection opened! type=%s → %s", type_val, result
+                        )
+                        audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+                        # LOCAL response: {"user": "...", "password": "...", "urls": ["192.168.x.x:443"]}
+                        local_user = result.get("user", "")
+                        local_pass = result.get("password", "")
+                        if type_val == "LOCAL" and local_user and local_pass:
+                            result["_connection_type"] = "LOCAL"
+                            result["_local_user"]     = local_user
+                            result["_local_password"] = local_pass
+                            urls = result.get("urls", [])
+                            img_scheme = result.get("imageUrlScheme", "https://{url}/snap.jpg")
+                            if urls:
+                                from urllib.parse import quote as _q
+                                cam_addr = urls[0]  # "192.168.x.x:443"
+                                result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
+                                cam_host, cam_port = cam_addr.split(":")
+                                proxy_port = await self._start_tls_proxy(
+                                    cam_id, cam_host, int(cam_port)
                                 )
-                                audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
-                                # LOCAL response: {"user": "...", "password": "...", "urls": ["192.168.x.x:443"]}
-                                # Embed credentials in RTSP URL for direct LAN access.
-                                local_user = result.get("user", "")
-                                local_pass = result.get("password", "")
-                                if type_val == "LOCAL" and local_user and local_pass:
-                                    result["_connection_type"] = "LOCAL"
-                                    result["_local_user"]     = local_user
-                                    result["_local_password"] = local_pass
-                                    urls = result.get("urls", [])
-                                    img_scheme = result.get("imageUrlScheme", "https://{url}/snap.jpg")
-                                    if urls:
-                                        from urllib.parse import quote as _q
-                                        cam_addr = urls[0]  # "192.168.x.x:443"
-                                        result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
-                                        # Start TLS proxy — FFmpeg can't handle RTSPS + Digest
-                                        # auth with self-signed certs. Proxy unwraps TLS only.
-                                        cam_host, cam_port = cam_addr.split(":")
-                                        proxy_port = await self._start_tls_proxy(
-                                            cam_id, cam_host, int(cam_port)
-                                        )
-                                        eu = _q(local_user, safe="")
-                                        ep = _q(local_pass, safe="")
-                                        # Plain RTSP through local proxy → TLS to camera
-                                        result["rtspsUrl"] = (
-                                            f"rtsp://{eu}:{ep}@127.0.0.1:{proxy_port}"
-                                            f"/rtsp_tunnel?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
-                                        )
-                                        result["rtspUrl"] = result["rtspsUrl"]
-                                else:
-                                    # REMOTE response: {"urls": ["proxy-NN:42090/{hash}"]}
-                                    urls = result.get("urls", [])
-                                    if urls:
-                                        proxy_host_path = urls[0]
-                                        result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
-                                        rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
-                                        result["rtspsUrl"] = (
-                                            f"rtsps://{rtsps_host_path}/rtsp_tunnel"
-                                            f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
-                                        )
-                                        result["rtspUrl"] = result["rtspsUrl"]
-                                    elif result.get("hash"):
-                                        h  = result["hash"]
-                                        ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
-                                        pp = result.get("proxyPort", 42090)
-                                        result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
-                                        result["rtspsUrl"] = (
-                                            f"rtsps://{ph}:443/{h}/rtsp_tunnel"
-                                            f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
-                                        )
-                                        result["rtspUrl"] = result["rtspsUrl"]
-                                self._live_connections[cam_id] = result
-                                self._live_opened_at[cam_id]   = time.monotonic()
-                                # Stop HA's internal stream object so it re-reads stream_source()
-                                # with the new URL/port on the next camera/stream WS request.
-                                # Without this, stream_worker keeps using the old cached URL.
-                                # Also null out _stream so HA creates a fresh Stream object
-                                # instead of restarting the old one with the cached stale URL.
-                                cam_entity = self._camera_entities.get(cam_id)
-                                if cam_entity is not None:
-                                    try:
-                                        await cam_entity.async_stop_stream()
-                                    except Exception:
-                                        pass
-                                    try:
-                                        cam_entity._stream = None
-                                    except Exception:
-                                        pass
-                                # Run go2rtc registration and pre-warm in parallel
-                                # — both are independent and best-effort.
-                                parallel_tasks: list[asyncio.Task] = []
-                                rtsps_url = result.get("rtspsUrl", "")
-                                if rtsps_url:
-                                    parallel_tasks.append(
-                                        asyncio.create_task(self._register_go2rtc_stream(cam_id, rtsps_url))
+                                eu = _q(local_user, safe="")
+                                ep = _q(local_pass, safe="")
+                                result["rtspsUrl"] = (
+                                    f"rtsp://{eu}:{ep}@127.0.0.1:{proxy_port}"
+                                    f"/rtsp_tunnel?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                )
+                                result["rtspUrl"] = result["rtspsUrl"]
+                        else:
+                            # REMOTE response: {"urls": ["proxy-NN:42090/{hash}"]}
+                            urls = result.get("urls", [])
+                            if urls:
+                                proxy_host_path = urls[0]
+                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
+                                rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
+                                result["rtspsUrl"] = (
+                                    f"rtsps://{rtsps_host_path}/rtsp_tunnel"
+                                    f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                )
+                                result["rtspUrl"] = result["rtspsUrl"]
+                            elif result.get("hash"):
+                                h  = result["hash"]
+                                ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
+                                pp = result.get("proxyPort", 42090)
+                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
+                                result["rtspsUrl"] = (
+                                    f"rtsps://{ph}:443/{h}/rtsp_tunnel"
+                                    f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                )
+                                result["rtspUrl"] = result["rtspsUrl"]
+                        self._live_connections[cam_id] = result
+                        self._live_opened_at[cam_id]   = time.monotonic()
+
+                        rtsps_url = result.get("rtspsUrl", "")
+
+                        # ── Pre-warm encoder FIRST (outside timeout) ─────
+                        # Camera needs ~5s after PUT /connection to initialize
+                        # the H.264 encoder. Must complete BEFORE update_source
+                        # (which triggers FFmpeg restart) or go2rtc registration.
+                        if type_val == "LOCAL" and local_user and local_pass:
+                            proxy_port_val = self._tls_proxy_ports.get(cam_id)
+                            if proxy_port_val:
+                                await asyncio.sleep(5)
+                                await pre_warm_rtsp(proxy_port_val, local_user, local_pass, cam_addr.split(":")[0])
+
+                        # ── Update HA's stream with new URL ──────────────
+                        # AFTER pre-warm so FFmpeg connects to a ready encoder.
+                        cam_entity = self._camera_entities.get(cam_id)
+                        if cam_entity is not None and rtsps_url:
+                            if hasattr(cam_entity, 'stream') and cam_entity.stream is not None:
+                                try:
+                                    cam_entity.stream.update_source(rtsps_url)
+                                    _LOGGER.debug(
+                                        "Stream.update_source() for %s → %s",
+                                        cam_id[:8], rtsps_url[:60],
                                     )
-                                if type_val == "LOCAL" and local_user and local_pass:
-                                    proxy_port_val = self._tls_proxy_ports.get(cam_id)
-                                    if proxy_port_val:
-                                        parallel_tasks.append(
-                                            asyncio.create_task(
-                                                pre_warm_rtsp(proxy_port_val, local_user, local_pass, cam_addr.split(":")[0])
-                                            )
-                                        )
-                                if parallel_tasks:
-                                    await asyncio.gather(*parallel_tasks, return_exceptions=True)
-                                # LOCAL: camera enforces 60s session timeout regardless of
-                                # maxSessionDuration in the URL. Schedule a keepalive every
-                                # 30s (RTSP OPTIONS) to reset the inactivity timer.
-                                if type_val == "LOCAL" and local_user and local_pass:
-                                    proxy_port_keepalive = self._tls_proxy_ports.get(cam_id)
-                                    if proxy_port_keepalive:
-                                        self.hass.async_create_task(
-                                            self._rtsp_keepalive_loop(cam_id, proxy_port_keepalive, local_user, local_pass)
-                                        )
-                                self.hass.async_create_task(self.async_request_refresh())
-                                return result
-                            elif resp.status == 401:
-                                _LOGGER.warning(
-                                    "try_live_connection: token expired (401) for %s", cam_id
-                                )
-                                return None
+                                except Exception:
+                                    cam_entity.stream = None
                             else:
-                                _LOGGER.warning(
-                                    "try_live_connection: HTTP %d for type=%s: %s",
-                                    resp.status, type_val, body[:200],
+                                cam_entity.stream = None
+
+                        # ── Register with go2rtc (AFTER pre-warm) ────────
+                        if rtsps_url:
+                            await self._register_go2rtc_stream(cam_id, rtsps_url)
+
+                        # ── LOCAL session auto-renewal ───────────────────
+                        if type_val == "LOCAL" and local_user and local_pass:
+                            if cam_id not in self._auto_renew_active:
+                                self.hass.async_create_task(
+                                    self._auto_renew_local_session(cam_id)
                                 )
+                        self.hass.async_create_task(self.async_request_refresh())
+                        return result
+                    elif resp.status == 401:
+                        _LOGGER.warning(
+                            "try_live_connection: token expired (401) for %s", cam_id
+                        )
+                        return None
+                    else:
+                        _LOGGER.warning(
+                            "try_live_connection: HTTP %d for type=%s: %s",
+                            resp.status, type_val, body[:200],
+                        )
                 except asyncio.TimeoutError:
                     _LOGGER.warning("try_live_connection: timeout for type=%s", type_val)
                 except aiohttp.ClientError as err:
@@ -1546,40 +1547,52 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Stop the TLS proxy for a camera."""
         stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
-    async def _rtsp_keepalive_loop(
-        self, cam_id: str, proxy_port: int, user: str, password: str
-    ) -> None:
-        """Send RTSP OPTIONS every 30s to prevent camera 60s session timeout.
+    async def _auto_renew_local_session(self, cam_id: str) -> None:
+        """Auto-renew LOCAL RTSP session every 50s to beat the 60s absolute limit.
 
-        The Bosch camera closes the TCP connection after 60s of inactivity
-        regardless of maxSessionDuration in the RTSP URL.  This loop sends an
-        authenticated OPTIONS request through the TLS proxy every 30s to reset
-        the inactivity timer and keep the stream alive indefinitely.
+        The Bosch camera enforces maxSessionDuration=60 for LOCAL connections.
+        This is an absolute session duration limit (not inactivity timeout) —
+        RTP data flowing over TCP interleaved transport doesn't prevent it.
 
-        Stops automatically when the live stream is turned off or the proxy port
-        changes (indicating a new session has started).
+        Every 50s this loop:
+        1. Calls PUT /connection to get fresh credentials + a new RTSP session
+        2. Starts a new TLS proxy (new port, since credentials changed)
+        3. Uses Stream.update_source() to hot-swap FFmpeg to the new URL
+           without destroying the HLS provider or frontend state
+
+        Stops when the live stream switch is turned OFF.
         """
-        _LOGGER.debug("RTSP keepalive loop started for %s on port %d", cam_id[:8], proxy_port)
-        while True:
-            await asyncio.sleep(30)
-            # Stop if stream was turned off or a new session started on a different port
+        if cam_id in self._auto_renew_active:
+            _LOGGER.debug("Auto-renew: already active for %s — skipping", cam_id[:8])
+            return
+        self._auto_renew_active.add(cam_id)
+        _LOGGER.debug("Auto-renew loop started for %s", cam_id[:8])
+        try:
+          while True:
+            await asyncio.sleep(50)
+            # Stop if stream was turned off
             if cam_id not in self._live_connections:
-                _LOGGER.debug("RTSP keepalive: stream off for %s — stopping loop", cam_id[:8])
+                _LOGGER.debug("Auto-renew: stream off for %s — stopping", cam_id[:8])
                 break
-            current_port = self._tls_proxy_ports.get(cam_id)
-            if current_port != proxy_port:
-                _LOGGER.debug(
-                    "RTSP keepalive: port changed for %s (%d→%s) — stopping loop",
-                    cam_id[:8], proxy_port, current_port,
-                )
+            live = self._live_connections.get(cam_id, {})
+            if live.get("_connection_type") != "LOCAL":
+                _LOGGER.debug("Auto-renew: not LOCAL for %s — stopping", cam_id[:8])
                 break
-            ok = await rtsp_keepalive(proxy_port, user, password, cam_id)
-            if not ok:
-                _LOGGER.debug(
-                    "RTSP keepalive failed for %s on port %d — proxy may have stopped",
-                    cam_id[:8], proxy_port,
-                )
-                break
+            _LOGGER.debug("Auto-renew: renewing LOCAL session for %s", cam_id[:8])
+            try:
+                result = await self.try_live_connection(cam_id)
+                if result:
+                    _LOGGER.info(
+                        "Auto-renew: new session for %s — %s",
+                        cam_id[:8], result.get("rtspsUrl", "")[:60],
+                    )
+                else:
+                    _LOGGER.warning("Auto-renew: renewal failed for %s", cam_id[:8])
+            except Exception as exc:
+                _LOGGER.warning("Auto-renew: error for %s: %s", cam_id[:8], exc)
+        finally:
+          self._auto_renew_active.discard(cam_id)
+          _LOGGER.debug("Auto-renew loop ended for %s", cam_id[:8])
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:
