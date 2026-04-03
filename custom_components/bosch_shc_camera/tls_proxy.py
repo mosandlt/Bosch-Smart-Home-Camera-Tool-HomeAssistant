@@ -24,6 +24,9 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
+# Track server sockets so we can close them on stop
+_proxy_servers: dict[str, socket.socket] = {}
+
 
 def start_tls_proxy(
     ssl_ctx: ssl.SSLContext,
@@ -34,34 +37,33 @@ def start_tls_proxy(
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
-    Args:
-        ssl_ctx: Pre-created SSL context (check_hostname=False, verify_mode=CERT_NONE).
-        cam_id: Camera identifier (used for logging and port_cache key).
-        cam_host: Camera IP address.
-        cam_port: Camera TLS port (typically 443).
-        port_cache: Dict mapping cam_id → proxy port. Updated in-place.
-
-    Returns:
-        The local proxy port number on 127.0.0.1.
+    Stops any existing proxy for this cam_id first, then starts fresh.
+    Tries to reuse the same port (SO_REUSEADDR) so HA's cached Stream URL
+    stays valid when the proxy is recycled.
     """
-    # Reuse existing proxy if already running for this camera
+    old_port = port_cache.get(cam_id)
+    # Always stop existing proxy to avoid stale state
     if cam_id in port_cache:
-        port = port_cache[cam_id]
-        # Quick check if port is still listening
-        try:
-            test = socket.create_connection(("127.0.0.1", port), timeout=0.5)
-            test.close()
-            return port  # proxy still alive
-        except OSError:
-            pass  # proxy dead, start new one
-        port_cache.pop(cam_id, None)
+        _LOGGER.debug(
+            "TLS proxy for %s: stopping existing proxy on port %d before restart",
+            cam_id[:8], port_cache[cam_id],
+        )
+        stop_tls_proxy(cam_id, port_cache)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
+    # Try to reuse old port so HA's cached stream URL stays valid
+    if old_port:
+        try:
+            srv.bind(("127.0.0.1", old_port))
+        except OSError:
+            srv.bind(("127.0.0.1", 0))
+    else:
+        srv.bind(("127.0.0.1", 0))
     port = srv.getsockname()[1]
     srv.listen(4)
     srv.settimeout(None)
+    _proxy_servers[cam_id] = srv
 
     def _proxy_thread() -> None:
         while True:
@@ -72,7 +74,16 @@ def start_tls_proxy(
             try:
                 raw = socket.create_connection((cam_host, cam_port), timeout=10)
                 tls = ssl_ctx.wrap_socket(raw, server_hostname=cam_host)
-            except Exception:
+                _LOGGER.debug(
+                    "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
+                    cam_id[:8], cam_host, cam_port,
+                    tls.version(), tls.cipher()[0] if tls.cipher() else "?",
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "TLS proxy %s: failed to connect to %s:%d — %s",
+                    cam_id[:8], cam_host, cam_port, exc,
+                )
                 client.close()
                 continue
 
@@ -124,12 +135,10 @@ def start_tls_proxy(
             t1.start()
             t2.start()
 
-    # Use an Event to wait for the proxy thread to be ready (accepting connections)
-    # before returning. Without this, FFmpeg connects before the thread calls accept().
     ready = threading.Event()
 
     def _proxy_thread_with_signal() -> None:
-        ready.set()  # Signal that we're about to accept
+        ready.set()
         _proxy_thread()
 
     t = threading.Thread(
@@ -138,7 +147,7 @@ def start_tls_proxy(
         name=f"tls_proxy_{cam_id[:8]}",
     )
     t.start()
-    ready.wait(timeout=2)  # Wait up to 2s for thread to be ready
+    ready.wait(timeout=2)
     port_cache[cam_id] = port
     _LOGGER.info(
         "TLS proxy for %s started on 127.0.0.1:%d -> %s:%d (threading)",
@@ -151,8 +160,15 @@ def start_tls_proxy(
 
 
 def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
-    """Stop the TLS proxy for a camera (removes from port cache)."""
+    """Stop the TLS proxy for a camera by closing its server socket."""
     port_cache.pop(cam_id, None)
+    srv = _proxy_servers.pop(cam_id, None)
+    if srv is not None:
+        try:
+            srv.close()
+            _LOGGER.debug("TLS proxy for %s: server socket closed", cam_id[:8])
+        except Exception:
+            pass
 
 
 def _digest_auth(
@@ -205,6 +221,10 @@ async def pre_warm_rtsp(
         nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
         realm_m = re.search(r'realm="([^"]+)"', resp1_str)
         if not (nonce_m and realm_m):
+            _LOGGER.debug(
+                "Pre-warm RTSP: no nonce/realm in response (port %d): %.200s",
+                proxy_port, resp1_str,
+            )
             writer.close()
             return
         nonce, realm = nonce_m.group(1), realm_m.group(1)
@@ -218,9 +238,17 @@ async def pre_warm_rtsp(
             f"\r\n".encode()
         )
         await writer.drain()
-        await asyncio.wait_for(reader.read(8192), timeout=3)
+        resp2 = await asyncio.wait_for(reader.read(8192), timeout=3)
+        resp2_str = resp2.decode("utf-8", errors="replace")
+
+        if "200 OK" in resp2_str:
+            _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port)
+        else:
+            _LOGGER.warning(
+                "Pre-warm RTSP: unexpected response on port %d: %.200s",
+                proxy_port, resp2_str,
+            )
 
         writer.close()
-        _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE only) on port %d", proxy_port)
-    except Exception:
-        pass  # Pre-warm is best-effort, failure is not critical
+    except Exception as exc:
+        _LOGGER.debug("Pre-warm RTSP failed on port %d: %s", proxy_port, exc)

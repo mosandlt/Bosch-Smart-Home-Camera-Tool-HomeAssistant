@@ -169,10 +169,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Clear the live session immediately."""
+        """Clear the live session and stop TLS proxy."""
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
+        # Stop TLS proxy to avoid stale proxy threads
+        await self.coordinator._stop_tls_proxy(self._cam_id)
         # Update state immediately so the UI reflects OFF without waiting for
         # the go2rtc unregister (up to 3s) + coordinator refresh.
         self.async_write_ha_state()
@@ -323,7 +325,18 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         }
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Enable privacy mode — camera turns off / shutter closes."""
+        """Enable privacy mode — camera turns off / shutter closes.
+
+        Also stops any active live stream since the camera can't stream
+        while privacy mode is active (shutter closed).
+        """
+        # Stop live stream if active — camera can't stream with shutter closed
+        if self._cam_id in self.coordinator._live_connections:
+            _LOGGER.info("Privacy ON for %s — stopping active live stream", self._cam_title)
+            self.coordinator._live_connections.pop(self._cam_id, None)
+            self.coordinator._live_opened_at.pop(self._cam_id, None)
+            await self.coordinator._stop_tls_proxy(self._cam_id)
+            await self.coordinator._unregister_go2rtc_stream(self._cam_id)
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
 
     async def async_turn_off(self, **kwargs) -> None:
