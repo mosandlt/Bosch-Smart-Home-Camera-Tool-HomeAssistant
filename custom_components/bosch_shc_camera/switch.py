@@ -169,12 +169,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Clear the live session and stop TLS proxy."""
+        """Clear the live session. TLS proxy stays alive (persistent port)."""
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
-        # Stop TLS proxy to avoid stale proxy threads
-        await self.coordinator._stop_tls_proxy(self._cam_id)
+        # NOTE: TLS proxy is NOT stopped — it persists on the same port
+        # so HA's stream worker URL stays valid.  Cleanup on integration unload.
         # Update state immediately so the UI reflects OFF without waiting for
         # the go2rtc unregister (up to 3s) + coordinator refresh.
         self.async_write_ha_state()

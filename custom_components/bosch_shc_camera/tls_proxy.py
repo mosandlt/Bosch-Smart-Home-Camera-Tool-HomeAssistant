@@ -37,17 +37,31 @@ def start_tls_proxy(
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
-    Stops any existing proxy for this cam_id first, then starts fresh.
-    Tries to reuse the same port (SO_REUSEADDR) so HA's cached Stream URL
-    stays valid when the proxy is recycled.
+    If a proxy is already running for this cam_id, returns the existing
+    port without restarting.  The proxy doesn't handle auth — it just
+    forwards bytes — so credential changes don't require a restart.
+    This keeps the port stable across session renewals, preventing HA's
+    stream worker from losing its cached RTSP URL.
     """
+    # If proxy is already running, reuse it — port never changes.
+    existing_port = port_cache.get(cam_id)
+    existing_srv = _proxy_servers.get(cam_id)
+    if existing_srv is not None and existing_port is not None:
+        try:
+            existing_srv.fileno()  # Verify socket is still alive.
+            _LOGGER.debug(
+                "TLS proxy %s: reusing existing proxy on port %d",
+                cam_id[:8], existing_port,
+            )
+            return existing_port
+        except Exception:
+            _LOGGER.debug("TLS proxy %s: server socket dead — recreating", cam_id[:8])
+            _proxy_servers.pop(cam_id, None)
+            port_cache.pop(cam_id, None)
+
     old_port = port_cache.get(cam_id)
-    # Always stop existing proxy to avoid stale state
+    # Clean up any leftover state
     if cam_id in port_cache:
-        _LOGGER.debug(
-            "TLS proxy for %s: stopping existing proxy on port %d before restart",
-            cam_id[:8], port_cache[cam_id],
-        )
         stop_tls_proxy(cam_id, port_cache)
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -169,6 +183,12 @@ def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
             _LOGGER.debug("TLS proxy for %s: server socket closed", cam_id[:8])
         except Exception:
             pass
+
+
+def stop_all_proxies(port_cache: dict[str, int]) -> None:
+    """Stop all TLS proxies — called during integration unload."""
+    for cam_id in list(_proxy_servers.keys()):
+        stop_tls_proxy(cam_id, port_cache)
 
 
 async def rtsp_keepalive(

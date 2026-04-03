@@ -47,7 +47,7 @@ from .smb import (
     sync_smb_disk_check,
     async_smb_disk_alert,
 )
-from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy
+from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy, stop_all_proxies
 from . import shc as shc_mod
 from .rcp import async_update_rcp_data, get_cached_rcp_session
 
@@ -1939,6 +1939,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     if coord := edata.get("coordinator"):
         await coord.async_stop_fcm_push()
+        # Stop all TLS proxies (closes server sockets, terminates threads).
+        stop_all_proxies(coord._tls_proxy_ports)
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
     if unloaded:

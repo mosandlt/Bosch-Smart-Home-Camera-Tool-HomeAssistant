@@ -1280,7 +1280,20 @@ class BoschCameraCard extends HTMLElement {
       const startPlay = () => {
         video.muted = true;
         video.play()
-          .then(() => { video.muted = !audioOn; })
+          .then(() => {
+            if (audioOn) {
+              // Try unmuting — Chrome may pause the video if there was no user gesture.
+              video.muted = false;
+              // Check after a tick if Chrome paused us due to autoplay policy.
+              setTimeout(() => {
+                if (video.paused && !video.muted) {
+                  // Chrome blocked unmuted autoplay — fall back to muted playback.
+                  video.muted = true;
+                  video.play().catch(() => {});
+                }
+              }, 100);
+            }
+          })
           .catch(() => {});
       };
 
