@@ -388,22 +388,9 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Disable privacy mode — camera turns back on.
-
-        For indoor cameras (CAMERA_360/INDOOR): also disables notifications
-        to prevent immediate motion alerts when the camera activates in a
-        room with people present. User can re-enable via the Notifications
-        switch when ready.
-        """
+        """Disable privacy mode — camera turns back on."""
         if not await self._check_cooldown():
             return
-        hw = self.coordinator._hw_version.get(self._cam_id, "")
-        if hw.upper() in ("INDOOR", "CAMERA_360"):
-            _LOGGER.info(
-                "Privacy OFF for %s (indoor) — disabling notifications to prevent false alerts",
-                self._cam_title,
-            )
-            await self.coordinator.async_cloud_set_notifications(self._cam_id, False)
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, False)
 
 
