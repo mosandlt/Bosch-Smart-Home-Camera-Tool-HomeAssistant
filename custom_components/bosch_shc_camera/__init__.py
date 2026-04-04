@@ -264,37 +264,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """True when verbose debug logging is enabled in integration options."""
         return get_options(self._entry).get("debug_logging", False)
 
-    # ── Model-specific configuration ─────────────────────────────────────────
-    # Gen1 cameras have different encoder warm-up characteristics:
-    #   INDOOR / CAMERA_360 — "360 Innenkamera" (Gen1): faster SoC, encoder
-    #     ready in ~5s, pre-warm usually succeeds on 1st attempt.
-    #   OUTDOOR / CAMERA_EYES — "Eyes Außenkamera" (Gen1): slower encoder init
-    #     (~25s), pre-warm needs 3-4 attempts before DESCRIBE responds.
-    # Gen2 models (not yet tested): "Eyes Außenkamera II", "Eyes Innenkamera II"
-    # API hardwareVersion values: "INDOOR", "OUTDOOR", or legacy "CAMERA_360", "CAMERA_EYES".
-    # RCP product names: "Smart Home Indoor Camera", "Smart Home Outdoor Camera".
-    # Model-specific timing for LOCAL RTSP streams.
-    # min_total_wait: minimum seconds from PUT /connection until FFmpeg URL
-    #   is exposed. Ensures the H.264 encoder produces valid frames.
-    # renewal_interval: seconds between auto-renewal cycles (must be < 60s
-    #   camera session limit, but long enough for stable streaming).
-    # snapshot_warmup: seconds to wait before fetching LOCAL snap.jpg
-    #   (camera needs encoder running for snap.jpg to return fresh data).
-    _MODEL_TIMING = {
-        # renewal_interval: 3500s — camera accepts maxSessionDuration=3600 in
-        # the RTSP URL even for LOCAL connections (Sebastian confirmed 60s limit
-        # "should not be that way"). No aggressive 50s renewal needed.
-        "INDOOR":      {"pre_warm_delay": 1, "pre_warm_retries": 3, "pre_warm_retry_wait": 3, "post_warm_buffer": 2, "min_total_wait": 25, "renewal_interval": 3500, "snapshot_warmup": 3, "describe_timeout": 5},
-        "CAMERA_360":  {"pre_warm_delay": 1, "pre_warm_retries": 3, "pre_warm_retry_wait": 3, "post_warm_buffer": 2, "min_total_wait": 25, "renewal_interval": 3500, "snapshot_warmup": 3, "describe_timeout": 5},
-        "OUTDOOR":     {"pre_warm_delay": 2, "pre_warm_retries": 8, "pre_warm_retry_wait": 5, "post_warm_buffer": 3, "min_total_wait": 35, "renewal_interval": 3500, "snapshot_warmup": 5, "describe_timeout": 8},
-        "CAMERA_EYES": {"pre_warm_delay": 2, "pre_warm_retries": 8, "pre_warm_retry_wait": 5, "post_warm_buffer": 3, "min_total_wait": 35, "renewal_interval": 3500, "snapshot_warmup": 5, "describe_timeout": 8},
-    }
-    _MODEL_TIMING_DEFAULT = {"pre_warm_delay": 2, "pre_warm_retries": 5, "pre_warm_retry_wait": 3, "post_warm_buffer": 3, "min_total_wait": 30, "renewal_interval": 50, "snapshot_warmup": 4, "describe_timeout": 5}
-
-    def get_model_timing(self, cam_id: str) -> dict:
-        """Return model-specific timing configuration for a camera."""
+    def get_model_config(self, cam_id: str):
+        """Return CameraModelConfig for a camera (from models.py)."""
+        from .models import get_model_config
         hw = self._hw_version.get(cam_id, "CAMERA")
-        return self._MODEL_TIMING.get(hw, self._MODEL_TIMING_DEFAULT)
+        return get_model_config(hw)
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -1175,9 +1149,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 )
                                 eu = _q(local_user, safe="")
                                 ep = _q(local_pass, safe="")
+                                from .models import get_model_config as _gmc
+                                _mcfg = _gmc(self._hw_version.get(cam_id, "CAMERA"))
                                 local_rtsp_url = (
                                     f"rtsp://{eu}:{ep}@127.0.0.1:{proxy_port}"
-                                    f"/rtsp_tunnel?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
+                                    f"/rtsp_tunnel?inst={inst}{audio_param}&fmtp=1&maxSessionDuration={_mcfg.max_session_duration}"
                                 )
                                 # Don't set rtspsUrl yet — pre-warm must complete first
                                 # so stream_source() returns None until encoder is ready.
@@ -1218,38 +1194,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if not hasattr(self, "_stream_warming"):
                                 self._stream_warming = set()
                             self._stream_warming.add(cam_id)
-                            timing = self.get_model_timing(cam_id)
+                            cfg = self.get_model_config(cam_id)
                             hw = self._hw_version.get(cam_id, "?")
                             put_time = time.monotonic()
                             proxy_port_val = self._tls_proxy_ports.get(cam_id)
                             if proxy_port_val:
                                 _LOGGER.debug(
-                                    "LOCAL pre-warm for %s (hw=%s): delay=%ds, retries=%d, wait=%ds, buffer=%ds, min_total=%ds",
-                                    cam_id[:8], hw, timing["pre_warm_delay"],
-                                    timing["pre_warm_retries"], timing["pre_warm_retry_wait"],
-                                    timing["post_warm_buffer"], timing["min_total_wait"],
+                                    "LOCAL pre-warm for %s (%s, hw=%s): delay=%ds, retries=%d, wait=%ds, buffer=%ds, min_total=%ds",
+                                    cam_id[:8], cfg.display_name, hw, cfg.pre_warm_delay,
+                                    cfg.pre_warm_retries, cfg.pre_warm_retry_wait,
+                                    cfg.post_warm_buffer, cfg.min_total_wait,
                                 )
-                                await asyncio.sleep(timing["pre_warm_delay"])
+                                await asyncio.sleep(cfg.pre_warm_delay)
                                 await pre_warm_rtsp(
                                     proxy_port_val, local_user, local_pass,
                                     cam_addr.split(":")[0],
-                                    max_attempts=timing["pre_warm_retries"],
-                                    retry_wait=timing["pre_warm_retry_wait"],
-                                    post_success_wait=timing["post_warm_buffer"],
-                                    describe_timeout=timing.get("describe_timeout", 5),
+                                    max_attempts=cfg.pre_warm_retries,
+                                    retry_wait=cfg.pre_warm_retry_wait,
+                                    post_success_wait=cfg.post_warm_buffer,
+                                    describe_timeout=cfg.describe_timeout,
                                 )
                             # Ensure minimum total time from PUT /connection.
-                            # The camera's H.264 encoder needs this time to produce
-                            # valid frames, even after DESCRIBE pre-warm succeeds.
-                            # Renewals use 2/3 of the initial wait (camera is warmer but
-                            # still needs time to init the new RTSP session).
-                            min_wait = (timing["min_total_wait"] * 2 // 3) if is_renewal else timing["min_total_wait"]
+                            # Renewals use 2/3 of this (camera encoder already warm).
+                            min_wait = (cfg.min_total_wait * 2 // 3) if is_renewal else cfg.min_total_wait
                             elapsed = time.monotonic() - put_time
                             remaining = min_wait - elapsed
                             if remaining > 0:
                                 _LOGGER.debug(
                                     "LOCAL %s: waiting %.0fs more (%.0fs elapsed, min %ds)",
-                                    cam_id[:8], remaining, elapsed, timing["min_total_wait"],
+                                    cam_id[:8], remaining, elapsed, cfg.min_total_wait,
                                 )
                                 await asyncio.sleep(remaining)
                             # Set URL — encoder should be ready now
@@ -1687,8 +1660,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Stops when the live stream switch is turned OFF or a new generation
         supersedes this one (OFF→ON cycle started a fresh renewal loop).
         """
-        timing = self.get_model_timing(cam_id)
-        interval = timing["renewal_interval"]
+        cfg = self.get_model_config(cam_id)
+        interval = cfg.renewal_interval
         _LOGGER.debug("Auto-renew loop started for %s (gen=%d, interval=%ds)", cam_id[:8], generation, interval)
         try:
           while True:

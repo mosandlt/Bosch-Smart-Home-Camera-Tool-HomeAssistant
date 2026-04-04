@@ -1,0 +1,114 @@
+"""Camera model definitions and timing configurations.
+
+Each Bosch Smart Home camera model has different hardware characteristics
+that affect stream startup, encoder warm-up, and session management.
+All timing values are empirically measured and model-specific.
+
+Supported models (Gen1, firmware 7.91.56):
+  - "360 Innenkamera"   (API: INDOOR / CAMERA_360)
+  - "Eyes Außenkamera"   (API: OUTDOOR / CAMERA_EYES)
+
+Planned models (Gen2, not yet tested):
+  - "Eyes Außenkamera II"
+  - "Eyes Innenkamera II"
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class CameraModelConfig:
+    """Timing and behavior configuration for a specific camera model."""
+
+    # ── Display ──────────────────────────────────────────────────────────
+    display_name: str           # Official Bosch product name
+    generation: int = 1         # Hardware generation (1 or 2)
+
+    # ── Pre-warm (RTSP DESCRIBE to wake H.264 encoder) ───────────────────
+    pre_warm_delay: int = 2     # Seconds to wait after PUT /connection before first DESCRIBE
+    pre_warm_retries: int = 5   # Max DESCRIBE attempts before giving up
+    pre_warm_retry_wait: int = 3  # Seconds between failed DESCRIBE attempts
+    post_warm_buffer: int = 3   # Seconds to wait after successful DESCRIBE (TLS cleanup)
+    describe_timeout: int = 5   # Timeout per DESCRIBE read (seconds)
+
+    # ── Stream startup ───────────────────────────────────────────────────
+    min_total_wait: int = 30    # Minimum seconds from PUT /connection until RTSP URL exposed
+                                # Ensures encoder produces valid H.264 frames.
+                                # For renewals: 2/3 of this value is used (camera already warm).
+
+    # ── Session management ───────────────────────────────────────────────
+    renewal_interval: int = 500  # Seconds between auto-renewal cycles.
+                                 # Camera accepts maxSessionDuration=3600 in RTSP URL,
+                                 # but some models reset the connection earlier.
+    max_session_duration: int = 3600  # Value sent in RTSP URL maxSessionDuration parameter.
+
+    # ── Snapshots ────────────────────────────────────────────────────────
+    snapshot_warmup: int = 4    # Seconds to wait before LOCAL snap.jpg fetch
+                                # (encoder must be running for fresh frame)
+
+
+# ── Model registry ───────────────────────────────────────────────────────
+# Keyed by API hardwareVersion values from GET /v11/video_inputs response.
+
+MODELS: dict[str, CameraModelConfig] = {
+    # ── Gen1 Indoor: 360 Innenkamera ─────────────────────────────────────
+    # Faster SoC, encoder ready in ~5s, pre-warm usually succeeds on 1st attempt.
+    # Session stable for 3500s+ (tested 90s+ without renewal, no disconnect).
+    "INDOOR": CameraModelConfig(
+        display_name="360 Innenkamera",
+        generation=1,
+        pre_warm_delay=1,
+        pre_warm_retries=3,
+        pre_warm_retry_wait=3,
+        post_warm_buffer=2,
+        describe_timeout=5,
+        min_total_wait=25,
+        renewal_interval=3500,
+        max_session_duration=3600,
+        snapshot_warmup=3,
+    ),
+
+    # ── Gen1 Outdoor: Eyes Außenkamera ────────────────────────────────────
+    # Slower encoder init (~25s), pre-warm needs 3-4 DESCRIBE attempts.
+    # Session may reset after ~10 min despite maxSessionDuration=3600.
+    # renewal_interval=500 (~8 min) as safety margin.
+    "OUTDOOR": CameraModelConfig(
+        display_name="Eyes Außenkamera",
+        generation=1,
+        pre_warm_delay=2,
+        pre_warm_retries=8,
+        pre_warm_retry_wait=5,
+        post_warm_buffer=3,
+        describe_timeout=8,
+        min_total_wait=35,
+        renewal_interval=500,
+        max_session_duration=3600,
+        snapshot_warmup=5,
+    ),
+}
+
+# Legacy API values map to the same configs
+MODELS["CAMERA_360"] = MODELS["INDOOR"]
+MODELS["CAMERA_EYES"] = MODELS["OUTDOOR"]
+
+# Default for unknown models
+DEFAULT_MODEL = CameraModelConfig(
+    display_name="Unknown Camera",
+    generation=1,
+    pre_warm_delay=2,
+    pre_warm_retries=5,
+    pre_warm_retry_wait=3,
+    post_warm_buffer=3,
+    describe_timeout=5,
+    min_total_wait=30,
+    renewal_interval=500,
+    max_session_duration=3600,
+    snapshot_warmup=4,
+)
+
+
+def get_model_config(hw_version: str) -> CameraModelConfig:
+    """Return model config for a hardwareVersion string."""
+    return MODELS.get(hw_version, DEFAULT_MODEL)

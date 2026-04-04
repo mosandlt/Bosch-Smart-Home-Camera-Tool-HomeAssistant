@@ -1,6 +1,8 @@
 # Bosch Smart Home Camera — Home Assistant Integration
 
-Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as fully featured entities in Home Assistant. Includes a custom **Lovelace card** with live streaming, controls, and event info.
+Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Includes a custom **Lovelace card** with live streaming, controls, and event info.
+
+**Supported models:** Eyes Außenkamera (Gen1), Eyes Außenkamera II (Gen2), 360 Innenkamera (Gen1), Eyes Innenkamera II (Gen2) — model-specific timing and configuration is automatic.
 
 > **No official API.** This integration uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
 
