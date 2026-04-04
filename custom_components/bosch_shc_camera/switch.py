@@ -171,6 +171,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     async def async_turn_off(self, **kwargs) -> None:
         """Clear the live session and stop the TLS proxy."""
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
+        # Cancel auto-renewal FIRST so it doesn't race with the cleanup
+        renew_task = self.coordinator._auto_renew_tasks.pop(self._cam_id, None)
+        if renew_task and not renew_task.done():
+            renew_task.cancel()
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
         # Stop TLS proxy — each session gets a fresh proxy with a new port,

@@ -83,7 +83,7 @@ DEFAULT_OPTIONS = {
     "shc_cert_path": "",
     "shc_key_path":  "",
     "high_quality_video": False,
-    "stream_connection_type": "auto",   # "remote", "local", or "auto" (local first, fallback remote)
+    "stream_connection_type": "auto",    # "auto" (local first, fallback remote), "local", or "remote" (cloud proxy)
     "enable_binary_sensors": True,
     "enable_fcm_push": False,  # FCM push notifications for near-instant event detection (opt-in)
     "alert_notify_service": "",   # notify service for alerts (e.g. "notify.signal_messenger"), empty = disabled
@@ -142,8 +142,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._stream_type_override: str | None = None
         # Per-camera audio setting — True = audio+video on (default), False = snapshot-only
         self._audio_enabled:    dict[str, bool]  = {}
-        # Guard against duplicate auto-renew loops per camera
-        self._auto_renew_active: set[str] = set()
+        # Auto-renewal tasks and generation counters per camera.
+        # The generation counter increments on every new stream start,
+        # allowing stale renewal loops to detect they belong to an old session.
+        self._auto_renew_tasks: dict[str, asyncio.Task] = {}
+        self._auto_renew_generation: dict[str, int] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict = {}
         # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
@@ -1101,11 +1104,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 )
                                 eu = _q(local_user, safe="")
                                 ep = _q(local_pass, safe="")
-                                result["rtspsUrl"] = (
+                                local_rtsp_url = (
                                     f"rtsp://{eu}:{ep}@127.0.0.1:{proxy_port}"
                                     f"/rtsp_tunnel?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                 )
-                                result["rtspUrl"] = result["rtspsUrl"]
+                                # Don't set rtspsUrl yet — pre-warm must complete first
+                                # so stream_source() returns None until encoder is ready.
+                                # rtspsUrl/rtspUrl will be set after pre-warm below.
                         else:
                             # REMOTE response: {"urls": ["proxy-NN:42090/{hash}"]}
                             urls = result.get("urls", [])
@@ -1131,17 +1136,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         self._live_connections[cam_id] = result
                         self._live_opened_at[cam_id]   = time.monotonic()
 
-                        rtsps_url = result.get("rtspsUrl", "")
-
-                        # ── Pre-warm encoder FIRST (outside timeout) ─────
-                        # Camera needs ~5s after PUT /connection to initialize
-                        # the H.264 encoder. Must complete BEFORE update_source
-                        # (which triggers FFmpeg restart) or go2rtc registration.
+                        # ── LOCAL encoder warm-up ─────────────────────────
+                        # Camera needs ~30s after PUT /connection before the
+                        # RTSP encoder is fully ready. Pre-warm DESCRIBE retries
+                        # until the camera responds, but FFmpeg still needs the
+                        # encoder to produce valid H.264 frames which takes longer.
+                        # The URL is withheld from stream_source() until after
+                        # pre-warm so FFmpeg doesn't connect prematurely.
                         if type_val == "LOCAL" and local_user and local_pass:
                             proxy_port_val = self._tls_proxy_ports.get(cam_id)
                             if proxy_port_val:
-                                await asyncio.sleep(5)
+                                await asyncio.sleep(2)
                                 await pre_warm_rtsp(proxy_port_val, local_user, local_pass, cam_addr.split(":")[0])
+                            # Set URL after pre-warm — encoder should be warmer now
+                            result["rtspsUrl"] = local_rtsp_url
+                            result["rtspUrl"] = local_rtsp_url
+                            self._live_connections[cam_id] = result  # update with URL
+
+                        rtsps_url = result.get("rtspsUrl", "")
 
                         # ── Update HA's stream with new URL ──────────────
                         # AFTER pre-warm so FFmpeg connects to a ready encoder.
@@ -1165,10 +1177,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                         # ── LOCAL session auto-renewal ───────────────────
                         if type_val == "LOCAL" and local_user and local_pass:
-                            if cam_id not in self._auto_renew_active:
-                                self.hass.async_create_task(
-                                    self._auto_renew_local_session(cam_id)
-                                )
+                            # Cancel any stale renewal from a previous session
+                            old_task = self._auto_renew_tasks.pop(cam_id, None)
+                            if old_task and not old_task.done():
+                                old_task.cancel()
+                            gen = self._auto_renew_generation.get(cam_id, 0) + 1
+                            self._auto_renew_generation[cam_id] = gen
+                            task = self.hass.async_create_task(
+                                self._auto_renew_local_session(cam_id, gen)
+                            )
+                            self._auto_renew_tasks[cam_id] = task
                         self.hass.async_create_task(self.async_request_refresh())
                         return result
                     elif resp.status == 401:
@@ -1547,7 +1565,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Stop the TLS proxy for a camera."""
         stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
-    async def _auto_renew_local_session(self, cam_id: str) -> None:
+    async def _auto_renew_local_session(self, cam_id: str, generation: int) -> None:
         """Auto-renew LOCAL RTSP session every 50s to beat the 60s absolute limit.
 
         The Bosch camera enforces maxSessionDuration=60 for LOCAL connections.
@@ -1560,16 +1578,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         3. Uses Stream.update_source() to hot-swap FFmpeg to the new URL
            without destroying the HLS provider or frontend state
 
-        Stops when the live stream switch is turned OFF.
+        Stops when the live stream switch is turned OFF or a new generation
+        supersedes this one (OFF→ON cycle started a fresh renewal loop).
         """
-        if cam_id in self._auto_renew_active:
-            _LOGGER.debug("Auto-renew: already active for %s — skipping", cam_id[:8])
-            return
-        self._auto_renew_active.add(cam_id)
-        _LOGGER.debug("Auto-renew loop started for %s", cam_id[:8])
+        _LOGGER.debug("Auto-renew loop started for %s (gen=%d)", cam_id[:8], generation)
         try:
           while True:
             await asyncio.sleep(50)
+            # Stop if a newer generation was started (OFF→ON cycle)
+            if self._auto_renew_generation.get(cam_id, 0) != generation:
+                _LOGGER.debug("Auto-renew: stale gen=%d for %s — stopping", generation, cam_id[:8])
+                break
             # Stop if stream was turned off
             if cam_id not in self._live_connections:
                 _LOGGER.debug("Auto-renew: stream off for %s — stopping", cam_id[:8])
@@ -1578,7 +1597,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if live.get("_connection_type") != "LOCAL":
                 _LOGGER.debug("Auto-renew: not LOCAL for %s — stopping", cam_id[:8])
                 break
-            _LOGGER.debug("Auto-renew: renewing LOCAL session for %s", cam_id[:8])
+            _LOGGER.debug("Auto-renew: renewing LOCAL session for %s (gen=%d)", cam_id[:8], generation)
             try:
                 result = await self.try_live_connection(cam_id)
                 if result:
@@ -1590,9 +1609,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning("Auto-renew: renewal failed for %s", cam_id[:8])
             except Exception as exc:
                 _LOGGER.warning("Auto-renew: error for %s: %s", cam_id[:8], exc)
+        except asyncio.CancelledError:
+          _LOGGER.debug("Auto-renew loop cancelled for %s (gen=%d)", cam_id[:8], generation)
         finally:
-          self._auto_renew_active.discard(cam_id)
-          _LOGGER.debug("Auto-renew loop ended for %s", cam_id[:8])
+          self._auto_renew_tasks.pop(cam_id, None)
+          _LOGGER.debug("Auto-renew loop ended for %s (gen=%d)", cam_id[:8], generation)
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:
@@ -1952,6 +1973,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     if coord := edata.get("coordinator"):
         await coord.async_stop_fcm_push()
+        # Cancel all auto-renewal tasks
+        for task in coord._auto_renew_tasks.values():
+            if not task.done():
+                task.cancel()
+        coord._auto_renew_tasks.clear()
         # Stop all TLS proxies (closes server sockets, terminates threads).
         stop_all_proxies(coord._tls_proxy_ports)
 

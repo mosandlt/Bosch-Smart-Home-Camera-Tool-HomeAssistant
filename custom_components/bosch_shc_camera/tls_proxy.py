@@ -83,6 +83,7 @@ def start_tls_proxy(
                 """Forward bytes. If rewrite_transport=True, intercept RTSP
                 SETUP requests and force TCP interleaved transport so FFmpeg
                 doesn't try UDP (which can't work through the TCP proxy)."""
+                _interleaved_counter = [0]  # tracks next interleaved channel pair
                 try:
                     while True:
                         r, _, _ = _select.select([src], [], [], 60)
@@ -94,11 +95,14 @@ def start_tls_proxy(
                         if rewrite_transport and b"SETUP " in data:
                             # Replace UDP transport with TCP interleaved
                             text = data.decode("utf-8", errors="replace")
+                            lo = _interleaved_counter[0]
+                            hi = lo + 1
                             text = re.sub(
                                 r"Transport:\s*RTP/AVP[^;\r\n]*;unicast;client_port=[^\r\n]+",
-                                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1",
+                                f"Transport: RTP/AVP/TCP;unicast;interleaved={lo}-{hi}",
                                 text,
                             )
+                            _interleaved_counter[0] = hi + 1
                             data = text.encode("utf-8")
                         dst.sendall(data)
                 except Exception:
@@ -261,57 +265,80 @@ async def pre_warm_rtsp(
     This avoids conflicts with FFmpeg which needs to start its own session.
 
     Sequence: DESCRIBE (unauth) → 401 → DESCRIBE (digest) → 200 OK (SDP)
+
+    Retries up to 5 times with 3s delay if the camera's encoder isn't ready yet
+    (connection refused or empty response from the TLS proxy).
     """
-    try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
-        uri = (
-            f"rtsp://127.0.0.1:{proxy_port}"
-            "/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
-        )
-
-        # Step 1: DESCRIBE without auth → 401 + nonce/realm
-        writer.write(
-            f"DESCRIBE {uri} RTSP/1.0\r\n"
-            f"CSeq: 1\r\n"
-            f"Accept: application/sdp\r\n"
-            f"\r\n".encode()
-        )
-        await writer.drain()
-        resp1 = await asyncio.wait_for(reader.read(4096), timeout=3)
-
-        # Step 2: Parse nonce, send authenticated DESCRIBE
-        resp1_str = resp1.decode("utf-8", errors="replace")
-        nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
-        realm_m = re.search(r'realm="([^"]+)"', resp1_str)
-        if not (nonce_m and realm_m):
-            _LOGGER.debug(
-                "Pre-warm RTSP: no nonce/realm in response (port %d): %.200s",
-                proxy_port, resp1_str,
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
+            uri = (
+                f"rtsp://127.0.0.1:{proxy_port}"
+                "/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
             )
+
+            # Step 1: DESCRIBE without auth → 401 + nonce/realm
+            writer.write(
+                f"DESCRIBE {uri} RTSP/1.0\r\n"
+                f"CSeq: 1\r\n"
+                f"Accept: application/sdp\r\n"
+                f"\r\n".encode()
+            )
+            await writer.drain()
+            resp1 = await asyncio.wait_for(reader.read(4096), timeout=5)
+
+            # Step 2: Parse nonce, send authenticated DESCRIBE
+            resp1_str = resp1.decode("utf-8", errors="replace")
+            nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
+            realm_m = re.search(r'realm="([^"]+)"', resp1_str)
+            if not (nonce_m and realm_m):
+                _LOGGER.debug(
+                    "Pre-warm RTSP: no nonce/realm in response (port %d, attempt %d/%d): %.200s",
+                    proxy_port, attempt, max_attempts, resp1_str,
+                )
+                writer.close()
+                if attempt < max_attempts:
+                    await asyncio.sleep(3)
+                    continue
+                return
+            nonce, realm = nonce_m.group(1), realm_m.group(1)
+
+            auth = _digest_auth(user, password, "DESCRIBE", uri, realm, nonce)
+            writer.write(
+                f"DESCRIBE {uri} RTSP/1.0\r\n"
+                f"CSeq: 2\r\n"
+                f"Accept: application/sdp\r\n"
+                f"Authorization: {auth}\r\n"
+                f"\r\n".encode()
+            )
+            await writer.drain()
+            resp2 = await asyncio.wait_for(reader.read(8192), timeout=5)
+            resp2_str = resp2.decode("utf-8", errors="replace")
+
+            if "200 OK" in resp2_str:
+                _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port)
+            else:
+                _LOGGER.warning(
+                    "Pre-warm RTSP: unexpected response on port %d: %.200s",
+                    proxy_port, resp2_str,
+                )
+
             writer.close()
-            return
-        nonce, realm = nonce_m.group(1), realm_m.group(1)
-
-        auth = _digest_auth(user, password, "DESCRIBE", uri, realm, nonce)
-        writer.write(
-            f"DESCRIBE {uri} RTSP/1.0\r\n"
-            f"CSeq: 2\r\n"
-            f"Accept: application/sdp\r\n"
-            f"Authorization: {auth}\r\n"
-            f"\r\n".encode()
-        )
-        await writer.drain()
-        resp2 = await asyncio.wait_for(reader.read(8192), timeout=3)
-        resp2_str = resp2.decode("utf-8", errors="replace")
-
-        if "200 OK" in resp2_str:
-            _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port)
-        else:
-            _LOGGER.warning(
-                "Pre-warm RTSP: unexpected response on port %d: %.200s",
-                proxy_port, resp2_str,
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            # Wait for the camera to fully release the TLS connection.
+            # The camera only allows ~2 concurrent RTSP sessions per
+            # PUT /connection credential set. Without this delay, FFmpeg
+            # may connect before the pre-warm's TLS session is torn down.
+            await asyncio.sleep(3)
+            return  # success or got a response — done
+        except Exception as exc:
+            _LOGGER.debug(
+                "Pre-warm RTSP failed on port %d (attempt %d/%d): %s",
+                proxy_port, attempt, max_attempts, exc,
             )
-
-        writer.close()
-    except Exception as exc:
-        _LOGGER.debug("Pre-warm RTSP failed on port %d: %s", proxy_port, exc)
+            if attempt < max_attempts:
+                await asyncio.sleep(3)

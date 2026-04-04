@@ -30,6 +30,15 @@ Adds your Bosch Smart Home cameras (CAMERA_EYES outdoor, CAMERA_360 indoor) as f
 
 ---
 
+## Known Issues
+
+| Issue | Status | Workaround |
+|-------|--------|------------|
+| **LOCAL stream: first ~30s may show loading** | Under investigation | The camera's H.264 encoder needs ~30s after connection setup. FFmpeg retries automatically — the stream starts once the encoder is ready. If you need instant playback, set `Stream connection type` to `remote` in the integration settings. |
+| **Motion sensitivity changes revert after ~1s** | Firmware limitation | The camera's IVA rules engine overwrites cloud-set motion sensitivity via RCP. Not fixable via the API. ([#1](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/1)) |
+
+---
+
 ## Disclaimer
 
 **This project is an independent, community-developed integration. It is not affiliated with, endorsed by, or connected to Robert Bosch GmbH. "Bosch" and "Bosch Smart Home" are registered trademarks of Robert Bosch GmbH.**
