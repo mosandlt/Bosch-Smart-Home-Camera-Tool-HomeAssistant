@@ -155,14 +155,27 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             "proxy_snap_url":   live.get("proxyUrl", ""),
         }
 
+    # Minimum seconds between stream ON attempts per camera.
+    _STREAM_COOLDOWN = 5
+
     async def async_turn_on(self, **kwargs) -> None:
         """Open a new live proxy connection."""
+        import time
+        last_off = getattr(self, "_last_stream_off", 0)
+        elapsed = time.monotonic() - last_off
+        if last_off > 0 and elapsed < self._STREAM_COOLDOWN:
+            _LOGGER.warning(
+                "Stream ON for %s blocked — cooldown %.0fs remaining",
+                self._cam_title, self._STREAM_COOLDOWN - elapsed,
+            )
+            return
         _LOGGER.info("Live stream ON for %s", self._cam_title)
         result = await self.coordinator.try_live_connection(self._cam_id)
         if result:
+            conn_type = result.get("_connection_type", "REMOTE")
             _LOGGER.info(
-                "Live stream active for %s — %s",
-                self._cam_title, result.get("rtspsUrl", ""),
+                "Live stream active for %s (%s) — %s",
+                self._cam_title, conn_type, result.get("rtspsUrl", ""),
             )
         else:
             _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
@@ -170,6 +183,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs) -> None:
         """Clear the live session and stop the TLS proxy."""
+        import time
+        self._last_stream_off = time.monotonic()
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
         # Cancel auto-renewal FIRST so it doesn't race with the cleanup
         renew_task = self.coordinator._auto_renew_tasks.pop(self._cam_id, None)
@@ -329,12 +344,40 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             "rcp_state": rcp_raw,
         }
 
+    # Minimum seconds between privacy mode changes per camera.
+    # Rapid toggling can stress the camera firmware (red LED / reboot).
+    _PRIVACY_COOLDOWN = 10
+
+    async def _check_cooldown(self) -> bool:
+        """Return True if cooldown period has passed, False if too soon."""
+        import time
+        # Block during stream warm-up (TLS proxy + encoder init)
+        if self.coordinator.is_stream_warming(self._cam_id):
+            _LOGGER.warning(
+                "Privacy toggle for %s blocked — stream is warming up",
+                self._cam_title,
+            )
+            return False
+        # Block rapid toggles
+        last = self.coordinator._privacy_set_at.get(self._cam_id, 0)
+        elapsed = time.monotonic() - last
+        if elapsed < self._PRIVACY_COOLDOWN:
+            remaining = self._PRIVACY_COOLDOWN - elapsed
+            _LOGGER.warning(
+                "Privacy toggle for %s blocked — cooldown %.0fs remaining (prevents camera stress)",
+                self._cam_title, remaining,
+            )
+            return False
+        return True
+
     async def async_turn_on(self, **kwargs) -> None:
         """Enable privacy mode — camera turns off / shutter closes.
 
         Also stops any active live stream since the camera can't stream
         while privacy mode is active (shutter closed).
         """
+        if not await self._check_cooldown():
+            return
         # Stop live stream if active — camera can't stream with shutter closed
         if self._cam_id in self.coordinator._live_connections:
             _LOGGER.info("Privacy ON for %s — stopping active live stream", self._cam_title)
@@ -345,7 +388,22 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Disable privacy mode — camera turns back on."""
+        """Disable privacy mode — camera turns back on.
+
+        For indoor cameras (CAMERA_360/INDOOR): also disables notifications
+        to prevent immediate motion alerts when the camera activates in a
+        room with people present. User can re-enable via the Notifications
+        switch when ready.
+        """
+        if not await self._check_cooldown():
+            return
+        hw = self.coordinator._hw_version.get(self._cam_id, "")
+        if hw.upper() in ("INDOOR", "CAMERA_360"):
+            _LOGGER.info(
+                "Privacy OFF for %s (indoor) — disabling notifications to prevent false alerts",
+                self._cam_title,
+            )
+            await self.coordinator.async_cloud_set_notifications(self._cam_id, False)
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, False)
 
 

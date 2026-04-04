@@ -22,7 +22,7 @@ No user data is hardcoded. All configuration via the HA UI.
 
 import asyncio
 import logging
-import os
+
 import time
 from datetime import timedelta
 
@@ -54,7 +54,6 @@ from .rcp import async_update_rcp_data, get_cached_rcp_session
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,6 +106,7 @@ DEFAULT_OPTIONS = {
     "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",  # File name pattern
     "smb_retention_days": 180,  # Delete files older than N days (0 = keep forever)
     "smb_disk_warn_mb": 5120,   # Alert when free space on SMB share falls below N MB (0 = disable)
+    "debug_logging": False,     # Enable verbose debug logging for stream/TLS proxy troubleshooting
 }
 
 
@@ -237,6 +237,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._privacy_set_at: dict[str, float] = {}      # privacy write timestamp
         _WRITE_LOCK_SECS = 8.0                           # seconds to hold write lock
         self._WRITE_LOCK_SECS = _WRITE_LOCK_SECS
+        # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
+        # Used for model-specific timing (encoder warm-up) and feature gating.
+        self._hw_version: dict[str, str] = {}
         # TLS proxy for LOCAL RTSPS streams — keyed by cam_id
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
@@ -255,6 +258,43 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._OFFLINE_EXTENDED_INTERVAL = _OFFLINE_EXTENDED_INTERVAL
         # Per-camera status check timestamps (for extended offline intervals)
         self._per_cam_status_at: dict[str, float] = {}
+
+    @property
+    def debug(self) -> bool:
+        """True when verbose debug logging is enabled in integration options."""
+        return get_options(self._entry).get("debug_logging", False)
+
+    # ── Model-specific configuration ─────────────────────────────────────────
+    # Gen1 cameras have different encoder warm-up characteristics:
+    #   INDOOR / CAMERA_360 — "360 Innenkamera" (Gen1): faster SoC, encoder
+    #     ready in ~5s, pre-warm usually succeeds on 1st attempt.
+    #   OUTDOOR / CAMERA_EYES — "Eyes Außenkamera" (Gen1): slower encoder init
+    #     (~25s), pre-warm needs 3-4 attempts before DESCRIBE responds.
+    # Gen2 models (not yet tested): "Eyes Außenkamera II", "Eyes Innenkamera II"
+    # API hardwareVersion values: "INDOOR", "OUTDOOR", or legacy "CAMERA_360", "CAMERA_EYES".
+    # RCP product names: "Smart Home Indoor Camera", "Smart Home Outdoor Camera".
+    # Model-specific timing for LOCAL RTSP streams.
+    # min_total_wait: minimum seconds from PUT /connection until FFmpeg URL
+    #   is exposed. Ensures the H.264 encoder produces valid frames.
+    # renewal_interval: seconds between auto-renewal cycles (must be < 60s
+    #   camera session limit, but long enough for stable streaming).
+    # snapshot_warmup: seconds to wait before fetching LOCAL snap.jpg
+    #   (camera needs encoder running for snap.jpg to return fresh data).
+    _MODEL_TIMING = {
+        # renewal_interval: 3500s — camera accepts maxSessionDuration=3600 in
+        # the RTSP URL even for LOCAL connections (Sebastian confirmed 60s limit
+        # "should not be that way"). No aggressive 50s renewal needed.
+        "INDOOR":      {"pre_warm_delay": 1, "pre_warm_retries": 3, "pre_warm_retry_wait": 3, "post_warm_buffer": 2, "min_total_wait": 25, "renewal_interval": 3500, "snapshot_warmup": 3, "describe_timeout": 5},
+        "CAMERA_360":  {"pre_warm_delay": 1, "pre_warm_retries": 3, "pre_warm_retry_wait": 3, "post_warm_buffer": 2, "min_total_wait": 25, "renewal_interval": 3500, "snapshot_warmup": 3, "describe_timeout": 5},
+        "OUTDOOR":     {"pre_warm_delay": 2, "pre_warm_retries": 8, "pre_warm_retry_wait": 5, "post_warm_buffer": 3, "min_total_wait": 35, "renewal_interval": 3500, "snapshot_warmup": 5, "describe_timeout": 8},
+        "CAMERA_EYES": {"pre_warm_delay": 2, "pre_warm_retries": 8, "pre_warm_retry_wait": 5, "post_warm_buffer": 3, "min_total_wait": 35, "renewal_interval": 3500, "snapshot_warmup": 5, "describe_timeout": 8},
+    }
+    _MODEL_TIMING_DEFAULT = {"pre_warm_delay": 2, "pre_warm_retries": 5, "pre_warm_retry_wait": 3, "post_warm_buffer": 3, "min_total_wait": 30, "renewal_interval": 50, "snapshot_warmup": 4, "describe_timeout": 5}
+
+    def get_model_timing(self, cam_id: str) -> dict:
+        """Return model-specific timing configuration for a camera."""
+        hw = self._hw_version.get(cam_id, "CAMERA")
+        return self._MODEL_TIMING.get(hw, self._MODEL_TIMING_DEFAULT)
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -536,6 +576,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if cid:
                     cam_ids.append(cid)
                     cam_by_id[cid] = cam
+                    # Cache hardware version for model-specific behavior
+                    self._hw_version[cid] = cam.get("hardwareVersion", "CAMERA")
 
             # ── 2. Status — parallel across all cameras ──────────────────────
             # Local TCP ping + cloud /commissioned run in parallel for all cameras.
@@ -830,7 +872,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     hw = cam_raw.get("hardwareVersion", "")
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
 
-                    async def _fetch(endpoint: str) -> tuple[str, int, any]:
+                    async def _fetch(endpoint: str) -> tuple[str, int, dict | None]:
                         """Fetch a single slow-tier endpoint. Returns (endpoint, status, data)."""
                         try:
                             async with asyncio.timeout(8):
@@ -1014,8 +1056,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Network error: {err}")
 
+    # ── Live stream safety guards ────────────────────────────────────────────
+    # Prevents concurrent stream setup, privacy toggles during warm-up, etc.
+    # _stream_setup_lock: per-camera asyncio.Lock to serialize stream operations
+    # _stream_warming: set of cam_ids currently in warm-up phase (blocks privacy toggles)
+
+    def _get_stream_lock(self, cam_id: str) -> asyncio.Lock:
+        """Get or create per-camera stream setup lock."""
+        if not hasattr(self, "_stream_locks"):
+            self._stream_locks: dict[str, asyncio.Lock] = {}
+        if cam_id not in self._stream_locks:
+            self._stream_locks[cam_id] = asyncio.Lock()
+        return self._stream_locks[cam_id]
+
+    def is_stream_warming(self, cam_id: str) -> bool:
+        """True if this camera is currently in the warm-up phase."""
+        if not hasattr(self, "_stream_warming"):
+            self._stream_warming: set[str] = set()
+        return cam_id in self._stream_warming
+
     # ── Live stream ───────────────────────────────────────────────────────────
-    async def try_live_connection(self, cam_id: str) -> dict | None:
+    async def try_live_connection(self, cam_id: str, is_renewal: bool = False) -> dict | None:
         """
         Open a live proxy connection via PUT /v11/video_inputs/{id}/connection.
         Uses "REMOTE" (confirmed working) → cloud proxy, fast (~1.5s).
@@ -1023,7 +1084,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
           - proxyUrl:  https://proxy-NN:42090/{hash}/snap.jpg  (current image, no auth)
           - rtspsUrl:  rtsps://proxy-NN:443/{hash}/rtsp_tunnel?... (30fps H.264+AAC audio)
         Returns the enriched response dict, or None on failure.
+        Serialized per camera via asyncio.Lock to prevent concurrent setup.
         """
+        lock = self._get_stream_lock(cam_id)
+        if lock.locked() and not is_renewal:
+            _LOGGER.warning("try_live_connection: already in progress for %s — skipping", cam_id[:8])
+            return None
+        async with lock:
+            return await self._try_live_connection_inner(cam_id, is_renewal)
+
+    async def _try_live_connection_inner(self, cam_id: str, is_renewal: bool = False) -> dict | None:
+        """Inner implementation of try_live_connection (called under lock)."""
         token = self.token
         if not token:
             _LOGGER.warning("try_live_connection: no token available")
@@ -1136,22 +1207,56 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         self._live_connections[cam_id] = result
                         self._live_opened_at[cam_id]   = time.monotonic()
 
-                        # ── LOCAL encoder warm-up ─────────────────────────
-                        # Camera needs ~30s after PUT /connection before the
-                        # RTSP encoder is fully ready. Pre-warm DESCRIBE retries
-                        # until the camera responds, but FFmpeg still needs the
-                        # encoder to produce valid H.264 frames which takes longer.
-                        # The URL is withheld from stream_source() until after
-                        # pre-warm so FFmpeg doesn't connect prematurely.
+                        # ── LOCAL encoder warm-up (model-specific) ────────
+                        # Camera needs time after PUT /connection before the
+                        # RTSP encoder produces valid H.264 frames. Timing
+                        # varies by model: CAMERA_360 (indoor) ~5s, CAMERA_EYES
+                        # (outdoor) ~25s. Pre-warm sends DESCRIBE until the
+                        # camera responds, plus a safety buffer. The RTSP URL
+                        # is withheld from stream_source() until ready.
                         if type_val == "LOCAL" and local_user and local_pass:
+                            if not hasattr(self, "_stream_warming"):
+                                self._stream_warming = set()
+                            self._stream_warming.add(cam_id)
+                            timing = self.get_model_timing(cam_id)
+                            hw = self._hw_version.get(cam_id, "?")
+                            put_time = time.monotonic()
                             proxy_port_val = self._tls_proxy_ports.get(cam_id)
                             if proxy_port_val:
-                                await asyncio.sleep(2)
-                                await pre_warm_rtsp(proxy_port_val, local_user, local_pass, cam_addr.split(":")[0])
-                            # Set URL after pre-warm — encoder should be warmer now
+                                _LOGGER.debug(
+                                    "LOCAL pre-warm for %s (hw=%s): delay=%ds, retries=%d, wait=%ds, buffer=%ds, min_total=%ds",
+                                    cam_id[:8], hw, timing["pre_warm_delay"],
+                                    timing["pre_warm_retries"], timing["pre_warm_retry_wait"],
+                                    timing["post_warm_buffer"], timing["min_total_wait"],
+                                )
+                                await asyncio.sleep(timing["pre_warm_delay"])
+                                await pre_warm_rtsp(
+                                    proxy_port_val, local_user, local_pass,
+                                    cam_addr.split(":")[0],
+                                    max_attempts=timing["pre_warm_retries"],
+                                    retry_wait=timing["pre_warm_retry_wait"],
+                                    post_success_wait=timing["post_warm_buffer"],
+                                    describe_timeout=timing.get("describe_timeout", 5),
+                                )
+                            # Ensure minimum total time from PUT /connection.
+                            # The camera's H.264 encoder needs this time to produce
+                            # valid frames, even after DESCRIBE pre-warm succeeds.
+                            # Renewals use 2/3 of the initial wait (camera is warmer but
+                            # still needs time to init the new RTSP session).
+                            min_wait = (timing["min_total_wait"] * 2 // 3) if is_renewal else timing["min_total_wait"]
+                            elapsed = time.monotonic() - put_time
+                            remaining = min_wait - elapsed
+                            if remaining > 0:
+                                _LOGGER.debug(
+                                    "LOCAL %s: waiting %.0fs more (%.0fs elapsed, min %ds)",
+                                    cam_id[:8], remaining, elapsed, timing["min_total_wait"],
+                                )
+                                await asyncio.sleep(remaining)
+                            # Set URL — encoder should be ready now
                             result["rtspsUrl"] = local_rtsp_url
                             result["rtspUrl"] = local_rtsp_url
                             self._live_connections[cam_id] = result  # update with URL
+                            self._stream_warming.discard(cam_id)
 
                         rtsps_url = result.get("rtspsUrl", "")
 
@@ -1549,7 +1654,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if self._tls_ssl_ctx is None:
             self._tls_ssl_ctx = await self.hass.async_add_executor_job(self._create_ssl_ctx)
         return start_tls_proxy(
-            self._tls_ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports
+            self._tls_ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports,
+            debug=self.debug,
         )
 
     @staticmethod
@@ -1581,10 +1687,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Stops when the live stream switch is turned OFF or a new generation
         supersedes this one (OFF→ON cycle started a fresh renewal loop).
         """
-        _LOGGER.debug("Auto-renew loop started for %s (gen=%d)", cam_id[:8], generation)
+        timing = self.get_model_timing(cam_id)
+        interval = timing["renewal_interval"]
+        _LOGGER.debug("Auto-renew loop started for %s (gen=%d, interval=%ds)", cam_id[:8], generation, interval)
         try:
           while True:
-            await asyncio.sleep(50)
+            await asyncio.sleep(interval)
             # Stop if a newer generation was started (OFF→ON cycle)
             if self._auto_renew_generation.get(cam_id, 0) != generation:
                 _LOGGER.debug("Auto-renew: stale gen=%d for %s — stopping", generation, cam_id[:8])
@@ -1599,7 +1707,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 break
             _LOGGER.debug("Auto-renew: renewing LOCAL session for %s (gen=%d)", cam_id[:8], generation)
             try:
-                result = await self.try_live_connection(cam_id)
+                result = await self.try_live_connection(cam_id, is_renewal=True)
                 if result:
                     _LOGGER.info(
                         "Auto-renew: new session for %s — %s",

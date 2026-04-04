@@ -74,6 +74,7 @@
           "smb_file_pattern":        "File name pattern",
           "smb_retention_days":      "Retention period (days, 0 = keep forever)",
           "smb_disk_warn_mb":        "Low disk warning threshold (MB, 0 = disabled)",
+          "debug_logging":           "Debug logging (verbose TLS proxy & stream logs)",
           "force_relogin":           "Force new browser login"
         },
         "data_description": {
@@ -113,6 +114,7 @@
           "smb_file_pattern":        "File name pattern (without extension). Variables: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Default: {camera}_{date}_{time}_{type}_{id}",
           "smb_retention_days":      "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
           "smb_disk_warn_mb":        "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
+          "debug_logging":           "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use.",
           "force_relogin":           "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare)."
         }
       },

@@ -228,7 +228,8 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "enable_fcm_push", "alert_save_snapshots",
                       "alert_delete_after_send", "audio_default_on",
                       "enable_intercom",
-                      "enable_smb_upload"]:
+                      "enable_smb_upload",
+                      "debug_logging"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -396,6 +397,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "smb_disk_warn_mb",
                     default=int(opts.get("smb_disk_warn_mb", 5120)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
+                vol.Optional(
+                    "debug_logging",
+                    default=bool(opts.get("debug_logging", False)),
+                ): bool,
                 vol.Optional("force_relogin", default=False): bool,
             }),
             description_placeholders={

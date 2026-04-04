@@ -25,7 +25,7 @@ import time
 
 import aiohttp
 
-from homeassistant.components.camera import Camera, CameraEntityFeature, StreamType
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -318,9 +318,20 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         latest   = events[0] if events else {}
         live     = cam_data.get("live", {})
         rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
+        # Stream status for dashboard display
+        if self.coordinator.is_stream_warming(self._cam_id):
+            stream_status = "warming_up"
+        elif self.is_streaming:
+            stream_status = "streaming"
+        elif self._cam_id in self.coordinator._live_connections:
+            stream_status = "connecting"
+        else:
+            stream_status = "idle"
+
         attrs = {
             "camera_id":       self._cam_id,
             "status":          cam_data.get("status", "UNKNOWN"),
+            "stream_status":   stream_status,
             "streaming_state": "active" if self.is_streaming else "idle",
             "last_event":      latest.get("timestamp", "")[:19],
             "event_type":      latest.get("eventType", ""),

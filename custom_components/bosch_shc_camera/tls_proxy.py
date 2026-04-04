@@ -20,7 +20,7 @@ import select as _select
 import socket
 import ssl
 import threading
-from typing import Any
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ def start_tls_proxy(
     cam_host: str,
     cam_port: int,
     port_cache: dict[str, int],
+    debug: bool = False,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
@@ -75,10 +76,13 @@ def start_tls_proxy(
                 client.close()
                 continue
 
+            _dbg_count = [0]  # shared debug exchange counter
+
             def _pipe(
                 src: socket.socket,
                 dst: socket.socket,
                 rewrite_transport: bool = False,
+                direction: str = "???",
             ) -> None:
                 """Forward bytes. If rewrite_transport=True, intercept RTSP
                 SETUP requests and force TCP interleaved transport so FFmpeg
@@ -92,6 +96,14 @@ def start_tls_proxy(
                         data = src.recv(65536)
                         if not data:
                             break
+                        # Debug: log first RTSP exchanges (text only, skip binary RTP)
+                        if debug and _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":
+                            _dbg_count[0] += 1
+                            preview = data[:500].decode("utf-8", errors="replace").replace("\r\n", "\\r\\n")
+                            _LOGGER.debug(
+                                "TLS proxy %s [%s] %d bytes: %.500s",
+                                cam_id[:8], direction, len(data), preview,
+                            )
                         if rewrite_transport and b"SETUP " in data:
                             # Replace UDP transport with TCP interleaved
                             text = data.decode("utf-8", errors="replace")
@@ -105,8 +117,9 @@ def start_tls_proxy(
                             _interleaved_counter[0] = hi + 1
                             data = text.encode("utf-8")
                         dst.sendall(data)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if debug and str(exc):
+                        _LOGGER.debug("TLS proxy %s [%s] pipe error: %s", cam_id[:8], direction, exc)
                 finally:
                     try:
                         src.close()
@@ -119,10 +132,10 @@ def start_tls_proxy(
 
             # client→camera: rewrite SETUP Transport to force TCP interleaved
             t1 = threading.Thread(
-                target=_pipe, args=(client, tls, True), daemon=True
+                target=_pipe, args=(client, tls, True, "C→CAM"), daemon=True
             )
             t2 = threading.Thread(
-                target=_pipe, args=(tls, client, False), daemon=True
+                target=_pipe, args=(tls, client, False, "CAM→C"), daemon=True
             )
             t1.start()
             t2.start()
@@ -253,7 +266,9 @@ def _digest_auth(
 
 
 async def pre_warm_rtsp(
-    proxy_port: int, user: str, password: str, cam_host: str
+    proxy_port: int, user: str, password: str, cam_host: str,
+    max_attempts: int = 5, retry_wait: int = 3, post_success_wait: int = 3,
+    describe_timeout: int = 5,
 ) -> None:
     """Pre-warm camera's H.264 encoder via authenticated RTSP DESCRIBE.
 
@@ -266,10 +281,9 @@ async def pre_warm_rtsp(
 
     Sequence: DESCRIBE (unauth) → 401 → DESCRIBE (digest) → 200 OK (SDP)
 
-    Retries up to 5 times with 3s delay if the camera's encoder isn't ready yet
-    (connection refused or empty response from the TLS proxy).
+    Retries with configurable attempts and delay. Timing is model-specific:
+    CAMERA_360 (indoor) is faster, CAMERA_EYES (outdoor) needs more retries.
     """
-    max_attempts = 5
     for attempt in range(1, max_attempts + 1):
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
@@ -286,7 +300,7 @@ async def pre_warm_rtsp(
                 f"\r\n".encode()
             )
             await writer.drain()
-            resp1 = await asyncio.wait_for(reader.read(4096), timeout=5)
+            resp1 = await asyncio.wait_for(reader.read(4096), timeout=describe_timeout)
 
             # Step 2: Parse nonce, send authenticated DESCRIBE
             resp1_str = resp1.decode("utf-8", errors="replace")
@@ -299,7 +313,7 @@ async def pre_warm_rtsp(
                 )
                 writer.close()
                 if attempt < max_attempts:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(retry_wait)
                     continue
                 return
             nonce, realm = nonce_m.group(1), realm_m.group(1)
@@ -313,7 +327,7 @@ async def pre_warm_rtsp(
                 f"\r\n".encode()
             )
             await writer.drain()
-            resp2 = await asyncio.wait_for(reader.read(8192), timeout=5)
+            resp2 = await asyncio.wait_for(reader.read(8192), timeout=describe_timeout)
             resp2_str = resp2.decode("utf-8", errors="replace")
 
             if "200 OK" in resp2_str:
@@ -333,7 +347,7 @@ async def pre_warm_rtsp(
             # The camera only allows ~2 concurrent RTSP sessions per
             # PUT /connection credential set. Without this delay, FFmpeg
             # may connect before the pre-warm's TLS session is torn down.
-            await asyncio.sleep(3)
+            await asyncio.sleep(post_success_wait)
             return  # success or got a response — done
         except Exception as exc:
             _LOGGER.debug(
@@ -341,4 +355,4 @@ async def pre_warm_rtsp(
                 proxy_port, attempt, max_attempts, exc,
             )
             if attempt < max_attempts:
-                await asyncio.sleep(3)
+                await asyncio.sleep(retry_wait)
