@@ -1,13 +1,12 @@
 /**
- * Bosch Camera Card — Stream Watchdog
- * Comprehensive fix for HLS stream issues:
- * 1. Chrome autoplay policy: keeps video muted and playing
- * 2. Dead stream detection: restarts HLS when video stalls
- * 3. Session recovery: restarts HLS when stream_source changes
- * Version: 2.0.0
+ * Bosch Camera Card — Stream Watchdog v3.0
+ * Monitors bosch-camera-card instances and fixes:
+ * 1. Chrome autoplay: keeps video muted and playing
+ * 2. Dead HLS (readyState=0): restarts HLS via camera/stream WS
+ * 3. Hidden video with stream ON: starts HLS
+ * Works even when the card's JS properties are inaccessible (cache issue).
  */
 (function() {
-  let lastTimes = {};
   let stallCounts = {};
 
   function findCards(root, depth) {
@@ -24,112 +23,118 @@
     return result;
   }
 
+  function getHass() {
+    const ha = document.querySelector("home-assistant");
+    return ha ? ha.hass : null;
+  }
+
+  function getCameraEntities(hass) {
+    if (!hass || !hass.states) return [];
+    return Object.keys(hass.states).filter(e => e.startsWith("camera.bosch_"));
+  }
+
+  function startHLS(video, hlsUrl) {
+    if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        liveSyncDurationCount: 3,
+        maxBufferLength: 10,
+        maxMaxBufferLength: 20,
+      });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_ev, data) => {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        }
+      });
+      // Store on video element for later cleanup
+      video._watchdogHls = hls;
+    } else if (video.canPlayType && video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+      video.src = hlsUrl;
+      video.muted = true;
+      video.play().catch(() => {});
+    }
+  }
+
   setInterval(() => {
-    for (const card of findCards(document, 0)) {
+    const hass = getHass();
+    if (!hass) return;
+    const camEntities = getCameraEntities(hass);
+    const cards = findCards(document, 0);
+
+    for (let i = 0; i < cards.length && i < camEntities.length; i++) {
+      const card = cards[i];
       const sr = card.shadowRoot;
       if (!sr) continue;
       const video = sr.getElementById("cam-video");
       const timer = sr.getElementById("stream-label");
       const timerText = timer ? timer.textContent : "";
+      const camEntity = camEntities[i];
 
-      // Only act if stream is supposed to be ON (timer shows MM:SS, not "idle")
+      // Only act when stream is supposed to be ON
       if (!timerText || timerText === "idle" || timerText === "none") continue;
-
       if (!video) continue;
-      const cardId = card._config ? card._config.camera_entity : "unknown";
 
-      // Case 1: Video element visible but paused → restart muted
+      const key = camEntity || ("card" + i);
+      const camState = hass.states[camEntity];
+      const isStreaming = camState && camState.state === "streaming";
+
+      // Case 1: Video visible but paused → play muted
       if (video.style.display === "block" && video.paused && video.readyState >= 2) {
         video.muted = true;
         video.play().catch(() => {});
+        stallCounts[key] = 0;
       }
 
-      // Case 2: Video element visible but readyState=0 (no data) → HLS dead
-      // This happens when session restarts and FFmpeg reconnects with new URL
-      if (video.style.display === "block" && video.readyState === 0 && video.src) {
-        stallCounts[cardId] = (stallCounts[cardId] || 0) + 1;
-        if (stallCounts[cardId] >= 4) { // 20s of no data (4 × 5s)
-          console.warn("bosch-watchdog: HLS dead for", cardId, "— restarting");
-          stallCounts[cardId] = 0;
-          // Force card to restart HLS by calling camera/stream WS
-          try {
-            const ha = document.querySelector("home-assistant");
-            const hass = ha ? ha.hass : null;
-            if (hass && card._entities && card._entities.camera) {
-              hass.callWS({ type: "camera/stream", entity_id: card._entities.camera })
-                .then(result => {
-                  if (result && result.url) {
-                    video.src = "";
-                    // Try to load hls.js if available
-                    if (window.Hls && Hls.isSupported()) {
-                      const hls = new Hls({ enableWorker: true, lowLatencyMode: true, liveSyncDurationCount: 3 });
-                      hls.loadSource(result.url);
-                      hls.attachMedia(video);
-                      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        video.muted = true;
-                        video.play().catch(() => {});
-                      });
-                    } else {
-                      video.src = result.url;
-                      video.muted = true;
-                      video.play().catch(() => {});
-                    }
-                  }
-                })
-                .catch(e => console.warn("bosch-watchdog: stream WS failed:", e));
-            }
-          } catch (e) {
-            console.warn("bosch-watchdog: restart error:", e);
-          }
-        }
-      } else {
-        stallCounts[cardId] = 0;
-      }
-
-      // Case 3: Video hidden but stream ON → card never started HLS
-      if (video.style.display === "none" && video.readyState === 0) {
-        stallCounts[cardId + "_hidden"] = (stallCounts[cardId + "_hidden"] || 0) + 1;
-        if (stallCounts[cardId + "_hidden"] >= 6) { // 30s hidden (6 × 5s)
-          console.warn("bosch-watchdog: video hidden for 30s with stream ON — starting HLS for", cardId);
-          stallCounts[cardId + "_hidden"] = 0;
-          try {
-            const ha = document.querySelector("home-assistant");
-            const hass = ha ? ha.hass : null;
-            const camEntity = card._config ? card._config.camera_entity : null;
-            if (hass && camEntity) {
-              const cam = hass.states[camEntity];
-              if (cam && cam.state === "streaming") {
-                hass.callWS({ type: "camera/stream", entity_id: camEntity })
-                  .then(result => {
-                    if (result && result.url) {
-                      const img = sr.getElementById("cam-img");
-                      video.style.display = "block";
-                      if (img) img.style.display = "none";
-                      if (window.Hls && Hls.isSupported()) {
-                        const hls = new Hls({ enableWorker: true, lowLatencyMode: true, liveSyncDurationCount: 3 });
-                        hls.loadSource(result.url);
-                        hls.attachMedia(video);
-                        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                          video.muted = true;
-                          video.play().catch(() => {});
-                        });
-                      } else {
-                        video.src = result.url;
-                        video.muted = true;
-                        video.play().catch(() => {});
-                      }
-                    }
-                  })
-                  .catch(e => console.warn("bosch-watchdog: start error:", e));
+      // Case 2: Video visible but readyState=0 (HLS dead) → restart HLS
+      if (video.style.display === "block" && video.readyState === 0 && isStreaming) {
+        stallCounts[key] = (stallCounts[key] || 0) + 1;
+        if (stallCounts[key] >= 4) { // 20s stall
+          console.warn("bosch-watchdog: HLS dead for", camEntity, "— restarting");
+          stallCounts[key] = 0;
+          // Cleanup old HLS
+          if (video._watchdogHls) { video._watchdogHls.destroy(); video._watchdogHls = null; }
+          // Get fresh HLS URL
+          hass.callWS({ type: "camera/stream", entity_id: camEntity })
+            .then(result => {
+              if (result && result.url) {
+                startHLS(video, result.url);
               }
-            }
-          } catch (e) {}
+            })
+            .catch(e => console.warn("bosch-watchdog: stream WS failed:", e));
+        }
+      } else if (video.readyState > 0) {
+        stallCounts[key] = 0;
+      }
+
+      // Case 3: Video hidden but stream ON → show video and start HLS
+      if (video.style.display === "none" && isStreaming) {
+        stallCounts[key + "_h"] = (stallCounts[key + "_h"] || 0) + 1;
+        if (stallCounts[key + "_h"] >= 6) { // 30s hidden
+          console.warn("bosch-watchdog: video hidden for", camEntity, "— starting HLS");
+          stallCounts[key + "_h"] = 0;
+          const img = sr.getElementById("cam-img");
+          video.style.display = "block";
+          if (img) img.style.display = "none";
+          if (video._watchdogHls) { video._watchdogHls.destroy(); video._watchdogHls = null; }
+          hass.callWS({ type: "camera/stream", entity_id: camEntity })
+            .then(result => {
+              if (result && result.url) startHLS(video, result.url);
+            })
+            .catch(() => {});
         }
       } else {
-        stallCounts[cardId + "_hidden"] = 0;
+        stallCounts[key + "_h"] = 0;
       }
     }
   }, 5000);
 
-  console.log("bosch-camera-autoplay-fix v2.0.0 loaded");
+  console.log("bosch-camera-watchdog v3.0 loaded");
 })();

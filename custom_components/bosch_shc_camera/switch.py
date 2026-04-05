@@ -161,6 +161,26 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     async def async_turn_on(self, **kwargs) -> None:
         """Open a new live proxy connection."""
         import time
+        # Block stream start if privacy mode is active (camera shutter is closed)
+        privacy_state = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+        if privacy_state and str(privacy_state).upper() in ("ON", "TRUE", "1"):
+            _LOGGER.warning(
+                "Stream ON for %s blocked — privacy mode is active (shutter closed). "
+                "Turn off privacy mode first.",
+                self._cam_title,
+            )
+            # Fire persistent notification so user sees the error in the UI
+            await self.hass.services.async_call(
+                "persistent_notification", "create",
+                {
+                    "title": f"Stream blockiert — {self._cam_title}",
+                    "message": f"Der Live-Stream für {self._cam_title} kann nicht gestartet werden, "
+                               f"da der Privacy-Modus aktiv ist (Blende geschlossen). "
+                               f"Bitte zuerst den Privacy-Modus deaktivieren.",
+                    "notification_id": f"bosch_stream_blocked_{self._cam_id[:8]}",
+                },
+            )
+            return
         last_off = getattr(self, "_last_stream_off", 0)
         elapsed = time.monotonic() - last_off
         if last_off > 0 and elapsed < self._STREAM_COOLDOWN:
