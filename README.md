@@ -211,6 +211,8 @@ No automations needed — the integration sends alerts directly:
 
 **iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are saved to `/www/bosch_alerts/` (served as `/local/bosch_alerts/`) and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
 
+**Notification switch guard (v7.9.1+):** Alerts respect the notification switches — if `switch.bosch_{name}_notifications` (master) is OFF, no alerts are sent. Type-specific switches (`movement_notifications`, `person_notifications`, `audio_notifications`) are also checked. The FCM push is still received (for event tracking), but the HA notification is suppressed.
+
 ### Mark-as-Read & Last Event Fast-Path
 
 Events are automatically **marked as read** after alert processing or download. This uses `PUT /v11/events/bulk` for batch updates and `PUT /v11/events` (with `{"id": ..., "isRead": true}`) for individual events, keeping the unread count in sync with the Bosch Smart Camera app.
@@ -323,7 +325,7 @@ Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_
 
 ## Lovelace Card
 
-> **Card version: v2.2.0**
+> **Card version: v2.3.1**
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -391,8 +393,74 @@ The integration supports three connection modes, configurable in **Settings → 
 | Mode | Description |
 |------|-------------|
 | **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
-| **Local** | Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s. |
-| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. Best default when HA is not on the same LAN. |
+| **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
+| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. |
+
+### WebRTC / go2rtc
+
+When [go2rtc](https://github.com/AlexxIT/go2rtc) is available, the card tries **WebRTC first** (~2 s latency) before falling back to HLS (~12 s latency).
+
+**Setup:**
+1. Install [AlexxIT WebRTC Camera](https://github.com/AlexxIT/WebRTC) via HACS
+2. Add the integration: **Settings → Integrations → + Add → WebRTC Camera** (leave URL empty)
+3. go2rtc downloads automatically and starts on port 1984
+4. Restart HA — the integration auto-registers camera streams with go2rtc
+5. The card automatically detects WebRTC support and uses it
+
+**How it works:**
+- On stream start, the integration registers the RTSP URL with go2rtc's API
+- The card checks `camera/capabilities` — if `web_rtc` is available, it creates an `RTCPeerConnection`
+- Full ICE candidate exchange via HA's `camera/webrtc/offer` websocket
+- If WebRTC fails (go2rtc not installed, network issue), falls back to HLS automatically
+
+### Stream Watchdog
+
+A separate JavaScript resource (`bosch-camera-autoplay-fix.js`) monitors all camera cards and auto-recovers from common issues:
+
+| Issue | Detection | Recovery |
+|-------|-----------|----------|
+| Chrome autoplay block | Video paused with readyState ≥ 2 | Play muted |
+| Dead HLS stream | readyState = 0 for 20 s | Request new HLS URL via `camera/stream` WS |
+| Hidden video element | display:none while stream ON | Show video, start HLS |
+| Buffer stall | 3 consecutive `bufferStalledError` | Full HLS reconnect |
+| Video freeze | `currentTime` unchanged for 15 s | Seek to live edge or restart |
+
+The watchdog gets entity IDs directly from HA states, so it works even when the card's JavaScript is cached.
+
+### Privacy Guard
+
+The **Live Stream switch cannot be turned ON while Privacy Mode is active** (camera shutter is closed). If attempted:
+- The switch stays OFF
+- A **persistent notification** appears in HA: *"Der Live-Stream kann nicht gestartet werden — Privacy-Modus aktiv"*
+- A warning is logged
+
+This prevents wasted API calls and confusing error states when the camera physically can't stream.
+
+### Fast Startup
+
+The first coordinator tick after HA restart **skips events and slow-tier API calls** (WiFi, ambient light, RCP, motion, etc.). This reduces startup from ~2 minutes to ~15 seconds. Full data loads on the second tick (60 s later).
+
+### Model-Specific Configuration
+
+Camera timing and behavior is configured per model via `CameraModelConfig`:
+
+| Parameter | Indoor (360) | Outdoor (Eyes) | Purpose |
+|-----------|-------------|----------------|---------|
+| Heartbeat interval | 30 s | 10 s | PUT /connection keepalive frequency |
+| Pre-warm delay | 1 s | 2 s | Wait before first RTSP DESCRIBE |
+| Pre-warm retries | 3 | 8 | Max DESCRIBE attempts |
+| Min total wait | 25 s | 35 s | Minimum time before exposing RTSP URL |
+| Renewal interval | 3500 s | 3500 s | Proactive session renewal (safety net) |
+| Snapshot warmup | 3 s | 5 s | Wait before LOCAL snap.jpg fetch |
+
+### HLS Buffer Tuning
+
+The card's HLS.js configuration is tuned to prevent HA's stream component from killing FFmpeg:
+
+- **`maxBufferLength: 10`** — Must be less than HA's `OUTPUT_IDLE_TIMEOUT` (30 s). If hls.js buffers ≥ 30 s, it stops requesting segments → HA thinks nobody is watching → kills FFmpeg → video freezes.
+- **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net
+- **`liveSyncDurationCount: 3`** — Stays 3 segments behind live edge for smooth playback
+- **SRI integrity hash** on hls.js CDN load for supply-chain security
 
 ### Card YAML
 
@@ -437,8 +505,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
-| **v7.9.3** | **WebRTC support in card:** Checks camera capabilities, tries WebRTC first (via go2rtc, ~2s latency), falls back to HLS (~12s). Full RTCPeerConnection implementation with ICE candidate exchange. **Fast startup:** First coordinator tick skips events + slow-tier API calls — reduces startup from ~2 min to ~15s. Full data loads on second tick. **Motion zones enabled.** |
-| **v7.9.3** | **WebRTC in card:** Tries WebRTC first (via go2rtc, ~2s latency), falls back to HLS. Full RTCPeerConnection with ICE candidates. **Fast startup:** First coordinator tick skips events + slow-tier — startup ~15s instead of ~2 min. **Privacy blocks stream:** Stream switch cannot be turned ON while privacy mode is active — shows persistent notification with error message. **Watchdog v3:** Gets entity IDs directly from HA states (works with cached card JS), auto-starts HLS for dead streams. **Motion zones** enabled. |
+| **v7.9.3** | **WebRTC in card:** Tries WebRTC first (via go2rtc, ~2s latency), falls back to HLS. Full RTCPeerConnection with ICE candidates. **Privacy guard:** Stream switch blocked when privacy mode ON — persistent notification. **Watchdog v3:** Gets entity IDs from HA states (cache-proof), auto-starts HLS for dead streams, auto-plays paused videos. **Fast startup:** First tick skips events + slow-tier (~15s instead of ~2 min). **Motion zones** enabled. |
 | **v7.9.2** | **go2rtc / WebRTC support:** Automatic go2rtc stream registration when available — enables WebRTC (~2 s latency vs ~12 s HLS). Tries Unix socket, port 11984, and port 1984 for go2rtc API. Falls back gracefully to HLS when go2rtc is not installed. **Code review fixes:** aiohttp connector leak in heartbeat loop (created new connector every 10 s — now uses async-with for automatic cleanup), raw socket leak in TLS proxy on TLS handshake failure, session cleanup connector leak. **Test suite:** All 6 tests passed (40/40 stability over 20 min, stream OFF/ON cycle, privacy toggle both cameras, go2rtc registration, sensor verification). |
 | **v7.9.1** | **HLS stream freeze fix:** Root cause was hls.js `maxBufferLength` (60 s) exceeding HA's idle timeout — buffered segments kept the connection "active" from hls.js perspective while HA considered it idle. Reduced to 30 s. **Chrome autoplay fix:** Muted autoplay with unmute retry on user interaction. **Alert notification switch guard:** Skips notification delivery when the alert notification switch is off. **Stall detector:** Monitors HLS playback progress and auto-reconnects after 10 s of no advancement. **TLS proxy directional timeout:** Separate read timeouts for camera-to-client (90 s, tolerates slow H.264 encoder startup) vs client-to-camera (10 s, detects FFmpeg disconnect quickly). |
 | **v7.9.0** | **Model-specific heartbeat:** Outdoor cameras (Eyes) get 10 s heartbeat interval via PUT /connection, indoor cameras (360) get 30 s — matches firmware behavior observed in network captures. **TCP keep-alive on TLS proxy:** Enables `SO_KEEPALIVE` with 10 s idle / 5 s interval / 3 probes on all proxy sockets to detect dead connections before OS default timeout. **Proactive session renewal:** Renews LOCAL sessions before expiry instead of waiting for connection errors. |
