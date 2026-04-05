@@ -315,6 +315,56 @@ The integration fires events for custom automations:
 
 Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`)
 
+### Developer Tools — Services
+
+All services are available in **Developer Tools → Services** (or via automations/scripts):
+
+| Service | Description | Fields |
+|---------|-------------|--------|
+| `bosch_shc_camera.trigger_snapshot` | Force immediate snapshot refresh for all cameras | — |
+| `bosch_shc_camera.open_live_connection` | Open live stream for a specific camera | `camera_id` |
+| `bosch_shc_camera.rename_camera` | Rename a camera (appears in Bosch app + HA) | `camera_id`, `new_name` |
+| `bosch_shc_camera.invite_friend` | Send camera sharing invitation by email | `email` |
+| `bosch_shc_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
+| `bosch_shc_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
+| `bosch_shc_camera.create_rule` | Create a cloud-side schedule rule | `camera_id`, `name`, `start_time`, `end_time`, `weekdays`, `is_active` |
+| `bosch_shc_camera.delete_rule` | Delete a schedule rule | `camera_id`, `rule_id` |
+
+**Examples:**
+
+```yaml
+# Rename a camera
+service: bosch_shc_camera.rename_camera
+data:
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  new_name: "Garten Kamera"
+
+# Invite a friend to share cameras
+service: bosch_shc_camera.invite_friend
+data:
+  email: "friend@example.com"
+
+# List all camera shares
+service: bosch_shc_camera.list_friends
+
+# Remove a friend (get friend_id from list_friends)
+service: bosch_shc_camera.remove_friend
+data:
+  friend_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Create a schedule rule (notifications active 8am-8pm weekdays)
+service: bosch_shc_camera.create_rule
+data:
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  name: "Weekday Schedule"
+  start_time: "08:00:00"
+  end_time: "20:00:00"
+  weekdays: [1, 2, 3, 4, 5]
+  is_active: true
+```
+
+> **Tip:** Find the `camera_id` in the camera entity's attributes (Developer Tools → States → `camera.bosch_*` → `camera_id` attribute).
+
 ### Ready-to-Use Automations
 
 - [`examples/automation_ios_push_alert.yaml`](examples/automation_ios_push_alert.yaml) — iPhone push (time-sensitive)
