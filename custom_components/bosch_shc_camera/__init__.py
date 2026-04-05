@@ -22,6 +22,7 @@ No user data is hardcoded. All configuration via the HA UI.
 
 import asyncio
 import logging
+import os
 
 import time
 from datetime import timedelta
@@ -1617,40 +1618,57 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return await self.hass.async_add_executor_job(_fetch_digest)
 
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
-        """Register the Bosch rtsps:// stream in go2rtc with TLS verify disabled.
+        """Register the Bosch RTSP stream in go2rtc for WebRTC support.
 
-        go2rtc is HA's built-in RTSP→WebRTC bridge (port 1984 locally).
-        Appending #insecure to the URL tells go2rtc to skip TLS verification,
-        which is required for Bosch's private CA certificate.
+        go2rtc is HA's built-in RTSP→WebRTC bridge. Once registered, HA's
+        camera card can display live 30fps H.264 + AAC audio via WebRTC
+        (~2s latency) or HLS (~12s latency) directly from go2rtc.
 
-        Once registered, HA's camera card can display live 30fps H.264 + AAC audio
-        via WebRTC or HLS directly from the go2rtc bridge.
+        The stream is registered under the camera entity unique_id so HA's
+        stream component can find it automatically.
 
-        The stream is registered under the camera entity unique_id so HA's stream
-        component can find it automatically.
+        go2rtc API endpoints (tried in order):
+        1. Unix socket (HA 2024+): /config/go2rtc.sock or /homeassistant/go2rtc.sock
+        2. Port 11984 (HA 2024+ internal)
+        3. Port 1984 (legacy / standalone go2rtc)
         """
-        # go2rtc stream name must match what HA's stream component uses.
-        # HA registers streams under the camera entity unique_id.
         stream_name = f"bosch_shc_cam_{cam_id.lower()}"
-        # Append #insecure to skip TLS certificate verification
-        go2rtc_src = f"{rtsps_url}#insecure=1"
+        go2rtc_src = rtsps_url
 
-        try:
-            async with asyncio.timeout(5):
-                async with aiohttp.ClientSession() as s:
-                    # go2rtc API: PUT /api/streams?src=URL&name=STREAM_NAME
-                    resp = await s.put(
-                        f"http://localhost:1984/api/streams",
-                        params={"src": go2rtc_src, "name": stream_name},
-                    )
-                    _LOGGER.info(
-                        "go2rtc stream '%s' registered → HTTP %d (src: %s)",
-                        stream_name, resp.status, go2rtc_src[:80],
-                    )
-        except asyncio.TimeoutError:
-            _LOGGER.debug("go2rtc API not reachable (timeout) — using TLS proxy instead")
-        except aiohttp.ClientError as err:
-            _LOGGER.debug("go2rtc API not reachable (%s) — using TLS proxy instead", err)
+        # Try multiple go2rtc API endpoints
+        endpoints = [
+            "http://localhost:11984/api/streams",
+            "http://localhost:1984/api/streams",
+        ]
+        # Also try Unix socket if available
+        config_dir = self.hass.config.config_dir
+        sock_path = os.path.join(config_dir, "go2rtc.sock") if config_dir else None
+
+        for url in endpoints:
+            try:
+                async with asyncio.timeout(3):
+                    connector = None
+                    if sock_path and url == endpoints[0]:
+                        # Try Unix socket first
+                        try:
+                            connector = aiohttp.UnixConnector(path=sock_path)
+                        except Exception:
+                            pass
+                    async with aiohttp.ClientSession(connector=connector) as s:
+                        resp = await s.put(
+                            url if not connector else "http://localhost/api/streams",
+                            params={"src": go2rtc_src, "name": stream_name},
+                        )
+                        _LOGGER.info(
+                            "go2rtc stream '%s' registered → HTTP %d via %s",
+                            stream_name, resp.status,
+                            "unix socket" if connector else url,
+                        )
+                        return  # success
+            except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
+                continue
+
+        _LOGGER.debug("go2rtc API not reachable on any endpoint — using TLS proxy + HLS")
 
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
         """Remove the camera stream from go2rtc when the live session ends."""
@@ -1701,9 +1719,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if not token:
             return
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
-            session = aiohttp.ClientSession(connector=connector)
-            try:
+            async with aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(ssl=False),
+                connector_owner=True,
+            ) as session:
                 url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
                 async with asyncio.timeout(5):
                     async with session.put(
@@ -1718,8 +1737,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "Session cleanup PUT /connection for %s → HTTP %d",
                             cam_id[:8], resp.status,
                         )
-            finally:
-                await session.close()
         except Exception as exc:
             _LOGGER.debug("Failed to cleanup session for %s: %s", cam_id[:8], exc)
 
@@ -1793,9 +1810,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 token = self.token
                 if not token:
                     continue
-                connector = aiohttp.TCPConnector(ssl=False)
-                session = aiohttp.ClientSession(connector=connector)
-                try:
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=False),
+                    connector_owner=True,
+                ) as session:
                     url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
                     async with asyncio.timeout(10):
                         async with session.put(
@@ -1819,8 +1837,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     "Heartbeat HTTP %d for %s (fail %d)",
                                     resp.status, cam_id[:8], consecutive_fails,
                                 )
-                finally:
-                    await session.close()
             except Exception as exc:
                 consecutive_fails += 1
                 _LOGGER.warning("Heartbeat error for %s: %s (fail %d)", cam_id[:8], exc, consecutive_fails)

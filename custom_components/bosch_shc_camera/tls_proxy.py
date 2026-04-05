@@ -64,17 +64,18 @@ def start_tls_proxy(
             try:
                 raw = socket.create_connection((cam_host, cam_port), timeout=10)
                 # TCP keep-alive: prevent OS from dropping idle connections.
-                # The camera may stop sending data briefly (dark scenes, low motion)
-                # but the TCP connection must stay alive for the RTSP session.
                 raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 try:
-                    # Linux/macOS: start probing after 30s idle, every 10s, 3 retries
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 except (AttributeError, OSError):
-                    pass  # not all platforms support these
-                tls = ssl_ctx.wrap_socket(raw, server_hostname=cam_host)
+                    pass
+                try:
+                    tls = ssl_ctx.wrap_socket(raw, server_hostname=cam_host)
+                except Exception:
+                    raw.close()  # close raw socket if TLS handshake fails
+                    raise
                 _LOGGER.debug(
                     "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
                     cam_id[:8], cam_host, cam_port,
