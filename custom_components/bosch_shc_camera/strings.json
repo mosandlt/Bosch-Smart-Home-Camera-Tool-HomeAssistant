@@ -86,7 +86,7 @@
           "enable_auto_download":    "Automatically download all event snapshots (JPEG) and video clips (MP4) to a local folder in the background.",
           "download_path":           "Local folder path for auto-downloaded events. Example: /config/bosch_events",
           "enable_fcm_push":         "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
-          "alert_notify_service":    "Default fallback: used when per-type fields below are empty. Comma-separated. Examples: notify.signal_messenger, notify.mobile_app_iphone17. Leave empty to disable alerts.",
+          "alert_notify_service":    "Default fallback: used when per-type fields below are empty. Comma-separated. Examples: notify.signal_messenger, notify.mobile_app_xxx. Leave empty to disable alerts.",
           "alert_notify_system":     "Comma-separated services for system alerts (token expiry, disk full). Empty = uses default fallback above.",
           "alert_notify_information": "Comma-separated services for step 1 — instant text event notification. Empty = uses default fallback. Supports: notify.signal_messenger, notify.mobile_app_xxx.",
           "alert_notify_screenshot": "Comma-separated services for step 2 — snapshot image. Empty = uses default fallback. Mobile apps (mobile_app_xxx) receive image in notification; others get file attachment.",

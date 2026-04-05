@@ -319,10 +319,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         live     = cam_data.get("live", {})
         rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
         # Stream status for dashboard display
+        fell_back = self.coordinator._stream_fell_back.get(self._cam_id, False)
+        err_count = self.coordinator._stream_error_count.get(self._cam_id, 0)
         if self.coordinator.is_stream_warming(self._cam_id):
             stream_status = "warming_up"
         elif self.is_streaming:
-            stream_status = "streaming"
+            stream_status = "streaming (REMOTE fallback)" if fell_back else "streaming"
         elif self._cam_id in self.coordinator._live_connections:
             stream_status = "connecting"
         else:
@@ -340,6 +342,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             "mac":             self._mac,
             "live_rtsps":      rtsps_url,
             "live_proxy":      live.get("proxyUrl", ""),
+            "stream_errors":   err_count,
         }
         if rtsps_url:
             attrs["stream_url"] = rtsps_url

@@ -170,6 +170,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             )
             return
         _LOGGER.info("Live stream ON for %s", self._cam_title)
+        # Clean any stale cloud session first (camera may still be streaming from a previous session)
+        await self.coordinator._close_cloud_session(self._cam_id)
         result = await self.coordinator.try_live_connection(self._cam_id)
         if result:
             conn_type = result.get("_connection_type", "REMOTE")
@@ -177,8 +179,49 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 "Live stream active for %s (%s) — %s",
                 self._cam_title, conn_type, result.get("rtspsUrl", ""),
             )
+            # Schedule health check — if FFmpeg hasn't connected after 60s,
+            # record an error and retry (potentially with REMOTE fallback).
+            if conn_type == "LOCAL":
+                self.hass.async_create_task(
+                    self._stream_health_check(self._cam_id, 60)
+                )
         else:
             _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
+            self.coordinator.record_stream_error(self._cam_id)
+        self.async_write_ha_state()
+
+    async def _stream_health_check(self, cam_id: str, delay: int) -> None:
+        """Check if the LOCAL stream is actually producing video after delay seconds.
+        If not, record error and restart with REMOTE fallback."""
+        import asyncio
+        await asyncio.sleep(delay)
+        # Stream might have been turned off in the meantime
+        if cam_id not in self.coordinator._live_connections:
+            return
+        live = self.coordinator._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            return
+        # Check if FFmpeg is actually streaming
+        cam_entity = self.coordinator._camera_entities.get(cam_id)
+        if cam_entity and hasattr(cam_entity, "stream") and cam_entity.stream:
+            # Stream object exists — FFmpeg is running
+            self.coordinator.record_stream_success(cam_id)
+            return
+        # No stream object after delay — FFmpeg never connected
+        _LOGGER.warning(
+            "Stream health check: %s has no active FFmpeg stream after %ds — recording error and retrying",
+            cam_id[:8], delay,
+        )
+        self.coordinator.record_stream_error(cam_id)
+        # Stop and restart — will use REMOTE if error threshold reached
+        self.coordinator._live_connections.pop(cam_id, None)
+        await self.coordinator._stop_tls_proxy(cam_id)
+        result = await self.coordinator.try_live_connection(cam_id)
+        if result:
+            _LOGGER.info(
+                "Stream health check: %s restarted as %s",
+                cam_id[:8], result.get("_connection_type", "?"),
+            )
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
@@ -192,9 +235,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             renew_task.cancel()
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
-        # Stop TLS proxy — each session gets a fresh proxy with a new port,
-        # so there's no reason to keep it alive after the stream stops.
+        # Stop TLS proxy and close cloud session — ensures camera stops
+        # streaming (LED stops blinking) and releases resources.
         await self.coordinator._stop_tls_proxy(self._cam_id)
+        await self.coordinator._close_cloud_session(self._cam_id)
         # Update state immediately so the UI reflects OFF without waiting for
         # the go2rtc unregister (up to 3s) + coordinator refresh.
         self.async_write_ha_state()

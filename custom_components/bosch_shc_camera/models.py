@@ -43,6 +43,12 @@ class CameraModelConfig:
                                  # Camera accepts maxSessionDuration=3600 in RTSP URL,
                                  # but some models reset the connection earlier.
     max_session_duration: int = 3600  # Value sent in RTSP URL maxSessionDuration parameter.
+    heartbeat_interval: int = 30  # Seconds between PUT /connection heartbeats during LOCAL stream.
+                                  # Bosch app uses ~1s. Outdoor needs more aggressive keepalive.
+
+    # ── Fallback / error recovery ────────────────────────────────────────
+    max_stream_errors: int = 3   # After this many consecutive FFmpeg errors, fall back to REMOTE
+    min_wifi_for_local: int = 40  # Minimum WiFi signal % to attempt LOCAL (below → use REMOTE)
 
     # ── Snapshots ────────────────────────────────────────────────────────
     snapshot_warmup: int = 4    # Seconds to wait before LOCAL snap.jpg fetch
@@ -67,13 +73,19 @@ MODELS: dict[str, CameraModelConfig] = {
         min_total_wait=25,
         renewal_interval=3500,
         max_session_duration=3600,
+        heartbeat_interval=30,
         snapshot_warmup=3,
     ),
 
     # ── Gen1 Outdoor: Eyes Außenkamera ────────────────────────────────────
     # Slower encoder init (~25s), pre-warm needs 3-4 DESCRIBE attempts.
-    # Session may reset after ~10 min despite maxSessionDuration=3600.
-    # renewal_interval=500 (~8 min) as safety margin.
+    # Previously dropped connections after 2-10 min without heartbeat.
+    # Now stable with 10s heartbeat (PUT /connection) + FFmpeg GET_PARAMETER
+    # + TCP keep-alive on proxy sockets. Tested 2:20+ without renewal.
+    # renewal_interval=3500 — no proactive renewal needed. Heartbeat keeps
+    # session alive. Proactive renewal causes HLS interruptions + pipe errors.
+    # Emergency renewal still triggers after 3 consecutive heartbeat failures.
+    # heartbeat_interval=10 — aggressive cloud keepalive (Bosch app uses ~1s).
     "OUTDOOR": CameraModelConfig(
         display_name="Eyes Außenkamera",
         generation=1,
@@ -83,8 +95,9 @@ MODELS: dict[str, CameraModelConfig] = {
         post_warm_buffer=3,
         describe_timeout=8,
         min_total_wait=35,
-        renewal_interval=500,
+        renewal_interval=3500,
         max_session_duration=3600,
+        heartbeat_interval=10,
         snapshot_warmup=5,
     ),
 }

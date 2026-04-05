@@ -35,6 +35,7 @@ def start_tls_proxy(
     cam_port: int,
     port_cache: dict[str, int],
     debug: bool = False,
+    is_renewal: bool = False,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
@@ -62,6 +63,17 @@ def start_tls_proxy(
                 break
             try:
                 raw = socket.create_connection((cam_host, cam_port), timeout=10)
+                # TCP keep-alive: prevent OS from dropping idle connections.
+                # The camera may stop sending data briefly (dark scenes, low motion)
+                # but the TCP connection must stay alive for the RTSP session.
+                raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                try:
+                    # Linux/macOS: start probing after 30s idle, every 10s, 3 retries
+                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+                except (AttributeError, OSError):
+                    pass  # not all platforms support these
                 tls = ssl_ctx.wrap_socket(raw, server_hostname=cam_host)
                 _LOGGER.debug(
                     "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
@@ -76,6 +88,14 @@ def start_tls_proxy(
                 client.close()
                 continue
 
+            # TCP keep-alive on client socket too (FFmpeg side)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            try:
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+            except (AttributeError, OSError):
+                pass
             _dbg_count = [0]  # shared debug exchange counter
 
             def _pipe(
@@ -90,7 +110,7 @@ def start_tls_proxy(
                 _interleaved_counter = [0]  # tracks next interleaved channel pair
                 try:
                     while True:
-                        r, _, _ = _select.select([src], [], [], 60)
+                        r, _, _ = _select.select([src], [], [], 120)
                         if not r:
                             break
                         data = src.recv(65536)

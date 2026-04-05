@@ -244,6 +244,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
+        # Stream error tracking — consecutive FFmpeg failures per camera.
+        # After max_stream_errors, auto-fallback from LOCAL → REMOTE.
+        self._stream_error_count: dict[str, int] = {}
+        self._stream_fell_back: dict[str, bool] = {}  # True = currently using REMOTE fallback
         # Pre-create SSL context for TLS proxy (blocking call — must not run in event loop)
         import ssl
         # SSL context created lazily on first use (ssl.create_default_context
@@ -269,6 +273,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         from .models import get_model_config
         hw = self._hw_version.get(cam_id, "CAMERA")
         return get_model_config(hw)
+
+    def record_stream_error(self, cam_id: str) -> None:
+        """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
+        count = self._stream_error_count.get(cam_id, 0) + 1
+        self._stream_error_count[cam_id] = count
+        cfg = self.get_model_config(cam_id)
+        if count >= cfg.max_stream_errors:
+            _LOGGER.warning(
+                "Stream error %d/%d for %s — will fall back to REMOTE on next start",
+                count, cfg.max_stream_errors, cam_id[:8],
+            )
+
+    def record_stream_success(self, cam_id: str) -> None:
+        """Reset error counter on successful stream."""
+        if self._stream_error_count.get(cam_id, 0) > 0:
+            _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
+        self._stream_error_count[cam_id] = 0
+        self._stream_fell_back[cam_id] = False
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -1095,7 +1117,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if conn_type_pref == "local":
                 candidates = ["LOCAL"]
             elif conn_type_pref == "auto":
-                candidates = ["LOCAL", "REMOTE"]
+                cfg = self.get_model_config(cam_id)
+                # Check if LOCAL should be skipped:
+                # 1. Too many consecutive stream errors → fall back to REMOTE
+                err_count = self._stream_error_count.get(cam_id, 0)
+                if err_count >= cfg.max_stream_errors:
+                    _LOGGER.warning(
+                        "AUTO mode: %s had %d consecutive LOCAL errors — falling back to REMOTE",
+                        cam_id[:8], err_count,
+                    )
+                    self._stream_fell_back[cam_id] = True
+                    candidates = ["REMOTE"]
+                else:
+                    # 2. WiFi signal too weak → prefer REMOTE
+                    wifi = self._wifiinfo_cache.get(cam_id, {}).get("signalStrength", 100)
+                    if isinstance(wifi, (int, float)) and wifi < cfg.min_wifi_for_local:
+                        _LOGGER.info(
+                            "AUTO mode: %s WiFi %d%% < %d%% threshold — using REMOTE",
+                            cam_id[:8], wifi, cfg.min_wifi_for_local,
+                        )
+                        candidates = ["REMOTE", "LOCAL"]  # prefer REMOTE but try LOCAL as fallback
+                    else:
+                        candidates = ["LOCAL", "REMOTE"]
+                    self._stream_fell_back[cam_id] = False
             else:
                 candidates = ["REMOTE"]
 
@@ -1145,7 +1189,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
                                 cam_host, cam_port = cam_addr.split(":")
                                 proxy_port = await self._start_tls_proxy(
-                                    cam_id, cam_host, int(cam_port)
+                                    cam_id, cam_host, int(cam_port),
+                                    is_renewal=is_renewal,
                                 )
                                 eu = _q(local_user, safe="")
                                 ep = _q(local_pass, safe="")
@@ -1621,14 +1666,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except (asyncio.TimeoutError, aiohttp.ClientError):
             pass  # go2rtc may not be running — silently ignore
 
-    async def _start_tls_proxy(self, cam_id: str, cam_host: str, cam_port: int) -> int:
+    async def _start_tls_proxy(self, cam_id: str, cam_host: str, cam_port: int, is_renewal: bool = False) -> int:
         """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
         # Lazy-init SSL context in executor (blocking I/O, must not run in event loop)
         if self._tls_ssl_ctx is None:
             self._tls_ssl_ctx = await self.hass.async_add_executor_job(self._create_ssl_ctx)
         return start_tls_proxy(
             self._tls_ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports,
-            debug=self.debug,
+            debug=self.debug, is_renewal=is_renewal,
         )
 
     @staticmethod
@@ -1644,57 +1689,164 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Stop the TLS proxy for a camera."""
         stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
+    async def _close_cloud_session(self, cam_id: str) -> None:
+        """Release the camera's RTSP session by opening a fresh PUT /connection.
+
+        The Bosch Cloud API has no DELETE endpoint for connections. Instead,
+        a new PUT /connection overwrites the old session, which causes the
+        camera to stop streaming the old session (LED stops blinking).
+        We don't store the result — it's just a cleanup call.
+        """
+        token = self.token
+        if not token:
+            return
+        try:
+            connector = aiohttp.TCPConnector(ssl=False)
+            session = aiohttp.ClientSession(connector=connector)
+            try:
+                url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+                async with asyncio.timeout(5):
+                    async with session.put(
+                        url,
+                        json={"type": "REMOTE"},
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                    ) as resp:
+                        _LOGGER.debug(
+                            "Session cleanup PUT /connection for %s → HTTP %d",
+                            cam_id[:8], resp.status,
+                        )
+            finally:
+                await session.close()
+        except Exception as exc:
+            _LOGGER.debug("Failed to cleanup session for %s: %s", cam_id[:8], exc)
+
     async def _auto_renew_local_session(self, cam_id: str, generation: int) -> None:
-        """Auto-renew LOCAL RTSP session every 50s to beat the 60s absolute limit.
+        """Keep LOCAL RTSP session alive via heartbeats + periodic full renewal.
 
-        The Bosch camera enforces maxSessionDuration=60 for LOCAL connections.
-        This is an absolute session duration limit (not inactivity timeout) —
-        RTP data flowing over TCP interleaved transport doesn't prevent it.
+        Two mechanisms, both model-specific (from CameraModelConfig):
 
-        Every 50s this loop:
-        1. Calls PUT /connection to get fresh credentials + a new RTSP session
-        2. Starts a new TLS proxy (new port, since credentials changed)
-        3. Uses Stream.update_source() to hot-swap FFmpeg to the new URL
-           without destroying the HLS provider or frontend state
+        1. Cloud heartbeat (every cfg.heartbeat_interval seconds):
+           PUT /connection LOCAL — refreshes the cloud-side credential lease.
+           Lightweight, does NOT restart TLS proxy or FFmpeg.
 
-        Stops when the live stream switch is turned OFF or a new generation
-        supersedes this one (OFF→ON cycle started a fresh renewal loop).
+        2. Full session renewal (every cfg.renewal_interval seconds):
+           Complete session restart — new PUT /connection, new credentials,
+           new TLS proxy, Stream.update_source(). Required because some cameras
+           (especially outdoor CAMERA_EYES) kill the RTSP TCP connection after
+           a few minutes regardless of cloud heartbeats.
+
+        The Bosch app sends PUT /connection every ~1s as heartbeat.
+        Indoor cameras are stable for 3500s+, outdoor cameras drop after 2-10 min.
         """
         cfg = self.get_model_config(cam_id)
-        interval = cfg.renewal_interval
-        _LOGGER.debug("Auto-renew loop started for %s (gen=%d, interval=%ds)", cam_id[:8], generation, interval)
+        heartbeat_interval = cfg.heartbeat_interval
+        renewal_interval = cfg.renewal_interval
+        _LOGGER.debug(
+            "Session keepalive started for %s (gen=%d, heartbeat=%ds, renewal=%ds)",
+            cam_id[:8], generation, heartbeat_interval, renewal_interval,
+        )
+        consecutive_fails = 0
+        session_start = time.monotonic()
         try:
           while True:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(heartbeat_interval)
             # Stop if a newer generation was started (OFF→ON cycle)
             if self._auto_renew_generation.get(cam_id, 0) != generation:
-                _LOGGER.debug("Auto-renew: stale gen=%d for %s — stopping", generation, cam_id[:8])
+                _LOGGER.debug("Keepalive: stale gen=%d for %s — stopping", generation, cam_id[:8])
                 break
             # Stop if stream was turned off
             if cam_id not in self._live_connections:
-                _LOGGER.debug("Auto-renew: stream off for %s — stopping", cam_id[:8])
+                _LOGGER.debug("Keepalive: stream off for %s — stopping", cam_id[:8])
                 break
             live = self._live_connections.get(cam_id, {})
             if live.get("_connection_type") != "LOCAL":
-                _LOGGER.debug("Auto-renew: not LOCAL for %s — stopping", cam_id[:8])
+                _LOGGER.debug("Keepalive: not LOCAL for %s — stopping", cam_id[:8])
                 break
-            _LOGGER.debug("Auto-renew: renewing LOCAL session for %s (gen=%d)", cam_id[:8], generation)
+
+            elapsed = time.monotonic() - session_start
+
+            # ── Full session renewal (proactive, time-based) ─────────
+            if elapsed >= renewal_interval:
+                _LOGGER.info(
+                    "Session renewal for %s after %.0fs (interval=%ds)",
+                    cam_id[:8], elapsed, renewal_interval,
+                )
+                try:
+                    result = await self.try_live_connection(cam_id, is_renewal=True)
+                    if result:
+                        _LOGGER.info("Session renewed for %s", cam_id[:8])
+                    else:
+                        _LOGGER.warning("Session renewal failed for %s — retrying next cycle", cam_id[:8])
+                        session_start = time.monotonic()  # reset to avoid spamming
+                except Exception as exc:
+                    _LOGGER.warning("Session renewal error for %s: %s", cam_id[:8], exc)
+                    session_start = time.monotonic()
+                # try_live_connection creates a NEW heartbeat task with new generation,
+                # so this loop will exit at the stale-gen check above.
+                continue
+
+            # ── Lightweight cloud heartbeat ───────────────────────────
             try:
-                result = await self.try_live_connection(cam_id, is_renewal=True)
-                if result:
-                    _LOGGER.info(
-                        "Auto-renew: new session for %s — %s",
-                        cam_id[:8], result.get("rtspsUrl", "")[:60],
-                    )
-                else:
-                    _LOGGER.warning("Auto-renew: renewal failed for %s", cam_id[:8])
+                token = self.token
+                if not token:
+                    continue
+                connector = aiohttp.TCPConnector(ssl=False)
+                session = aiohttp.ClientSession(connector=connector)
+                try:
+                    url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+                    async with asyncio.timeout(10):
+                        async with session.put(
+                            url,
+                            json={"type": "LOCAL"},
+                            headers={
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json",
+                            },
+                        ) as resp:
+                            if resp.status in (200, 201):
+                                consecutive_fails = 0
+                                if self.debug:
+                                    _LOGGER.debug(
+                                        "Heartbeat OK for %s (gen=%d, %.0fs into session)",
+                                        cam_id[:8], generation, elapsed,
+                                    )
+                            else:
+                                consecutive_fails += 1
+                                _LOGGER.warning(
+                                    "Heartbeat HTTP %d for %s (fail %d)",
+                                    resp.status, cam_id[:8], consecutive_fails,
+                                )
+                finally:
+                    await session.close()
             except Exception as exc:
-                _LOGGER.warning("Auto-renew: error for %s: %s", cam_id[:8], exc)
+                consecutive_fails += 1
+                _LOGGER.warning("Heartbeat error for %s: %s (fail %d)", cam_id[:8], exc, consecutive_fails)
+
+            # After 3 consecutive heartbeat failures, force immediate renewal
+            if consecutive_fails >= 3:
+                _LOGGER.warning(
+                    "Heartbeat: %d consecutive failures for %s — forcing renewal",
+                    consecutive_fails, cam_id[:8],
+                )
+                consecutive_fails = 0
+                try:
+                    result = await self.try_live_connection(cam_id, is_renewal=True)
+                    if result:
+                        _LOGGER.info("Heartbeat: session renewed for %s", cam_id[:8])
+                    else:
+                        _LOGGER.warning("Heartbeat: renewal failed for %s", cam_id[:8])
+                        session_start = time.monotonic()
+                except Exception as exc:
+                    _LOGGER.warning("Heartbeat: renewal error for %s: %s", cam_id[:8], exc)
+                    session_start = time.monotonic()
         except asyncio.CancelledError:
-          _LOGGER.debug("Auto-renew loop cancelled for %s (gen=%d)", cam_id[:8], generation)
+          _LOGGER.debug("Keepalive cancelled for %s (gen=%d)", cam_id[:8], generation)
         finally:
           self._auto_renew_tasks.pop(cam_id, None)
-          _LOGGER.debug("Auto-renew loop ended for %s (gen=%d)", cam_id[:8], generation)
+          _LOGGER.debug("Keepalive loop ended for %s (gen=%d)", cam_id[:8], generation)
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:

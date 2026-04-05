@@ -88,7 +88,7 @@
           "enable_auto_download":    "Event-Snapshots (JPEG) und Videoclips (MP4) von der Bosch Cloud herunterladen und lokal auf dem HA-Host speichern. Benötigt Download-Ordner unten.",
           "download_path":           "Lokaler Ordner für heruntergeladene Events. Beispiel: /config/bosch_events",
           "enable_fcm_push":         "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
-          "alert_notify_service":    "Standard-Fallback: wird verwendet wenn die Typ-spezifischen Felder unten leer sind. Kommagetrennt. Beispiele: notify.signal_messenger, notify.mobile_app_iphone17. Leer = Alerts deaktiviert.",
+          "alert_notify_service":    "Standard-Fallback: wird verwendet wenn die Typ-spezifischen Felder unten leer sind. Kommagetrennt. Beispiele: notify.signal_messenger, notify.mobile_app_xxx. Leer = Alerts deaktiviert.",
           "alert_notify_system":     "Dienste für System-Alerts (Token abgelaufen, Speicher voll). Leer = verwendet Standard-Fallback oben.",
           "alert_notify_information": "Dienste für Stufe 1 — sofortige Text-Benachrichtigung. Leer = Standard-Fallback. z.B.: notify.signal_messenger, notify.mobile_app_xxx.",
           "alert_notify_screenshot": "Dienste für Stufe 2 — Snapshot-Bild. Leer = Standard-Fallback. Mobile Apps (mobile_app_xxx) erhalten das Bild direkt in der Benachrichtigung; andere als Dateianhang.",
