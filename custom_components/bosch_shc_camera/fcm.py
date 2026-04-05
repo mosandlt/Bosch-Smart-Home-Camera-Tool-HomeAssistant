@@ -37,41 +37,14 @@ FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
 # ── Firebase config ──────────────────────────────────────────────────────────
 
 async def fetch_firebase_config(hass: HomeAssistant) -> dict:
-    """Fetch Firebase config for the Bosch Smart Camera app.
+    """Return Firebase config for the Bosch Smart Camera app.
 
-    Uses Google's public Firebase installations API to get the API key,
-    project ID, and app ID for FCM registration. This avoids hardcoding
-    the Firebase API key in the source code.
+    These are public app-level identifiers embedded in every copy of the
+    Bosch Smart Camera APK — they identify the app to Firebase, not the user.
+    The API key is restricted by Firebase project rules (not by secrecy).
     """
-    # These are public app identifiers (not secrets) — same for every user
     project_id = "bosch-smart-cameras"
     app_id = f"1:{FCM_SENDER_ID}:android:9e5b6b58e4c70075"
-
-    session = async_get_clientsession(hass, verify_ssl=False)
-    try:
-        # Fetch API key via Firebase Installations API
-        url = f"https://firebaseinstallations.googleapis.com/v1/projects/{project_id}/installations"
-        body = {
-            "appId": app_id,
-            "authVersion": "FIS_v2",
-            "sdkVersion": "a:17.1.0",
-            "fid": "auto",
-        }
-        async with asyncio.timeout(10):
-            async with session.post(url, json=body, headers={
-                "x-goog-api-key": "",  # empty — discovery request
-                "Content-Type": "application/json",
-            }) as resp:
-                # The installations API may not return the key directly,
-                # but we can extract it from the Android app's public config.
-                pass
-    except Exception:
-        pass
-
-    # Fallback: use well-known Firebase config values for this project.
-    # These are public app-level identifiers embedded in every copy of the
-    # Bosch Smart Camera APK — they identify the app to Firebase, not the user.
-    # The API key is restricted by Firebase project rules (not by secrecy).
     import base64
     _k = base64.b64decode("QUl6YVN5QS1WOGEzR3hsZ1A0NTRzbzY3QzFJaDBQakpDd3pFMEFJ").decode()
     return {
@@ -314,9 +287,7 @@ async def async_handle_fcm_push(coordinator) -> None:
                     event_type, cam_name, newest_id[:8],
                 )
 
-                # Update cached events
-                if cam_id in coordinator.data:
-                    coordinator.data[cam_id]["events"] = events
+                # Update cached events (write to cache only — coordinator tick merges)
                 coordinator._cached_events[cam_id] = events
 
                 # Fire HA event bus

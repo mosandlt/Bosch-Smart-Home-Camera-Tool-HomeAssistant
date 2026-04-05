@@ -116,8 +116,9 @@ DEFAULT_MODEL = CameraModelConfig(
     post_warm_buffer=3,
     describe_timeout=5,
     min_total_wait=30,
-    renewal_interval=500,
+    renewal_interval=3500,
     max_session_duration=3600,
+    heartbeat_interval=15,
     snapshot_warmup=4,
 )
 

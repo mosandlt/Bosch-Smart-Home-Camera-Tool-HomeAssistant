@@ -1241,6 +1241,8 @@ class BoschCameraCard extends HTMLElement {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
       s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+      s.integrity = "sha384-iZBI1/lW9u8FcBjxuQ8nPTsU7TXhZNtzkV8H3gQHSTgz+VYQoKWqGlBHqhO84alJ";
+      s.crossOrigin = "anonymous";
       s.onload  = () => resolve(window.Hls);
       s.onerror = () => reject(new Error("hls.js load failed"));
       document.head.appendChild(s);
