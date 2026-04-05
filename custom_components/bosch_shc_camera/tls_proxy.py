@@ -110,7 +110,11 @@ def start_tls_proxy(
                 _interleaved_counter = [0]  # tracks next interleaved channel pair
                 try:
                     while True:
-                        r, _, _ = _select.select([src], [], [], 120)
+                        # CAM→C (rewrite_transport=False): no timeout — dark/still
+                        # scenes have sparse RTP packets; TCP keepalive handles dead
+                        # connections. C→CAM (rewrite_transport=True): 120s timeout.
+                        pipe_timeout = 120 if rewrite_transport else None
+                        r, _, _ = _select.select([src], [], [], pipe_timeout)
                         if not r:
                             break
                         data = src.recv(65536)

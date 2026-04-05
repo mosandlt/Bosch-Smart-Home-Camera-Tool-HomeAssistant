@@ -335,17 +335,40 @@ async def async_handle_fcm_push(coordinator) -> None:
                 elif event_type == "PERSON":
                     coordinator.hass.bus.async_fire("bosch_shc_camera_person", event_payload)
 
-                # Send alert notification (3-step: text + snapshot + video)
-                coordinator.hass.async_create_task(
-                    async_send_alert(
-                        coordinator,
-                        cam_name, event_type,
-                        newest_event.get("timestamp", ""),
-                        newest_event.get("imageUrl", ""),
-                        newest_event.get("videoClipUrl", ""),
-                        newest_event.get("videoClipUploadStatus", ""),
+                # Check notification switches before sending alert.
+                # Master switch (switch.bosch_{name}_notifications) must be ON,
+                # AND the type-specific switch must be ON for this event type.
+                _alert_blocked = False
+                _base = cam_name.lower().replace(" ", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+                _master_eid = f"switch.bosch_{_base}_notifications"
+                _master_state = coordinator.hass.states.get(_master_eid)
+                if _master_state and _master_state.state == "off":
+                    _LOGGER.debug("Alert suppressed: %s is OFF", _master_eid)
+                    _alert_blocked = True
+                # Type-specific check
+                _type_map = {"MOVEMENT": "movement", "AUDIO_ALARM": "audio", "PERSON": "person", "CAMERA_ALARM": "camera_alarm", "TROUBLE": "trouble"}
+                _type_key = _type_map.get(event_type)
+                if _type_key and not _alert_blocked:
+                    _type_eid = f"switch.bosch_{_base}_{_type_key}_notifications"
+                    _type_state = coordinator.hass.states.get(_type_eid)
+                    if _type_state and _type_state.state == "off":
+                        _LOGGER.debug("Alert suppressed: %s is OFF", _type_eid)
+                        _alert_blocked = True
+
+                if not _alert_blocked:
+                    # Send alert notification (3-step: text + snapshot + video)
+                    coordinator.hass.async_create_task(
+                        async_send_alert(
+                            coordinator,
+                            cam_name, event_type,
+                            newest_event.get("timestamp", ""),
+                            newest_event.get("imageUrl", ""),
+                            newest_event.get("videoClipUrl", ""),
+                            newest_event.get("videoClipUploadStatus", ""),
+                        )
                     )
-                )
+                else:
+                    _LOGGER.info("Alert skipped for %s (%s) — notifications disabled", cam_name, event_type)
 
                 # Trigger snapshot refresh
                 cam_entity = coordinator._camera_entities.get(cam_id)

@@ -17,7 +17,7 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.2.1
+ * Version: 2.3.0
  *
  * Changes vs 2.1.0:
  *   - Removed dead _streamingImageLoad() method (snapshot-streaming mode removed in v2.0.0)
@@ -1274,6 +1274,36 @@ class BoschCameraCard extends HTMLElement {
       };
       video.addEventListener("playing", clearOverlay);
       setTimeout(() => { clearOverlay(); }, 45000);
+
+      // Stall detector: if video.currentTime stops advancing for 15s, recover
+      if (this._stallChecker) clearInterval(this._stallChecker);
+      let lastTime = 0;
+      let stallCount = 0;
+      this._stallChecker = setInterval(() => {
+        if (!this._liveVideoActive || !video) {
+          clearInterval(this._stallChecker);
+          return;
+        }
+        if (video.currentTime === lastTime && !video.paused) {
+          stallCount++;
+          if (stallCount >= 3) { // 15s stall (3 × 5s)
+            console.warn("bosch-camera-card: video stalled for 15s, recovering");
+            stallCount = 0;
+            if (this._hls && this._hls.liveSyncPosition) {
+              video.currentTime = this._hls.liveSyncPosition;
+            } else {
+              // Full restart
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => this._startLiveVideo(), 2000);
+              }
+            }
+          }
+        } else {
+          stallCount = 0;
+        }
+        lastTime = video.currentTime;
+      }, 5000);
     };
 
     // ── WebRTC (deferred — needs active stream_source before go2rtc can offer it) ──
@@ -1290,25 +1320,25 @@ class BoschCameraCard extends HTMLElement {
       });
       if (!result?.url) throw new Error("no url");
 
+      // Always start muted to comply with Chrome autoplay policy.
+      // Chrome blocks unmuted autoplay without prior user interaction.
+      // Audio is controlled by the user via the audio toggle in the card.
       video.muted = true;
       const startPlay = () => {
         video.muted = true;
         video.play()
           .then(() => {
-            if (audioOn) {
-              // Try unmuting — Chrome may pause the video if there was no user gesture.
-              video.muted = false;
-              // Check after a tick if Chrome paused us due to autoplay policy.
-              setTimeout(() => {
-                if (video.paused && !video.muted) {
-                  // Chrome blocked unmuted autoplay — fall back to muted playback.
-                  video.muted = true;
-                  video.play().catch(() => {});
-                }
-              }, 100);
-            }
+            // Video is playing muted. User can unmute via audio toggle.
+            // Do NOT auto-unmute — Chrome will pause the video.
           })
-          .catch(() => {});
+          .catch((err) => {
+            // If even muted play fails, retry after a moment
+            console.warn("bosch-camera-card: muted play failed:", err.message);
+            setTimeout(() => {
+              video.muted = true;
+              video.play().catch(() => {});
+            }, 2000);
+          });
       };
 
       const Hls = await this._loadHlsJs();
@@ -1317,11 +1347,13 @@ class BoschCameraCard extends HTMLElement {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
-          // Tolerate low-bitrate streams (nighttime outdoor, dark scenes)
+          // CRITICAL: maxBufferLength MUST be < HA's OUTPUT_IDLE_TIMEOUT (30s).
+          // If hls.js buffers ≥30s, it stops requesting segments → HA thinks
+          // nobody is watching → kills FFmpeg → video freezes on last frame.
           liveSyncDurationCount: 3,     // stay 3 segments behind live edge
           liveMaxLatencyDurationCount: 6, // max 6 segments behind before seeking to live
-          maxBufferLength: 30,          // buffer up to 30s
-          maxMaxBufferLength: 60,       // absolute max buffer 60s
+          maxBufferLength: 10,          // buffer up to 10s (MUST be < 30s HA idle timeout!)
+          maxMaxBufferLength: 20,       // absolute max buffer 20s
           // Aggressive recovery: reload manifest on stall
           manifestLoadingMaxRetry: 10,
           levelLoadingMaxRetry: 10,
@@ -1329,12 +1361,25 @@ class BoschCameraCard extends HTMLElement {
         });
         this._hls = hls;
         hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
-        // Auto-recovery on buffer stall: seek to live edge
+        // Reset stall counter on successful fragment delivery
+        this._stallCount = 0;
+        hls.on(Hls.Events.FRAG_LOADED, () => { this._stallCount = 0; });
+
+        // Auto-recovery on buffer stall: seek to live edge, then reconnect
         hls.on(Hls.Events.ERROR, (_ev, data) => {
           if (data.details === "bufferStalledError") {
-            // Non-fatal buffer stall — seek to live edge to recover
+            this._stallCount = (this._stallCount || 0) + 1;
             if (video && hls.liveSyncPosition) {
               video.currentTime = hls.liveSyncPosition;
+            }
+            // After 3 consecutive stalls, FFmpeg is likely dead — full reconnect
+            if (this._stallCount >= 3) {
+              console.warn("bosch-camera-card: 3 buffer stalls, reconnecting HLS");
+              this._stallCount = 0;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 1000);
+              }
             }
             return;
           }
@@ -1353,6 +1398,14 @@ class BoschCameraCard extends HTMLElement {
         });
         hls.loadSource(result.url);
         hls.attachMedia(video);
+        // HLS keepalive: prevent HA's 30s idle timeout from killing FFmpeg.
+        // Even with maxBufferLength=10, belt-and-suspenders measure.
+        if (this._hlsKeepaliveTimer) clearInterval(this._hlsKeepaliveTimer);
+        this._hlsKeepaliveTimer = setInterval(() => {
+          if (this._hls && this._liveVideoActive) {
+            this._hls.startLoad(-1); // restart loading from current position
+          }
+        }, 20000); // every 20s, well within 30s timeout
       } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
         video.src = result.url;
         startPlay();
@@ -1362,19 +1415,32 @@ class BoschCameraCard extends HTMLElement {
       activateVideo();
 
     } catch (e) {
-      if (attempt < 3) {
-        setTimeout(() => this._startLiveVideo(attempt + 1), 1000);
+      if (attempt < 5) {
+        // Quick retries for transient errors (WS not ready yet)
+        setTimeout(() => this._startLiveVideo(attempt + 1), 1500);
       } else {
-        console.warn("bosch-camera-card: stream not available", e);
+        // After 5 attempts, back off but DON'T give up permanently.
+        // Schedule a retry in 10s — the stream may still be starting.
+        console.warn("bosch-camera-card: stream not available (attempt " + attempt + "), retrying in 10s", e);
         this._liveVideoActive   = false;
         this._startingLiveVideo = false;
         this._startRefreshTimer();
+        // Retry after 10s if stream is still supposed to be on
+        setTimeout(() => {
+          if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, "Stream wird erneut versucht…");
+            this._waitForStreamReady();
+          }
+        }, 10000);
       }
     }
   }
 
   _stopLiveVideo() {
     if (this._hls) { this._hls.destroy(); this._hls = null; }
+    if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
+    if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
@@ -1623,12 +1689,11 @@ class BoschCameraCard extends HTMLElement {
     // Wait until camera entity actually reports streaming (stream_source set)
     // to avoid "does not support play stream" errors from premature WS calls.
     // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
-    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo) {
-      if (!this._waitingForStream) {
-        this._waitingForStream = true;
-        this._setLoadingOverlay(true, "Stream wird gestartet…");
-        this._waitForStreamReady();
-      }
+    // Also re-triggers if card got stuck (e.g. WS failed during page load).
+    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      this._waitForStreamReady();
     }
     if (!shouldVideo) {
       this._waitingForStream = false;
