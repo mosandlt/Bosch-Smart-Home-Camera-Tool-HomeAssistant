@@ -87,3 +87,53 @@ delete_rule:
       required: true
       selector:
         text:
+
+rename_camera:
+  name: Rename Camera
+  description: >
+    Rename a Bosch camera via the cloud API. The new name appears in the Bosch app
+    and in all HA entity names after the next coordinator refresh.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: "The cloud ID of the camera (UUID from entity attributes)"
+      required: true
+      selector:
+        text:
+    new_name:
+      name: New Name
+      description: "The new display name for the camera"
+      required: true
+      selector:
+        text:
+
+invite_friend:
+  name: Invite Friend (Camera Sharing)
+  description: >
+    Send a camera sharing invitation to an email address.
+    The recipient receives an email with a link to accept.
+  fields:
+    email:
+      name: Email Address
+      required: true
+      selector:
+        text:
+
+list_friends:
+  name: List Friends (Camera Sharing)
+  description: >
+    List all friends and their camera sharing status.
+    Results are logged and returned as a persistent notification.
+  fields: {}
+
+remove_friend:
+  name: Remove Friend
+  description: >
+    Remove a friend and revoke all their camera shares.
+  fields:
+    friend_id:
+      name: Friend ID
+      description: "The UUID of the friend (from list_friends)"
+      required: true
+      selector:
+        text:

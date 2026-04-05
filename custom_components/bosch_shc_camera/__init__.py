@@ -2341,6 +2341,120 @@ def _register_services(hass: HomeAssistant) -> None:
                     _LOGGER.warning("Delete rule error: %s", err)
                 break
 
+    async def handle_rename_camera(call: ServiceCall) -> None:
+        """Rename a camera via the Bosch cloud API."""
+        cam_id = call.data.get("camera_id", "")
+        new_name = call.data.get("new_name", "")
+        if not cam_id or not new_name:
+            _LOGGER.warning("rename_camera: camera_id and new_name are required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.put(
+                            f"{CLOUD_API}/v11/video_inputs",
+                            headers=headers,
+                            json={"videoInputId": cam_id, "title": new_name, "timeZone": "Europe/Berlin"},
+                        ) as resp:
+                            if resp.status in (200, 201, 204):
+                                _LOGGER.info("Camera %s renamed to '%s'", cam_id[:8], new_name)
+                                await coord.async_request_refresh()
+                            else:
+                                _LOGGER.warning("Rename failed: HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("Rename error: %s", err)
+                break
+
+    async def handle_invite_friend(call: ServiceCall) -> None:
+        """Invite a friend for camera sharing."""
+        email = call.data.get("email", "")
+        if not email:
+            _LOGGER.warning("invite_friend: email is required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.post(
+                            f"{CLOUD_API}/v11/friends",
+                            headers=headers,
+                            json={"invitationEmail": email, "nickName": email},
+                        ) as resp:
+                            if resp.status in (200, 201):
+                                data = await resp.json()
+                                _LOGGER.info("Friend invited: %s (ID: %s)", email, data.get("id", "?"))
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Kamera-Freigabe", "message": f"Einladung an {email} gesendet. Friend-ID: {data.get('id', '?')}"},
+                                )
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Invite failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Invite error: %s", err)
+                break
+
+    async def handle_list_friends(call: ServiceCall) -> None:
+        """List all friends and camera shares."""
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(f"{CLOUD_API}/v11/friends", headers=headers) as resp:
+                            if resp.status == 200:
+                                friends = await resp.json()
+                                if not friends:
+                                    msg = "Keine Freunde / Kamera-Freigaben."
+                                else:
+                                    lines = [f"{len(friends)} Freund(e):"]
+                                    for f in friends:
+                                        email = f.get("email", f.get("invitationEmail", "?"))
+                                        status = f.get("status", f.get("invitationStatus", "?"))
+                                        fid = f.get("id", "?")
+                                        shares = f.get("sharedVideoInputs", [])
+                                        lines.append(f"• {email} (Status: {status}, ID: {fid}, Kameras: {len(shares)})")
+                                    msg = "\n".join(lines)
+                                _LOGGER.info("Friends: %s", msg)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Kamera-Freigaben", "message": msg, "notification_id": "bosch_friends_list"},
+                                )
+                            else:
+                                _LOGGER.warning("List friends failed: HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("List friends error: %s", err)
+                break
+
+    async def handle_remove_friend(call: ServiceCall) -> None:
+        """Remove a friend and revoke camera shares."""
+        friend_id = call.data.get("friend_id", "")
+        if not friend_id:
+            _LOGGER.warning("remove_friend: friend_id is required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.delete(
+                            f"{CLOUD_API}/v11/friends/{friend_id}", headers=headers
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Friend %s removed", friend_id)
+                            else:
+                                _LOGGER.warning("Remove friend failed: HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("Remove friend error: %s", err)
+                break
+
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
@@ -2349,3 +2463,11 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+    if not hass.services.has_service(DOMAIN, "rename_camera"):
+        hass.services.async_register(DOMAIN, "rename_camera", handle_rename_camera)
+    if not hass.services.has_service(DOMAIN, "invite_friend"):
+        hass.services.async_register(DOMAIN, "invite_friend", handle_invite_friend)
+    if not hass.services.has_service(DOMAIN, "list_friends"):
+        hass.services.async_register(DOMAIN, "list_friends", handle_list_friends)
+    if not hass.services.has_service(DOMAIN, "remove_friend"):
+        hass.services.async_register(DOMAIN, "remove_friend", handle_remove_friend)
