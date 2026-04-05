@@ -1308,13 +1308,29 @@ class BoschCameraCard extends HTMLElement {
       }, 5000);
     };
 
-    // ── WebRTC (deferred — needs active stream_source before go2rtc can offer it) ──
-    // go2rtc provides WebRTC but only after stream_source returns an RTSP URL.
-    // On-demand streams (Bosch) don't have a permanent RTSP URL — it's created
-    // when the live switch is turned ON. HLS starts the stream, then WebRTC
-    // could be used for subsequent reconnects. TODO: implement WebRTC upgrade.
+    // ── WebRTC (try first if go2rtc is available) ─────────────────────
+    // go2rtc provides WebRTC (~2s latency vs ~12s HLS) when stream is active.
+    // Falls back to HLS if WebRTC is not available or fails.
+    try {
+      const caps = await this._hass.callWS({
+        type: "camera/capabilities",
+        entity_id: this._entities.camera,
+      });
+      const types = caps?.frontend_stream_types || [];
+      if (types.includes("web_rtc")) {
+        try {
+          await this._startWebRTC(video, activateVideo);
+          return; // WebRTC started successfully
+        } catch (webrtcErr) {
+          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr);
+          // Fall through to HLS
+        }
+      }
+    } catch (capsErr) {
+      // Capabilities check failed — try HLS directly
+    }
 
-    // ── HLS via camera/stream ───────────────────────────────────────────
+    // ── HLS via camera/stream (fallback) ────────────────────────────────
     try {
       const result = await this._hass.callWS({
         type:      "camera/stream",
@@ -1439,10 +1455,70 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
+  async _startWebRTC(video, activateVideo) {
+    /**
+     * Start WebRTC stream via go2rtc (HA's camera/webrtc/offer WS API).
+     * Provides ~2s latency vs ~12s for HLS.
+     */
+    const entityId = this._entities.camera;
+    const pc = new RTCPeerConnection();
+    this._webrtcPc = pc;
+
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
+
+    const remoteStream = new MediaStream();
+    pc.ontrack = (ev) => {
+      remoteStream.addTrack(ev.track);
+      if (video.srcObject !== remoteStream) {
+        video.srcObject = remoteStream;
+        video.muted = true;
+        video.play().catch(() => {});
+        activateVideo();
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // Subscribe to answer/candidates via HA WS
+    const unsub = await this._hass.connection.subscribeMessage(
+      (event) => {
+        if (event.type === "answer") {
+          pc.setRemoteDescription({ type: "answer", sdp: event.answer });
+        } else if (event.type === "candidate") {
+          pc.addIceCandidate(event.candidate);
+        } else if (event.type === "error") {
+          console.warn("bosch-camera-card: WebRTC error:", event.message);
+        }
+      },
+      { type: "camera/webrtc/offer", entity_id: entityId, offer: offer.sdp }
+    );
+    this._webrtcUnsub = unsub;
+
+    // Wait for first track with timeout
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 10s")), 10000);
+      pc.ontrack = (ev) => {
+        clearTimeout(timeout);
+        remoteStream.addTrack(ev.track);
+        if (video.srcObject !== remoteStream) {
+          video.srcObject = remoteStream;
+          video.muted = true;
+          video.play().catch(() => {});
+          activateVideo();
+        }
+        resolve();
+      };
+    });
+  }
+
   _stopLiveVideo() {
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
+    if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
+    if (this._webrtcUnsub) { this._webrtcUnsub(); this._webrtcUnsub = null; }
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {

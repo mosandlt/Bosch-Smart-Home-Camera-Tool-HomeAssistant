@@ -506,16 +506,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         opts    = self.options
         now     = time.monotonic()
 
+        # Fast first tick: on startup, only fetch camera list + basic status.
+        # Skip events + slow-tier to reduce startup from ~2 min to ~15s.
+        # Full data loads on the second tick (60s later).
+        is_first_tick = not hasattr(self, '_first_tick_done')
+        if is_first_tick:
+            self._first_tick_done = True
+
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
-        # Event polling interval: when FCM push is healthy, extend to interval_events (5 min)
-        # as a safety net. When FCM is down/disabled, poll at scan_interval (60s) for faster detection.
         if self._fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
         else:
             event_interval = int(opts.get("interval_events", 60))
         do_events = (now - self._last_events) >= event_interval
-        # Slow tier — wifiinfo, ambient light, RCP, motion, audio alarm, recording (every 5 min)
         do_slow   = (now - self._last_slow)   >= int(opts.get("interval_slow", 300))
+
+        # First tick: skip heavy operations
+        if is_first_tick:
+            do_events = False
+            do_slow = False
+            _LOGGER.info("Fast first tick — skipping events + slow-tier for quick startup")
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
