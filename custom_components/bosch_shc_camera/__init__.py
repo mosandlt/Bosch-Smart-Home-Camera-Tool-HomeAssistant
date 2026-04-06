@@ -236,7 +236,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._light_set_at:   dict[str, float] = {}      # lighting_override write timestamp
         self._notif_set_at:   dict[str, float] = {}      # enable_notifications write timestamp
         self._privacy_set_at: dict[str, float] = {}      # privacy write timestamp
-        _WRITE_LOCK_SECS = 8.0                           # seconds to hold write lock
+        _WRITE_LOCK_SECS = 30.0                          # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         self._WRITE_LOCK_SECS = _WRITE_LOCK_SECS
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
         # Used for model-specific timing (encoder warm-up) and feature gating.
