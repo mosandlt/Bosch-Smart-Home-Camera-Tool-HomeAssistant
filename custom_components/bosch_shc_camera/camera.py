@@ -346,6 +346,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         }
         if rtsps_url:
             attrs["stream_url"] = rtsps_url
+        # bufferingTime from PUT /connection (LOCAL=500ms, REMOTE=1000ms)
+        live_conn = self.coordinator._live_connections.get(self._cam_id, {})
+        bt = live_conn.get("_bufferingTime")
+        if bt is not None:
+            attrs["buffering_time_ms"] = bt
+            attrs["connection_type"] = live_conn.get("_connection_type", "REMOTE")
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
