@@ -190,8 +190,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             )
             return
         _LOGGER.info("Live stream ON for %s", self._cam_title)
-        # Clean any stale cloud session first (camera may still be streaming from a previous session)
-        await self.coordinator._close_cloud_session(self._cam_id)
+        # No explicit cleanup needed — try_live_connection() sends a new
+        # PUT /connection which automatically replaces any stale session.
         result = await self.coordinator.try_live_connection(self._cam_id)
         if result:
             conn_type = result.get("_connection_type", "REMOTE")
@@ -255,10 +255,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             renew_task.cancel()
         self.coordinator._live_connections.pop(self._cam_id, None)
         self.coordinator._live_opened_at.pop(self._cam_id, None)
-        # Stop TLS proxy and close cloud session — ensures camera stops
-        # streaming (LED stops blinking) and releases resources.
+        # Stop TLS proxy — closing the TCP connection is enough for the
+        # camera to detect disconnect and stop streaming (LED off).
+        # Do NOT call PUT /connection here — that creates a NEW session
+        # and keeps the camera streaming (blue LED stays on).
+        # The Bosch app also just closes TCP, no TEARDOWN or API call.
         await self.coordinator._stop_tls_proxy(self._cam_id)
-        await self.coordinator._close_cloud_session(self._cam_id)
         # Update state immediately so the UI reflects OFF without waiting for
         # the go2rtc unregister (up to 3s) + coordinator refresh.
         self.async_write_ha_state()

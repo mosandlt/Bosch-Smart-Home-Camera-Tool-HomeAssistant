@@ -1717,39 +1717,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """Stop the TLS proxy for a camera."""
         stop_tls_proxy(cam_id, self._tls_proxy_ports)
 
-    async def _close_cloud_session(self, cam_id: str) -> None:
-        """Release the camera's RTSP session by opening a fresh PUT /connection.
-
-        The Bosch Cloud API has no DELETE endpoint for connections. Instead,
-        a new PUT /connection overwrites the old session, which causes the
-        camera to stop streaming the old session (LED stops blinking).
-        We don't store the result — it's just a cleanup call.
-        """
-        token = self.token
-        if not token:
-            return
-        try:
-            async with aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=False),
-                connector_owner=True,
-            ) as session:
-                url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
-                async with asyncio.timeout(5):
-                    async with session.put(
-                        url,
-                        json={"type": "REMOTE"},
-                        headers={
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": "application/json",
-                        },
-                    ) as resp:
-                        _LOGGER.debug(
-                            "Session cleanup PUT /connection for %s → HTTP %d",
-                            cam_id[:8], resp.status,
-                        )
-        except Exception as exc:
-            _LOGGER.debug("Failed to cleanup session for %s: %s", cam_id[:8], exc)
-
     async def _auto_renew_local_session(self, cam_id: str, generation: int) -> None:
         """Keep LOCAL RTSP session alive via heartbeats + periodic full renewal.
 

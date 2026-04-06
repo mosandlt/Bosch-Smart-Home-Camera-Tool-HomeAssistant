@@ -381,10 +381,13 @@ class BoschCameraCard extends HTMLElement {
         }
         .cam-img.hidden { opacity: 0; }
 
-        /* Live video element */
+        /* Live video element — absolute so it overlays the snapshot image
+           without layout shift. Image stays visible underneath until video
+           fires "playing" event, avoiding the black gap. */
         .cam-video {
+          position: absolute; inset: 0;
           width: 100%; height: 100%; display: block; object-fit: cover;
-          min-height: 160px; background: #000;
+          min-height: 160px; background: transparent;
         }
 
         /* Fullscreen — native API (desktop/Android) */
@@ -959,7 +962,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.2.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.3.1</div>
       </ha-card>
     `;
 
@@ -1131,7 +1134,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.2.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.3.1 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1177,9 +1180,13 @@ class BoschCameraCard extends HTMLElement {
     if (img) img.classList.toggle("hidden", visible && !this._imageLoaded);
 
     if (visible) {
-      // Safety timeout: always hide overlay after 15s even if image never loads
+      // Safety timeout — shorter for snapshot refreshes, longer during stream start.
+      // During stream start (_startingLiveVideo or _waitingForStream), the overlay
+      // should stay visible until the video actually plays (outdoor cam takes 80s+).
       if (this._loadingTimeout) clearTimeout(this._loadingTimeout);
-      this._loadingTimeout = setTimeout(() => this._setLoadingOverlay(false), 15000);
+      const isStreamStart = this._startingLiveVideo || this._waitingForStream || this._liveVideoActive;
+      const safetyMs = isStreamStart ? 120000 : 15000;
+      this._loadingTimeout = setTimeout(() => this._setLoadingOverlay(false), safetyMs);
     } else {
       if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
     }
@@ -1263,10 +1270,13 @@ class BoschCameraCard extends HTMLElement {
     // Helper: activate video element with overlay management
     const activateVideo = () => {
       video.style.display = "block";
-      if (img) img.style.display = "none";
+      // Keep snapshot image visible until video actually plays — avoids
+      // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
       const clearOverlay = () => {
+        // NOW hide the snapshot — video is playing, no black gap
+        if (img) img.style.display = "none";
         this._setLoadingOverlay(false);
         if (this._streamConnecting) {
           this._streamConnecting = false;
@@ -1275,7 +1285,20 @@ class BoschCameraCard extends HTMLElement {
         video.removeEventListener("playing", clearOverlay);
       };
       video.addEventListener("playing", clearOverlay);
-      setTimeout(() => { clearOverlay(); }, 45000);
+      // Safety timeout: if video never plays after 120s, hide overlay but
+      // keep snapshot visible (don't call clearOverlay which hides the image).
+      // Outdoor camera can take 80s+ for first HLS frame.
+      if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
+      this._activateSafetyTimer = setTimeout(() => {
+        if (!video.paused && video.currentTime > 0) {
+          // Video is actually playing — full cleanup
+          clearOverlay();
+        } else {
+          // Video still not playing — hide overlay spinner only,
+          // keep snapshot image visible underneath
+          this._setLoadingOverlay(false);
+        }
+      }, 120000);
 
       // Stall detector: if video.currentTime stops advancing for 15s, recover
       if (this._stallChecker) clearInterval(this._stallChecker);
@@ -1517,6 +1540,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
+    if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
     if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
     if (this._webrtcUnsub) { this._webrtcUnsub(); this._webrtcUnsub = null; }
     const video = this.shadowRoot.getElementById("cam-video");
