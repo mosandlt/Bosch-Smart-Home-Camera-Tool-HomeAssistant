@@ -859,10 +859,13 @@ class BoschMotionZonesSensor(_BoschSensorBase):
     def extra_state_attributes(self) -> dict:
         zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
         coords = self.coordinator._rcp_motion_coords_cache.get(self._cam_id, [])
+        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
         return {
             "zones": zones,
             "coordinates": coords,
             "coordinate_count": len(coords),
+            "cloud_zones": cloud_zones,
+            "cloud_zone_count": len(cloud_zones),
         }
 
 

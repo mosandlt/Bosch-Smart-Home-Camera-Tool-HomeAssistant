@@ -2146,13 +2146,9 @@ class BoschCameraCard extends HTMLElement {
     // Use the motion_sensitive_areas data from the camera entity attributes if available,
     // otherwise fall back to the RCP-based motion zones sensor
     const mzState = hass.states[ents.motionZones];
+    const cloudZones = mzState?.attributes?.cloud_zones || [];
     if (zonesCountEl) {
-      zonesCountEl.textContent = (mzState?.state != null && mzState.state !== "unavailable") ? mzState.state : "—";
-    }
-    if (zonesInfoEl && mzState?.attributes?.coordinates) {
-      const coords = mzState.attributes.coordinates;
-      const count = mzState.attributes.coordinate_count || coords.length;
-      zonesInfoEl.textContent = `${count} Koordinaten (RCP)`;
+      zonesCountEl.textContent = cloudZones.length > 0 ? `${cloudZones.length} (Cloud)` : (mzState?.state != null && mzState.state !== "unavailable") ? `${mzState.state} (RCP)` : "—";
     }
   }
 
@@ -2208,31 +2204,31 @@ class BoschCameraCard extends HTMLElement {
     const svg = this.shadowRoot.getElementById("motion-zones-overlay");
     if (!svg) return;
 
-    // Read coordinates from the motion zones sensor attributes
+    // Prefer cloud_zones (from GET /motion_sensitive_areas, normalized 0.0–1.0)
+    // over RCP coordinates (raw firmware data, often incorrectly parsed).
     const zoneState = hass.states[ents.motionZones];
-    const coords = zoneState?.attributes?.coordinates;
+    const cloudZones = zoneState?.attributes?.cloud_zones;
+    const hasCloudZones = cloudZones && cloudZones.length > 0;
 
-    // Only show overlay when config option is set and data is available
-    const showZones = this._showMotionZones && coords && coords.length > 0;
+    const showZones = this._showMotionZones && hasCloudZones;
     svg.classList.toggle("visible", showZones);
     if (!showZones) return;
 
     // Only re-render if coordinates changed (avoid DOM thrashing)
-    const coordKey = JSON.stringify(coords);
+    const coordKey = JSON.stringify(cloudZones);
     if (this._lastMotionCoordKey === coordKey) return;
     this._lastMotionCoordKey = coordKey;
 
-    // Coordinates are zone rectangles: {x1, y1, x2, y2} in percent (0-100).
-    // ViewBox is 0-100, so coords map directly.
+    // Cloud zones: {x, y, w, h} normalized 0.0–1.0
+    // ViewBox is 0-100, so multiply by 100.
     svg.innerHTML = "";
-    for (let z = 0; z < coords.length; z++) {
-      const c = coords[z];
-      if (c.x1 == null || c.y1 == null || c.x2 == null || c.y2 == null) continue;
+    for (const z of cloudZones) {
+      if (z.x == null || z.y == null || z.w == null || z.h == null) continue;
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", c.x1);
-      rect.setAttribute("y", c.y1);
-      rect.setAttribute("width", c.x2 - c.x1);
-      rect.setAttribute("height", c.y2 - c.y1);
+      rect.setAttribute("x", z.x * 100);
+      rect.setAttribute("y", z.y * 100);
+      rect.setAttribute("width", z.w * 100);
+      rect.setAttribute("height", z.h * 100);
       svg.appendChild(rect);
     }
   }

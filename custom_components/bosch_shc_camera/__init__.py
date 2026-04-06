@@ -230,6 +230,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._notifications_cache: dict[str, dict] = {}
         # Rules cache — keyed by cam_id, from GET /rules
         self._rules_cache: dict[str, list] = {}
+        # Cloud motion zones cache — keyed by cam_id, from GET /motion_sensitive_areas
+        self._cloud_zones_cache: dict[str, list] = {}
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
@@ -899,7 +901,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         "wifiinfo", "ambient_light_sensor_level", "motion",
                         "audioAlarm", "firmware", "recording_options",
                         "unread_events_count", "commissioned", "timestamp",
-                        "notifications", "rules",
+                        "notifications", "rules", "motion_sensitive_areas",
                     ]
                     if hw in ("INDOOR", "CAMERA_360"):
                         endpoints.append("privacy_sound_override")
@@ -947,6 +949,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._notifications_cache[cam_id_key] = ep_data
                         elif ep == "rules":
                             self._rules_cache[cam_id_key] = ep_data
+                        elif ep == "motion_sensitive_areas":
+                            self._cloud_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
