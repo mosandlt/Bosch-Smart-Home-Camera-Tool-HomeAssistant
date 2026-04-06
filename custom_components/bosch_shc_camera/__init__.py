@@ -2308,6 +2308,204 @@ def _register_services(hass: HomeAssistant) -> None:
                     _LOGGER.warning("Delete rule error: %s", err)
                 break
 
+    async def handle_update_rule(call: ServiceCall) -> None:
+        """Update a cloud-side schedule rule (activate/deactivate, change times)."""
+        cam_id = call.data.get("camera_id", "")
+        rule_id = call.data.get("rule_id", "")
+        if not cam_id or not rule_id:
+            _LOGGER.warning("update_rule: camera_id and rule_id are required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                # Fetch current rule from cache or API (API needs all fields for PUT)
+                existing = None
+                for rule in coord._rules_cache.get(cam_id, []):
+                    if rule.get("id") == rule_id:
+                        existing = dict(rule)
+                        break
+                if not existing:
+                    # Fetch from API if not in cache
+                    try:
+                        async with asyncio.timeout(10):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
+                                headers=headers,
+                            ) as resp:
+                                if resp.status == 200:
+                                    rules = await resp.json()
+                                    for rule in rules:
+                                        if rule.get("id") == rule_id:
+                                            existing = dict(rule)
+                                            break
+                    except Exception as err:
+                        _LOGGER.warning("Fetch rules for update failed: %s", err)
+                if not existing:
+                    _LOGGER.warning("update_rule: rule %s not found", rule_id)
+                    return
+                # Overlay provided fields
+                if "name" in call.data:
+                    existing["name"] = call.data["name"]
+                if "is_active" in call.data:
+                    existing["isActive"] = call.data["is_active"]
+                if "start_time" in call.data:
+                    existing["startTime"] = call.data["start_time"]
+                if "end_time" in call.data:
+                    existing["endTime"] = call.data["end_time"]
+                if "weekdays" in call.data:
+                    existing["weekdays"] = call.data["weekdays"]
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.put(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
+                            headers=headers, json=existing,
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Rule %s updated", rule_id)
+                                await coord.async_request_refresh()
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Update rule failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Update rule error: %s", err)
+                break
+
+    async def handle_set_motion_zones(call: ServiceCall) -> None:
+        """Set motion detection zones for a camera (normalized coordinates 0.0–1.0)."""
+        cam_id = call.data.get("camera_id", "")
+        zones = call.data.get("zones", [])
+        if not cam_id:
+            _LOGGER.warning("set_motion_zones: camera_id is required")
+            return
+        if not isinstance(zones, list):
+            _LOGGER.warning("set_motion_zones: zones must be a list of {x, y, w, h}")
+            return
+        # Validate zone coordinates
+        for i, z in enumerate(zones):
+            for key in ("x", "y", "w", "h"):
+                if key not in z:
+                    _LOGGER.warning("set_motion_zones: zone %d missing '%s'", i, key)
+                    return
+                val = float(z[key])
+                if val < 0.0 or val > 1.0:
+                    _LOGGER.warning("set_motion_zones: zone %d '%s'=%.3f out of range 0.0–1.0", i, key, val)
+                    return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.post(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
+                            headers=headers, json=zones,
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Motion zones set for %s (%d zones)", cam_id[:8], len(zones))
+                                await coord.async_request_refresh()
+                            elif resp.status == 443:
+                                _LOGGER.warning("Set motion zones: not available (HTTP 443) — Privacy mode may be active")
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Set motion zones failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Set motion zones error: %s", err)
+                break
+
+    async def handle_get_motion_zones(call: ServiceCall) -> None:
+        """Read current motion detection zones and show as persistent notification."""
+        cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            _LOGGER.warning("get_motion_zones: camera_id is required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status == 200:
+                                zones = await resp.json()
+                                if not zones:
+                                    msg = "Keine Motion-Zonen konfiguriert."
+                                else:
+                                    lines = [f"{len(zones)} Motion-Zone(n):"]
+                                    for i, z in enumerate(zones):
+                                        lines.append(f"• Zone {i+1}: x={z.get('x',0):.3f} y={z.get('y',0):.3f} w={z.get('w',0):.3f} h={z.get('h',0):.3f}")
+                                    msg = "\n".join(lines)
+                                _LOGGER.info("Motion zones for %s: %s", cam_id[:8], msg)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Motion-Zonen", "message": msg, "notification_id": "bosch_motion_zones"},
+                                )
+                            elif resp.status == 443:
+                                msg = "Motion-Zonen nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
+                                _LOGGER.warning("Get motion zones: %s", msg)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Motion-Zonen", "message": msg, "notification_id": "bosch_motion_zones"},
+                                )
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Get motion zones failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Get motion zones error: %s", err)
+                break
+
+    async def handle_share_camera(call: ServiceCall) -> None:
+        """Share one or more cameras with a friend (time-limited)."""
+        friend_id = call.data.get("friend_id", "")
+        camera_ids = call.data.get("camera_ids", [])
+        days = call.data.get("days", 30)
+        if not friend_id:
+            _LOGGER.warning("share_camera: friend_id is required")
+            return
+        if not camera_ids:
+            _LOGGER.warning("share_camera: camera_ids list is required")
+            return
+        if isinstance(camera_ids, str):
+            camera_ids = [camera_ids]
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(days=int(days))
+        shares = [
+            {
+                "videoInputId": cid,
+                "shareTime": {
+                    "start": now.isoformat(),
+                    "end": end.isoformat(),
+                },
+            }
+            for cid in camera_ids
+        ]
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.put(
+                            f"{CLOUD_API}/v11/friends/{friend_id}/share",
+                            headers=headers, json=shares,
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Shared %d camera(s) with friend %s for %d days", len(camera_ids), friend_id[:8], days)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Kamera-Freigabe", "message": f"{len(camera_ids)} Kamera(s) für {days} Tage geteilt."},
+                                )
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Share camera failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Share camera error: %s", err)
+                break
+
     async def handle_rename_camera(call: ServiceCall) -> None:
         """Rename a camera via the Bosch cloud API."""
         cam_id = call.data.get("camera_id", "")
@@ -2430,6 +2628,14 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+    if not hass.services.has_service(DOMAIN, "update_rule"):
+        hass.services.async_register(DOMAIN, "update_rule", handle_update_rule)
+    if not hass.services.has_service(DOMAIN, "set_motion_zones"):
+        hass.services.async_register(DOMAIN, "set_motion_zones", handle_set_motion_zones)
+    if not hass.services.has_service(DOMAIN, "get_motion_zones"):
+        hass.services.async_register(DOMAIN, "get_motion_zones", handle_get_motion_zones)
+    if not hass.services.has_service(DOMAIN, "share_camera"):
+        hass.services.async_register(DOMAIN, "share_camera", handle_share_camera)
     if not hass.services.has_service(DOMAIN, "rename_camera"):
         hass.services.async_register(DOMAIN, "rename_camera", handle_rename_camera)
     if not hass.services.has_service(DOMAIN, "invite_friend"):

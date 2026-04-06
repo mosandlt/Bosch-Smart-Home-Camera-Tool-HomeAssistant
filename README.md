@@ -328,7 +328,11 @@ All services are available in **Developer Tools → Services** (or via automatio
 | `bosch_shc_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
 | `bosch_shc_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
 | `bosch_shc_camera.create_rule` | Create a cloud-side schedule rule | `camera_id`, `name`, `start_time`, `end_time`, `weekdays`, `is_active` |
+| `bosch_shc_camera.update_rule` | Update a schedule rule (change name, times, activate/deactivate) | `camera_id`, `rule_id`, `name`?, `start_time`?, `end_time`?, `weekdays`?, `is_active`? |
 | `bosch_shc_camera.delete_rule` | Delete a schedule rule | `camera_id`, `rule_id` |
+| `bosch_shc_camera.set_motion_zones` | Set motion detection zones (normalized 0.0–1.0 coordinates) | `camera_id`, `zones` |
+| `bosch_shc_camera.get_motion_zones` | Read motion zones from cloud API (persistent notification) | `camera_id` |
+| `bosch_shc_camera.share_camera` | Share cameras with a friend (time-limited) | `friend_id`, `camera_ids`, `days`? |
 
 **Examples:**
 
@@ -361,6 +365,30 @@ data:
   end_time: "20:00:00"
   weekdays: [1, 2, 3, 4, 5]
   is_active: true
+
+# Update a rule (deactivate it)
+service: bosch_shc_camera.update_rule
+data:
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  rule_id: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
+  is_active: false
+
+# Set motion detection zones (list of normalized rectangles)
+service: bosch_shc_camera.set_motion_zones
+data:
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  zones:
+    - { x: 0.0, y: 0.3, w: 0.67, h: 0.7 }
+    - { x: 0.63, y: 0.42, w: 0.28, h: 0.58 }
+
+# Share cameras with a friend for 30 days
+service: bosch_shc_camera.share_camera
+data:
+  friend_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  camera_ids:
+    - "cam-id-1"
+    - "cam-id-2"
+  days: 30
 ```
 
 > **Tip:** Find the `camera_id` in the camera entity's attributes (Developer Tools → States → `camera.bosch_*` → `camera_id` attribute).
@@ -375,7 +403,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v2.3.1**
+> **Card version: v2.4.0**
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -397,6 +425,7 @@ data:
 │  ▼ Benachrichtigungs-Typen            │
 │  ▼ Erweitert                          │
 │  ▼ Diagnose                           │
+│  ▼ Zeitpläne & Zonen                  │
 └──────────────────────────────────┘
 ```
 
@@ -424,6 +453,7 @@ data:
 - **Benachrichtigungs-Typen** — per-type notification toggles: movement, person, audio, trouble, camera alarm
 - **Erweitert** — timestamp overlay, auto-follow, motion detection, record sound, privacy sound
 - **Diagnose** — WiFi signal %, firmware version, ambient light %, movement/audio events today
+- **Zeitpläne & Zonen** — schedule rules list with AN/AUS toggle per rule + delete button, motion zone overlay toggle, motion zone count (RCP)
 
 ### Reliability (v1.9.4)
 
@@ -555,6 +585,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v7.10.0** | **Phase 3 Cloud Features — Rules Editor, Motion Zones, Camera Sharing.** New services: `update_rule` (activate/deactivate, change times — fetches current rule from API if not in cache), `set_motion_zones` (POST normalized x/y/w/h coordinates to cloud API), `get_motion_zones` (read zones, persistent notification), `share_camera` (time-limited camera sharing with friends). **Card v2.4.0:** New "Zeitpläne & Zonen" accordion section — shows schedule rules list with AN/AUS toggle per rule + delete button (calls `update_rule`/`delete_rule` services), runtime-toggleable motion zone SVG overlay on camera image (no YAML config needed), motion zone count from RCP sensor. HTTP 443 handling: cloud API returns 443 when privacy mode is active — clear error message in logs and notification. 12 HA services total. |
 | **v7.9.6** | **Light state sync fix:** Increased cloud API write-lock from 8s to 30s — prevents the switch from reverting to OFF after turning the light on (Bosch API propagation takes up to 20s). **Automation: light only at night** — camera light only turns on when sun is below horizon (door/garage open trigger). |
 | **v7.9.5** | **Stream cleanup fix:** Camera LED no longer stays blue after stream stop — removed `PUT /connection REMOTE` cleanup call that was creating a new session instead of closing the old one. Now just closes the TCP connection (like the Bosch app does). **Card v2.3.1 — no more black screen:** Snapshot image stays visible until HLS video actually starts playing (outdoor camera takes 80s+). Loading overlay timeout extended from 15s to 120s during stream start. Video element uses `position: absolute` with transparent background to overlay the snapshot without layout shift. |
 | **v7.9.4** | **New HA services:** `rename_camera` (rename via cloud API), `invite_friend` (camera sharing invitation), `list_friends` (list shares as persistent notification), `remove_friend` (revoke access). All with error handling + persistent notifications. Ported from Python CLI. |

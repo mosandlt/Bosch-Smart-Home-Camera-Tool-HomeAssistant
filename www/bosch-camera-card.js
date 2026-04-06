@@ -17,7 +17,15 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.3.0
+ * Version: 2.4.0
+ *
+ * Changes vs 2.3.1:
+ *   - New "Zeitpläne & Zonen" accordion section:
+ *     - Schedule rules list with AN/AUS toggle per rule (calls update_rule service)
+ *     - Delete button per rule (calls delete_rule service)
+ *     - Motion zones count display (from RCP sensor)
+ *   - New entity: rules_entity (sensor.bosch_{cam}_schedule_rules)
+ *   - Optimistic UI for rule toggle and delete
  *
  * Changes vs 2.1.0:
  *   - Removed dead _streamingImageLoad() method (snapshot-streaming mode removed in v2.0.0)
@@ -153,6 +161,8 @@ class BoschCameraCard extends HTMLElement {
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
     this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
+    this._showMotionZones   = false; // runtime toggle for motion zone overlay
+    this._lastRulesKey      = null;  // memoization key for rules list HTML
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -208,8 +218,10 @@ class BoschCameraCard extends HTMLElement {
       movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
+      scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
     };
 
+    this._showMotionZones = this._config.show_motion_zones;
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
@@ -615,6 +627,16 @@ class BoschCameraCard extends HTMLElement {
         .accordion-content { padding: 0 12px 12px; }
         .accordion-content .sw-row { padding: 7px 4px; }
 
+        /* Rule row inside accordion */
+        .rule-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 4px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .rule-row .rule-info { flex: 1; min-width: 0; }
+        .rule-row .rule-name { font-weight: 500; color: var(--primary-text-color, #e1e1e1); }
+        .rule-row .rule-time { color: #999; font-size: 11px; }
+        .rule-row .rule-days { color: #888; font-size: 10px; }
+        .rule-row .rule-toggle { cursor: pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,.15); background: transparent; color: #999; font-size: 11px; margin-left: 6px; }
+        .rule-row .rule-toggle.active { background: rgba(52,199,89,.15); color: #34c759; border-color: rgba(52,199,89,.3); }
+        .rule-row .rule-delete { cursor: pointer; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,59,48,.2); background: transparent; color: #666; font-size: 11px; margin-left: 4px; }
+        .rule-row .rule-delete:hover { background: rgba(255,59,48,.15); color: #ff3b30; }
         /* Diagnostic row inside accordion */
         .diag-row {
           display: flex; align-items: center; justify-content: space-between;
@@ -962,7 +984,41 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.3.1</div>
+          <!-- Accordion: Schedules & Zones -->
+          <div class="accordion" id="acc-schedules">
+            <div class="accordion-header" id="acc-schedules-header">
+              <span class="accordion-title">Zeitpläne & Zonen</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    Zeitpläne
+                  </span>
+                  <span class="diag-value" id="diag-rules-count">—</span>
+                </div>
+                <div id="rules-list" style="padding:0 4px"></div>
+                <div class="sw-row" id="btn-show-zones">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+                    <span>Motion-Zonen anzeigen</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+                    Motion-Zonen (RCP)
+                  </span>
+                  <span class="diag-value" id="diag-zones-count">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.4.0</div>
       </ha-card>
     `;
 
@@ -1032,7 +1088,7 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Accordion toggle handlers
-    ["acc-notif-types", "acc-advanced", "acc-diagnostics"].forEach(id => {
+    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules"].forEach(id => {
       this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
         const acc = this.shadowRoot.getElementById(id);
         if (acc) acc.classList.toggle("open");
@@ -1045,6 +1101,14 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-notif-audio")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAudio));
     this.shadowRoot.getElementById("btn-notif-trouble")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifTrouble));
     this.shadowRoot.getElementById("btn-notif-alarm")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAlarm));
+    this.shadowRoot.getElementById("btn-show-zones")?.addEventListener("click", () => {
+      this._showMotionZones = !this._showMotionZones;
+      const btn = this.shadowRoot.getElementById("btn-show-zones");
+      if (btn) btn.classList.toggle("on", this._showMotionZones);
+      // Force motion zones re-render
+      this._lastMotionCoordKey = null;
+      if (this._hass) this._updateMotionZones(this._hass, this._entities);
+    });
     this.shadowRoot.getElementById("btn-timestamp")?.addEventListener("click", () => this._toggleSwitch(this._entities.timestamp));
     this.shadowRoot.getElementById("btn-autofollow")?.addEventListener("click", () => this._toggleSwitch(this._entities.autofollow));
     this.shadowRoot.getElementById("btn-motion")?.addEventListener("click", () => this._toggleSwitch(this._entities.motion));
@@ -1134,7 +1198,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.3.1 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.4.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1884,6 +1948,9 @@ class BoschCameraCard extends HTMLElement {
     if (wifiVal?.state && wifiVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-wifi-val"); if (el) el.textContent = wifiVal.state + " %"; }
     if (ambVal?.state && ambVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-ambient-val"); if (el) el.textContent = ambVal.state + " %"; }
 
+    // Accordion: Schedules & Zones
+    this._updateSchedulesSection(hass, ents);
+
     // Hide entire accordion sections if ALL their toggle entities are missing
     const _hideAccIf = (accId, entityIds) => {
       const acc = this.shadowRoot.getElementById(accId);
@@ -1897,6 +1964,7 @@ class BoschCameraCard extends HTMLElement {
     _hideAccIf("acc-notif-types", [ents.notifMovement, ents.notifPerson, ents.notifAudio, ents.notifTrouble, ents.notifAlarm]);
     _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound]);
     _hideAccIf("acc-diagnostics", [ents.wifi, ents.firmware, ents.ambient, ents.movementToday, ents.audioToday]);
+    _hideAccIf("acc-schedules", [ents.scheduleRules, ents.motionZones]);
 
     // Swap bell icon: bell when ON (notifications active), bell-off when OFF
     const notifState = this._getEffectiveState(ents.notifications);
@@ -1987,6 +2055,113 @@ class BoschCameraCard extends HTMLElement {
     btn.disabled = false;
   }
 
+  // ── Schedules & Zones ──────────────────────────────────────────────────────
+  _updateSchedulesSection(hass, ents) {
+    const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+    // Rules count
+    const rulesState = hass.states[ents.scheduleRules];
+    const rulesCountEl = this.shadowRoot.getElementById("diag-rules-count");
+    if (rulesCountEl) {
+      rulesCountEl.textContent = (rulesState?.state != null && rulesState.state !== "unavailable") ? rulesState.state : "—";
+    }
+
+    // Rules list
+    const rulesListEl = this.shadowRoot.getElementById("rules-list");
+    if (rulesListEl && rulesState) {
+      const rules = rulesState.attributes?.rules || [];
+      const camId = hass.states[ents.status]?.attributes?.camera_id || "";
+      if (rules.length === 0) {
+        rulesListEl.innerHTML = '<div style="font-size:11px;color:#666;padding:4px 0">Keine Zeitpläne</div>';
+      } else {
+        // Build rules HTML — only re-render when data changes (compare JSON)
+        const rulesKey = JSON.stringify(rules);
+        if (this._lastRulesKey !== rulesKey) {
+          this._lastRulesKey = rulesKey;
+          rulesListEl.innerHTML = rules.map((r, i) => {
+            const days = (r.weekdays || []).map(d => WEEKDAY_NAMES[d] || d).join(", ");
+            // Sensor uses "active"/"start"/"end", API uses "isActive"/"startTime"/"endTime"
+            const isActive = r.active ?? r.isActive ?? false;
+            const startT = r.start || r.startTime || "?";
+            const endT = r.end || r.endTime || "?";
+            const activeClass = isActive ? " active" : "";
+            const activeLabel = isActive ? "AN" : "AUS";
+            return `<div class="rule-row" data-rule-idx="${i}">
+              <div class="rule-info">
+                <div class="rule-name">${this._escHtml(r.name || "Regel " + (i+1))}</div>
+                <div class="rule-time">${startT} – ${endT}</div>
+                <div class="rule-days">${days}</div>
+              </div>
+              <button class="rule-toggle${activeClass}" data-rule-id="${r.id}" data-cam-id="${camId}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>
+              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="Löschen">✕</button>
+            </div>`;
+          }).join("");
+
+          // Wire toggle buttons
+          rulesListEl.querySelectorAll(".rule-toggle").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              const newActive = btn.dataset.active !== "true";
+              this._callService("bosch_shc_camera", "update_rule", {
+                camera_id: cId, rule_id: ruleId, is_active: newActive,
+              });
+              // Optimistic UI
+              btn.dataset.active = newActive ? "true" : "false";
+              btn.textContent = newActive ? "AN" : "AUS";
+              btn.classList.toggle("active", newActive);
+            });
+          });
+
+          // Wire delete buttons
+          rulesListEl.querySelectorAll(".rule-delete").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              this._callService("bosch_shc_camera", "delete_rule", {
+                camera_id: cId, rule_id: ruleId,
+              });
+              // Remove row optimistically
+              btn.closest(".rule-row")?.remove();
+            });
+          });
+        }
+      }
+    }
+
+    // Motion zones toggle visual state
+    const zonesToggle = this.shadowRoot.getElementById("btn-show-zones");
+    if (zonesToggle) {
+      zonesToggle.classList.toggle("on", this._showMotionZones);
+      // Only show toggle when motion zones sensor exists
+      const mzExists = hass.states[ents.motionZones];
+      zonesToggle.style.display = mzExists ? "" : "none";
+    }
+
+    // Motion zones count (cloud API zones)
+    const zonesCountEl = this.shadowRoot.getElementById("diag-zones-count");
+    const zonesInfoEl = this.shadowRoot.getElementById("zones-info");
+    // Use the motion_sensitive_areas data from the camera entity attributes if available,
+    // otherwise fall back to the RCP-based motion zones sensor
+    const mzState = hass.states[ents.motionZones];
+    if (zonesCountEl) {
+      zonesCountEl.textContent = (mzState?.state != null && mzState.state !== "unavailable") ? mzState.state : "—";
+    }
+    if (zonesInfoEl && mzState?.attributes?.coordinates) {
+      const coords = mzState.attributes.coordinates;
+      const count = mzState.attributes.coordinate_count || coords.length;
+      zonesInfoEl.textContent = `${count} Koordinaten (RCP)`;
+    }
+  }
+
+  _escHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   _getEffectiveState(entityId) {
     if (entityId in this._optimistic) return this._optimistic[entityId];
@@ -2038,7 +2213,7 @@ class BoschCameraCard extends HTMLElement {
     const coords = zoneState?.attributes?.coordinates;
 
     // Only show overlay when config option is set and data is available
-    const showZones = this._config.show_motion_zones && coords && coords.length > 0;
+    const showZones = this._showMotionZones && coords && coords.length > 0;
     svg.classList.toggle("visible", showZones);
     if (!showZones) return;
 
