@@ -197,6 +197,39 @@ share_camera:
           max: 365
           mode: box
 
+delete_motion_zone:
+  name: Delete Single Motion Zone
+  description: >
+    Delete a single motion detection zone by index (0-based).
+    Fetches current zones, removes the one at the given index, and re-POSTs.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+    zone_index:
+      name: Zone Index
+      description: "0-based index of the zone to delete"
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 10
+          mode: box
+
+get_lighting_schedule:
+  name: Get Lighting Schedule
+  description: >
+    Read the full lighting schedule configuration (on/off times, motion trigger,
+    darkness threshold). Results shown as persistent notification. Outdoor cameras only.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+
 get_privacy_masks:
   name: Get Privacy Masks
   description: >

@@ -234,6 +234,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._cloud_zones_cache: dict[str, list] = {}
         # Cloud privacy masks cache — keyed by cam_id, from GET /privacy_masks
         self._cloud_privacy_masks_cache: dict[str, list] = {}
+        # Lighting options cache — keyed by cam_id, from GET /lighting_options
+        self._lighting_options_cache: dict[str, dict] = {}
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
@@ -912,6 +914,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         endpoints.append("privacy_sound_override")
                     if pan_limit:
                         endpoints.append("autofollow")
+                    has_light = cam_raw.get("featureSupport", {}).get("light", False)
+                    if has_light:
+                        endpoints.append("lighting_options")
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -958,6 +963,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._cloud_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
                         elif ep == "privacy_masks":
                             self._cloud_privacy_masks_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                        elif ep == "lighting_options":
+                            self._lighting_options_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -1196,6 +1203,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "Live connection opened! type=%s → %s", type_val, result
                         )
                         audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+                        # Extract bufferingTime for FFmpeg tuning (LOCAL=500ms, REMOTE=1000ms)
+                        buffering_ms = result.get("bufferingTime", 1000)
+                        result["_bufferingTime"] = buffering_ms
                         # LOCAL response: {"user": "...", "password": "...", "urls": ["192.168.x.x:443"]}
                         local_user = result.get("user", "")
                         local_pass = result.get("password", "")
@@ -2598,6 +2608,98 @@ def _register_services(hass: HomeAssistant) -> None:
                     _LOGGER.warning("Set privacy masks error: %s", err)
                 break
 
+    async def handle_delete_motion_zone(call: ServiceCall) -> None:
+        """Delete a single motion detection zone by index."""
+        cam_id = call.data.get("camera_id", "")
+        zone_index = call.data.get("zone_index", -1)
+        if not cam_id or zone_index < 0:
+            _LOGGER.warning("delete_motion_zone: camera_id and zone_index are required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                # Fetch current zones, remove the one at index, re-POST
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status != 200:
+                                _LOGGER.warning("delete_motion_zone: fetch failed HTTP %d", resp.status)
+                                return
+                            zones = await resp.json()
+                    if zone_index >= len(zones):
+                        _LOGGER.warning("delete_motion_zone: index %d out of range (have %d zones)", zone_index, len(zones))
+                        return
+                    removed = zones.pop(zone_index)
+                    _LOGGER.info("Removing zone %d: %s", zone_index, removed)
+                    async with asyncio.timeout(10):
+                        async with session.post(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
+                            headers=headers, json=zones,
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Zone %d deleted, %d zones remaining", zone_index, len(zones))
+                                await coord.async_request_refresh()
+                            else:
+                                _LOGGER.warning("delete_motion_zone: POST failed HTTP %d", resp.status)
+                except Exception as err:
+                    _LOGGER.warning("delete_motion_zone error: %s", err)
+                break
+
+    async def handle_get_lighting_schedule(call: ServiceCall) -> None:
+        """Read the full lighting schedule and show as persistent notification."""
+        cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            _LOGGER.warning("get_lighting_schedule: camera_id is required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                try:
+                    cached = getattr(coord, "_lighting_options_cache", {}).get(cam_id)
+                    if cached:
+                        data = cached
+                    else:
+                        session = async_get_clientsession(hass, verify_ssl=False)
+                        headers = {"Authorization": f"Bearer {coord.token}"}
+                        async with asyncio.timeout(10):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+                                headers=headers,
+                            ) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                else:
+                                    _LOGGER.warning("get_lighting_schedule: HTTP %d", resp.status)
+                                    return
+                    sched = data.get("scheduleStatus", "?")
+                    on_time = data.get("generalLightOnTime", "?")
+                    off_time = data.get("generalLightOffTime", "?")
+                    threshold = data.get("darknessThreshold", "?")
+                    motion = data.get("lightOnMotion", False)
+                    followup = data.get("lightOnMotionFollowUpTimeSeconds", 0)
+                    front = data.get("frontIlluminatorInGeneralLightOn", False)
+                    wall = data.get("wallwasherInGeneralLightOn", False)
+                    intensity = data.get("frontIlluminatorGeneralLightIntensity", 1.0)
+                    msg = (
+                        f"Modus: {sched}\n"
+                        f"Zeitplan: {on_time} → {off_time}\n"
+                        f"Dunkelheits-Schwelle: {threshold}\n"
+                        f"Licht bei Bewegung: {'Ja' if motion else 'Nein'} ({followup}s Nachlauf)\n"
+                        f"Frontlicht: {'An' if front else 'Aus'} (Intensität: {intensity})\n"
+                        f"Wallwasher: {'An' if wall else 'Aus'}"
+                    )
+                    _LOGGER.info("Lighting schedule for %s: %s", cam_id[:8], msg)
+                    await hass.services.async_call(
+                        "persistent_notification", "create",
+                        {"title": "Licht-Zeitplan", "message": msg, "notification_id": "bosch_lighting"},
+                    )
+                except Exception as err:
+                    _LOGGER.error("get_lighting_schedule error: %s", err, exc_info=True)
+                break
+
     async def handle_rename_camera(call: ServiceCall) -> None:
         """Rename a camera via the Bosch cloud API."""
         cam_id = call.data.get("camera_id", "")
@@ -2720,6 +2822,10 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+    if not hass.services.has_service(DOMAIN, "delete_motion_zone"):
+        hass.services.async_register(DOMAIN, "delete_motion_zone", handle_delete_motion_zone)
+    if not hass.services.has_service(DOMAIN, "get_lighting_schedule"):
+        hass.services.async_register(DOMAIN, "get_lighting_schedule", handle_get_lighting_schedule)
     if not hass.services.has_service(DOMAIN, "get_privacy_masks"):
         hass.services.async_register(DOMAIN, "get_privacy_masks", handle_get_privacy_masks)
     if not hass.services.has_service(DOMAIN, "set_privacy_masks"):

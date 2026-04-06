@@ -1024,9 +1024,16 @@ class BoschCameraCard extends HTMLElement {
                 <div class="diag-row">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
-                    Motion-Zonen (RCP)
+                    Motion-Zonen
                   </span>
                   <span class="diag-value" id="diag-zones-count">—</span>
+                </div>
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                    Privacy-Masken
+                  </span>
+                  <span class="diag-value" id="diag-masks-count">—</span>
                 </div>
               </div>
             </div>
@@ -2179,7 +2186,14 @@ class BoschCameraCard extends HTMLElement {
     const mzState = hass.states[ents.motionZones];
     const cloudZones = mzState?.attributes?.cloud_zones || [];
     if (zonesCountEl) {
-      zonesCountEl.textContent = cloudZones.length > 0 ? `${cloudZones.length} (Cloud)` : (mzState?.state != null && mzState.state !== "unavailable") ? `${mzState.state} (RCP)` : "—";
+      zonesCountEl.textContent = cloudZones.length > 0 ? String(cloudZones.length) : (mzState?.state != null && mzState.state !== "unavailable") ? `${mzState.state} (RCP)` : "—";
+    }
+
+    // Privacy masks count
+    const masksCountEl = this.shadowRoot.getElementById("diag-masks-count");
+    const privacyMasks = mzState?.attributes?.cloud_privacy_masks || [];
+    if (masksCountEl) {
+      masksCountEl.textContent = privacyMasks.length > 0 ? String(privacyMasks.length) : "0";
     }
   }
 
@@ -2206,6 +2220,8 @@ class BoschCameraCard extends HTMLElement {
         label: "Freunde", svc: "list_friends", data: {} },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
         label: "Regel erstellen", svc: "_prompt_create_rule", data: null },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>',
+        label: "Licht-Zeitplan", svc: "get_lighting_schedule", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
         label: "Verbindung", svc: "open_live_connection", data: () => ({camera_id: camId()}) },
     ];
