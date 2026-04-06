@@ -327,6 +327,10 @@ All services are available in **Developer Tools → Services** (or via automatio
 | `bosch_shc_camera.invite_friend` | Send camera sharing invitation by email | `email` |
 | `bosch_shc_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
 | `bosch_shc_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
+| `bosch_shc_camera.get_lighting_schedule` | Read full lighting schedule (persistent notification) | `camera_id` |
+| `bosch_shc_camera.delete_motion_zone` | Delete a single motion zone by index | `camera_id`, `zone_index` |
+| `bosch_shc_camera.get_privacy_masks` | Read privacy mask zones (persistent notification) | `camera_id` |
+| `bosch_shc_camera.set_privacy_masks` | Set/clear privacy mask zones (0.0–1.0 coordinates) | `camera_id`, `masks` |
 | `bosch_shc_camera.create_rule` | Create a cloud-side schedule rule | `camera_id`, `name`, `start_time`, `end_time`, `weekdays`, `is_active` |
 | `bosch_shc_camera.update_rule` | Update a schedule rule (change name, times, activate/deactivate) | `camera_id`, `rule_id`, `name`?, `start_time`?, `end_time`?, `weekdays`?, `is_active`? |
 | `bosch_shc_camera.delete_rule` | Delete a schedule rule | `camera_id`, `rule_id` |
@@ -403,7 +407,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v2.5.0**
+> **Card version: v2.5.0** — includes Services accordion
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -585,6 +589,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v7.12.0** | **Lighting schedule, per-zone delete, deep network integration.** New services: `get_lighting_schedule` (read full light schedule — on/off times, motion trigger, darkness threshold; outdoor cameras), `delete_motion_zone` (remove a single zone by index without replacing all), `get_privacy_masks` + `set_privacy_masks` (read/write privacy mask zones). Privacy masks and lighting options cached in slow-tier. `bufferingTime` from PUT /connection stored for future FFmpeg tuning. `/ping` as primary health check (8 bytes), `JpegSize=1206` on all snap.jpg URLs. **Card v2.5.0:** New "Services" accordion with 7 quick-action buttons (Snapshot, Zonen lesen, Privacy-Masken, Freunde, Regel erstellen, Licht-Zeitplan, Verbindung). Privacy mask count + motion zone count in Zeitpläne accordion. 16 HA services total. |
 | **v7.11.0** | **3 Quick Wins from network analysis.** (1) **`/ping` as primary health check:** Swapped from `/commissioned` (200 bytes) to `/ping` (8 bytes) for faster status polling — `/commissioned` now fallback only. (2) **`JpegSize=1206` on all snap.jpg URLs:** App uses this parameter — added to all 5 snap.jpg fetch locations (cloud proxy + LOCAL). (3) **Privacy masks services:** New `get_privacy_masks` and `set_privacy_masks` services for reading/writing privacy mask zones (same coordinate format as motion zones). Cloud privacy masks also cached in slow-tier. 14 HA services total. |
 | **v7.10.1** | **Motion zone overlay fix:** Cloud API zones (`GET /motion_sensitive_areas`) now fetched in slow-tier and used for the SVG overlay instead of raw RCP data. RCP coordinates (0x0c00/0x0c0a) were incorrectly parsed — 147 garbage entries with negative dimensions for 5 zones. Cloud zones use normalized `{x, y, w, h}` (0.0–1.0) and render correctly. New `cloud_zones` + `cloud_zone_count` sensor attributes. |
 | **v7.10.0** | **Phase 3 Cloud Features — Rules Editor, Motion Zones, Camera Sharing.** New services: `update_rule` (activate/deactivate, change times — fetches current rule from API if not in cache), `set_motion_zones` (POST normalized x/y/w/h coordinates to cloud API), `get_motion_zones` (read zones, persistent notification), `share_camera` (time-limited camera sharing with friends). **Card v2.4.0:** New "Zeitpläne & Zonen" accordion section — shows schedule rules list with AN/AUS toggle per rule + delete button (calls `update_rule`/`delete_rule` services), runtime-toggleable motion zone SVG overlay on camera image (no YAML config needed), motion zone count from RCP sensor. HTTP 443 handling: cloud API returns 443 when privacy mode is active — clear error message in logs and notification. 12 HA services total. |
