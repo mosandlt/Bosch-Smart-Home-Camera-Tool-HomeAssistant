@@ -17,7 +17,14 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.4.0
+ * Version: 2.5.0
+ *
+ * Changes vs 2.4.0:
+ *   - New "Services" accordion: grid of quick-action buttons for
+ *     Snapshot, Zonen lesen, Privacy-Masken, Freunde, Regel erstellen, Verbindung.
+ *     Regel erstellen uses prompt() for name/start/end.
+ *   - Motion zone overlay now uses cloud API zones (normalized x/y/w/h 0-1)
+ *     instead of broken RCP coordinates.
  *
  * Changes vs 2.3.1:
  *   - New "Zeitpläne & Zonen" accordion section:
@@ -627,6 +634,13 @@ class BoschCameraCard extends HTMLElement {
         .accordion-content { padding: 0 12px 12px; }
         .accordion-content .sw-row { padding: 7px 4px; }
 
+        /* Service grid inside accordion */
+        .svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 0; }
+        .svc-btn { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); color: var(--primary-text-color, #e1e1e1); font-size: 11px; cursor: pointer; transition: background .15s; }
+        .svc-btn:hover { background: rgba(255,255,255,.08); }
+        .svc-btn:active { background: rgba(255,255,255,.12); }
+        .svc-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .svc-btn.running { opacity: 0.5; pointer-events: none; }
         /* Rule row inside accordion */
         .rule-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 4px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
         .rule-row .rule-info { flex: 1; min-width: 0; }
@@ -1018,7 +1032,21 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.4.0</div>
+          <!-- Accordion: Services -->
+          <div class="accordion" id="acc-services">
+            <div class="accordion-header" id="acc-services-header">
+              <span class="accordion-title">Services</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="svc-grid" id="svc-grid"></div>
+                <div id="svc-result" style="font-size:11px;color:#999;padding:4px 0;display:none"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.5.0</div>
       </ha-card>
     `;
 
@@ -1088,7 +1116,7 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Accordion toggle handlers
-    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules"].forEach(id => {
+    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules", "acc-services"].forEach(id => {
       this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
         const acc = this.shadowRoot.getElementById(id);
         if (acc) acc.classList.toggle("open");
@@ -1101,6 +1129,9 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-notif-audio")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAudio));
     this.shadowRoot.getElementById("btn-notif-trouble")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifTrouble));
     this.shadowRoot.getElementById("btn-notif-alarm")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAlarm));
+    // Service buttons grid
+    this._renderServiceButtons();
+
     this.shadowRoot.getElementById("btn-show-zones")?.addEventListener("click", () => {
       this._showMotionZones = !this._showMotionZones;
       const btn = this.shadowRoot.getElementById("btn-show-zones");
@@ -1198,7 +1229,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.4.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.5.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -2156,6 +2187,68 @@ class BoschCameraCard extends HTMLElement {
     const d = document.createElement("div");
     d.textContent = str;
     return d.innerHTML;
+  }
+
+  _renderServiceButtons() {
+    const grid = this.shadowRoot.getElementById("svc-grid");
+    if (!grid) return;
+
+    const camId = () => this._hass?.states[this._entities.status]?.attributes?.camera_id || "";
+
+    const services = [
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+        label: "Snapshot", svc: "trigger_snapshot", data: {} },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
+        label: "Zonen lesen", svc: "get_motion_zones", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+        label: "Privacy-Masken", svc: "get_privacy_masks", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
+        label: "Freunde", svc: "list_friends", data: {} },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+        label: "Regel erstellen", svc: "_prompt_create_rule", data: null },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        label: "Verbindung", svc: "open_live_connection", data: () => ({camera_id: camId()}) },
+    ];
+
+    grid.innerHTML = services.map((s, i) => `<button class="svc-btn" data-svc-idx="${i}">${s.icon}<span>${s.label}</span></button>`).join("");
+
+    const resultEl = this.shadowRoot.getElementById("svc-result");
+
+    grid.querySelectorAll(".svc-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const idx = parseInt(btn.dataset.svcIdx);
+        const svc = services[idx];
+        if (!svc || !this._hass) return;
+
+        // Special: prompt for create_rule
+        if (svc.svc === "_prompt_create_rule") {
+          const name = prompt("Regel-Name:", "Neue Regel");
+          if (!name) return;
+          const start = prompt("Startzeit (HH:MM):", "08:00");
+          if (!start) return;
+          const end = prompt("Endzeit (HH:MM):", "20:00");
+          if (!end) return;
+          btn.classList.add("running");
+          this._callService("bosch_shc_camera", "create_rule", {
+            camera_id: camId(), name: name,
+            start_time: start + ":00", end_time: end + ":00",
+            weekdays: [0,1,2,3,4,5,6], is_active: true,
+          });
+          if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `Regel "${name}" wird erstellt...`; }
+          setTimeout(() => { btn.classList.remove("running"); }, 3000);
+          return;
+        }
+
+        btn.classList.add("running");
+        const data = typeof svc.data === "function" ? svc.data() : svc.data;
+        this._callService("bosch_shc_camera", svc.svc, data);
+        if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `${svc.label} wird ausgeführt...`; }
+        setTimeout(() => {
+          btn.classList.remove("running");
+          if (resultEl) { resultEl.textContent = `${svc.label} abgeschlossen.`; setTimeout(() => { resultEl.style.display = "none"; }, 5000); }
+        }, 3000);
+      });
+    });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

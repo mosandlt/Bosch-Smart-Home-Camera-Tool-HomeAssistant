@@ -197,6 +197,39 @@ share_camera:
           max: 365
           mode: box
 
+get_privacy_masks:
+  name: Get Privacy Masks
+  description: >
+    Read current privacy mask zones from the Bosch cloud API.
+    Results are shown as a persistent notification.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+
+set_privacy_masks:
+  name: Set Privacy Masks
+  description: >
+    Set privacy mask zones for a camera. Each mask is a rectangle defined by
+    normalized coordinates (0.0–1.0): x, y (top-left corner), w (width), h (height).
+    Send an empty list to clear all masks.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+    masks:
+      name: Masks
+      description: >
+        List of mask objects, each with x, y, w, h (all 0.0–1.0).
+        Example: [{"x": 0.0, "y": 0.0, "w": 0.3, "h": 0.3}]
+      required: true
+      selector:
+        object:
+
 rename_camera:
   name: Rename Camera
   description: >

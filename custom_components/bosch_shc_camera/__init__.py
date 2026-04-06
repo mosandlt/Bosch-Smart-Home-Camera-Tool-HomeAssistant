@@ -232,6 +232,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._rules_cache: dict[str, list] = {}
         # Cloud motion zones cache — keyed by cam_id, from GET /motion_sensitive_areas
         self._cloud_zones_cache: dict[str, list] = {}
+        # Cloud privacy masks cache — keyed by cam_id, from GET /privacy_masks
+        self._cloud_privacy_masks_cache: dict[str, list] = {}
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
@@ -606,39 +608,42 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Local TCP ping OK for %s — ONLINE (cloud check skipped)", cam_id[:8])
                     return (cam_id, "ONLINE")
 
-                # Cloud path: /commissioned (primary) + /ping (fallback)
+                # Cloud path: /ping (primary, 8 bytes) + /commissioned (fallback)
                 status = "UNKNOWN"
-                comm_ok = False
+                ping_ok = False
                 try:
-                    async with asyncio.timeout(8):
+                    async with asyncio.timeout(5):
                         async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
                             headers=headers,
-                        ) as r:
-                            if r.status == 200:
-                                comm = await r.json()
-                                self._commissioned_cache[cam_id] = comm
-                                comm_ok = True
-                                if comm.get("connected") and comm.get("commissioned"):
-                                    status = "ONLINE"
-                                elif comm.get("configured"):
-                                    status = "OFFLINE"
-                            elif r.status == 444:
+                        ) as pr:
+                            if pr.status == 200:
+                                ping_result = (await pr.text()).strip().strip('"')
+                                status = ping_result  # "ONLINE" or "OFFLINE"
+                                ping_ok = True
+                            elif pr.status == 444:
                                 status = "OFFLINE"
-                                comm_ok = True
+                                ping_ok = True
                 except Exception as err:
-                    _LOGGER.debug("Commissioned check error for %s: %s", cam_id, err)
-                if not comm_ok:
+                    _LOGGER.debug("Ping check error for %s: %s", cam_id, err)
+                if not ping_ok:
                     try:
-                        async with asyncio.timeout(5):
+                        async with asyncio.timeout(8):
                             async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
                                 headers=headers,
-                            ) as pr:
-                                if pr.status == 200:
-                                    status = (await pr.text()).strip().strip('"')
+                            ) as r:
+                                if r.status == 200:
+                                    comm = await r.json()
+                                    self._commissioned_cache[cam_id] = comm
+                                    if comm.get("connected") and comm.get("commissioned"):
+                                        status = "ONLINE"
+                                    elif comm.get("configured"):
+                                        status = "OFFLINE"
+                                elif r.status == 444:
+                                    status = "OFFLINE"
                     except Exception as err:
-                        _LOGGER.debug("Ping fallback error for %s: %s", cam_id, err)
+                        _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
 
                 self._per_cam_status_at[cam_id] = now
                 # Track offline duration for extended interval
@@ -901,7 +906,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         "wifiinfo", "ambient_light_sensor_level", "motion",
                         "audioAlarm", "firmware", "recording_options",
                         "unread_events_count", "commissioned", "timestamp",
-                        "notifications", "rules", "motion_sensitive_areas",
+                        "notifications", "rules", "motion_sensitive_areas", "privacy_masks",
                     ]
                     if hw in ("INDOOR", "CAMERA_360"):
                         endpoints.append("privacy_sound_override")
@@ -951,6 +956,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._rules_cache[cam_id_key] = ep_data
                         elif ep == "motion_sensitive_areas":
                             self._cloud_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                        elif ep == "privacy_masks":
+                            self._cloud_privacy_masks_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -1223,7 +1230,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             urls = result.get("urls", [])
                             if urls:
                                 proxy_host_path = urls[0]
-                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg"
+                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg?JpegSize=1206"
                                 rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
                                 result["rtspsUrl"] = (
                                     f"rtsps://{rtsps_host_path}/rtsp_tunnel"
@@ -1234,7 +1241,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 h  = result["hash"]
                                 ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
                                 pp = result.get("proxyPort", 42090)
-                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg"
+                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
                                 result["rtspsUrl"] = (
                                     f"rtsps://{ph}:443/{h}/rtsp_tunnel"
                                     f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
@@ -1445,7 +1452,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         cam_id, _rcp_err,
                     )
 
-            proxy_url = f"https://{url_entry}/snap.jpg"
+            proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
             async with asyncio.timeout(10):
                 async with session.get(proxy_url) as snap_resp:
                     ct = snap_resp.headers.get("Content-Type", "")
@@ -1459,7 +1466,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         url_entry2 = await _get_proxy_url_entry()
                         if not url_entry2:
                             return None
-                        proxy_url2 = f"https://{url_entry2}/snap.jpg"
+                        proxy_url2 = f"https://{url_entry2}/snap.jpg?JpegSize=1206"
                         async with asyncio.timeout(10):
                             async with session.get(proxy_url2) as snap_resp2:
                                 ct2 = snap_resp2.headers.get("Content-Type", "")
@@ -1602,7 +1609,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         camera_host = urls[0]  # e.g. "192.168.x.x:443"
-        snap_url    = f"https://{camera_host}/snap.jpg"
+        snap_url    = f"https://{camera_host}/snap.jpg?JpegSize=1206"
 
         def _fetch_digest() -> bytes | None:
             import requests as req
@@ -2510,6 +2517,87 @@ def _register_services(hass: HomeAssistant) -> None:
                     _LOGGER.warning("Share camera error: %s", err)
                 break
 
+    async def handle_get_privacy_masks(call: ServiceCall) -> None:
+        """Read current privacy masks and show as persistent notification."""
+        cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            _LOGGER.warning("get_privacy_masks: camera_id is required")
+            return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status == 200:
+                                masks = await resp.json()
+                                if not masks:
+                                    msg = "Keine Privacy-Masken konfiguriert."
+                                else:
+                                    lines = [f"{len(masks)} Privacy-Maske(n):"]
+                                    for i, m in enumerate(masks):
+                                        lines.append(f"• Maske {i+1}: x={m.get('x',0):.3f} y={m.get('y',0):.3f} w={m.get('w',0):.3f} h={m.get('h',0):.3f}")
+                                    msg = "\n".join(lines)
+                                _LOGGER.info("Privacy masks for %s: %s", cam_id[:8], msg)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Privacy-Masken", "message": msg, "notification_id": "bosch_privacy_masks"},
+                                )
+                            elif resp.status == 443:
+                                msg = "Privacy-Masken nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
+                                _LOGGER.warning("Get privacy masks: %s", msg)
+                                await hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "Privacy-Masken", "message": msg, "notification_id": "bosch_privacy_masks"},
+                                )
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Get privacy masks failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Get privacy masks error: %s", err)
+                break
+
+    async def handle_set_privacy_masks(call: ServiceCall) -> None:
+        """Set privacy mask zones for a camera (normalized coordinates 0.0–1.0)."""
+        cam_id = call.data.get("camera_id", "")
+        masks = call.data.get("masks", [])
+        if not cam_id:
+            _LOGGER.warning("set_privacy_masks: camera_id is required")
+            return
+        if not isinstance(masks, list):
+            _LOGGER.warning("set_privacy_masks: masks must be a list of {x, y, w, h}")
+            return
+        for i, m in enumerate(masks):
+            for key in ("x", "y", "w", "h"):
+                if key not in m:
+                    _LOGGER.warning("set_privacy_masks: mask %d missing '%s'", i, key)
+                    return
+        for edata in hass.data.get(DOMAIN, {}).values():
+            if coord := edata.get("coordinator"):
+                session = async_get_clientsession(hass, verify_ssl=False)
+                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.post(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
+                            headers=headers, json=masks,
+                        ) as resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info("Privacy masks set for %s (%d masks)", cam_id[:8], len(masks))
+                                await coord.async_request_refresh()
+                            elif resp.status == 443:
+                                _LOGGER.warning("Set privacy masks: not available (HTTP 443) — Privacy mode may be active")
+                            else:
+                                body = await resp.text()
+                                _LOGGER.warning("Set privacy masks failed: HTTP %d — %s", resp.status, body[:200])
+                except Exception as err:
+                    _LOGGER.warning("Set privacy masks error: %s", err)
+                break
+
     async def handle_rename_camera(call: ServiceCall) -> None:
         """Rename a camera via the Bosch cloud API."""
         cam_id = call.data.get("camera_id", "")
@@ -2632,6 +2720,10 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+    if not hass.services.has_service(DOMAIN, "get_privacy_masks"):
+        hass.services.async_register(DOMAIN, "get_privacy_masks", handle_get_privacy_masks)
+    if not hass.services.has_service(DOMAIN, "set_privacy_masks"):
+        hass.services.async_register(DOMAIN, "set_privacy_masks", handle_set_privacy_masks)
     if not hass.services.has_service(DOMAIN, "update_rule"):
         hass.services.async_register(DOMAIN, "update_rule", handle_update_rule)
     if not hass.services.has_service(DOMAIN, "set_motion_zones"):
