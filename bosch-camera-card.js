@@ -980,6 +980,13 @@ class BoschCameraCard extends HTMLElement {
                   </span>
                   <span class="diag-value" id="diag-audio-today-val">—</span>
                 </div>
+                <div class="sw-row" id="btn-motion-zones" style="margin-top:4px">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="10" height="10" rx="1" stroke-dasharray="3 2"/></svg>
+                    <span>Motion Zones</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
               </div>
             </div>
           </div>
@@ -1087,6 +1094,12 @@ class BoschCameraCard extends HTMLElement {
         if (lbl) lbl.textContent = val + "%";
       });
     }
+
+    // Motion zones overlay toggle
+    this.shadowRoot.getElementById("btn-motion-zones")?.addEventListener("click", () => {
+      this._config.show_motion_zones = !this._config.show_motion_zones;
+      this._update();
+    });
 
     // Load the first image immediately
     this._imgTimestamp = Date.now();
@@ -1749,6 +1762,15 @@ class BoschCameraCard extends HTMLElement {
     if (wifiVal?.state && wifiVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-wifi-val"); if (el) el.textContent = wifiVal.state + " %"; }
     if (ambVal?.state && ambVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-ambient-val"); if (el) el.textContent = ambVal.state + " %"; }
 
+    // Motion zones toggle — visual state from config flag
+    const mzBtn = this.shadowRoot.getElementById("btn-motion-zones");
+    if (mzBtn) {
+      const mzOn = !!this._config.show_motion_zones;
+      mzBtn.classList.toggle("on", mzOn);
+      const mzToggle = mzBtn.querySelector(".sw-toggle");
+      if (mzToggle) mzToggle.classList.toggle("on", mzOn);
+    }
+
     // Hide entire accordion sections if ALL their toggle entities are missing
     const _hideAccIf = (accId, entityIds) => {
       const acc = this.shadowRoot.getElementById(accId);
@@ -1894,31 +1916,32 @@ class BoschCameraCard extends HTMLElement {
     const svg = this.shadowRoot.getElementById("motion-zones-overlay");
     if (!svg) return;
 
-    // Read coordinates from the motion zones sensor attributes
+    // Read cloud zones from the motion zones sensor attributes.
+    // cloud_zones use normalized 0.0–1.0 coordinates {x, y, w, h} from the Cloud API.
+    // The old "coordinates" field contains raw RCP data (not usable for overlay).
     const zoneState = hass.states[ents.motionZones];
-    const coords = zoneState?.attributes?.coordinates;
+    const zones = zoneState?.attributes?.cloud_zones;
 
     // Only show overlay when config option is set and data is available
-    const showZones = this._config.show_motion_zones && coords && coords.length > 0;
+    const showZones = this._config.show_motion_zones && zones && zones.length > 0;
     svg.classList.toggle("visible", showZones);
     if (!showZones) return;
 
-    // Only re-render if coordinates changed (avoid DOM thrashing)
-    const coordKey = JSON.stringify(coords);
+    // Only re-render if zones changed (avoid DOM thrashing)
+    const coordKey = JSON.stringify(zones);
     if (this._lastMotionCoordKey === coordKey) return;
     this._lastMotionCoordKey = coordKey;
 
-    // Coordinates are zone rectangles: {x1, y1, x2, y2} in percent (0-100).
-    // ViewBox is 0-100, so coords map directly.
+    // Cloud zones: {x, y, w, h} normalized 0.0–1.0. ViewBox is 0-100, so multiply by 100.
     svg.innerHTML = "";
-    for (let z = 0; z < coords.length; z++) {
-      const c = coords[z];
-      if (c.x1 == null || c.y1 == null || c.x2 == null || c.y2 == null) continue;
+    for (let z = 0; z < zones.length; z++) {
+      const c = zones[z];
+      if (c.x == null || c.y == null || c.w == null || c.h == null) continue;
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", c.x1);
-      rect.setAttribute("y", c.y1);
-      rect.setAttribute("width", c.x2 - c.x1);
-      rect.setAttribute("height", c.y2 - c.y1);
+      rect.setAttribute("x", c.x * 100);
+      rect.setAttribute("y", c.y * 100);
+      rect.setAttribute("width", c.w * 100);
+      rect.setAttribute("height", c.h * 100);
       svg.appendChild(rect);
     }
   }
