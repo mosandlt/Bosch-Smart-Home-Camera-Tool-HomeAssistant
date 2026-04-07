@@ -94,6 +94,8 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
         self._model     = info.get("hardwareVersion", "CAMERA")
+        from .models import get_display_name
+        self._model_name = get_display_name(self._model)
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
@@ -107,7 +109,7 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model,
+            "model":        self._model_name,
             "sw_version":   self._fw,
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }
@@ -839,6 +841,10 @@ class BoschMotionZonesSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int | None:
+        # Prefer cloud zones (accurate) over RCP zones (often garbage on indoor cameras)
+        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id)
+        if cloud_zones is not None:
+            return len(cloud_zones)
         zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id)
         if zones is None:
             return None
@@ -852,7 +858,10 @@ class BoschMotionZonesSensor(_BoschSensorBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
-            and self.coordinator._rcp_motion_zones_cache.get(self._cam_id) is not None
+            and (
+                self.coordinator._cloud_zones_cache.get(self._cam_id) is not None
+                or self.coordinator._rcp_motion_zones_cache.get(self._cam_id) is not None
+            )
         )
 
     @property
@@ -861,7 +870,7 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         coords = self.coordinator._rcp_motion_coords_cache.get(self._cam_id, [])
         cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
         privacy_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
-        return {
+        attrs = {
             "zones": zones,
             "coordinates": coords,
             "coordinate_count": len(coords),
@@ -870,6 +879,11 @@ class BoschMotionZonesSensor(_BoschSensorBase):
             "cloud_privacy_masks": privacy_masks,
             "cloud_privacy_mask_count": len(privacy_masks),
         }
+        if len(zones) == 0 and len(cloud_zones) == 0:
+            attrs["note"] = (
+                "No motion zones configured — use the Bosch app to set up zones"
+            )
+        return attrs
 
 
 class BoschTlsCertSensor(_BoschSensorBase):

@@ -145,3 +145,17 @@ DEFAULT_MODEL = CameraModelConfig(
 def get_model_config(hw_version: str) -> CameraModelConfig:
     """Return model config for a hardwareVersion string."""
     return MODELS.get(hw_version, DEFAULT_MODEL)
+
+
+def get_display_name(hw_version: str) -> str:
+    """Return human-readable model name for a hardwareVersion string."""
+    cfg = MODELS.get(hw_version)
+    if cfg:
+        return cfg.display_name
+    # Dynamic fallback for unknown models
+    hw_lower = hw_version.lower()
+    if "indoor" in hw_lower or "360" in hw_lower:
+        return f"Innenkamera ({hw_version})"
+    if "outdoor" in hw_lower or "eyes" in hw_lower:
+        return f"Außenkamera ({hw_version})"
+    return hw_version  # raw value as last resort

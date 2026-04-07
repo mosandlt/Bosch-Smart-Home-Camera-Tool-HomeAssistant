@@ -216,6 +216,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._commissioned_cache: dict[str, dict] = {}
         # Feature flags — populated once from GET /v11/feature_flags
         self._feature_flags: dict[str, bool] = {}
+        # Protocol version check — run once at startup
+        self._protocol_checked: bool = False
+        self._integration_version = "8.0.3"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -578,6 +581,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 _LOGGER.debug("Feature flags: %s", self._feature_flags)
                 except Exception:
                     pass
+
+            # ── Protocol version check (once at startup) ──────────────────
+            if not self._protocol_checked:
+                self._protocol_checked = True
+                try:
+                    _version = self._integration_version
+                    async with asyncio.timeout(5):
+                        async with session.get(
+                            f"{CLOUD_API}/protocol_support?protocol=11&client=haV{_version}",
+                            headers=headers,
+                        ) as proto_resp:
+                            if proto_resp.status == 200:
+                                proto_data = await proto_resp.json()
+                                if proto_data.get("state") != "SUPPORTED":
+                                    _LOGGER.warning(
+                                        "Bosch API protocol version 11 may no longer be supported "
+                                        "(state=%s) — consider updating the integration",
+                                        proto_data.get("state"),
+                                    )
+                                else:
+                                    _LOGGER.debug("Protocol v11 supported: %s", proto_data)
+                            else:
+                                _LOGGER.warning(
+                                    "Bosch API protocol version check returned HTTP %s "
+                                    "— consider updating the integration",
+                                    proto_resp.status,
+                                )
+                except Exception as exc:
+                    _LOGGER.debug("Protocol version check failed: %s", exc)
 
             data: dict = {}
 

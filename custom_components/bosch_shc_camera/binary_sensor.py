@@ -76,6 +76,8 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
         self._model     = info.get("hardwareVersion", "CAMERA")
+        from .models import get_display_name
+        self._model_name = get_display_name(self._model)
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
@@ -89,7 +91,7 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model,
+            "model":        self._model_name,
             "sw_version":   self._fw,
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }

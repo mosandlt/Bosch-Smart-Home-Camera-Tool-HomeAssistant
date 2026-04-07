@@ -100,8 +100,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._attr_unique_id = f"bosch_shc_cam_{cam_id.lower()}"
         self._model = info.get("hardwareVersion", "CAMERA")
         self._hw_version = info.get("hardwareVersion", "")
-        from .models import get_model_config
-        self._model_name = get_model_config(self._hw_version).display_name
+        from .models import get_display_name
+        self._model_name = get_display_name(self._hw_version)
         self._fw    = info.get("firmwareVersion", "")
         self._mac   = info.get("macAddress", "")
 

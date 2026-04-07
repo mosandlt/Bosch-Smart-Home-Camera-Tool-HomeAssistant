@@ -17,7 +17,27 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.6.0
+ * Version: 2.7.0
+ *
+ * Changes vs 2.6.0:
+ *   - Separate light controls: Front Light, Wallwasher toggle + Intensity slider
+ *     appear below the main Light toggle when entities exist (Outdoor camera).
+ *   - Siren button in Services accordion — triggers acoustic alarm on the camera.
+ *
+ * Changes vs 2.4.0:
+ *   - New "Services" accordion: grid of quick-action buttons for
+ *     Snapshot, Zonen lesen, Privacy-Masken, Freunde, Regel erstellen, Verbindung.
+ *     Regel erstellen uses prompt() for name/start/end.
+ *   - Motion zone overlay now uses cloud API zones (normalized x/y/w/h 0-1)
+ *     instead of broken RCP coordinates.
+ *
+ * Changes vs 2.3.1:
+ *   - New "Zeitpläne & Zonen" accordion section:
+ *     - Schedule rules list with AN/AUS toggle per rule (calls update_rule service)
+ *     - Delete button per rule (calls delete_rule service)
+ *     - Motion zones count display (from RCP sensor)
+ *   - New entity: rules_entity (sensor.bosch_{cam}_schedule_rules)
+ *   - Optimistic UI for rule toggle and delete
  *
  * Changes vs 2.1.0:
  *   - Removed dead _streamingImageLoad() method (snapshot-streaming mode removed in v2.0.0)
@@ -153,6 +173,8 @@ class BoschCameraCard extends HTMLElement {
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
     this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
+    this._showMotionZones   = false; // runtime toggle for motion zone overlay
+    this._lastRulesKey      = null;  // memoization key for rules list HTML
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -182,9 +204,6 @@ class BoschCameraCard extends HTMLElement {
       switch:       config.switch_entity        || `switch.${base}_live_stream`,
       audio:        config.audio_entity         || `switch.${base}_audio`,
       light:        config.light_entity         || `switch.${base}_camera_light`,
-      frontLight:   config.front_light_entity   || `switch.${base}_front_light`,
-      wallwasher:   config.wallwasher_entity    || `switch.${base}_wallwasher`,
-      frontIntensity: config.front_intensity_entity || `number.${base}_front_light_intensity`,
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       notifications: config.notifications_entity || `switch.${base}_notifications`,
       intercom:     config.intercom_entity      || `switch.${base}_intercom`,
@@ -211,8 +230,14 @@ class BoschCameraCard extends HTMLElement {
       movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
+      scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
+      frontLight:    config.front_light_entity   || `switch.${base}_front_light`,
+      wallwasher:    config.wallwasher_entity    || `switch.${base}_wallwasher`,
+      frontLightIntensity: config.front_light_intensity_entity || `number.${base}_front_light_intensity`,
+      siren:         config.siren_entity         || `button.${base}_siren`,
     };
 
+    this._showMotionZones = this._config.show_motion_zones;
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
@@ -384,10 +409,13 @@ class BoschCameraCard extends HTMLElement {
         }
         .cam-img.hidden { opacity: 0; }
 
-        /* Live video element */
+        /* Live video element — absolute so it overlays the snapshot image
+           without layout shift. Image stays visible underneath until video
+           fires "playing" event, avoiding the black gap. */
         .cam-video {
+          position: absolute; inset: 0;
           width: 100%; height: 100%; display: block; object-fit: cover;
-          min-height: 160px; background: #000;
+          min-height: 160px; background: transparent;
         }
 
         /* Fullscreen — native API (desktop/Android) */
@@ -615,6 +643,23 @@ class BoschCameraCard extends HTMLElement {
         .accordion-content { padding: 0 12px 12px; }
         .accordion-content .sw-row { padding: 7px 4px; }
 
+        /* Service grid inside accordion */
+        .svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 0; }
+        .svc-btn { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); color: var(--primary-text-color, #e1e1e1); font-size: 11px; cursor: pointer; transition: background .15s; }
+        .svc-btn:hover { background: rgba(255,255,255,.08); }
+        .svc-btn:active { background: rgba(255,255,255,.12); }
+        .svc-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .svc-btn.running { opacity: 0.5; pointer-events: none; }
+        /* Rule row inside accordion */
+        .rule-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 4px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .rule-row .rule-info { flex: 1; min-width: 0; }
+        .rule-row .rule-name { font-weight: 500; color: var(--primary-text-color, #e1e1e1); }
+        .rule-row .rule-time { color: #999; font-size: 11px; }
+        .rule-row .rule-days { color: #888; font-size: 10px; }
+        .rule-row .rule-toggle { cursor: pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,.15); background: transparent; color: #999; font-size: 11px; margin-left: 6px; }
+        .rule-row .rule-toggle.active { background: rgba(52,199,89,.15); color: #34c759; border-color: rgba(52,199,89,.3); }
+        .rule-row .rule-delete { cursor: pointer; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,59,48,.2); background: transparent; color: #666; font-size: 11px; margin-left: 4px; }
+        .rule-row .rule-delete:hover { background: rgba(255,59,48,.15); color: #ff3b30; }
         /* Diagnostic row inside accordion */
         .diag-row {
           display: flex; align-items: center; justify-content: space-between;
@@ -731,27 +776,32 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
-            <div class="sw-row" id="btn-front-light" style="padding-left:28px">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span>Frontlicht</span>
+            <!-- Light sub-controls (front light, wallwasher, intensity) -->
+            <div class="light-sub-controls" id="light-sub-controls" style="display:none;padding:0 0 0 28px;border-left:2px solid rgba(255,204,0,.3);margin:0 0 0 16px">
+              <div class="sw-row" id="btn-front-light" style="padding:4px 4px">
+                <div class="sw-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/>
+                  </svg>
+                  <span style="font-size:13px">Frontlicht</span>
+                </div>
+                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
               </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
-            <div class="sw-row" id="btn-wallwasher" style="padding-left:28px">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                <span>Wallwasher</span>
+              <div class="sw-row" id="btn-wallwasher" style="padding:4px 4px">
+                <div class="sw-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                    <path d="M9 18h6M10 22h4M12 2v1M4.22 4.22l.7.7M1 12h1M20.78 4.22l-.7.7M23 12h-1"/>
+                    <path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/>
+                  </svg>
+                  <span style="font-size:13px">Wallwasher</span>
+                </div>
+                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
               </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
-            <div class="sw-row" id="row-front-intensity" style="padding-left:28px;padding-right:12px">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
-                <span>Helligkeit</span>
+              <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:4px 4px;font-size:13px">
+                <span style="white-space:nowrap">Helligkeit</span>
+                <input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px">
+                <span id="intensity-value" style="min-width:32px;text-align:right;color:#999">—</span>
               </div>
-              <input type="range" id="slider-front-intensity" min="0" max="100" step="5" style="flex:1;margin-left:8px;accent-color:#4fc3f7">
-              <span id="val-front-intensity" style="min-width:36px;text-align:right;font-size:13px;color:#aaa">—</span>
             </div>
             <div class="sw-row privacy-row" id="btn-privacy">
               <div class="sw-left">
@@ -980,18 +1030,66 @@ class BoschCameraCard extends HTMLElement {
                   </span>
                   <span class="diag-value" id="diag-audio-today-val">—</span>
                 </div>
-                <div class="sw-row" id="btn-motion-zones" style="margin-top:4px">
+              </div>
+            </div>
+          </div>
+
+          <!-- Accordion: Schedules & Zones -->
+          <div class="accordion" id="acc-schedules">
+            <div class="accordion-header" id="acc-schedules-header">
+              <span class="accordion-title">Zeitpläne & Zonen</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    Zeitpläne
+                  </span>
+                  <span class="diag-value" id="diag-rules-count">—</span>
+                </div>
+                <div id="rules-list" style="padding:0 4px"></div>
+                <div class="sw-row" id="btn-show-zones">
                   <div class="sw-left">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="10" height="10" rx="1" stroke-dasharray="3 2"/></svg>
-                    <span>Motion Zones</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+                    <span>Motion-Zonen anzeigen</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+                    Motion-Zonen
+                  </span>
+                  <span class="diag-value" id="diag-zones-count">—</span>
+                </div>
+                <div class="diag-row">
+                  <span class="diag-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                    Privacy-Masken
+                  </span>
+                  <span class="diag-value" id="diag-masks-count">—</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.6.0</div>
+          <!-- Accordion: Services -->
+          <div class="accordion" id="acc-services">
+            <div class="accordion-header" id="acc-services-header">
+              <span class="accordion-title">Services</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="svc-grid" id="svc-grid"></div>
+                <div id="svc-result" style="font-size:11px;color:#999;padding:4px 0;display:none"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.7.0</div>
       </ha-card>
     `;
 
@@ -1033,6 +1131,32 @@ class BoschCameraCard extends HTMLElement {
       this._toggleSwitch(this._entities.intercom)
     );
 
+    // Light sub-controls
+    this.shadowRoot.getElementById("btn-front-light")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.frontLight)
+    );
+    this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.wallwasher)
+    );
+    const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+    if (intensitySlider) {
+      let debounce = null;
+      intensitySlider.addEventListener("input", () => {
+        const valEl = this.shadowRoot.getElementById("intensity-value");
+        if (valEl) valEl.textContent = intensitySlider.value + "%";
+      });
+      intensitySlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.frontLightIntensity) return;
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.frontLightIntensity,
+            value: parseInt(intensitySlider.value),
+          }).catch(err => console.warn("bosch-camera-card: intensity", err));
+        }, 200);
+      });
+    }
+
     // Pan buttons
     const PAN_STEP = 30;
     const setPan = (pos) => {
@@ -1061,7 +1185,7 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Accordion toggle handlers
-    ["acc-notif-types", "acc-advanced", "acc-diagnostics"].forEach(id => {
+    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules", "acc-services"].forEach(id => {
       this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
         const acc = this.shadowRoot.getElementById(id);
         if (acc) acc.classList.toggle("open");
@@ -1074,32 +1198,22 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-notif-audio")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAudio));
     this.shadowRoot.getElementById("btn-notif-trouble")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifTrouble));
     this.shadowRoot.getElementById("btn-notif-alarm")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAlarm));
+    // Service buttons grid
+    this._renderServiceButtons();
+
+    this.shadowRoot.getElementById("btn-show-zones")?.addEventListener("click", () => {
+      this._showMotionZones = !this._showMotionZones;
+      const btn = this.shadowRoot.getElementById("btn-show-zones");
+      if (btn) btn.classList.toggle("on", this._showMotionZones);
+      // Force motion zones re-render
+      this._lastMotionCoordKey = null;
+      if (this._hass) this._updateMotionZones(this._hass, this._entities);
+    });
     this.shadowRoot.getElementById("btn-timestamp")?.addEventListener("click", () => this._toggleSwitch(this._entities.timestamp));
     this.shadowRoot.getElementById("btn-autofollow")?.addEventListener("click", () => this._toggleSwitch(this._entities.autofollow));
     this.shadowRoot.getElementById("btn-motion")?.addEventListener("click", () => this._toggleSwitch(this._entities.motion));
     this.shadowRoot.getElementById("btn-record-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.recordSound));
     this.shadowRoot.getElementById("btn-privacy-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.privacySound));
-    this.shadowRoot.getElementById("btn-front-light")?.addEventListener("click", () => this._toggleSwitch(this._entities.frontLight));
-    this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () => this._toggleSwitch(this._entities.wallwasher));
-    // Front light intensity slider
-    const intSlider = this.shadowRoot.getElementById("slider-front-intensity");
-    if (intSlider) {
-      intSlider.addEventListener("change", (e) => {
-        const val = parseFloat(e.target.value);
-        this._hass?.callService("number", "set_value", {
-          entity_id: this._entities.frontIntensity,
-          value: val,
-        });
-        const lbl = this.shadowRoot.getElementById("val-front-intensity");
-        if (lbl) lbl.textContent = val + "%";
-      });
-    }
-
-    // Motion zones overlay toggle
-    this.shadowRoot.getElementById("btn-motion-zones")?.addEventListener("click", () => {
-      this._config.show_motion_zones = !this._config.show_motion_zones;
-      this._update();
-    });
 
     // Load the first image immediately
     this._imgTimestamp = Date.now();
@@ -1184,7 +1298,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.6.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.7.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1230,9 +1344,13 @@ class BoschCameraCard extends HTMLElement {
     if (img) img.classList.toggle("hidden", visible && !this._imageLoaded);
 
     if (visible) {
-      // Safety timeout: always hide overlay after 15s even if image never loads
+      // Safety timeout — shorter for snapshot refreshes, longer during stream start.
+      // During stream start (_startingLiveVideo or _waitingForStream), the overlay
+      // should stay visible until the video actually plays (outdoor cam takes 80s+).
       if (this._loadingTimeout) clearTimeout(this._loadingTimeout);
-      this._loadingTimeout = setTimeout(() => this._setLoadingOverlay(false), 15000);
+      const isStreamStart = this._startingLiveVideo || this._waitingForStream || this._liveVideoActive;
+      const safetyMs = isStreamStart ? 120000 : 15000;
+      this._loadingTimeout = setTimeout(() => this._setLoadingOverlay(false), safetyMs);
     } else {
       if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
     }
@@ -1294,6 +1412,8 @@ class BoschCameraCard extends HTMLElement {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
       s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+      s.integrity = "sha384-iZBI1/lW9u8FcBjxuQ8nPTsU7TXhZNtzkV8H3gQHSTgz+VYQoKWqGlBHqhO84alJ";
+      s.crossOrigin = "anonymous";
       s.onload  = () => resolve(window.Hls);
       s.onerror = () => reject(new Error("hls.js load failed"));
       document.head.appendChild(s);
@@ -1314,10 +1434,13 @@ class BoschCameraCard extends HTMLElement {
     // Helper: activate video element with overlay management
     const activateVideo = () => {
       video.style.display = "block";
-      if (img) img.style.display = "none";
+      // Keep snapshot image visible until video actually plays — avoids
+      // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
       const clearOverlay = () => {
+        // NOW hide the snapshot — video is playing, no black gap
+        if (img) img.style.display = "none";
         this._setLoadingOverlay(false);
         if (this._streamConnecting) {
           this._streamConnecting = false;
@@ -1326,16 +1449,75 @@ class BoschCameraCard extends HTMLElement {
         video.removeEventListener("playing", clearOverlay);
       };
       video.addEventListener("playing", clearOverlay);
-      setTimeout(() => { clearOverlay(); }, 45000);
+      // Safety timeout: if video never plays after 120s, hide overlay but
+      // keep snapshot visible (don't call clearOverlay which hides the image).
+      // Outdoor camera can take 80s+ for first HLS frame.
+      if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
+      this._activateSafetyTimer = setTimeout(() => {
+        if (!video.paused && video.currentTime > 0) {
+          // Video is actually playing — full cleanup
+          clearOverlay();
+        } else {
+          // Video still not playing — hide overlay spinner only,
+          // keep snapshot image visible underneath
+          this._setLoadingOverlay(false);
+        }
+      }, 120000);
+
+      // Stall detector: if video.currentTime stops advancing for 15s, recover
+      if (this._stallChecker) clearInterval(this._stallChecker);
+      let lastTime = 0;
+      let stallCount = 0;
+      this._stallChecker = setInterval(() => {
+        if (!this._liveVideoActive || !video) {
+          clearInterval(this._stallChecker);
+          return;
+        }
+        if (video.currentTime === lastTime && !video.paused) {
+          stallCount++;
+          if (stallCount >= 3) { // 15s stall (3 × 5s)
+            console.warn("bosch-camera-card: video stalled for 15s, recovering");
+            stallCount = 0;
+            if (this._hls && this._hls.liveSyncPosition) {
+              video.currentTime = this._hls.liveSyncPosition;
+            } else {
+              // Full restart
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => this._startLiveVideo(), 2000);
+              }
+            }
+          }
+        } else {
+          stallCount = 0;
+        }
+        lastTime = video.currentTime;
+      }, 5000);
     };
 
-    // ── WebRTC (deferred — needs active stream_source before go2rtc can offer it) ──
-    // go2rtc provides WebRTC but only after stream_source returns an RTSP URL.
-    // On-demand streams (Bosch) don't have a permanent RTSP URL — it's created
-    // when the live switch is turned ON. HLS starts the stream, then WebRTC
-    // could be used for subsequent reconnects. TODO: implement WebRTC upgrade.
+    // ── WebRTC (try first if go2rtc is available) ─────────────────────
+    // go2rtc provides WebRTC (~2s latency vs ~12s HLS) when stream is active.
+    // Falls back to HLS if WebRTC is not available or fails.
+    try {
+      const caps = await this._hass.callWS({
+        type: "camera/capabilities",
+        entity_id: this._entities.camera,
+      });
+      const types = caps?.frontend_stream_types || [];
+      if (types.includes("web_rtc")) {
+        try {
+          await this._startWebRTC(video, activateVideo);
+          return; // WebRTC started successfully
+        } catch (webrtcErr) {
+          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr);
+          // Fall through to HLS
+        }
+      }
+    } catch (capsErr) {
+      // Capabilities check failed — try HLS directly
+    }
 
-    // ── HLS via camera/stream ───────────────────────────────────────────
+    // ── HLS via camera/stream (fallback) ────────────────────────────────
     try {
       const result = await this._hass.callWS({
         type:      "camera/stream",
@@ -1343,34 +1525,69 @@ class BoschCameraCard extends HTMLElement {
       });
       if (!result?.url) throw new Error("no url");
 
+      // Always start muted to comply with Chrome autoplay policy.
+      // Chrome blocks unmuted autoplay without prior user interaction.
+      // Audio is controlled by the user via the audio toggle in the card.
       video.muted = true;
       const startPlay = () => {
         video.muted = true;
         video.play()
           .then(() => {
-            if (audioOn) {
-              // Try unmuting — Chrome may pause the video if there was no user gesture.
-              video.muted = false;
-              // Check after a tick if Chrome paused us due to autoplay policy.
-              setTimeout(() => {
-                if (video.paused && !video.muted) {
-                  // Chrome blocked unmuted autoplay — fall back to muted playback.
-                  video.muted = true;
-                  video.play().catch(() => {});
-                }
-              }, 100);
-            }
+            // Video is playing muted. User can unmute via audio toggle.
+            // Do NOT auto-unmute — Chrome will pause the video.
           })
-          .catch(() => {});
+          .catch((err) => {
+            // If even muted play fails, retry after a moment
+            console.warn("bosch-camera-card: muted play failed:", err.message);
+            setTimeout(() => {
+              video.muted = true;
+              video.play().catch(() => {});
+            }, 2000);
+          });
       };
 
       const Hls = await this._loadHlsJs();
       if (Hls.isSupported()) {
         if (this._hls) { this._hls.destroy(); this._hls = null; }
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          // CRITICAL: maxBufferLength MUST be < HA's OUTPUT_IDLE_TIMEOUT (30s).
+          // If hls.js buffers ≥30s, it stops requesting segments → HA thinks
+          // nobody is watching → kills FFmpeg → video freezes on last frame.
+          liveSyncDurationCount: 3,     // stay 3 segments behind live edge
+          liveMaxLatencyDurationCount: 6, // max 6 segments behind before seeking to live
+          maxBufferLength: 10,          // buffer up to 10s (MUST be < 30s HA idle timeout!)
+          maxMaxBufferLength: 20,       // absolute max buffer 20s
+          // Aggressive recovery: reload manifest on stall
+          manifestLoadingMaxRetry: 10,
+          levelLoadingMaxRetry: 10,
+          fragLoadingMaxRetry: 10,
+        });
         this._hls = hls;
         hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
+        // Reset stall counter on successful fragment delivery
+        this._stallCount = 0;
+        hls.on(Hls.Events.FRAG_LOADED, () => { this._stallCount = 0; });
+
+        // Auto-recovery on buffer stall: seek to live edge, then reconnect
         hls.on(Hls.Events.ERROR, (_ev, data) => {
+          if (data.details === "bufferStalledError") {
+            this._stallCount = (this._stallCount || 0) + 1;
+            if (video && hls.liveSyncPosition) {
+              video.currentTime = hls.liveSyncPosition;
+            }
+            // After 3 consecutive stalls, FFmpeg is likely dead — full reconnect
+            if (this._stallCount >= 3) {
+              console.warn("bosch-camera-card: 3 buffer stalls, reconnecting HLS");
+              this._stallCount = 0;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 1000);
+              }
+            }
+            return;
+          }
           if (!data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             hls.startLoad();
@@ -1386,6 +1603,14 @@ class BoschCameraCard extends HTMLElement {
         });
         hls.loadSource(result.url);
         hls.attachMedia(video);
+        // HLS keepalive: prevent HA's 30s idle timeout from killing FFmpeg.
+        // Even with maxBufferLength=10, belt-and-suspenders measure.
+        if (this._hlsKeepaliveTimer) clearInterval(this._hlsKeepaliveTimer);
+        this._hlsKeepaliveTimer = setInterval(() => {
+          if (this._hls && this._liveVideoActive) {
+            this._hls.startLoad(-1); // restart loading from current position
+          }
+        }, 20000); // every 20s, well within 30s timeout
       } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
         video.src = result.url;
         startPlay();
@@ -1395,19 +1620,93 @@ class BoschCameraCard extends HTMLElement {
       activateVideo();
 
     } catch (e) {
-      if (attempt < 3) {
-        setTimeout(() => this._startLiveVideo(attempt + 1), 1000);
+      if (attempt < 5) {
+        // Quick retries for transient errors (WS not ready yet)
+        setTimeout(() => this._startLiveVideo(attempt + 1), 1500);
       } else {
-        console.warn("bosch-camera-card: stream not available", e);
+        // After 5 attempts, back off but DON'T give up permanently.
+        // Schedule a retry in 10s — the stream may still be starting.
+        console.warn("bosch-camera-card: stream not available (attempt " + attempt + "), retrying in 10s", e);
         this._liveVideoActive   = false;
         this._startingLiveVideo = false;
         this._startRefreshTimer();
+        // Retry after 10s if stream is still supposed to be on
+        setTimeout(() => {
+          if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, "Stream wird erneut versucht…");
+            this._waitForStreamReady();
+          }
+        }, 10000);
       }
     }
   }
 
+  async _startWebRTC(video, activateVideo) {
+    /**
+     * Start WebRTC stream via go2rtc (HA's camera/webrtc/offer WS API).
+     * Provides ~2s latency vs ~12s for HLS.
+     */
+    const entityId = this._entities.camera;
+    const pc = new RTCPeerConnection();
+    this._webrtcPc = pc;
+
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
+
+    const remoteStream = new MediaStream();
+    pc.ontrack = (ev) => {
+      remoteStream.addTrack(ev.track);
+      if (video.srcObject !== remoteStream) {
+        video.srcObject = remoteStream;
+        video.muted = true;
+        video.play().catch(() => {});
+        activateVideo();
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // Subscribe to answer/candidates via HA WS
+    const unsub = await this._hass.connection.subscribeMessage(
+      (event) => {
+        if (event.type === "answer") {
+          pc.setRemoteDescription({ type: "answer", sdp: event.answer });
+        } else if (event.type === "candidate") {
+          pc.addIceCandidate(event.candidate);
+        } else if (event.type === "error") {
+          console.warn("bosch-camera-card: WebRTC error:", event.message);
+        }
+      },
+      { type: "camera/webrtc/offer", entity_id: entityId, offer: offer.sdp }
+    );
+    this._webrtcUnsub = unsub;
+
+    // Wait for first track with timeout
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 10s")), 10000);
+      pc.ontrack = (ev) => {
+        clearTimeout(timeout);
+        remoteStream.addTrack(ev.track);
+        if (video.srcObject !== remoteStream) {
+          video.srcObject = remoteStream;
+          video.muted = true;
+          video.play().catch(() => {});
+          activateVideo();
+        }
+        resolve();
+      };
+    });
+  }
+
   _stopLiveVideo() {
     if (this._hls) { this._hls.destroy(); this._hls = null; }
+    if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
+    if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
+    if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
+    if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
+    if (this._webrtcUnsub) { this._webrtcUnsub(); this._webrtcUnsub = null; }
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
@@ -1655,11 +1954,12 @@ class BoschCameraCard extends HTMLElement {
     // Start HLS video when stream turns ON.
     // Wait until camera entity actually reports streaming (stream_source set)
     // to avoid "does not support play stream" errors from premature WS calls.
-    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo) {
-      if (!this._waitingForStream) {
-        this._waitingForStream = true;
-        this._waitForStreamReady();
-      }
+    // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
+    // Also re-triggers if card got stuck (e.g. WS failed during page load).
+    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      this._waitForStreamReady();
     }
     if (!shouldVideo) {
       this._waitingForStream = false;
@@ -1718,6 +2018,28 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
     this._updateToggleBtn("btn-intercom",      ents.intercom,      hass.states[ents.intercom]);
 
+    // Light sub-controls — show only when entities exist
+    const lightSubControls = this.shadowRoot.getElementById("light-sub-controls");
+    if (lightSubControls) {
+      const hasFront = ents.frontLight && hass.states[ents.frontLight];
+      const hasWall = ents.wallwasher && hass.states[ents.wallwasher];
+      const hasIntensity = ents.frontLightIntensity && hass.states[ents.frontLightIntensity];
+      lightSubControls.style.display = (hasFront || hasWall || hasIntensity) ? "" : "none";
+      this._updateToggleBtn("btn-front-light", ents.frontLight, hass.states[ents.frontLight]);
+      this._updateToggleBtn("btn-wallwasher", ents.wallwasher, hass.states[ents.wallwasher]);
+      const intensityRow = this.shadowRoot.getElementById("intensity-row");
+      const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+      const intensityValue = this.shadowRoot.getElementById("intensity-value");
+      if (intensityRow) intensityRow.style.display = hasIntensity ? "flex" : "none";
+      if (hasIntensity && intensitySlider && intensityValue) {
+        const v = parseFloat(hass.states[ents.frontLightIntensity]?.state) || 0;
+        if (!intensitySlider.matches(":active")) {
+          intensitySlider.value = v;
+          intensityValue.textContent = Math.round(v) + "%";
+        }
+      }
+    }
+
     // Accordion: notification type toggles
     this._updateToggleBtn("btn-notif-movement", ents.notifMovement, hass.states[ents.notifMovement]);
     this._updateToggleBtn("btn-notif-person",   ents.notifPerson,   hass.states[ents.notifPerson]);
@@ -1731,20 +2053,6 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-motion",        ents.motion,        hass.states[ents.motion]);
     this._updateToggleBtn("btn-record-sound",  ents.recordSound,   hass.states[ents.recordSound]);
     this._updateToggleBtn("btn-privacy-sound", ents.privacySound,  hass.states[ents.privacySound]);
-    this._updateToggleBtn("btn-front-light",   ents.frontLight,    hass.states[ents.frontLight]);
-    this._updateToggleBtn("btn-wallwasher",    ents.wallwasher,    hass.states[ents.wallwasher]);
-    // Front light intensity slider
-    const intState = hass.states[ents.frontIntensity];
-    const intSlider = this.shadowRoot.getElementById("slider-front-intensity");
-    const intLabel = this.shadowRoot.getElementById("val-front-intensity");
-    const intRow = this.shadowRoot.getElementById("row-front-intensity");
-    if (intState && intState.state !== "unavailable" && intState.state !== "unknown") {
-      if (intSlider && !intSlider.matches(":active")) intSlider.value = intState.state;
-      if (intLabel) intLabel.textContent = intState.state + "%";
-      if (intRow) intRow.style.display = "";
-    } else {
-      if (intRow) intRow.style.display = "none";
-    }
 
     // Accordion: diagnostics sensor values
     const wifiVal = hass.states[ents.wifi];
@@ -1762,14 +2070,8 @@ class BoschCameraCard extends HTMLElement {
     if (wifiVal?.state && wifiVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-wifi-val"); if (el) el.textContent = wifiVal.state + " %"; }
     if (ambVal?.state && ambVal.state !== "unavailable") { const el = this.shadowRoot.getElementById("diag-ambient-val"); if (el) el.textContent = ambVal.state + " %"; }
 
-    // Motion zones toggle — visual state from config flag
-    const mzBtn = this.shadowRoot.getElementById("btn-motion-zones");
-    if (mzBtn) {
-      const mzOn = !!this._config.show_motion_zones;
-      mzBtn.classList.toggle("on", mzOn);
-      const mzToggle = mzBtn.querySelector(".sw-toggle");
-      if (mzToggle) mzToggle.classList.toggle("on", mzOn);
-    }
+    // Accordion: Schedules & Zones
+    this._updateSchedulesSection(hass, ents);
 
     // Hide entire accordion sections if ALL their toggle entities are missing
     const _hideAccIf = (accId, entityIds) => {
@@ -1782,8 +2084,9 @@ class BoschCameraCard extends HTMLElement {
       acc.style.display = anyExists ? "" : "none";
     };
     _hideAccIf("acc-notif-types", [ents.notifMovement, ents.notifPerson, ents.notifAudio, ents.notifTrouble, ents.notifAlarm]);
-    _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound, ents.frontLight, ents.wallwasher, ents.frontIntensity]);
+    _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound]);
     _hideAccIf("acc-diagnostics", [ents.wifi, ents.firmware, ents.ambient, ents.movementToday, ents.audioToday]);
+    _hideAccIf("acc-schedules", [ents.scheduleRules, ents.motionZones]);
 
     // Swap bell icon: bell when ON (notifications active), bell-off when OFF
     const notifState = this._getEffectiveState(ents.notifications);
@@ -1874,6 +2177,197 @@ class BoschCameraCard extends HTMLElement {
     btn.disabled = false;
   }
 
+  // ── Schedules & Zones ──────────────────────────────────────────────────────
+  _updateSchedulesSection(hass, ents) {
+    const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+    // Rules count
+    const rulesState = hass.states[ents.scheduleRules];
+    const rulesCountEl = this.shadowRoot.getElementById("diag-rules-count");
+    if (rulesCountEl) {
+      rulesCountEl.textContent = (rulesState?.state != null && rulesState.state !== "unavailable") ? rulesState.state : "—";
+    }
+
+    // Rules list
+    const rulesListEl = this.shadowRoot.getElementById("rules-list");
+    if (rulesListEl && rulesState) {
+      const rules = rulesState.attributes?.rules || [];
+      const camId = hass.states[ents.status]?.attributes?.camera_id || "";
+      if (rules.length === 0) {
+        rulesListEl.innerHTML = '<div style="font-size:11px;color:#666;padding:4px 0">Keine Zeitpläne</div>';
+      } else {
+        // Build rules HTML — only re-render when data changes (compare JSON)
+        const rulesKey = JSON.stringify(rules);
+        if (this._lastRulesKey !== rulesKey) {
+          this._lastRulesKey = rulesKey;
+          rulesListEl.innerHTML = rules.map((r, i) => {
+            const days = (r.weekdays || []).map(d => WEEKDAY_NAMES[d] || d).join(", ");
+            // Sensor uses "active"/"start"/"end", API uses "isActive"/"startTime"/"endTime"
+            const isActive = r.active ?? r.isActive ?? false;
+            const startT = r.start || r.startTime || "?";
+            const endT = r.end || r.endTime || "?";
+            const activeClass = isActive ? " active" : "";
+            const activeLabel = isActive ? "AN" : "AUS";
+            return `<div class="rule-row" data-rule-idx="${i}">
+              <div class="rule-info">
+                <div class="rule-name">${this._escHtml(r.name || "Regel " + (i+1))}</div>
+                <div class="rule-time">${startT} – ${endT}</div>
+                <div class="rule-days">${days}</div>
+              </div>
+              <button class="rule-toggle${activeClass}" data-rule-id="${r.id}" data-cam-id="${camId}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>
+              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="Löschen">✕</button>
+            </div>`;
+          }).join("");
+
+          // Wire toggle buttons
+          rulesListEl.querySelectorAll(".rule-toggle").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              const newActive = btn.dataset.active !== "true";
+              this._callService("bosch_shc_camera", "update_rule", {
+                camera_id: cId, rule_id: ruleId, is_active: newActive,
+              });
+              // Optimistic UI
+              btn.dataset.active = newActive ? "true" : "false";
+              btn.textContent = newActive ? "AN" : "AUS";
+              btn.classList.toggle("active", newActive);
+            });
+          });
+
+          // Wire delete buttons
+          rulesListEl.querySelectorAll(".rule-delete").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              this._callService("bosch_shc_camera", "delete_rule", {
+                camera_id: cId, rule_id: ruleId,
+              });
+              // Remove row optimistically
+              btn.closest(".rule-row")?.remove();
+            });
+          });
+        }
+      }
+    }
+
+    // Motion zones toggle visual state
+    const zonesToggle = this.shadowRoot.getElementById("btn-show-zones");
+    if (zonesToggle) {
+      zonesToggle.classList.toggle("on", this._showMotionZones);
+      // Only show toggle when motion zones sensor exists
+      const mzExists = hass.states[ents.motionZones];
+      zonesToggle.style.display = mzExists ? "" : "none";
+    }
+
+    // Motion zones count (cloud API zones)
+    const zonesCountEl = this.shadowRoot.getElementById("diag-zones-count");
+    const zonesInfoEl = this.shadowRoot.getElementById("zones-info");
+    // Use the motion_sensitive_areas data from the camera entity attributes if available,
+    // otherwise fall back to the RCP-based motion zones sensor
+    const mzState = hass.states[ents.motionZones];
+    const cloudZones = mzState?.attributes?.cloud_zones || [];
+    if (zonesCountEl) {
+      zonesCountEl.textContent = cloudZones.length > 0 ? String(cloudZones.length) : (mzState?.state != null && mzState.state !== "unavailable") ? `${mzState.state} (RCP)` : "—";
+    }
+
+    // Privacy masks count
+    const masksCountEl = this.shadowRoot.getElementById("diag-masks-count");
+    const privacyMasks = mzState?.attributes?.cloud_privacy_masks || [];
+    if (masksCountEl) {
+      masksCountEl.textContent = privacyMasks.length > 0 ? String(privacyMasks.length) : "0";
+    }
+  }
+
+  _escHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  _renderServiceButtons() {
+    const grid = this.shadowRoot.getElementById("svc-grid");
+    if (!grid) return;
+
+    const camId = () => this._hass?.states[this._entities.status]?.attributes?.camera_id || "";
+
+    const services = [
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+        label: "Snapshot", svc: "trigger_snapshot", data: {} },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
+        label: "Zonen lesen", svc: "get_motion_zones", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+        label: "Privacy-Masken", svc: "get_privacy_masks", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
+        label: "Freunde", svc: "list_friends", data: {} },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+        label: "Regel erstellen", svc: "_prompt_create_rule", data: null },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>',
+        label: "Licht-Zeitplan", svc: "get_lighting_schedule", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        label: "Verbindung", svc: "open_live_connection", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+        label: "Sirene", svc: "_trigger_siren", data: null },
+    ];
+
+    grid.innerHTML = services.map((s, i) => `<button class="svc-btn" data-svc-idx="${i}">${s.icon}<span>${s.label}</span></button>`).join("");
+
+    const resultEl = this.shadowRoot.getElementById("svc-result");
+
+    grid.querySelectorAll(".svc-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const idx = parseInt(btn.dataset.svcIdx);
+        const svc = services[idx];
+        if (!svc || !this._hass) return;
+
+        // Special: trigger siren (button entity)
+        if (svc.svc === "_trigger_siren") {
+          if (!confirm("Sirene wirklich auslösen?")) return;
+          btn.classList.add("running");
+          const sirenEntity = this._entities.siren;
+          if (sirenEntity && this._hass.states[sirenEntity]) {
+            this._hass.callService("button", "press", { entity_id: sirenEntity });
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene wird ausgelöst..."; }
+          } else {
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene nicht verfügbar für diese Kamera."; }
+          }
+          setTimeout(() => { btn.classList.remove("running"); }, 3000);
+          return;
+        }
+
+        // Special: prompt for create_rule
+        if (svc.svc === "_prompt_create_rule") {
+          const name = prompt("Regel-Name:", "Neue Regel");
+          if (!name) return;
+          const start = prompt("Startzeit (HH:MM):", "08:00");
+          if (!start) return;
+          const end = prompt("Endzeit (HH:MM):", "20:00");
+          if (!end) return;
+          btn.classList.add("running");
+          this._callService("bosch_shc_camera", "create_rule", {
+            camera_id: camId(), name: name,
+            start_time: start + ":00", end_time: end + ":00",
+            weekdays: [0,1,2,3,4,5,6], is_active: true,
+          });
+          if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `Regel "${name}" wird erstellt...`; }
+          setTimeout(() => { btn.classList.remove("running"); }, 3000);
+          return;
+        }
+
+        btn.classList.add("running");
+        const data = typeof svc.data === "function" ? svc.data() : svc.data;
+        this._callService("bosch_shc_camera", svc.svc, data);
+        if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `${svc.label} wird ausgeführt...`; }
+        setTimeout(() => {
+          btn.classList.remove("running");
+          if (resultEl) { resultEl.textContent = `${svc.label} abgeschlossen.`; setTimeout(() => { resultEl.style.display = "none"; }, 5000); }
+        }, 3000);
+      });
+    });
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   _getEffectiveState(entityId) {
     if (entityId in this._optimistic) return this._optimistic[entityId];
@@ -1881,23 +2375,27 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _waitForStreamReady(attempt = 0) {
-    // Poll until the switch entity (real, not optimistic) confirms ON.
-    // Backend needs ~5s for PUT /connection + TLS proxy + pre-warm.
-    // Only then call camera/stream WS to avoid "does not support play stream"
-    // errors and wasted retries that add 10-20s to startup.
+    // Poll until camera entity reports "streaming" (stream_source is set).
+    // Backend needs 25-35s for PUT /connection + TLS proxy + pre-warm
+    // (outdoor camera is slower). Only then call camera/stream WS to avoid
+    // "does not support play stream" errors from premature WS calls.
     if (!this._waitingForStream || !this._hass) return;
 
-    const switchState = this._hass.states[this._entities.switch];
-    const reallyOn = switchState?.state === "on";
-    // Also check if camera entity has streaming attributes set
     const cam = this._hass.states[this._entities.camera];
-    const camReady = cam?.state === "streaming"
-                  || cam?.attributes?.streaming_state === "active"
-                  || (reallyOn && switchState?.attributes?.connection_type);
+    const camReady = cam?.state === "streaming";
 
-    if (camReady || (reallyOn && attempt >= 5)) {
-      // Stream is ready or switch confirmed ON after 5s — start HLS
+    // Update loading overlay with progress text
+    if (attempt > 0 && attempt % 10 === 0) {
+      const sec = attempt;
+      if (sec < 20) this._setLoadingOverlay(true, "Encoder wird aufgewärmt…");
+      else if (sec < 40) this._setLoadingOverlay(true, "Stream wird vorbereitet…");
+      else this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
+    }
+
+    if (camReady) {
+      // Camera entity reports streaming — stream_source is ready, start HLS
       this._waitingForStream = false;
+      this._setLoadingOverlay(true, "HLS wird geladen…");
       this._startLiveVideo();
       return;
     }
@@ -1916,32 +2414,31 @@ class BoschCameraCard extends HTMLElement {
     const svg = this.shadowRoot.getElementById("motion-zones-overlay");
     if (!svg) return;
 
-    // Read cloud zones from the motion zones sensor attributes.
-    // cloud_zones use normalized 0.0–1.0 coordinates {x, y, w, h} from the Cloud API.
-    // The old "coordinates" field contains raw RCP data (not usable for overlay).
+    // Prefer cloud_zones (from GET /motion_sensitive_areas, normalized 0.0–1.0)
+    // over RCP coordinates (raw firmware data, often incorrectly parsed).
     const zoneState = hass.states[ents.motionZones];
-    const zones = zoneState?.attributes?.cloud_zones;
+    const cloudZones = zoneState?.attributes?.cloud_zones;
+    const hasCloudZones = cloudZones && cloudZones.length > 0;
 
-    // Only show overlay when config option is set and data is available
-    const showZones = this._config.show_motion_zones && zones && zones.length > 0;
+    const showZones = this._showMotionZones && hasCloudZones;
     svg.classList.toggle("visible", showZones);
     if (!showZones) return;
 
-    // Only re-render if zones changed (avoid DOM thrashing)
-    const coordKey = JSON.stringify(zones);
+    // Only re-render if coordinates changed (avoid DOM thrashing)
+    const coordKey = JSON.stringify(cloudZones);
     if (this._lastMotionCoordKey === coordKey) return;
     this._lastMotionCoordKey = coordKey;
 
-    // Cloud zones: {x, y, w, h} normalized 0.0–1.0. ViewBox is 0-100, so multiply by 100.
+    // Cloud zones: {x, y, w, h} normalized 0.0–1.0
+    // ViewBox is 0-100, so multiply by 100.
     svg.innerHTML = "";
-    for (let z = 0; z < zones.length; z++) {
-      const c = zones[z];
-      if (c.x == null || c.y == null || c.w == null || c.h == null) continue;
+    for (const z of cloudZones) {
+      if (z.x == null || z.y == null || z.w == null || z.h == null) continue;
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", c.x * 100);
-      rect.setAttribute("y", c.y * 100);
-      rect.setAttribute("width", c.w * 100);
-      rect.setAttribute("height", c.h * 100);
+      rect.setAttribute("x", z.x * 100);
+      rect.setAttribute("y", z.y * 100);
+      rect.setAttribute("width", z.w * 100);
+      rect.setAttribute("height", z.h * 100);
       svg.appendChild(rect);
     }
   }

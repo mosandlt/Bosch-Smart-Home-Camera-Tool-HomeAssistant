@@ -17,7 +17,12 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.5.0
+ * Version: 2.7.0
+ *
+ * Changes vs 2.6.0:
+ *   - Separate light controls: Front Light, Wallwasher toggle + Intensity slider
+ *     appear below the main Light toggle when entities exist (Outdoor camera).
+ *   - Siren button in Services accordion — triggers acoustic alarm on the camera.
  *
  * Changes vs 2.4.0:
  *   - New "Services" accordion: grid of quick-action buttons for
@@ -226,6 +231,10 @@ class BoschCameraCard extends HTMLElement {
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
       scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
+      frontLight:    config.front_light_entity   || `switch.${base}_front_light`,
+      wallwasher:    config.wallwasher_entity    || `switch.${base}_wallwasher`,
+      frontLightIntensity: config.front_light_intensity_entity || `number.${base}_front_light_intensity`,
+      siren:         config.siren_entity         || `button.${base}_siren`,
     };
 
     this._showMotionZones = this._config.show_motion_zones;
@@ -767,6 +776,33 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
+            <!-- Light sub-controls (front light, wallwasher, intensity) -->
+            <div class="light-sub-controls" id="light-sub-controls" style="display:none;padding:0 0 0 28px;border-left:2px solid rgba(255,204,0,.3);margin:0 0 0 16px">
+              <div class="sw-row" id="btn-front-light" style="padding:4px 4px">
+                <div class="sw-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/>
+                  </svg>
+                  <span style="font-size:13px">Frontlicht</span>
+                </div>
+                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+              </div>
+              <div class="sw-row" id="btn-wallwasher" style="padding:4px 4px">
+                <div class="sw-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                    <path d="M9 18h6M10 22h4M12 2v1M4.22 4.22l.7.7M1 12h1M20.78 4.22l-.7.7M23 12h-1"/>
+                    <path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/>
+                  </svg>
+                  <span style="font-size:13px">Wallwasher</span>
+                </div>
+                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+              </div>
+              <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:4px 4px;font-size:13px">
+                <span style="white-space:nowrap">Helligkeit</span>
+                <input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px">
+                <span id="intensity-value" style="min-width:32px;text-align:right;color:#999">—</span>
+              </div>
+            </div>
             <div class="sw-row privacy-row" id="btn-privacy">
               <div class="sw-left">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1053,7 +1089,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.5.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.7.0</div>
       </ha-card>
     `;
 
@@ -1094,6 +1130,32 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-intercom")?.addEventListener("click", () =>
       this._toggleSwitch(this._entities.intercom)
     );
+
+    // Light sub-controls
+    this.shadowRoot.getElementById("btn-front-light")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.frontLight)
+    );
+    this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.wallwasher)
+    );
+    const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+    if (intensitySlider) {
+      let debounce = null;
+      intensitySlider.addEventListener("input", () => {
+        const valEl = this.shadowRoot.getElementById("intensity-value");
+        if (valEl) valEl.textContent = intensitySlider.value + "%";
+      });
+      intensitySlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.frontLightIntensity) return;
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.frontLightIntensity,
+            value: parseInt(intensitySlider.value),
+          }).catch(err => console.warn("bosch-camera-card: intensity", err));
+        }, 200);
+      });
+    }
 
     // Pan buttons
     const PAN_STEP = 30;
@@ -1236,7 +1298,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.5.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.7.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1956,6 +2018,28 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
     this._updateToggleBtn("btn-intercom",      ents.intercom,      hass.states[ents.intercom]);
 
+    // Light sub-controls — show only when entities exist
+    const lightSubControls = this.shadowRoot.getElementById("light-sub-controls");
+    if (lightSubControls) {
+      const hasFront = ents.frontLight && hass.states[ents.frontLight];
+      const hasWall = ents.wallwasher && hass.states[ents.wallwasher];
+      const hasIntensity = ents.frontLightIntensity && hass.states[ents.frontLightIntensity];
+      lightSubControls.style.display = (hasFront || hasWall || hasIntensity) ? "" : "none";
+      this._updateToggleBtn("btn-front-light", ents.frontLight, hass.states[ents.frontLight]);
+      this._updateToggleBtn("btn-wallwasher", ents.wallwasher, hass.states[ents.wallwasher]);
+      const intensityRow = this.shadowRoot.getElementById("intensity-row");
+      const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+      const intensityValue = this.shadowRoot.getElementById("intensity-value");
+      if (intensityRow) intensityRow.style.display = hasIntensity ? "flex" : "none";
+      if (hasIntensity && intensitySlider && intensityValue) {
+        const v = parseFloat(hass.states[ents.frontLightIntensity]?.state) || 0;
+        if (!intensitySlider.matches(":active")) {
+          intensitySlider.value = v;
+          intensityValue.textContent = Math.round(v) + "%";
+        }
+      }
+    }
+
     // Accordion: notification type toggles
     this._updateToggleBtn("btn-notif-movement", ents.notifMovement, hass.states[ents.notifMovement]);
     this._updateToggleBtn("btn-notif-person",   ents.notifPerson,   hass.states[ents.notifPerson]);
@@ -2224,6 +2308,8 @@ class BoschCameraCard extends HTMLElement {
         label: "Licht-Zeitplan", svc: "get_lighting_schedule", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
         label: "Verbindung", svc: "open_live_connection", data: () => ({camera_id: camId()}) },
+      { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+        label: "Sirene", svc: "_trigger_siren", data: null },
     ];
 
     grid.innerHTML = services.map((s, i) => `<button class="svc-btn" data-svc-idx="${i}">${s.icon}<span>${s.label}</span></button>`).join("");
@@ -2235,6 +2321,21 @@ class BoschCameraCard extends HTMLElement {
         const idx = parseInt(btn.dataset.svcIdx);
         const svc = services[idx];
         if (!svc || !this._hass) return;
+
+        // Special: trigger siren (button entity)
+        if (svc.svc === "_trigger_siren") {
+          if (!confirm("Sirene wirklich auslösen?")) return;
+          btn.classList.add("running");
+          const sirenEntity = this._entities.siren;
+          if (sirenEntity && this._hass.states[sirenEntity]) {
+            this._hass.callService("button", "press", { entity_id: sirenEntity });
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene wird ausgelöst..."; }
+          } else {
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene nicht verfügbar für diese Kamera."; }
+          }
+          setTimeout(() => { btn.classList.remove("running"); }, 3000);
+          return;
+        }
 
         // Special: prompt for create_rule
         if (svc.svc === "_prompt_create_rule") {
