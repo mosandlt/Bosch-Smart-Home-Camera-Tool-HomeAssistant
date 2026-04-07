@@ -106,6 +106,25 @@ MODELS: dict[str, CameraModelConfig] = {
 MODELS["CAMERA_360"] = MODELS["INDOOR"]
 MODELS["CAMERA_EYES"] = MODELS["OUTDOOR"]
 
+# ── Gen2: Eyes Außenkamera II ────────────────────────────────────────────
+# API hardwareVersion: "HOME_Eyes_Outdoor" (confirmed by user DrNiKa, FW 9.40.25)
+# Timing values are initial estimates — will be tuned once we have test hardware.
+MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
+    display_name="Eyes Außenkamera II",
+    generation=2,
+    pre_warm_delay=2,
+    pre_warm_retries=8,
+    pre_warm_retry_wait=5,
+    post_warm_buffer=3,
+    describe_timeout=8,
+    min_total_wait=35,
+    renewal_interval=3500,
+    max_session_duration=3600,
+    heartbeat_interval=10,
+    snapshot_warmup=5,
+)
+
+
 # Default for unknown models
 DEFAULT_MODEL = CameraModelConfig(
     display_name="Unknown Camera",

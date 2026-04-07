@@ -99,6 +99,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._attr_name      = f"Bosch {title}"
         self._attr_unique_id = f"bosch_shc_cam_{cam_id.lower()}"
         self._model = info.get("hardwareVersion", "CAMERA")
+        self._hw_version = info.get("hardwareVersion", "")
+        from .models import get_model_config
+        self._model_name = get_model_config(self._hw_version).display_name
         self._fw    = info.get("firmwareVersion", "")
         self._mac   = info.get("macAddress", "")
 
@@ -306,7 +309,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         self._attr_name,
             "manufacturer": "Bosch",
-            "model":        self._model,
+            "model":        self._model_name,
             "sw_version":   self._fw,
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }
@@ -337,7 +340,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             "streaming_state": "active" if self.is_streaming else "idle",
             "last_event":      latest.get("timestamp", "")[:19],
             "event_type":      latest.get("eventType", ""),
-            "model":           self._model,
+            "model_name":      self._model_name,
+            "hardware_version": self._hw_version,
             "firmware":        self._fw,
             "mac":             self._mac,
             "live_rtsps":      rtsps_url,
