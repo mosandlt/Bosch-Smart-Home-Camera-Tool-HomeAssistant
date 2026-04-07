@@ -41,6 +41,9 @@ async def async_setup_entry(
             entities.append(BoschPanNumber(coordinator, cam_id, config_entry, pan_limit))
         entities.append(BoschAudioThresholdNumber(coordinator, cam_id, config_entry))
         entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
+        has_light = cam_info.get("featureSupport", {}).get("light", False)
+        if has_light:
+            entities.append(BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -255,3 +258,62 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
         except Exception as err:
             _LOGGER.warning("Speaker level error for %s: %s", self._cam_id, err)
         self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):
+    """Number entity: front light brightness (0–100%).
+
+    Maps to frontLightIntensity (0.0–1.0) in PUT /v11/video_inputs/{id}/lighting_override.
+    Only for cameras with featureSupport.light = True (outdoor cameras).
+    Disabled by default — enable in Settings → Entities.
+    """
+
+    _attr_icon                        = "mdi:brightness-6"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 100
+    _attr_native_step                 = 5
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "%"
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+        self._attr_name      = f"Bosch {self._cam_title} Front Light Intensity"
+        self._attr_unique_id = f"bosch_shc_front_light_intensity_{cam_id.lower()}"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def native_value(self) -> float | None:
+        val = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("front_light_intensity")
+        if val is not None:
+            return round(val * 100)
+        return None
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set front light intensity (0-100% → 0.0-1.0 API value)."""
+        intensity = round(value / 100, 2)
+        await self.coordinator.async_cloud_set_light_component(
+            self._cam_id, "intensity", intensity
+        )

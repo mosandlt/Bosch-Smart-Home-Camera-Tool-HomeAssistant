@@ -7,6 +7,7 @@ as its first argument instead of using `self`.
 Public API (cloud setters — used by switch / number entities):
   async_cloud_set_privacy_mode(coordinator, cam_id, enabled)
   async_cloud_set_camera_light(coordinator, cam_id, on)
+  async_cloud_set_light_component(coordinator, cam_id, component, value)
   async_cloud_set_notifications(coordinator, cam_id, enabled)
   async_cloud_set_pan(coordinator, cam_id, position)
 
@@ -397,19 +398,23 @@ async def async_cloud_set_camera_light(
             "Accept": "application/json",
         }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
-        body = (
-            {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 1.0}
-            if on
-            else {"frontLightOn": False, "wallwasherOn": False}
-        )
+        cache = coordinator._shc_state_cache.get(cam_id, {})
+        last_intensity = cache.get("front_light_intensity") or 1.0
+        if on:
+            body = {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": last_intensity}
+        else:
+            body = {"frontLightOn": False, "wallwasherOn": False}
 
         try:
             async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
                     if resp.status in (200, 201, 204):
-                        coordinator._shc_state_cache.setdefault(cam_id, {})[
-                            "camera_light"
-                        ] = on
+                        cache_entry = coordinator._shc_state_cache.setdefault(cam_id, {})
+                        cache_entry["camera_light"] = on
+                        cache_entry["front_light"] = on
+                        cache_entry["wallwasher"] = on
+                        if on and last_intensity:
+                            cache_entry["front_light_intensity"] = last_intensity
                         # Write-lock: prevent the next coordinator refresh from
                         # overwriting the optimistic state with stale cloud data
                         # (Bosch API propagation delay).
@@ -437,6 +442,74 @@ async def async_cloud_set_camera_light(
             "cloud_set_camera_light: cloud failed, falling back to SHC for %s", cam_id
         )
         return await async_shc_set_camera_light(coordinator, cam_id, on)
+    return False
+
+
+async def async_cloud_set_light_component(
+    coordinator: BoschCameraCoordinator, cam_id: str, component: str, value
+) -> bool:
+    """Set individual light component via PUT /v11/video_inputs/{id}/lighting_override.
+
+    component: "front" (bool), "wallwasher" (bool), or "intensity" (float 0.0-1.0).
+    Reads current state from cache to preserve the other components.
+    """
+    token = coordinator.token
+    if not token:
+        return False
+
+    cache = coordinator._shc_state_cache.get(cam_id, {})
+    # Build body from current cached state, then apply the change
+    front = cache.get("front_light") or False
+    wall = cache.get("wallwasher") or False
+    intensity = cache.get("front_light_intensity") or 1.0
+
+    if component == "front":
+        front = value
+    elif component == "wallwasher":
+        wall = value
+    elif component == "intensity":
+        intensity = value
+        front = True  # turning intensity on implies front light on
+
+    body = {
+        "frontLightOn": front,
+        "wallwasherOn": wall,
+    }
+    if front:
+        body["frontLightIntensity"] = intensity
+
+    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
+
+    try:
+        async with asyncio.timeout(10):
+            async with session.put(url, json=body, headers=headers) as resp:
+                if resp.status in (200, 201, 204):
+                    cache_entry = coordinator._shc_state_cache.setdefault(cam_id, {})
+                    cache_entry["front_light"] = front
+                    cache_entry["wallwasher"] = wall
+                    cache_entry["front_light_intensity"] = intensity
+                    cache_entry["camera_light"] = front or wall
+                    coordinator._light_set_at[cam_id] = time.monotonic()
+                    coordinator.async_update_listeners()
+                    _LOGGER.debug(
+                        "cloud_set_light_component: %s %s=%s (front=%s wall=%s int=%.2f)",
+                        cam_id[:8], component, value, front, wall, intensity,
+                    )
+                    coordinator.hass.async_create_task(
+                        coordinator.async_request_refresh()
+                    )
+                    return True
+                _LOGGER.warning(
+                    "cloud_set_light_component: HTTP %d for %s", resp.status, cam_id
+                )
+    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        _LOGGER.warning("cloud_set_light_component error for %s: %s", cam_id, err)
     return False
 
 

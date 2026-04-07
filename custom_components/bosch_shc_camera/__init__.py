@@ -819,6 +819,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 cache = self._shc_state_cache.setdefault(cam_id_key, {
                     "device_id":           None,
                     "camera_light":        None,
+                    "front_light":         None,
+                    "wallwasher":          None,
+                    "front_light_intensity": None,
                     "privacy_mode":        None,
                     "has_light":           False,
                     "notifications_status": None,
@@ -843,6 +846,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 )
                 if light_on is not None and not light_locked:
                     cache["camera_light"] = light_on
+                    cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
+                    cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
+                    intensity = feat_status.get("frontIlluminatorGeneralLightIntensity")
+                    if intensity is not None:
+                        cache["front_light_intensity"] = intensity
                 elif cache.get("camera_light") is None:
                     cache["camera_light"] = None
                 # Read notifications status from cloud API response.
@@ -2160,6 +2168,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     async def async_shc_set_camera_light(self, cam_id: str, on: bool) -> bool:
         return await shc_mod.async_shc_set_camera_light(self, cam_id, on)
 
+    async def async_cloud_set_light_component(
+        self, cam_id: str, component: str, value
+    ) -> bool:
+        return await shc_mod.async_cloud_set_light_component(
+            self, cam_id, component, value
+        )
+
     async def async_shc_set_privacy_mode(self, cam_id: str, enabled: bool) -> bool:
         return await shc_mod.async_shc_set_privacy_mode(self, cam_id, enabled)
 
@@ -2204,6 +2219,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms = ["binary_sensor"] + platforms
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
+
+    # v8.0.2 migration: auto-enable front light / wallwasher / intensity entities
+    # that were initially created with disabled_by=integration in earlier builds.
+    from homeassistant.helpers import entity_registry as er
+    ent_reg = er.async_get(hass)
+    for uid_suffix in ("front_light_", "wallwasher_", "front_light_intensity_"):
+        for cam_id in coordinator.data:
+            uid = f"bosch_shc_{uid_suffix}{cam_id.lower()}"
+            ent = ent_reg.async_get_entity_id("switch" if "intensity" not in uid_suffix else "number", DOMAIN, uid)
+            if ent:
+                entry_obj = ent_reg.async_get(ent)
+                if entry_obj and entry_obj.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+                    ent_reg.async_update_entity(ent, disabled_by=None)
+                    _LOGGER.info("v8.0.2 migration: enabled %s", ent)
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))

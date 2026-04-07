@@ -17,7 +17,7 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.1.1
+ * Version: 2.6.0
  *
  * Changes vs 2.1.0:
  *   - Removed dead _streamingImageLoad() method (snapshot-streaming mode removed in v2.0.0)
@@ -182,6 +182,9 @@ class BoschCameraCard extends HTMLElement {
       switch:       config.switch_entity        || `switch.${base}_live_stream`,
       audio:        config.audio_entity         || `switch.${base}_audio`,
       light:        config.light_entity         || `switch.${base}_camera_light`,
+      frontLight:   config.front_light_entity   || `switch.${base}_front_light`,
+      wallwasher:   config.wallwasher_entity    || `switch.${base}_wallwasher`,
+      frontIntensity: config.front_intensity_entity || `number.${base}_front_light_intensity`,
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       notifications: config.notifications_entity || `switch.${base}_notifications`,
       intercom:     config.intercom_entity      || `switch.${base}_intercom`,
@@ -728,6 +731,28 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
+            <div class="sw-row" id="btn-front-light" style="padding-left:28px">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Frontlicht</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+            <div class="sw-row" id="btn-wallwasher" style="padding-left:28px">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                <span>Wallwasher</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+            <div class="sw-row" id="row-front-intensity" style="padding-left:28px;padding-right:12px">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
+                <span>Helligkeit</span>
+              </div>
+              <input type="range" id="slider-front-intensity" min="0" max="100" step="5" style="flex:1;margin-left:8px;accent-color:#4fc3f7">
+              <span id="val-front-intensity" style="min-width:36px;text-align:right;font-size:13px;color:#aaa">—</span>
+            </div>
             <div class="sw-row privacy-row" id="btn-privacy">
               <div class="sw-left">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -959,7 +984,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.2.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.6.0</div>
       </ha-card>
     `;
 
@@ -1047,6 +1072,21 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-motion")?.addEventListener("click", () => this._toggleSwitch(this._entities.motion));
     this.shadowRoot.getElementById("btn-record-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.recordSound));
     this.shadowRoot.getElementById("btn-privacy-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.privacySound));
+    this.shadowRoot.getElementById("btn-front-light")?.addEventListener("click", () => this._toggleSwitch(this._entities.frontLight));
+    this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () => this._toggleSwitch(this._entities.wallwasher));
+    // Front light intensity slider
+    const intSlider = this.shadowRoot.getElementById("slider-front-intensity");
+    if (intSlider) {
+      intSlider.addEventListener("change", (e) => {
+        const val = parseFloat(e.target.value);
+        this._hass?.callService("number", "set_value", {
+          entity_id: this._entities.frontIntensity,
+          value: val,
+        });
+        const lbl = this.shadowRoot.getElementById("val-front-intensity");
+        if (lbl) lbl.textContent = val + "%";
+      });
+    }
 
     // Load the first image immediately
     this._imgTimestamp = Date.now();
@@ -1131,7 +1171,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.2.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v2.6.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
@@ -1678,6 +1718,20 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-motion",        ents.motion,        hass.states[ents.motion]);
     this._updateToggleBtn("btn-record-sound",  ents.recordSound,   hass.states[ents.recordSound]);
     this._updateToggleBtn("btn-privacy-sound", ents.privacySound,  hass.states[ents.privacySound]);
+    this._updateToggleBtn("btn-front-light",   ents.frontLight,    hass.states[ents.frontLight]);
+    this._updateToggleBtn("btn-wallwasher",    ents.wallwasher,    hass.states[ents.wallwasher]);
+    // Front light intensity slider
+    const intState = hass.states[ents.frontIntensity];
+    const intSlider = this.shadowRoot.getElementById("slider-front-intensity");
+    const intLabel = this.shadowRoot.getElementById("val-front-intensity");
+    const intRow = this.shadowRoot.getElementById("row-front-intensity");
+    if (intState && intState.state !== "unavailable" && intState.state !== "unknown") {
+      if (intSlider && !intSlider.matches(":active")) intSlider.value = intState.state;
+      if (intLabel) intLabel.textContent = intState.state + "%";
+      if (intRow) intRow.style.display = "";
+    } else {
+      if (intRow) intRow.style.display = "none";
+    }
 
     // Accordion: diagnostics sensor values
     const wifiVal = hass.states[ents.wifi];
@@ -1706,7 +1760,7 @@ class BoschCameraCard extends HTMLElement {
       acc.style.display = anyExists ? "" : "none";
     };
     _hideAccIf("acc-notif-types", [ents.notifMovement, ents.notifPerson, ents.notifAudio, ents.notifTrouble, ents.notifAlarm]);
-    _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound]);
+    _hideAccIf("acc-advanced", [ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound, ents.frontLight, ents.wallwasher, ents.frontIntensity]);
     _hideAccIf("acc-diagnostics", [ents.wifi, ents.firmware, ents.ambient, ents.movementToday, ents.audioToday]);
 
     // Swap bell icon: bell when ON (notifications active), bell-off when OFF

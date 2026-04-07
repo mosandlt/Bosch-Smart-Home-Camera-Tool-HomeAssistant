@@ -97,6 +97,8 @@ async def async_setup_entry(
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschFrontLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschWallwasherSwitch(coordinator, cam_id, config_entry))
         # Notifications — available for all cameras via cloud API
         entities.append(BoschNotificationsSwitch(coordinator, cam_id, config_entry))
         # Motion detection toggle — available for all cameras via cloud API
@@ -355,6 +357,64 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_cloud_set_camera_light(self._cam_id, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschFrontLightSwitch(_BoschSwitchBase):
+    """Switch: front spotlight on/off (independent of wallwasher).
+
+    Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override
+    Only registered for cameras with featureSupport.light = True.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Front Light"
+        self._attr_unique_id = f"bosch_shc_front_light_{cam_id.lower()}"
+        self._attr_icon      = "mdi:spotlight-beam"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("front_light")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_cloud_set_light_component(self._cam_id, "front", True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_cloud_set_light_component(self._cam_id, "front", False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschWallwasherSwitch(_BoschSwitchBase):
+    """Switch: wallwasher (ambient wall light) on/off (independent of front light).
+
+    Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override
+    Only registered for cameras with featureSupport.light = True.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Wallwasher"
+        self._attr_unique_id = f"bosch_shc_wallwasher_{cam_id.lower()}"
+        self._attr_icon      = "mdi:wall-sconce-flat"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("wallwasher")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_cloud_set_light_component(self._cam_id, "wallwasher", True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_cloud_set_light_component(self._cam_id, "wallwasher", False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
