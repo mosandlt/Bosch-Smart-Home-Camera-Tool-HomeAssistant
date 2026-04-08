@@ -51,6 +51,30 @@ This integration communicates with a reverse-engineered, undocumented API. Provi
 
 ---
 
+## Prerequisites — Setting Up a New Camera
+
+Before adding a camera to this integration, it **must** be fully set up in the official **Bosch Smart Camera** app first.
+
+### Step-by-step
+
+1. **Unbox and power on** the camera
+2. **Open the Bosch Smart Camera app** and follow the pairing wizard to add the camera to your account
+3. **Wait for the firmware update** — new cameras typically receive a Zero-Day update during first setup. This can take **up to 1 hour**. The camera's LED blinks yellow/green during the update.
+   - **Do not unplug or restart** the camera during the update
+   - If the LED blink pattern doesn't change after 1 hour, leave the camera alone for up to 24 hours ([Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-aussenkamera-2/))
+   - The app shows the update status — wait until it reports the camera as ready
+4. **Verify the camera works** in the Bosch app — check live stream, settings, and notifications
+5. **Then add it to Home Assistant** using this integration (see Installation below)
+
+> **Tip:** If you're replacing an existing camera (e.g. upgrading from Gen1 to Gen2), rename the new camera in the Bosch app to match the old name before setting up the integration. This way Home Assistant creates entities with the expected names.
+
+For more help with camera setup, see:
+- [Eyes Außenkamera II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-aussenkamera-2/)
+- [Eyes Innenkamera II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-innenkamera-2/)
+- [Firmware Update dauert lange — Bosch Community](https://community.bosch-smarthome.com/t5/technische-probleme/wie-lange-dauert-das-update-der-software-bei-mir-l%C3%A4uft-es-seit-%C3%BCber-20-minuten/td-p/71764)
+
+---
+
 ## Installation
 
 ### HACS (Recommended)
@@ -591,6 +615,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v9.0.0** | **Gen2 camera support.** Full Eyes Außenkamera II + Innenkamera II support with Gen2-specific lighting API (`lighting/switch/front`, `lighting/switch/topdown`), 3 separate light groups with brightness + whiteBalance. New Gen2 entities: Status LED switch, lens elevation, audio controls. Firmware update detection (`UPDATING_REGULAR`). Pan support for Gen2 Outdoor (panLimit: 120). |
 | **v8.0.5** | **OSS OAuth credentials.** Switched to dedicated Bosch OSS OAuth client (`oss_residential_app`) — provided by Bosch for open source projects. Firebase/FCM API keys unchanged (OSS key lacks FCM permissions). Re-authentication required via integration config flow. |
 | **v8.0.4** | **Intensity fix.** Changing front light intensity no longer auto-activates the front light — intensity is stored independently so it applies when the light is next turned on. `frontLightIntensity` is always sent in the API payload (previously only sent when front light was on). |
 | **v8.0.3** | **Card v2.7.0 + protocol check + dynamic HW names.** Card: Front Light / Wallwasher toggles + intensity slider below main Light switch (outdoor cameras). Siren button in Services grid (all cameras, with confirmation dialog). Siren button entity now created for all camera models (not just Indoor). Protocol version check on startup — logs a warning if Bosch API protocol v11 is no longer supported. Dynamic hardware version display: human-readable model names (e.g. "Eyes Außenkamera" instead of "OUTDOOR") across all entity device info. Feature flags fetched on startup. Motion zones sensor shows diagnostic note when no zones are configured (Indoor cameras). |

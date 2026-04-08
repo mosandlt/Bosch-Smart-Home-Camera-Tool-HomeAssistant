@@ -44,6 +44,15 @@ async def async_setup_entry(
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry))
+        # Gen2-only entities
+        from .models import get_model_config
+        hw = cam_info.get("hardwareVersion", "CAMERA")
+        if get_model_config(hw).generation >= 2:
+            entities.append(BoschLensElevationNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschWhiteBalanceNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -325,3 +334,269 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):
         await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "intensity", intensity
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class _BoschGen2NumberBase(CoordinatorEntity, NumberEntity):
+    """Base class for Gen2-only number entities."""
+
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model     = info.get("hardwareVersion", "CAMERA")
+        from .models import get_display_name
+        self._model_name = get_display_name(self._model)
+        self._fw        = info.get("firmwareVersion", "")
+        self._mac       = info.get("macAddress", "")
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers":  {(DOMAIN, self._cam_id)},
+            "name":         f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":        self._model_name,
+            "sw_version":   self._fw,
+            "connections":  {("mac", self._mac)} if self._mac else set(),
+        }
+
+
+class BoschLensElevationNumber(_BoschGen2NumberBase):
+    """Number entity: lens mounting height in meters (Gen2 only).
+
+    Reads from GET /v11/video_inputs/{id}/lens_elevation → {"elevation": 2.0}
+    Writes via PUT /v11/video_inputs/{id}/lens_elevation → {"elevation": value}
+    Used by camera for perspective correction in person detection.
+    """
+
+    _attr_icon                        = "mdi:arrow-up-down"
+    _attr_native_min_value            = 0.5
+    _attr_native_max_value            = 5.0
+    _attr_native_step                 = 0.05
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "m"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Lens Elevation"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lens_elevation"
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator._lens_elevation_cache.get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._lens_elevation_cache.get(self._cam_id) is not None
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_put_camera(
+            self._cam_id, "lens_elevation", {"elevation": round(value, 2)}
+        )
+        self.coordinator._lens_elevation_cache[self._cam_id] = value
+        self.async_write_ha_state()
+
+
+class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
+    """Number entity: microphone recording level 0-100% (Gen2 only).
+
+    Reads from GET /v11/video_inputs/{id}/audio → {"microphoneLevel": 60, ...}
+    Writes via PUT /v11/video_inputs/{id}/audio → full body with updated microphoneLevel.
+    """
+
+    _attr_icon                        = "mdi:microphone"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 100
+    _attr_native_step                 = 5
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "%"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Microphone Level"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_mic_level"
+
+    @property
+    def native_value(self) -> float | None:
+        audio = self.coordinator._audio_cache.get(self._cam_id, {})
+        val = audio.get("microphoneLevel")
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._audio_cache.get(self._cam_id))
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
+        audio["microphoneLevel"] = int(round(value))
+        await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
+        self.coordinator._audio_cache[self._cam_id] = audio
+        self.async_write_ha_state()
+
+
+class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
+    """Number entity: front light color temperature -1.0 to 1.0 (Gen2 only).
+
+    -1.0 = cool/blue, 0.0 = neutral, 1.0 = warm/orange.
+    Only applies to front light (top/bottom LEDs use RGB color instead).
+    Reads from GET /v11/video_inputs/{id}/lighting/switch → frontLightSettings.whiteBalance
+    Writes via PUT /lighting/switch with frontLightSettings only.
+    """
+
+    _attr_icon                        = "mdi:thermometer-lines"
+    _attr_native_min_value            = -1.0
+    _attr_native_max_value            = 1.0
+    _attr_native_step                 = 0.05
+    _attr_mode                        = NumberMode.SLIDER
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Farbtemperatur Frontlicht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_white_balance"
+        self._wb_value: float | None = None
+
+    @property
+    def native_value(self) -> float | None:
+        cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        front = cached.get("frontLightSettings", {})
+        wb = front.get("whiteBalance")
+        if wb is not None:
+            self._wb_value = wb
+        return self._wb_value
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set white balance for front light — sends FULL body (API requirement)."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        wb = round(value, 2)
+        cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        body = {
+            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+        }
+        body["frontLightSettings"] = {**body["frontLightSettings"], "whiteBalance": wb, "color": None}
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.coordinator.token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with asyncio.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
+                    headers=headers, json=body,
+                ) as resp:
+                    if resp.status in (200, 201, 204):
+                        self._wb_value = wb
+                        try:
+                            self.coordinator._lighting_switch_cache[self._cam_id] = await resp.json()
+                        except Exception:
+                            pass
+                        _LOGGER.debug("White balance set to %.2f for %s", wb, self._cam_id[:8])
+                    else:
+                        _LOGGER.warning("White balance HTTP %d for %s", resp.status, self._cam_id[:8])
+        except Exception as err:
+            _LOGGER.warning("White balance error for %s: %s", self._cam_id[:8], err)
+        self.async_write_ha_state()
+
+
+class _BoschLedBrightnessBase(_BoschGen2NumberBase):
+    """Base for Top/Bottom LED brightness (0-100%, Gen2 only)."""
+
+    _attr_icon                        = "mdi:brightness-6"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 100
+    _attr_native_step                 = 5
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "%"
+    _led_key: str = ""  # override in subclass
+
+    @property
+    def native_value(self) -> float | None:
+        cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        led = cached.get(self._led_key, {})
+        val = led.get("brightness")
+        if val is not None:
+            self._brightness = float(val)
+        return self._brightness
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._brightness: float | None = None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set brightness — sends FULL body with all 3 groups (API requirement)."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        brightness = int(round(value))
+        # Read current state from cache, update only our group
+        cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        body = {
+            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+        }
+        body[self._led_key] = {**body[self._led_key], "brightness": brightness}
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {
+            "Authorization": f"Bearer {self.coordinator.token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with asyncio.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
+                    headers=headers, json=body,
+                ) as resp:
+                    if resp.status in (200, 201, 204):
+                        self._brightness = float(brightness)
+                        try:
+                            self.coordinator._lighting_switch_cache[self._cam_id] = await resp.json()
+                        except Exception:
+                            pass
+                        _LOGGER.debug("%s brightness set to %d for %s", self._led_key, brightness, self._cam_id[:8])
+                    else:
+                        _LOGGER.warning("%s brightness HTTP %d for %s", self._led_key, resp.status, self._cam_id[:8])
+        except Exception as err:
+            _LOGGER.warning("%s brightness error for %s: %s", self._led_key, self._cam_id[:8], err)
+        self.async_write_ha_state()
+
+
+class BoschTopLedBrightnessNumber(_BoschLedBrightnessBase):
+    """Number entity: top LED brightness 0-100% (Gen2, oberes Licht)."""
+    _led_key = "topLedLightSettings"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Helligkeit Oberes Licht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_brightness"
+        self._attr_icon      = "mdi:arrow-up-bold"
+
+
+class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
+    """Number entity: bottom LED brightness 0-100% (Gen2, unteres Licht)."""
+    _led_key = "bottomLedLightSettings"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Helligkeit Unteres Licht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
+        self._attr_icon      = "mdi:arrow-down-bold"

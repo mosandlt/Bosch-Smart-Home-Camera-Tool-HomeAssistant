@@ -120,6 +120,12 @@ async def async_setup_entry(
             entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
         # Timestamp overlay — available for all cameras
         entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
+        # Status LED — Gen2 cameras only
+        from .models import get_model_config
+        if get_model_config(hw_version).generation >= 2:
+            entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschMotionLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
         # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm
         for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm"):
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
@@ -392,15 +398,20 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschWallwasherSwitch(_BoschSwitchBase):
-    """Switch: wallwasher (ambient wall light) on/off (independent of front light).
+    """Switch: top + bottom ambient lights on/off (independent of front light).
 
-    Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override
+    Gen1: Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override (wallwasherOn)
+    Gen2: Uses cloud API: PUT /v11/video_inputs/{id}/lighting/switch/topdown (enabled)
     Only registered for cameras with featureSupport.light = True.
     """
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Wallwasher"
+        from .models import get_model_config
+        hw = coordinator.data.get(cam_id, {}).get("info", {}).get("hardwareVersion", "CAMERA")
+        is_gen2 = get_model_config(hw).generation >= 2
+        label = "Oberes + Unteres Licht" if is_gen2 else "Wallwasher"
+        self._attr_name      = f"Bosch {self._cam_title} {label}"
         self._attr_unique_id = f"bosch_shc_wallwasher_{cam_id.lower()}"
         self._attr_icon      = "mdi:wall-sconce-flat"
 
@@ -875,6 +886,187 @@ class BoschTimestampSwitch(_BoschSwitchBase):
         )
         self.coordinator._timestamp_cache[self._cam_id] = False
         self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschStatusLedSwitch(_BoschSwitchBase):
+    """Switch: status LED on/off (Gen2 cameras only).
+
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/ledlights
+    Body: {"state": "ON"/"OFF"}
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Status LED"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ledlights"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._ledlights_cache.get(self._cam_id)
+
+    @property
+    def icon(self) -> str:
+        return "mdi:led-on" if self.is_on else "mdi:led-off"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._ledlights_cache.get(self._cam_id) is not None
+        )
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "ledlights", {"state": "ON"}
+        )
+        self.coordinator._ledlights_cache[self._cam_id] = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_put_camera(
+            self._cam_id, "ledlights", {"state": "OFF"}
+        )
+        self.coordinator._ledlights_cache[self._cam_id] = False
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschMotionLightSwitch(_BoschSwitchBase):
+    """Switch: motion-triggered lighting on/off (Gen2 only).
+
+    When ON, camera lights turn on automatically when motion is detected.
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/lighting/motion
+    Toggles lightOnMotionEnabled field, preserves all other settings.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Licht bei Bewegung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light"
+        self._attr_icon      = "mdi:motion-sensor"
+        self._is_on: bool | None = None
+
+    @property
+    def is_on(self) -> bool | None:
+        # Read from coordinator cache if local state not yet set
+        if self._is_on is None:
+            cache = self.coordinator._motion_light_cache.get(self._cam_id, {})
+            if cache:
+                self._is_on = cache.get("lightOnMotionEnabled", False)
+        return self._is_on
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def _set_motion_light(self, enabled: bool) -> None:
+        """Read current motion light config, toggle enabled, write back."""
+        # Read current config from cache or API
+        cache = self.coordinator._motion_light_cache.get(self._cam_id, {})
+        if not cache:
+            # Fetch fresh if cache empty
+            import aiohttp, asyncio
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            token = self.coordinator.token
+            if not token:
+                return
+            session = async_get_clientsession(self.hass, verify_ssl=False)
+            try:
+                async with asyncio.timeout(10):
+                    async with session.get(
+                        f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/motion",
+                        headers={"Authorization": f"Bearer {token}"},
+                    ) as resp:
+                        if resp.status == 200:
+                            cache = await resp.json()
+                        else:
+                            _LOGGER.warning("Motion light GET HTTP %d for %s", resp.status, self._cam_id[:8])
+                            return
+            except Exception as err:
+                _LOGGER.warning("Motion light GET error for %s: %s", self._cam_id[:8], err)
+                return
+        # Update the enabled flag and write back
+        data = dict(cache)
+        data["lightOnMotionEnabled"] = enabled
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "lighting/motion", data
+        )
+        if success:
+            self._is_on = enabled
+            self.coordinator._motion_light_cache[self._cam_id] = data
+            _LOGGER.info("Motion light %s for %s", "ON" if enabled else "OFF", self._cam_id[:8])
+        else:
+            _LOGGER.warning("Motion light PUT failed for %s", self._cam_id[:8])
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set_motion_light(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set_motion_light(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAmbientLightSwitch(_BoschSwitchBase):
+    """Switch: ambient/permanent lighting on/off (Gen2 only).
+
+    When ON, camera lights stay on according to schedule (dusk-to-dawn or manual times).
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/lighting/ambient
+    Toggles ambientLightEnabled field, preserves schedule and brightness settings.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Dauerlicht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ambient_light"
+        self._attr_icon      = "mdi:lightbulb-auto"
+        self._is_on: bool | None = None
+
+    @property
+    def is_on(self) -> bool | None:
+        if self._is_on is None:
+            cache = self.coordinator._ambient_light_cache.get(self._cam_id, {})
+            if cache:
+                self._is_on = cache.get("ambientLightEnabled", False)
+        return self._is_on
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    async def _set_ambient_light(self, enabled: bool) -> None:
+        import aiohttp
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        token = self.coordinator.token
+        if not token:
+            return
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/ambient"
+        import asyncio
+        try:
+            async with asyncio.timeout(10):
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        return
+                    data = await resp.json()
+            data["ambientLightEnabled"] = enabled
+            async with asyncio.timeout(10):
+                async with session.put(url, headers=headers, json=data) as resp:
+                    if resp.status in (200, 204):
+                        self._is_on = enabled
+        except Exception as err:
+            _LOGGER.warning("Ambient light error for %s: %s", self._cam_id[:8], err)
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set_ambient_light(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set_ambient_light(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

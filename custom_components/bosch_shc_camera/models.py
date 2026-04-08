@@ -8,9 +8,9 @@ Supported models (Gen1, firmware 7.91.56):
   - "360 Innenkamera"   (API: INDOOR / CAMERA_360)
   - "Eyes Außenkamera"   (API: OUTDOOR / CAMERA_EYES)
 
-Planned models (Gen2, not yet tested):
-  - "Eyes Außenkamera II"
-  - "Eyes Innenkamera II"
+Supported models (Gen2, firmware 9.40.25):
+  - "Eyes Außenkamera II"  (API: HOME_Eyes_Outdoor / CAMERA_OUTDOOR_GEN2)
+  - "Eyes Innenkamera II"  (API: HOME_Eyes_Indoor / CAMERA_INDOOR_GEN2)
 """
 
 from __future__ import annotations
@@ -108,6 +108,7 @@ MODELS["CAMERA_EYES"] = MODELS["OUTDOOR"]
 
 # ── Gen2: Eyes Außenkamera II ────────────────────────────────────────────
 # API hardwareVersion: "HOME_Eyes_Outdoor" (confirmed by user DrNiKa, FW 9.40.25)
+# App product type: "CAMERA_OUTDOOR_GEN2" (from Bosch product catalog)
 # Timing values are initial estimates — will be tuned once we have test hardware.
 MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     display_name="Eyes Außenkamera II",
@@ -123,6 +124,26 @@ MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     heartbeat_interval=10,
     snapshot_warmup=5,
 )
+MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
+
+# ── Gen2: Eyes Innenkamera II ────────────────────────────────────────────
+# API hardwareVersion: "HOME_Eyes_Indoor" (expected, not yet confirmed)
+# App product type: "CAMERA_INDOOR_GEN2" (expected)
+MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
+    display_name="Eyes Innenkamera II",
+    generation=2,
+    pre_warm_delay=1,
+    pre_warm_retries=3,
+    pre_warm_retry_wait=3,
+    post_warm_buffer=2,
+    describe_timeout=5,
+    min_total_wait=25,
+    renewal_interval=3500,
+    max_session_duration=3600,
+    heartbeat_interval=30,
+    snapshot_warmup=3,
+)
+MODELS["CAMERA_INDOOR_GEN2"] = MODELS["HOME_Eyes_Indoor"]
 
 
 # Default for unknown models

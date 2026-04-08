@@ -62,7 +62,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN     = "bosch_shc_camera"
 CLOUD_API  = "https://residential.cbs.boschsecurity.com"
 
-ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select", "update"]
+ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select", "update", "light"]
 
 # ConnectionType enum — confirmed working value: "REMOTE"
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
@@ -229,6 +229,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._token_fail_count: int = 0          # consecutive refresh failures
         # Timestamp overlay cache — keyed by cam_id, from GET /timestamp
         self._timestamp_cache: dict[str, bool | None] = {}
+        # Status LED cache — keyed by cam_id, from GET /ledlights (Gen2 only)
+        self._ledlights_cache: dict[str, bool | None] = {}
+        # Lens elevation cache — keyed by cam_id, from GET /lens_elevation (Gen2 only)
+        self._lens_elevation_cache: dict[str, float | None] = {}
+        # Audio settings cache — keyed by cam_id, from GET /audio (Gen2 only)
+        self._audio_cache: dict[str, dict] = {}
+        # Motion light cache — keyed by cam_id, from GET /lighting/motion (Gen2 only)
+        self._motion_light_cache: dict[str, dict] = {}
+        # Ambient light cache — keyed by cam_id, from GET /lighting/ambient (Gen2 only)
+        self._ambient_light_cache: dict[str, dict] = {}
+        # Lighting switch cache — keyed by cam_id, from GET /lighting/switch (Gen2 only)
+        self._lighting_switch_cache: dict[str, dict] = {}
         # Notification type toggles cache — keyed by cam_id, from GET /notifications
         self._notifications_cache: dict[str, dict] = {}
         # Rules cache — keyed by cam_id, from GET /rules
@@ -653,7 +665,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         ) as pr:
                             if pr.status == 200:
                                 ping_result = (await pr.text()).strip().strip('"')
-                                status = ping_result  # "ONLINE" or "OFFLINE"
+                                # Map firmware update statuses to UPDATING
+                                if ping_result.startswith("UPDATING"):
+                                    status = "UPDATING"
+                                else:
+                                    status = ping_result  # "ONLINE" or "OFFLINE"
                                 ping_ok = True
                             elif pr.status == 444:
                                 status = "OFFLINE"
@@ -681,7 +697,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                 self._per_cam_status_at[cam_id] = now
                 # Track offline duration for extended interval
-                if status == "OFFLINE":
+                if status in ("OFFLINE", "UPDATING"):
                     if cam_id not in self._offline_since:
                         self._offline_since[cam_id] = now
                 else:
@@ -877,12 +893,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     and (time.monotonic() - self._light_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
                 )
                 if light_on is not None and not light_locked:
-                    cache["camera_light"] = light_on
-                    cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
-                    cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
-                    intensity = feat_status.get("frontIlluminatorGeneralLightIntensity")
-                    if intensity is not None:
-                        cache["front_light_intensity"] = intensity
+                    # Gen2: Use lighting/switch cache for actual light state
+                    # (featureStatus reports config state, not physical on/off)
+                    from .models import get_model_config as _gmc_light
+                    _hw = cam_raw.get("hardwareVersion", "CAMERA")
+                    if _gmc_light(_hw).generation >= 2 and cam_id_key in self._lighting_switch_cache:
+                        lsc = self._lighting_switch_cache[cam_id_key]
+                        front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
+                        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                        cache["front_light"] = front_bri > 0
+                        cache["wallwasher"] = top_bri > 0 or bot_bri > 0
+                        cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
+                        cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+                    else:
+                        cache["camera_light"] = light_on
+                        cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
+                        cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
+                        intensity = feat_status.get("frontIlluminatorGeneralLightIntensity")
+                        if intensity is not None:
+                            cache["front_light_intensity"] = intensity
                 elif cache.get("camera_light") is None:
                     cache["camera_light"] = None
                 # Read notifications status from cloud API response.
@@ -958,6 +988,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     if has_light:
                         endpoints.append("lighting_options")
 
+                    # Gen2-only endpoints
+                    from .models import get_model_config as _gmc2
+                    if _gmc2(hw).generation >= 2:
+                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "lighting/switch"])
+
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
                         return_exceptions=True,
@@ -1005,6 +1040,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._cloud_privacy_masks_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
                         elif ep == "lighting_options":
                             self._lighting_options_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "ledlights":
+                            self._ledlights_cache[cam_id_key] = ep_data.get("state") == "ON" if isinstance(ep_data, dict) else None
+                        elif ep == "lens_elevation":
+                            self._lens_elevation_cache[cam_id_key] = ep_data.get("elevation") if isinstance(ep_data, dict) else None
+                        elif ep == "audio":
+                            self._audio_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "lighting/motion":
+                            self._motion_light_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            # Update MotionLightSwitch state
+                            for ent in self.hass.data.get("entity_platform", {}).get(f"{DOMAIN}.switch", []):
+                                pass  # State synced via switch._is_on in next update
+                        elif ep == "lighting/ambient":
+                            self._ambient_light_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "lighting/switch":
+                            self._lighting_switch_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.

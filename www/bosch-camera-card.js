@@ -235,6 +235,18 @@ class BoschCameraCard extends HTMLElement {
       wallwasher:    config.wallwasher_entity    || `switch.${base}_wallwasher`,
       frontLightIntensity: config.front_light_intensity_entity || `number.${base}_front_light_intensity`,
       siren:         config.siren_entity         || `button.${base}_siren`,
+      // Gen2-only entities
+      statusLed:     config.status_led_entity    || `switch.${base}_status_led`,
+      lensElevation: config.lens_elevation_entity || `number.${base}_lens_elevation`,
+      micLevel:      config.mic_level_entity     || `number.${base}_microphone_level`,
+      colorTemp:     config.color_temp_entity    || `number.${base}_color_temperature`,
+      motionLight:   config.motion_light_entity  || `switch.${base}_licht_bei_bewegung`,
+      ambientLight:  config.ambient_light_entity || `switch.${base}_dauerlicht`,
+      topLedLight:   config.top_led_light_entity || `light.${base}_oberes_licht`,
+      bottomLedLight: config.bottom_led_light_entity || `light.${base}_unteres_licht`,
+      frontLightEntity: config.front_light_color_entity || `light.${base}_frontlicht`,
+      topBrightness: config.top_brightness_entity || `number.${base}_helligkeit_oberes_licht`,
+      bottomBrightness: config.bottom_brightness_entity || `number.${base}_helligkeit_unteres_licht`,
     };
 
     this._showMotionZones = this._config.show_motion_zones;
@@ -793,7 +805,7 @@ class BoschCameraCard extends HTMLElement {
                     <path d="M9 18h6M10 22h4M12 2v1M4.22 4.22l.7.7M1 12h1M20.78 4.22l-.7.7M23 12h-1"/>
                     <path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/>
                   </svg>
-                  <span style="font-size:13px">Wallwasher</span>
+                  <span style="font-size:13px">Oben + Unten</span>
                 </div>
                 <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
               </div>
@@ -801,6 +813,69 @@ class BoschCameraCard extends HTMLElement {
                 <span style="white-space:nowrap">Helligkeit</span>
                 <input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px">
                 <span id="intensity-value" style="min-width:32px;text-align:right;color:#999">—</span>
+              </div>
+              <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:4px 4px;font-size:13px">
+                <span style="white-space:nowrap">Farbtemp.</span>
+                <input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)">
+                <span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span>
+              </div>
+            </div>
+            <!-- Gen2: Status LED, Microphone, Lens Elevation -->
+            <div class="sw-row" id="btn-status-led" style="display:none">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+                <span>Status-LED</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+            <div id="mic-level-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:13px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <span style="white-space:nowrap">Mikrofon</span>
+              <input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px">
+              <span id="mic-value" style="min-width:32px;text-align:right;color:#999">—</span>
+            </div>
+            <div id="lens-elev-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:13px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0">
+                <path d="M12 22V2M5 12l7-10 7 10"/><path d="M5 19h14"/>
+              </svg>
+              <span style="white-space:nowrap">Höhe</span>
+              <input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px">
+              <span id="lens-value" style="min-width:40px;text-align:right;color:#999">—</span>
+            </div>
+            <!-- Gen2: Motion Light + Ambient Light toggles -->
+            <div class="sw-row" id="btn-motion-light" style="display:none">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>
+                </svg>
+                <span>Licht bei Bewegung</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+            <div class="sw-row" id="btn-ambient-light" style="display:none">
+              <div class="sw-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+                <span>Dauerlicht</span>
+              </div>
+              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+            </div>
+            <!-- Gen2: RGB color circles for top/bottom LEDs -->
+            <div id="rgb-lights-row" style="display:none;padding:8px 12px;font-size:13px">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+                <span style="flex:1">Oberes Licht</span>
+                <div id="top-led-color" style="width:28px;height:28px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div>
+                <input type="color" id="top-led-picker" style="display:none">
+              </div>
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="flex:1">Unteres Licht</span>
+                <div id="bottom-led-color" style="width:28px;height:28px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div>
+                <input type="color" id="bottom-led-picker" style="display:none">
               </div>
             </div>
             <div class="sw-row privacy-row" id="btn-privacy">
@@ -1153,6 +1228,115 @@ class BoschCameraCard extends HTMLElement {
             entity_id: this._entities.frontLightIntensity,
             value: parseInt(intensitySlider.value),
           }).catch(err => console.warn("bosch-camera-card: intensity", err));
+        }, 200);
+      });
+    }
+
+    // Gen2: Status LED toggle
+    const statusLedBtn = this.shadowRoot.getElementById("btn-status-led");
+    if (statusLedBtn) statusLedBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.statusLed)
+    );
+
+    // Gen2: Motion Light toggle
+    const motionLightBtn = this.shadowRoot.getElementById("btn-motion-light");
+    if (motionLightBtn) motionLightBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.motionLight)
+    );
+
+    // Gen2: Ambient Light toggle
+    const ambientLightBtn = this.shadowRoot.getElementById("btn-ambient-light");
+    if (ambientLightBtn) ambientLightBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.ambientLight)
+    );
+
+    // Gen2: RGB color pickers for top/bottom LEDs
+    const topColorCircle = this.shadowRoot.getElementById("top-led-color");
+    const topPicker = this.shadowRoot.getElementById("top-led-picker");
+    if (topColorCircle && topPicker) {
+      topColorCircle.addEventListener("click", () => topPicker.click());
+      topPicker.addEventListener("change", () => {
+        if (!this._hass || !this._entities.topLedLight) return;
+        const hex = topPicker.value;
+        const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+        this._hass.callService("light", "turn_on", {
+          entity_id: this._entities.topLedLight, rgb_color: [r, g, b], brightness: 200
+        }).catch(e => console.warn("bosch-camera-card: top-led-color", e));
+        topColorCircle.style.background = hex;
+      });
+    }
+    const botColorCircle = this.shadowRoot.getElementById("bottom-led-color");
+    const botPicker = this.shadowRoot.getElementById("bottom-led-picker");
+    if (botColorCircle && botPicker) {
+      botColorCircle.addEventListener("click", () => botPicker.click());
+      botPicker.addEventListener("change", () => {
+        if (!this._hass || !this._entities.bottomLedLight) return;
+        const hex = botPicker.value;
+        const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+        this._hass.callService("light", "turn_on", {
+          entity_id: this._entities.bottomLedLight, rgb_color: [r, g, b], brightness: 200
+        }).catch(e => console.warn("bosch-camera-card: bottom-led-color", e));
+        botColorCircle.style.background = hex;
+      });
+    }
+
+    // Gen2: Color temperature slider
+    const ctSlider = this.shadowRoot.getElementById("colortemp-slider");
+    if (ctSlider) {
+      let ctDebounce = null;
+      ctSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("colortemp-value");
+        const val = parseInt(ctSlider.value);
+        if (v) v.textContent = val === 0 ? "neutral" : val < 0 ? "kalt" : "warm";
+      });
+      ctSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.colorTemp) return;
+        clearTimeout(ctDebounce);
+        ctDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.colorTemp,
+            value: parseFloat((parseInt(ctSlider.value) / 100).toFixed(2)),
+          }).catch(err => console.warn("bosch-camera-card: colortemp", err));
+        }, 200);
+      });
+    }
+
+    // Gen2: Microphone level slider
+    const micSlider = this.shadowRoot.getElementById("mic-slider");
+    if (micSlider) {
+      let micDebounce = null;
+      micSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("mic-value");
+        if (v) v.textContent = micSlider.value + "%";
+      });
+      micSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.micLevel) return;
+        clearTimeout(micDebounce);
+        micDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.micLevel,
+            value: parseInt(micSlider.value),
+          }).catch(err => console.warn("bosch-camera-card: mic-level", err));
+        }, 200);
+      });
+    }
+
+    // Gen2: Lens elevation slider
+    const lensSlider = this.shadowRoot.getElementById("lens-slider");
+    if (lensSlider) {
+      let lensDebounce = null;
+      lensSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("lens-value");
+        if (v) v.textContent = (parseInt(lensSlider.value) / 100).toFixed(2) + " m";
+      });
+      lensSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.lensElevation) return;
+        clearTimeout(lensDebounce);
+        lensDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.lensElevation,
+            value: parseFloat((parseInt(lensSlider.value) / 100).toFixed(2)),
+          }).catch(err => console.warn("bosch-camera-card: lens-elevation", err));
         }, 200);
       });
     }
@@ -2038,6 +2222,60 @@ class BoschCameraCard extends HTMLElement {
           intensityValue.textContent = Math.round(v) + "%";
         }
       }
+    }
+
+    // Gen2: Status LED, Motion Light, Ambient Light, Color pickers
+    this._updateToggleBtn("btn-status-led", ents.statusLed, hass.states[ents.statusLed]);
+    this._updateToggleBtn("btn-motion-light", ents.motionLight, hass.states[ents.motionLight]);
+    this._updateToggleBtn("btn-ambient-light", ents.ambientLight, hass.states[ents.ambientLight]);
+
+    // Gen2: RGB color circles — show current color
+    const rgbRow = this.shadowRoot.getElementById("rgb-lights-row");
+    const hasTopLed = ents.topLedLight && hass.states[ents.topLedLight];
+    const hasBotLed = ents.bottomLedLight && hass.states[ents.bottomLedLight];
+    if (rgbRow) rgbRow.style.display = (hasTopLed || hasBotLed) ? "" : "none";
+    const topCircle = this.shadowRoot.getElementById("top-led-color");
+    if (topCircle && hasTopLed) {
+      const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
+      topCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#333";
+    }
+    const botCircle = this.shadowRoot.getElementById("bottom-led-color");
+    if (botCircle && hasBotLed) {
+      const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
+      botCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#333";
+    }
+
+    const ctRow = this.shadowRoot.getElementById("colortemp-row");
+    const ctSliderEl = this.shadowRoot.getElementById("colortemp-slider");
+    const ctValue = this.shadowRoot.getElementById("colortemp-value");
+    const hasColorTemp = ents.colorTemp && hass.states[ents.colorTemp] && hass.states[ents.colorTemp].state !== "unavailable" && hass.states[ents.colorTemp].state !== "unknown";
+    if (ctRow) ctRow.style.display = hasColorTemp ? "flex" : "none";
+    if (hasColorTemp && ctSliderEl && ctValue && !ctSliderEl.matches(":active")) {
+      const wb = parseFloat(hass.states[ents.colorTemp]?.state) || 0;
+      ctSliderEl.value = Math.round(wb * 100);
+      ctValue.textContent = wb === 0 ? "neutral" : wb < 0 ? "kalt" : "warm";
+    }
+
+    const micRow = this.shadowRoot.getElementById("mic-level-row");
+    const micSliderEl = this.shadowRoot.getElementById("mic-slider");
+    const micValue = this.shadowRoot.getElementById("mic-value");
+    const hasMic = ents.micLevel && hass.states[ents.micLevel] && hass.states[ents.micLevel].state !== "unavailable";
+    if (micRow) micRow.style.display = hasMic ? "flex" : "none";
+    if (hasMic && micSliderEl && micValue && !micSliderEl.matches(":active")) {
+      const ml = parseFloat(hass.states[ents.micLevel]?.state) || 0;
+      micSliderEl.value = Math.round(ml);
+      micValue.textContent = Math.round(ml) + "%";
+    }
+
+    const lensRow = this.shadowRoot.getElementById("lens-elev-row");
+    const lensSliderEl = this.shadowRoot.getElementById("lens-slider");
+    const lensValue = this.shadowRoot.getElementById("lens-value");
+    const hasLens = ents.lensElevation && hass.states[ents.lensElevation] && hass.states[ents.lensElevation].state !== "unavailable";
+    if (lensRow) lensRow.style.display = hasLens ? "flex" : "none";
+    if (hasLens && lensSliderEl && lensValue && !lensSliderEl.matches(":active")) {
+      const el = parseFloat(hass.states[ents.lensElevation]?.state) || 2.0;
+      lensSliderEl.value = Math.round(el * 100);
+      lensValue.textContent = el.toFixed(2) + " m";
     }
 
     // Accordion: notification type toggles
