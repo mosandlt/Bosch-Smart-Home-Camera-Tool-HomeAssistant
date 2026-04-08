@@ -242,6 +242,10 @@ class BoschCameraCard extends HTMLElement {
       colorTemp:     config.color_temp_entity    || `number.${base}_color_temperature`,
       motionLight:   config.motion_light_entity  || `switch.${base}_licht_bei_bewegung`,
       ambientLight:  config.ambient_light_entity || `switch.${base}_dauerlicht`,
+      intrusionDetection: config.intrusion_entity || `switch.${base}_einbrucherkennung`,
+      motionSensitivity: config.motion_sensitivity_entity || `number.${base}_bewegungslicht_empfindlichkeit`,
+      // Automations (configurable per card — array of entity IDs)
+      automations: config.automations || [],
       topLedLight:   config.top_led_light_entity || `light.${base}_oberes_licht`,
       bottomLedLight: config.bottom_led_light_entity || `light.${base}_unteres_licht`,
       frontLightEntity: config.front_light_color_entity || `light.${base}_frontlicht`,
@@ -788,94 +792,18 @@ class BoschCameraCard extends HTMLElement {
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
-            <!-- Light sub-controls (front light, wallwasher, intensity) -->
+            <!-- Light sub-controls: toggles + expandable details -->
             <div class="light-sub-controls" id="light-sub-controls" style="display:none;padding:0 0 0 28px;border-left:2px solid rgba(255,204,0,.3);margin:0 0 0 16px">
-              <div class="sw-row" id="btn-front-light" style="padding:4px 4px">
-                <div class="sw-left">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/>
-                  </svg>
-                  <span style="font-size:13px">Frontlicht</span>
-                </div>
-                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-              </div>
-              <div class="sw-row" id="btn-wallwasher" style="padding:4px 4px">
-                <div class="sw-left">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                    <path d="M9 18h6M10 22h4M12 2v1M4.22 4.22l.7.7M1 12h1M20.78 4.22l-.7.7M23 12h-1"/>
-                    <path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/>
-                  </svg>
-                  <span style="font-size:13px">Oben + Unten</span>
-                </div>
-                <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-              </div>
-              <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:4px 4px;font-size:13px">
-                <span style="white-space:nowrap">Helligkeit</span>
-                <input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px">
-                <span id="intensity-value" style="min-width:32px;text-align:right;color:#999">—</span>
-              </div>
-              <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:4px 4px;font-size:13px">
-                <span style="white-space:nowrap">Farbtemp.</span>
-                <input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)">
-                <span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span>
-              </div>
-            </div>
-            <!-- Gen2: Status LED, Microphone, Lens Elevation -->
-            <div class="sw-row" id="btn-status-led" style="display:none">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                </svg>
-                <span>Status-LED</span>
-              </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
-            <div id="mic-level-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:13px">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0">
-                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
-              </svg>
-              <span style="white-space:nowrap">Mikrofon</span>
-              <input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px">
-              <span id="mic-value" style="min-width:32px;text-align:right;color:#999">—</span>
-            </div>
-            <div id="lens-elev-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:13px">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0">
-                <path d="M12 22V2M5 12l7-10 7 10"/><path d="M5 19h14"/>
-              </svg>
-              <span style="white-space:nowrap">Höhe</span>
-              <input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px">
-              <span id="lens-value" style="min-width:40px;text-align:right;color:#999">—</span>
-            </div>
-            <!-- Gen2: Motion Light + Ambient Light toggles -->
-            <div class="sw-row" id="btn-motion-light" style="display:none">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>
-                </svg>
-                <span>Licht bei Bewegung</span>
-              </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
-            <div class="sw-row" id="btn-ambient-light" style="display:none">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                </svg>
-                <span>Dauerlicht</span>
-              </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
-            <!-- Gen2: RGB color circles for top/bottom LEDs -->
-            <div id="rgb-lights-row" style="display:none;padding:8px 12px;font-size:13px">
-              <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
-                <span style="flex:1">Oberes Licht</span>
-                <div id="top-led-color" style="width:28px;height:28px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div>
-                <input type="color" id="top-led-picker" style="display:none">
-              </div>
-              <div style="display:flex;align-items:center;gap:12px">
-                <span style="flex:1">Unteres Licht</span>
-                <div id="bottom-led-color" style="width:28px;height:28px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div>
-                <input type="color" id="bottom-led-picker" style="display:none">
+              <div class="sw-row" id="btn-front-light" style="padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg><span style="font-size:13px">Frontlicht</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-top-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 2v8l6-4M12 2v8l-6-4"/></svg><span style="font-size:13px">Oberes Licht</span></div><div id="top-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-bottom-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 22v-8l6 4M12 22v-8l-6 4"/></svg><span style="font-size:13px">Unteres Licht</span></div><div id="bottom-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-wallwasher" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M9 18h6M10 22h4M12 2v1"/><path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/></svg><span style="font-size:13px">Oben + Unten</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div id="light-details-toggle" style="padding:4px;cursor:pointer;display:flex;align-items:center;gap:6px;color:#888;font-size:12px;user-select:none"><svg id="light-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg><span>Helligkeit & Farben</span></div>
+              <div id="light-details-body" style="display:none">
+                <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Front</span><input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px"><span id="intensity-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="top-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Oben</span><input type="range" id="top-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#4DFF7D;height:4px"><span id="top-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="bottom-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Unten</span><input type="range" id="bottom-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#FF453A;height:4px"><span id="bottom-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Farbt.</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
             <div class="sw-row privacy-row" id="btn-privacy">
@@ -1062,7 +990,56 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <!-- Accordion: Diagnostics -->
+          <!-- Gen2 Accordion: Automatik & Sicherheit -->
+          <div class="accordion" id="acc-gen2-auto" style="display:none">
+            <div class="accordion-header" id="acc-gen2-auto-header">
+              <span class="accordion-title">Automatik & Sicherheit</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div class="sw-row" id="btn-motion-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>Licht bei Bewegung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-ambient-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><span>Dauerlicht</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-intrusion" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Einbrucherkennung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="motion-sens-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Empfindlichkeit</span><input type="range" id="motion-sens-slider" min="1" max="5" step="1" style="flex:1;accent-color:#ff9500;height:4px"><span id="motion-sens-value" style="min-width:16px;text-align:right;color:#999">—</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Automations Accordion (alle Kameras, konfigurierbar) -->
+          <div class="accordion" id="acc-automations" style="display:none">
+            <div class="accordion-header" id="acc-automations-header">
+              <span class="accordion-title">Automationen</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div id="automations-container"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gen2 Accordion: Licht & Kamera -->
+          <div class="accordion" id="acc-gen2-light" style="display:none">
+            <div class="accordion-header" id="acc-gen2-light-header">
+              <span class="accordion-title">Licht & Kamera</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="accordion-body">
+              <div class="accordion-content">
+                <div id="colortemp-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Farbtemperatur</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span></div>
+                <div id="rgb-lights-row" style="padding:4px 0;font-size:13px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="flex:1">Farbe Oben</span><div id="top-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div><input type="color" id="top-led-picker" style="display:none"></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="flex:1">Farbe Unten</span><div id="bottom-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div><input type="color" id="bottom-led-picker" style="display:none"></div>
+                </div>
+                <div class="sw-row" id="btn-status-led" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>Status-LED</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="mic-level-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg><span style="white-space:nowrap">Mikrofon</span><input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px"><span id="mic-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="lens-elev-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 22V2M5 12l7-10 7 10"/></svg><span style="white-space:nowrap">Höhe</span><input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px"><span id="lens-value" style="min-width:36px;text-align:right;color:#999">—</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accordion: Diagnostics & Services -->
           <div class="accordion" id="acc-diagnostics">
             <div class="accordion-header" id="acc-diagnostics-header">
               <span class="accordion-title">Diagnose</span>
@@ -1213,6 +1190,58 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () =>
       this._toggleSwitch(this._entities.wallwasher)
     );
+    // Light details toggle (Helligkeit & Farben expandable)
+    const lightDetailsToggle = this.shadowRoot.getElementById("light-details-toggle");
+    if (lightDetailsToggle) {
+      lightDetailsToggle.addEventListener("click", () => {
+        const body = this.shadowRoot.getElementById("light-details-body");
+        const chevron = this.shadowRoot.getElementById("light-details-chevron");
+        if (body) {
+          const open = body.style.display !== "none";
+          body.style.display = open ? "none" : "";
+          if (chevron) chevron.style.transform = open ? "" : "rotate(180deg)";
+        }
+      });
+    }
+
+    // Gen2: Top/Bottom brightness sliders
+    const topBriSlider = this.shadowRoot.getElementById("top-bri-slider");
+    if (topBriSlider) {
+      topBriSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("top-bri-value");
+        if (v) v.textContent = topBriSlider.value + "%";
+      });
+      topBriSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.topBrightness) return;
+        this._hass.callService("number", "set_value", {
+          entity_id: this._entities.topBrightness, value: parseInt(topBriSlider.value),
+        }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+      });
+    }
+    const botBriSlider = this.shadowRoot.getElementById("bottom-bri-slider");
+    if (botBriSlider) {
+      botBriSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("bottom-bri-value");
+        if (v) v.textContent = botBriSlider.value + "%";
+      });
+      botBriSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.bottomBrightness) return;
+        this._hass.callService("number", "set_value", {
+          entity_id: this._entities.bottomBrightness, value: parseInt(botBriSlider.value),
+        }).catch(e => console.warn("bosch-camera-card: bottom-bri", e));
+      });
+    }
+    // Gen2: separate top/bottom LED toggles via light.turn_on/turn_off
+    this.shadowRoot.getElementById("btn-top-led")?.querySelector(".sw-toggle")?.addEventListener("click", () => {
+      if (!this._hass || !this._entities.topLedLight) return;
+      const st = this._hass.states[this._entities.topLedLight]?.state;
+      this._callService("light", st === "on" ? "turn_off" : "turn_on", {entity_id: this._entities.topLedLight});
+    });
+    this.shadowRoot.getElementById("btn-bottom-led")?.querySelector(".sw-toggle")?.addEventListener("click", () => {
+      if (!this._hass || !this._entities.bottomLedLight) return;
+      const st = this._hass.states[this._entities.bottomLedLight]?.state;
+      this._callService("light", st === "on" ? "turn_off" : "turn_on", {entity_id: this._entities.bottomLedLight});
+    });
     const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
     if (intensitySlider) {
       let debounce = null;
@@ -1237,6 +1266,47 @@ class BoschCameraCard extends HTMLElement {
     if (statusLedBtn) statusLedBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
       this._toggleSwitch(this._entities.statusLed)
     );
+
+    // Gen2: Intrusion Detection toggle
+    const intrusionBtn = this.shadowRoot.getElementById("btn-intrusion");
+    if (intrusionBtn) intrusionBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.intrusionDetection)
+    );
+
+    // Automation toggles — dynamically generated from config.automations array
+    const autoContainer = this.shadowRoot.getElementById("automations-container");
+    if (autoContainer && this._entities.automations?.length) {
+      autoContainer.innerHTML = '<div style="border-top:1px solid rgba(255,255,255,.1);margin:6px 0 2px;padding-top:4px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px">Automationen</div>';
+      this._entities.automations.forEach((eid, i) => {
+        const row = document.createElement("div");
+        row.className = "sw-row";
+        row.id = `btn-auto-${i}`;
+        row.style.padding = "4px 0";
+        row.innerHTML = `<div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg><span class="auto-label">${eid.split(".").pop().replace(/_/g, " ")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>`;
+        row.querySelector(".sw-toggle").addEventListener("click", () => {
+          if (!this._hass) return;
+          const st = this._hass.states[eid]?.state;
+          this._callService("automation", st === "on" ? "turn_off" : "turn_on", {entity_id: eid});
+        });
+        autoContainer.appendChild(row);
+      });
+    }
+
+    // Gen2: Motion Light Sensitivity slider
+    const motSensSlider = this.shadowRoot.getElementById("motion-sens-slider");
+    if (motSensSlider) {
+      motSensSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("motion-sens-value");
+        if (v) v.textContent = motSensSlider.value;
+      });
+      motSensSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.motionSensitivity) return;
+        this._hass.callService("number", "set_value", {
+          entity_id: this._entities.motionSensitivity,
+          value: parseInt(motSensSlider.value),
+        }).catch(err => console.warn("bosch-camera-card: motion-sensitivity", err));
+      });
+    }
 
     // Gen2: Motion Light toggle
     const motionLightBtn = this.shadowRoot.getElementById("btn-motion-light");
@@ -1369,7 +1439,7 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Accordion toggle handlers
-    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules", "acc-services"].forEach(id => {
+    ["acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules", "acc-services", "acc-gen2-auto", "acc-gen2-light", "acc-automations"].forEach(id => {
       this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
         const acc = this.shadowRoot.getElementById(id);
         if (acc) acc.classList.toggle("open");
@@ -2224,15 +2294,96 @@ class BoschCameraCard extends HTMLElement {
       }
     }
 
-    // Gen2: Status LED, Motion Light, Ambient Light, Color pickers
+    // Gen2: Accordion visibility + toggle updates
+    const hasGen2 = ents.statusLed && hass.states[ents.statusLed];
+    const hasAutomations = ents.automations?.length > 0;
+    const accAuto = this.shadowRoot.getElementById("acc-gen2-auto");
+    const accLight = this.shadowRoot.getElementById("acc-gen2-light");
+    const accAutomations = this.shadowRoot.getElementById("acc-automations");
+    if (accAuto) accAuto.style.display = hasGen2 ? "" : "none";
+    if (accLight) accLight.style.display = hasGen2 ? "" : "none";
+    if (accAutomations) accAutomations.style.display = hasAutomations ? "" : "none";
+
     this._updateToggleBtn("btn-status-led", ents.statusLed, hass.states[ents.statusLed]);
     this._updateToggleBtn("btn-motion-light", ents.motionLight, hass.states[ents.motionLight]);
     this._updateToggleBtn("btn-ambient-light", ents.ambientLight, hass.states[ents.ambientLight]);
+    this._updateToggleBtn("btn-intrusion", ents.intrusionDetection, hass.states[ents.intrusionDetection]);
 
-    // Gen2: RGB color circles — show current color
-    const rgbRow = this.shadowRoot.getElementById("rgb-lights-row");
+    // Automation toggles — update state + name from HA
+    if (ents.automations?.length) {
+      ents.automations.forEach((eid, i) => {
+        const btn = this.shadowRoot.getElementById(`btn-auto-${i}`);
+        if (!btn) return;
+        const state = hass.states[eid];
+        if (!state) { btn.style.display = "none"; return; }
+        btn.style.display = "";
+        btn.classList.toggle("on", state.state === "on");
+        const label = btn.querySelector(".auto-label");
+        if (label) label.textContent = state.attributes?.friendly_name || eid.split(".").pop().replace(/_/g, " ");
+      });
+    }
+
+    const motSensRow = this.shadowRoot.getElementById("motion-sens-row");
+    const motSensEl = this.shadowRoot.getElementById("motion-sens-slider");
+    const motSensVal = this.shadowRoot.getElementById("motion-sens-value");
+    const hasMotSens = ents.motionSensitivity && hass.states[ents.motionSensitivity] && hass.states[ents.motionSensitivity].state !== "unavailable";
+    if (motSensRow) motSensRow.style.display = hasMotSens ? "flex" : "none";
+    if (hasMotSens && motSensEl && motSensVal && !motSensEl.matches(":active")) {
+      const sv = parseFloat(hass.states[ents.motionSensitivity]?.state) || 3;
+      motSensEl.value = Math.round(sv);
+      motSensVal.textContent = Math.round(sv);
+    }
+
+    // Gen2: Top/Bottom brightness sliders sync
+    const topBriRow = this.shadowRoot.getElementById("top-bri-row");
+    const topBriEl = this.shadowRoot.getElementById("top-bri-slider");
+    const topBriVal = this.shadowRoot.getElementById("top-bri-value");
+    const hasTopBri = ents.topBrightness && hass.states[ents.topBrightness] && hass.states[ents.topBrightness].state !== "unavailable" && hass.states[ents.topBrightness].state !== "unknown";
+    if (topBriRow) topBriRow.style.display = hasTopBri ? "flex" : "none";
+    if (hasTopBri && topBriEl && topBriVal && !topBriEl.matches(":active")) {
+      const v = parseFloat(hass.states[ents.topBrightness]?.state) || 0;
+      topBriEl.value = Math.round(v);
+      topBriVal.textContent = Math.round(v) + "%";
+    }
+    const botBriRow = this.shadowRoot.getElementById("bottom-bri-row");
+    const botBriEl = this.shadowRoot.getElementById("bottom-bri-slider");
+    const botBriVal = this.shadowRoot.getElementById("bottom-bri-value");
+    const hasBotBri = ents.bottomBrightness && hass.states[ents.bottomBrightness] && hass.states[ents.bottomBrightness].state !== "unavailable" && hass.states[ents.bottomBrightness].state !== "unknown";
+    if (botBriRow) botBriRow.style.display = hasBotBri ? "flex" : "none";
+    if (hasBotBri && botBriEl && botBriVal && !botBriEl.matches(":active")) {
+      const v = parseFloat(hass.states[ents.bottomBrightness]?.state) || 0;
+      botBriEl.value = Math.round(v);
+      botBriVal.textContent = Math.round(v) + "%";
+    }
+
+    // Gen2: Top/Bottom LED toggles + color dots
     const hasTopLed = ents.topLedLight && hass.states[ents.topLedLight];
     const hasBotLed = ents.bottomLedLight && hass.states[ents.bottomLedLight];
+    const topLedBtn = this.shadowRoot.getElementById("btn-top-led");
+    const botLedBtn = this.shadowRoot.getElementById("btn-bottom-led");
+    if (topLedBtn) {
+      topLedBtn.style.display = hasTopLed ? "" : "none";
+      if (hasTopLed) {
+        const isOn = hass.states[ents.topLedLight]?.state === "on";
+        topLedBtn.classList.toggle("on", isOn);
+        const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
+        const dot = this.shadowRoot.getElementById("top-led-color-mini");
+        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#555";
+      }
+    }
+    if (botLedBtn) {
+      botLedBtn.style.display = hasBotLed ? "" : "none";
+      if (hasBotLed) {
+        const isOn = hass.states[ents.bottomLedLight]?.state === "on";
+        botLedBtn.classList.toggle("on", isOn);
+        const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
+        const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
+        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#555";
+      }
+    }
+
+    // Gen2: RGB color circles (picker row)
+    const rgbRow = this.shadowRoot.getElementById("rgb-lights-row");
     if (rgbRow) rgbRow.style.display = (hasTopLed || hasBotLed) ? "" : "none";
     const topCircle = this.shadowRoot.getElementById("top-led-color");
     if (topCircle && hasTopLed) {

@@ -126,6 +126,7 @@ async def async_setup_entry(
             entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschMotionLightSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry))
         # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm
         for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm"):
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
@@ -1028,7 +1029,7 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
     @property
     def is_on(self) -> bool | None:
         if self._is_on is None:
-            cache = self.coordinator._ambient_light_cache.get(self._cam_id, {})
+            cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
             if cache:
                 self._is_on = cache.get("ambientLightEnabled", False)
         return self._is_on
@@ -1067,6 +1068,78 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs):
         await self._set_ambient_light(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
+    """Switch: intrusion detection on/off (Gen2 only).
+
+    DualRadar 180° 3D motion detection with person recognition.
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/intrusionDetectionConfig
+    Toggles enabled field, preserves sensitivity/detectionMode/distance.
+    Extra attributes: sensitivity (1-5), detectionMode, distance (meters).
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Einbrucherkennung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_detection"
+        self._attr_icon      = "mdi:shield-home"
+        self._config: dict = {}
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._config.get("enabled")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and bool(self._config)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "sensitivity": self._config.get("sensitivity"),
+            "detection_mode": self._config.get("detectionMode"),
+            "distance_meters": self._config.get("distance"),
+        }
+
+    async def _set_intrusion(self, enabled: bool) -> None:
+        # Read current config
+        if not self._config:
+            import aiohttp, asyncio
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            token = self.coordinator.token
+            if not token:
+                return
+            session = async_get_clientsession(self.hass, verify_ssl=False)
+            try:
+                async with asyncio.timeout(10):
+                    async with session.get(
+                        f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/intrusionDetectionConfig",
+                        headers={"Authorization": f"Bearer {token}"},
+                    ) as resp:
+                        if resp.status == 200:
+                            self._config = await resp.json()
+                        else:
+                            return
+            except Exception as err:
+                _LOGGER.warning("Intrusion GET error for %s: %s", self._cam_id[:8], err)
+                return
+
+        data = dict(self._config)
+        data["enabled"] = enabled
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "intrusionDetectionConfig", data
+        )
+        if success:
+            self._config = data
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set_intrusion(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set_intrusion(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

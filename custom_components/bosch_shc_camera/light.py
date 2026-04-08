@@ -74,9 +74,13 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
 
         # Local state cache
         self._brightness: int = 0
+        self._last_brightness: int = 100  # remember last non-zero brightness for restore on turn_on
         self._color_hex: str | None = None
+        self._last_color_hex: str | None = None  # remember last color for restore
         self._white_balance: float | None = None
+        self._last_white_balance: float | None = 0.0
         self._is_on: bool = False
+        self._state_loaded: bool = False  # True after first load from cache
 
     @property
     def device_info(self) -> dict:
@@ -91,16 +95,43 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
 
     @property
     def is_on(self) -> bool:
+        self._load_state_from_cache()
         return self._is_on
 
     @property
     def brightness(self) -> int | None:
         """HA brightness is 0-255, API brightness is 0-100."""
+        self._load_state_from_cache()
         return int(self._brightness * 255 / 100) if self._brightness else 0
 
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success
+
+    def _load_state_from_cache(self) -> None:
+        """Load initial state from coordinator lighting/switch cache."""
+        if self._state_loaded:
+            return
+        lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        if not lsc:
+            return
+        led = lsc.get(self._led_key, {})
+        bri = led.get("brightness", 0)
+        color = led.get("color")
+        wb = led.get("whiteBalance")
+        self._brightness = bri
+        self._is_on = bri > 0
+        if bri > 0:
+            self._last_brightness = bri
+        if color:
+            self._color_hex = color
+            self._last_color_hex = color
+            self._white_balance = None
+        elif wb is not None:
+            self._white_balance = wb
+            self._last_white_balance = wb
+            self._color_hex = None
+        self._state_loaded = True
 
     def _get_current_state(self) -> dict:
         """Get the current lighting/switch state from coordinator cache."""
@@ -175,15 +206,72 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschTopLedLight(_BoschLightBase):
-    """Light entity: Top LED (oberes Licht) — RGB color + brightness.
+class _BoschRgbLedLight(_BoschLightBase):
+    """Base for Top/Bottom LED light — RGB color + brightness.
 
-    Supports thousands of colors via HEX #RRGGBB.
+    Remembers last brightness and color for restore on turn_on.
     """
 
-    _led_key = "topLedLightSettings"
+    _led_key = ""
     _attr_color_mode = ColorMode.RGB
     _attr_supported_color_modes = {ColorMode.RGB}
+
+    @property
+    def rgb_color(self) -> tuple[int, int, int] | None:
+        self._load_state_from_cache()
+        color = self._color_hex or self._last_color_hex
+        if color:
+            h = color.lstrip("#")
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        return None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._load_state_from_cache()
+        brightness = kwargs.get(ATTR_BRIGHTNESS)
+        rgb = kwargs.get(ATTR_RGB_COLOR)
+
+        # Restore last brightness if not specified
+        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
+
+        if rgb:
+            color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+            self._color_hex = color_hex
+            self._last_color_hex = color_hex
+            self._white_balance = None
+        else:
+            # Restore last color
+            color_hex = self._color_hex or self._last_color_hex
+
+        if color_hex:
+            body = {self._led_key: {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}}
+        else:
+            body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": 0.0}}
+
+        self._brightness = api_brightness
+        self._last_brightness = api_brightness
+        self._is_on = True
+
+        if await self._put_lighting_switch(body):
+            await self._put_switch_endpoint("topdown", True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        # Remember current settings before turning off
+        if self._brightness > 0:
+            self._last_brightness = self._brightness
+        if self._color_hex:
+            self._last_color_hex = self._color_hex
+        body = {self._led_key: {"brightness": 0}}
+        self._is_on = False
+        self._brightness = 0
+        await self._put_lighting_switch(body)
+        self.async_write_ha_state()
+
+
+class BoschTopLedLight(_BoschRgbLedLight):
+    """Light entity: Top LED (oberes Licht) — RGB color + brightness."""
+
+    _led_key = "topLedLightSettings"
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
@@ -191,102 +279,18 @@ class BoschTopLedLight(_BoschLightBase):
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_light"
         self._attr_icon = "mdi:arrow-up-bold-circle"
 
-    @property
-    def rgb_color(self) -> tuple[int, int, int] | None:
-        if self._color_hex:
-            h = self._color_hex.lstrip("#")
-            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-        return None
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        body = {}
-        brightness = kwargs.get(ATTR_BRIGHTNESS)
-        rgb = kwargs.get(ATTR_RGB_COLOR)
-
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._brightness or 100)
-
-        if rgb:
-            color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
-            body[self._led_key] = {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}
-            self._color_hex = color_hex
-            self._white_balance = None
-        else:
-            # Keep current color or default to white
-            if self._color_hex:
-                body[self._led_key] = {"brightness": api_brightness, "color": self._color_hex, "whiteBalance": None}
-            else:
-                body[self._led_key] = {"brightness": api_brightness, "color": None, "whiteBalance": 0.0}
-
-        self._brightness = api_brightness
-        self._is_on = True
-
-        if await self._put_lighting_switch(body):
-            await self._put_switch_endpoint("topdown", True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        body = {self._led_key: {"brightness": 0}}
-        self._is_on = False
-        self._brightness = 0
-        await self._put_lighting_switch(body)
-        self.async_write_ha_state()
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschBottomLedLight(_BoschLightBase):
-    """Light entity: Bottom LED (unteres Licht) — RGB color + brightness.
-
-    Supports thousands of colors via HEX #RRGGBB.
-    """
+class BoschBottomLedLight(_BoschRgbLedLight):
+    """Light entity: Bottom LED (unteres Licht) — RGB color + brightness."""
 
     _led_key = "bottomLedLightSettings"
-    _attr_color_mode = ColorMode.RGB
-    _attr_supported_color_modes = {ColorMode.RGB}
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_name = f"Bosch {self._cam_title} Unteres Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_light"
         self._attr_icon = "mdi:arrow-down-bold-circle"
-
-    @property
-    def rgb_color(self) -> tuple[int, int, int] | None:
-        if self._color_hex:
-            h = self._color_hex.lstrip("#")
-            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-        return None
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        body = {}
-        brightness = kwargs.get(ATTR_BRIGHTNESS)
-        rgb = kwargs.get(ATTR_RGB_COLOR)
-
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._brightness or 100)
-
-        if rgb:
-            color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
-            body[self._led_key] = {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}
-            self._color_hex = color_hex
-            self._white_balance = None
-        else:
-            if self._color_hex:
-                body[self._led_key] = {"brightness": api_brightness, "color": self._color_hex, "whiteBalance": None}
-            else:
-                body[self._led_key] = {"brightness": api_brightness, "color": None, "whiteBalance": 0.0}
-
-        self._brightness = api_brightness
-        self._is_on = True
-
-        if await self._put_lighting_switch(body):
-            await self._put_switch_endpoint("topdown", True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        body = {self._led_key: {"brightness": 0}}
-        self._is_on = False
-        self._brightness = 0
-        await self._put_lighting_switch(body)
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

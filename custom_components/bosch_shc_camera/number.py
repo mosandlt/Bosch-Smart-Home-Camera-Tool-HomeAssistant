@@ -53,6 +53,7 @@ async def async_setup_entry(
             entities.append(BoschWhiteBalanceNumber(coordinator, cam_id, config_entry))
             entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
             entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -600,3 +601,48 @@ class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
         self._attr_name      = f"Bosch {self._cam_title} Helligkeit Unteres Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
         self._attr_icon      = "mdi:arrow-down-bold"
+
+
+class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
+    """Number entity: motion-triggered light sensitivity 1-5 (Gen2 only).
+
+    Reads from GET /v11/video_inputs/{id}/lighting/motion → motionLightSensitivity
+    Writes via PUT /v11/video_inputs/{id}/lighting/motion with full body.
+    1 = low sensitivity, 5 = high sensitivity.
+    """
+
+    _attr_icon                        = "mdi:motion-sensor"
+    _attr_native_min_value            = 1
+    _attr_native_max_value            = 5
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Bewegungslicht Empfindlichkeit"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light_sensitivity"
+
+    @property
+    def native_value(self) -> float | None:
+        cache = self.coordinator._motion_light_cache.get(self._cam_id, {})
+        val = cache.get("motionLightSensitivity")
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._motion_light_cache.get(self._cam_id))
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        cache = dict(self.coordinator._motion_light_cache.get(self._cam_id, {}))
+        if not cache:
+            return
+        cache["motionLightSensitivity"] = int(round(value))
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "lighting/motion", cache
+        )
+        if success:
+            self.coordinator._motion_light_cache[self._cam_id] = cache
+        self.async_write_ha_state()

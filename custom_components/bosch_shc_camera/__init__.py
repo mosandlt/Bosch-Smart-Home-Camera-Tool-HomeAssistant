@@ -237,8 +237,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._audio_cache: dict[str, dict] = {}
         # Motion light cache — keyed by cam_id, from GET /lighting/motion (Gen2 only)
         self._motion_light_cache: dict[str, dict] = {}
-        # Ambient light cache — keyed by cam_id, from GET /lighting/ambient (Gen2 only)
-        self._ambient_light_cache: dict[str, dict] = {}
+        # Ambient lighting config cache — keyed by cam_id, from GET /lighting/ambient (Gen2 only)
+        self._ambient_lighting_cache: dict[str, dict] = {}
         # Lighting switch cache — keyed by cam_id, from GET /lighting/switch (Gen2 only)
         self._lighting_switch_cache: dict[str, dict] = {}
         # Notification type toggles cache — keyed by cam_id, from GET /notifications
@@ -897,15 +897,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # (featureStatus reports config state, not physical on/off)
                     from .models import get_model_config as _gmc_light
                     _hw = cam_raw.get("hardwareVersion", "CAMERA")
-                    if _gmc_light(_hw).generation >= 2 and cam_id_key in self._lighting_switch_cache:
-                        lsc = self._lighting_switch_cache[cam_id_key]
-                        front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
-                        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-                        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-                        cache["front_light"] = front_bri > 0
-                        cache["wallwasher"] = top_bri > 0 or bot_bri > 0
-                        cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
-                        cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+                    if _gmc_light(_hw).generation >= 2:
+                        # Gen2: Only update light state from lighting/switch cache
+                        # Do NOT use featureStatus (reports config, not physical state)
+                        # If cache not yet populated, keep current state (don't overwrite)
+                        lsc = self._lighting_switch_cache.get(cam_id_key)
+                        if lsc:
+                            front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
+                            top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                            bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                            cache["front_light"] = front_bri > 0
+                            cache["wallwasher"] = top_bri > 0 or bot_bri > 0
+                            cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
+                            cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+                        # else: keep current cache values, don't overwrite from featureStatus
                     else:
                         cache["camera_light"] = light_on
                         cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
@@ -1052,7 +1057,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             for ent in self.hass.data.get("entity_platform", {}).get(f"{DOMAIN}.switch", []):
                                 pass  # State synced via switch._is_on in next update
                         elif ep == "lighting/ambient":
-                            self._ambient_light_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._ambient_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "lighting/switch":
                             self._lighting_switch_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
 
