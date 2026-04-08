@@ -469,14 +469,12 @@ async def async_cloud_set_light_component(
         wall = value
     elif component == "intensity":
         intensity = value
-        front = True  # turning intensity on implies front light on
 
     body = {
         "frontLightOn": front,
         "wallwasherOn": wall,
+        "frontLightIntensity": intensity,
     }
-    if front:
-        body["frontLightIntensity"] = intensity
 
     session = async_get_clientsession(coordinator.hass, verify_ssl=False)
     headers = {
