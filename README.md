@@ -210,6 +210,19 @@ title: Garten
 | **TLS Certificate** (RCP 0x0b91) | `sensor` | diagnostic — camera cert expiry date, issuer, key size |
 | **Network Services** (RCP 0x0c62) | `sensor` | diagnostic — active services (HTTP, HTTPS, RTSP, SNMP, UPnP, NTP, ONVIF) |
 | **IVA Analytics** (RCP 0x0b60) | `sensor` | diagnostic — analytics module inventory (detectors, versions, active state) |
+| Front light with color temperature | `light` | Gen2 only |
+| Top LED light with RGB color picker | `light` | Gen2 only |
+| Bottom LED light with RGB color picker | `light` | Gen2 only |
+| Status LED on/off | `switch` | Gen2 only |
+| Motion-triggered lighting on/off | `switch` | Gen2 only |
+| Ambient/permanent lighting on/off | `switch` | Gen2 only |
+| DualRadar intrusion detection on/off | `switch` | Gen2 only |
+| Mounting height (meters) | `number` | Gen2 only |
+| Microphone recording level (0–100%) | `number` | Gen2 only |
+| Front light color temperature | `number` | Gen2 only |
+| Top LED brightness (0–100%) | `number` | Gen2 only |
+| Bottom LED brightness (0–100%) | `number` | Gen2 only |
+| Motion light sensitivity (1–5) | `number` | Gen2 only |
 
 > **RCP diagnostic sensors** are disabled by default. Enable them in entity settings to inspect camera firmware capabilities. Gen2 cameras will automatically expose new alarm types and analytics modules.
 
@@ -433,7 +446,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v2.5.0** — includes Services accordion
+> **Card version: v9.0.1** — includes Services accordion
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
