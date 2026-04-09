@@ -17,7 +17,13 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.7.0
+ * Version: 2.8.0
+ *
+ * Changes vs 2.7.0:
+ *   - Gen2 polygon zone overlay: renders polygon zones (from GET /zones) on camera image
+ *   - Privacy mask overlay: separate toggle + black polygon/rect overlay for privacy masks
+ *   - Updated diagnostics to show Gen2 zones + privacy masks from separate sensor
+ *   - Ambient light schedule sensor support in diagnostics
  *
  * Changes vs 2.6.0:
  *   - Separate light controls: Front Light, Wallwasher toggle + Intensity slider
@@ -155,6 +161,7 @@ class BoschCameraCard extends HTMLElement {
     this._connectSteps     = null;   // setTimeout IDs for progressive overlay text
     this._waitingForStream = false;  // true while waiting for backend stream ready
     this._lastMotionCoordKey = null; // memoization key for motion zone SVG
+    this._lastPrivacyMaskKey = null; // memoization key for privacy mask SVG
     this._lastPrivacy    = null;    // last known privacy state (true/false/null)
     this._imageLoaded    = false;   // did we ever successfully load an image?
     this._loadingOverlay = false;   // is the "Wird geladen" overlay active?
@@ -174,6 +181,7 @@ class BoschCameraCard extends HTMLElement {
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
     this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
     this._showMotionZones   = false; // runtime toggle for motion zone overlay
+    this._showPrivacyMasks  = false; // runtime toggle for privacy mask overlay
     this._lastRulesKey      = null;  // memoization key for rules list HTML
   }
 
@@ -230,6 +238,8 @@ class BoschCameraCard extends HTMLElement {
       movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
+      privacyMasks:  config.privacy_masks_entity  || `sensor.${base}_privacy_masks`,
+      ambientSchedule: config.ambient_schedule_entity || `sensor.${base}_dauerlicht_zeitplan`,
       scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
       frontLight:    config.front_light_entity   || `switch.${base}_front_light`,
       wallwasher:    config.wallwasher_entity    || `switch.${base}_wallwasher`,
@@ -485,6 +495,18 @@ class BoschCameraCard extends HTMLElement {
         .motion-zones-overlay rect:nth-child(3) { fill: rgba(255, 159, 10, 0.15); stroke: rgba(255, 159, 10, 0.6); }
         .motion-zones-overlay rect:nth-child(4) { fill: rgba(255, 69, 58, 0.15); stroke: rgba(255, 69, 58, 0.6); }
         .motion-zones-overlay rect:nth-child(5) { fill: rgba(175, 82, 222, 0.15); stroke: rgba(175, 82, 222, 0.6); }
+        /* Gen2 polygon zones use per-zone colors from API */
+        .motion-zones-overlay polygon { fill-opacity: 0.15; stroke-width: 2; stroke-opacity: 0.6; }
+        /* Privacy mask SVG overlay */
+        .privacy-mask-overlay {
+          position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+          pointer-events: none; z-index: 5;
+          opacity: 0; transition: opacity 0.3s;
+        }
+        .privacy-mask-overlay.visible { opacity: 1; }
+        .privacy-mask-overlay rect, .privacy-mask-overlay polygon {
+          fill: rgba(0, 0, 0, 0.5); stroke: rgba(0, 0, 0, 0.8); stroke-width: 1.5;
+        }
 
         /* Loading overlay — must be above both cam-img and cam-video */
         .loading-overlay {
@@ -725,6 +747,7 @@ class BoschCameraCard extends HTMLElement {
             <span>Privat-Modus aktiv</span>
           </div>
           <svg class="motion-zones-overlay" id="motion-zones-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+          <svg class="privacy-mask-overlay" id="privacy-mask-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
           <div class="img-overlay">
             <span class="last-event-overlay" id="last-event-overlay"></span>
             <span class="events-overlay" id="events-overlay"></span>
@@ -1109,6 +1132,13 @@ class BoschCameraCard extends HTMLElement {
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
+                <div class="sw-row" id="btn-show-masks">
+                  <div class="sw-left">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    <span>Privacy-Masken anzeigen</span>
+                  </div>
+                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
+                </div>
                 <div class="diag-row">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
@@ -1462,6 +1492,13 @@ class BoschCameraCard extends HTMLElement {
       // Force motion zones re-render
       this._lastMotionCoordKey = null;
       if (this._hass) this._updateMotionZones(this._hass, this._entities);
+    });
+    this.shadowRoot.getElementById("btn-show-masks")?.addEventListener("click", () => {
+      this._showPrivacyMasks = !this._showPrivacyMasks;
+      const btn = this.shadowRoot.getElementById("btn-show-masks");
+      if (btn) btn.classList.toggle("on", this._showPrivacyMasks);
+      this._lastPrivacyMaskKey = null;
+      if (this._hass) this._updatePrivacyMasks(this._hass, this._entities);
     });
     this.shadowRoot.getElementById("btn-timestamp")?.addEventListener("click", () => this._toggleSwitch(this._entities.timestamp));
     this.shadowRoot.getElementById("btn-autofollow")?.addEventListener("click", () => this._toggleSwitch(this._entities.autofollow));
@@ -2520,6 +2557,8 @@ class BoschCameraCard extends HTMLElement {
 
     // Motion zones overlay — SVG polygons from RCP 0x0c00/0x0c0a sensor data
     this._updateMotionZones(hass, ents);
+    // Privacy mask overlay — from privacy masks sensor
+    this._updatePrivacyMasks(hass, ents);
 
     // Pan section — only visible when the pan number entity exists and has a valid state
     const panState   = hass.states[ents.pan];
@@ -2651,22 +2690,34 @@ class BoschCameraCard extends HTMLElement {
       zonesToggle.style.display = mzExists ? "" : "none";
     }
 
-    // Motion zones count (cloud API zones)
+    // Motion zones count — prefer Gen2 zones, then cloud zones, then RCP
     const zonesCountEl = this.shadowRoot.getElementById("diag-zones-count");
-    const zonesInfoEl = this.shadowRoot.getElementById("zones-info");
-    // Use the motion_sensitive_areas data from the camera entity attributes if available,
-    // otherwise fall back to the RCP-based motion zones sensor
     const mzState = hass.states[ents.motionZones];
+    const gen2Zones = mzState?.attributes?.gen2_zones || [];
     const cloudZones = mzState?.attributes?.cloud_zones || [];
     if (zonesCountEl) {
-      zonesCountEl.textContent = cloudZones.length > 0 ? String(cloudZones.length) : (mzState?.state != null && mzState.state !== "unavailable") ? `${mzState.state} (RCP)` : "—";
+      if (gen2Zones.length > 0) zonesCountEl.textContent = `${gen2Zones.length} (Gen2)`;
+      else if (cloudZones.length > 0) zonesCountEl.textContent = String(cloudZones.length);
+      else if (mzState?.state != null && mzState.state !== "unavailable") zonesCountEl.textContent = `${mzState.state} (RCP)`;
+      else zonesCountEl.textContent = "—";
     }
 
-    // Privacy masks count
+    // Privacy masks count — from dedicated privacy masks sensor
     const masksCountEl = this.shadowRoot.getElementById("diag-masks-count");
-    const privacyMasks = mzState?.attributes?.cloud_privacy_masks || [];
+    const pmState = hass.states[ents.privacyMasks];
+    const gen2Areas = pmState?.attributes?.gen2_private_areas || [];
+    const cloudMasks = pmState?.attributes?.cloud_privacy_masks || [];
     if (masksCountEl) {
-      masksCountEl.textContent = privacyMasks.length > 0 ? String(privacyMasks.length) : "0";
+      const total = gen2Areas.length || cloudMasks.length;
+      masksCountEl.textContent = total > 0 ? String(total) : (pmState?.state != null && pmState.state !== "unavailable") ? pmState.state : "0";
+    }
+
+    // Privacy mask toggle visual state
+    const masksToggle = this.shadowRoot.getElementById("btn-show-masks");
+    if (masksToggle) {
+      masksToggle.classList.toggle("on", this._showPrivacyMasks);
+      const hasMasks = gen2Areas.length > 0 || cloudMasks.length > 0;
+      masksToggle.style.display = hasMasks ? "" : "none";
     }
   }
 
@@ -2803,32 +2854,91 @@ class BoschCameraCard extends HTMLElement {
     const svg = this.shadowRoot.getElementById("motion-zones-overlay");
     if (!svg) return;
 
-    // Prefer cloud_zones (from GET /motion_sensitive_areas, normalized 0.0–1.0)
-    // over RCP coordinates (raw firmware data, often incorrectly parsed).
     const zoneState = hass.states[ents.motionZones];
-    const cloudZones = zoneState?.attributes?.cloud_zones;
-    const hasCloudZones = cloudZones && cloudZones.length > 0;
+    const gen2Zones = zoneState?.attributes?.gen2_zones || [];
+    const cloudZones = zoneState?.attributes?.cloud_zones || [];
+    const hasZones = gen2Zones.length > 0 || cloudZones.length > 0;
 
-    const showZones = this._showMotionZones && hasCloudZones;
+    const showZones = this._showMotionZones && hasZones;
     svg.classList.toggle("visible", showZones);
     if (!showZones) return;
 
     // Only re-render if coordinates changed (avoid DOM thrashing)
-    const coordKey = JSON.stringify(cloudZones);
+    const coordKey = JSON.stringify(gen2Zones.length > 0 ? gen2Zones : cloudZones);
     if (this._lastMotionCoordKey === coordKey) return;
     this._lastMotionCoordKey = coordKey;
 
-    // Cloud zones: {x, y, w, h} normalized 0.0–1.0
-    // ViewBox is 0-100, so multiply by 100.
     svg.innerHTML = "";
-    for (const z of cloudZones) {
-      if (z.x == null || z.y == null || z.w == null || z.h == null) continue;
-      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", z.x * 100);
-      rect.setAttribute("y", z.y * 100);
-      rect.setAttribute("width", z.w * 100);
-      rect.setAttribute("height", z.h * 100);
-      svg.appendChild(rect);
+
+    if (gen2Zones.length > 0) {
+      // Gen2 polygon zones: each zone has points array [{x,y}...], color, trigger
+      const defaultColors = ["#0A84FF", "#34C759", "#FF9F0A", "#FF453A", "#AF52DE"];
+      gen2Zones.forEach((z, i) => {
+        const points = z.points || z.polygon || z.vertices || [];
+        if (points.length < 3) return;
+        const color = z.color || defaultColors[i % defaultColors.length];
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        const pts = points.map(p => `${(p.x || 0) * 100},${(p.y || 0) * 100}`).join(" ");
+        poly.setAttribute("points", pts);
+        poly.setAttribute("fill", color);
+        poly.setAttribute("stroke", color);
+        svg.appendChild(poly);
+      });
+    } else {
+      // Gen1 cloud zones: {x, y, w, h} normalized 0.0–1.0
+      // ViewBox is 0-100, so multiply by 100.
+      for (const z of cloudZones) {
+        if (z.x == null || z.y == null || z.w == null || z.h == null) continue;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", z.x * 100);
+        rect.setAttribute("y", z.y * 100);
+        rect.setAttribute("width", z.w * 100);
+        rect.setAttribute("height", z.h * 100);
+        svg.appendChild(rect);
+      }
+    }
+  }
+
+  _updatePrivacyMasks(hass, ents) {
+    const svg = this.shadowRoot.getElementById("privacy-mask-overlay");
+    if (!svg) return;
+
+    const pmState = hass.states[ents.privacyMasks];
+    const gen2Areas = pmState?.attributes?.gen2_private_areas || [];
+    const cloudMasks = pmState?.attributes?.cloud_privacy_masks || [];
+    const hasMasks = gen2Areas.length > 0 || cloudMasks.length > 0;
+
+    const showMasks = this._showPrivacyMasks && hasMasks;
+    svg.classList.toggle("visible", showMasks);
+    if (!showMasks) return;
+
+    const coordKey = JSON.stringify(gen2Areas.length > 0 ? gen2Areas : cloudMasks);
+    if (this._lastPrivacyMaskKey === coordKey) return;
+    this._lastPrivacyMaskKey = coordKey;
+
+    svg.innerHTML = "";
+
+    if (gen2Areas.length > 0) {
+      // Gen2 polygon private areas: each has points array [{x,y}...]
+      for (const a of gen2Areas) {
+        const points = a.points || a.polygon || a.vertices || [];
+        if (points.length < 3) continue;
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        const pts = points.map(p => `${(p.x || 0) * 100},${(p.y || 0) * 100}`).join(" ");
+        poly.setAttribute("points", pts);
+        svg.appendChild(poly);
+      }
+    } else {
+      // Gen1 cloud privacy masks: {x, y, w, h} normalized 0.0–1.0
+      for (const m of cloudMasks) {
+        if (m.x == null || m.y == null || m.w == null || m.h == null) continue;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", m.x * 100);
+        rect.setAttribute("y", m.y * 100);
+        rect.setAttribute("width", m.w * 100);
+        rect.setAttribute("height", m.h * 100);
+        svg.appendChild(rect);
+      }
     }
   }
 

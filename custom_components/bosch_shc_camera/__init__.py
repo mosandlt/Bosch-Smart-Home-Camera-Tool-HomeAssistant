@@ -108,6 +108,7 @@ DEFAULT_OPTIONS = {
     "smb_retention_days": 180,  # Delete files older than N days (0 = keep forever)
     "smb_disk_warn_mb": 5120,   # Alert when free space on SMB share falls below N MB (0 = disable)
     "debug_logging": False,     # Enable verbose debug logging for stream/TLS proxy troubleshooting
+    "enable_go2rtc": True,       # Auto-setup go2rtc integration for WebRTC streaming (low-latency ~2s vs HLS ~12s)
 }
 
 
@@ -218,7 +219,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "8.0.3"
+        self._integration_version = "9.0.4"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -253,6 +254,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._lighting_options_cache: dict[str, dict] = {}
         # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
         self._intrusion_config_cache: dict[str, dict] = {}
+        # Gen2 polygon zones cache — keyed by cam_id, from GET /zones (Gen2 only)
+        # Contains polygon zones with trigger: "PERSON", maskType, color fields
+        self._gen2_zones_cache: dict[str, list] = {}
+        # Gen2 private areas cache — keyed by cam_id, from GET /privateAreas (Gen2 only)
+        # Contains privacy mask polygons with color: "#000000"
+        self._gen2_private_areas_cache: dict[str, list] = {}
         # Separate timer for lighting/switch — polled every tick (60s) instead of slow tier (300s)
         # Bosch app polls this every ~40s; slow tier (300s) is too slow for responsive light state
         self._last_lighting_switch: float = -86400.0
@@ -1018,7 +1025,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # Gen2-only endpoints
                     from .models import get_model_config as _gmc2
                     if _gmc2(hw).generation >= 2:
-                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig"])
+                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig", "zones", "privateAreas"])
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -1082,6 +1089,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._ambient_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "intrusionDetectionConfig":
                             self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "zones":
+                            self._gen2_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                        elif ep == "privateAreas":
+                            self._gen2_private_areas_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -2342,6 +2353,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if entry_obj and entry_obj.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
                     ent_reg.async_update_entity(ent, disabled_by=None)
                     _LOGGER.info("v8.0.2 migration: enabled %s", ent)
+
+    # Auto-setup go2rtc integration for WebRTC streaming (opt-out via options)
+    if opts.get("enable_go2rtc", True):
+        go2rtc_entries = hass.config_entries.async_entries("go2rtc")
+        if not go2rtc_entries:
+            try:
+                result = await hass.config_entries.flow.async_init(
+                    "go2rtc",
+                    context={"source": "system"},
+                    data={},
+                )
+                if result.get("type") == "create_entry":
+                    _LOGGER.info("go2rtc integration auto-created for WebRTC streaming support")
+                else:
+                    _LOGGER.debug("go2rtc setup result: %s", result.get("type", "unknown"))
+            except Exception as err:
+                _LOGGER.debug("go2rtc auto-setup skipped: %s", err)
+        else:
+            _LOGGER.debug("go2rtc integration already active (entry: %s)", go2rtc_entries[0].entry_id)
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))

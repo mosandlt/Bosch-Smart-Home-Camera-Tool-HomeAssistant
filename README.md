@@ -446,7 +446,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v9.0.1** — includes Services accordion
+> **Card version: v2.8.0** — includes Gen2 polygon overlays + privacy mask overlay
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -627,6 +627,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v9.0.4** | **Gen2 zones + privacy masks + ambient schedule + go2rtc auto-setup.** New sensors: `Privacy Masks` (Gen1 rects + Gen2 polygons), `Dauerlicht Zeitplan` (Gen2 ambient light schedule with times + per-group brightness). Enhanced `Motion Zones` sensor with Gen2 polygon zone support (trigger, color, points). Card v2.8.0: polygon overlay for Gen2 zones, separate privacy mask overlay with toggle, updated diagnostics. go2rtc WebRTC auto-setup: integration automatically creates go2rtc config entry for low-latency streaming (~2s vs ~12s HLS), configurable via options. Sensors always available (show 0 instead of unavailable when no zones/masks configured). |
 | **v9.0.3** | **Faster light sync + detection mode + ambient light + go2rtc docs.** Gen2 `lighting/switch` now polled every 60s (was 300s) — matches Bosch app behavior (~40s). New `Erkennungsmodus` select entity for Gen2 intrusion detection (ALL_MOTIONS / PERSON_DETECTION / ZONES). `intrusionDetectionConfig` moved to coordinator cache (shared by switch + select). Ambient light sensor enabled by default. Updated go2rtc docs: built-in since HA 2024.11, no add-on needed. |
 | **v9.0.2** | **Fix: Front light turns on when changing LED colors.** Front light turn-off now sends brightness=0 via PUT (matching Bosch app behavior) so the cache stays in sync — prevents stale brightness from re-enabling front light during top/bottom LED changes. Light entities now re-sync from coordinator cache on every poll (not just once), so changes made in the Bosch app are reflected faster. Default whiteBalance aligned with Bosch app (-1.0 instead of 0.0). Fixes [#3](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/3). |
 | **v9.0.1** | **Card cleanup + Gen2 fixes.** Compact light section with expandable brightness/color details. Separate "Automationen" accordion (configurable, works for Gen1+Gen2). Gen2 light state from `lighting/switch` cache (no more switch bounce-back). Light entities remember last brightness+color. Intrusion detection switch (DualRadar). Motion light sensitivity entity. Single JS file (removed legacy copies). MIT License. |

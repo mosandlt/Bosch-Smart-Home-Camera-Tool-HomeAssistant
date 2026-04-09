@@ -72,9 +72,15 @@ async def async_setup_entry(
         # Phase 2 RCP sensors (diagnostic, disabled by default)
         entities.append(BoschAlarmCatalogSensor(coordinator, cam_id, config_entry))
         entities.append(BoschMotionZonesSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschPrivateAreasSensor(coordinator, cam_id, config_entry))
         entities.append(BoschTlsCertSensor(coordinator, cam_id, config_entry))
         entities.append(BoschNetworkServicesSensor(coordinator, cam_id, config_entry))
         entities.append(BoschIvaCatalogSensor(coordinator, cam_id, config_entry))
+        # Gen2-only sensors
+        from .models import get_model_config as _gmc_setup
+        hw_setup = cam_info.get("hardwareVersion", "")
+        if _gmc_setup(hw_setup).generation >= 2:
+            entities.append(BoschAmbientLightScheduleSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -822,10 +828,13 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
 
 
 class BoschMotionZonesSensor(_BoschSensorBase):
-    """Sensor: motion detection zones from camera firmware (RCP 0x0c00 + 0x0c0a).
+    """Sensor: motion detection zones (Cloud API + RCP + Gen2 polygon zones).
 
-    Displays number of zones. Attributes contain zone coordinates
-    as normalized x/y pairs (-1.0 to 1.0) for overlay visualization.
+    Displays total number of zones across all sources.
+    Attributes contain zone data for overlay visualization:
+      - cloud_zones: Gen1 rectangular zones (x/y/w/h normalized 0.0–1.0)
+      - gen2_zones: Gen2 polygon zones (points array, trigger, color)
+      - zones/coordinates: RCP firmware data (fallback)
     """
 
     _attr_icon = "mdi:vector-square"
@@ -838,14 +847,17 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_zones"
 
     @property
-    def native_value(self) -> int | None:
-        # Prefer cloud zones (accurate) over RCP zones (often garbage on indoor cameras)
-        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id)
-        if cloud_zones is not None:
+    def native_value(self) -> int:
+        # Gen2 polygon zones take priority
+        gen2_zones = self.coordinator._gen2_zones_cache.get(self._cam_id, [])
+        if len(gen2_zones) > 0:
+            return len(gen2_zones)
+        # Then cloud zones (Gen1 rectangles)
+        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
+        if len(cloud_zones) > 0:
             return len(cloud_zones)
-        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id)
-        if zones is None:
-            return None
+        # Fallback to RCP
+        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
         return len(zones)
 
     @property
@@ -853,31 +865,22 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         return "zones"
 
     @property
-    def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and (
-                self.coordinator._cloud_zones_cache.get(self._cam_id) is not None
-                or self.coordinator._rcp_motion_zones_cache.get(self._cam_id) is not None
-            )
-        )
-
-    @property
     def extra_state_attributes(self) -> dict:
         zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
         coords = self.coordinator._rcp_motion_coords_cache.get(self._cam_id, [])
         cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
-        privacy_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
+        gen2_zones = self.coordinator._gen2_zones_cache.get(self._cam_id, [])
         attrs = {
             "zones": zones,
             "coordinates": coords,
             "coordinate_count": len(coords),
             "cloud_zones": cloud_zones,
             "cloud_zone_count": len(cloud_zones),
-            "cloud_privacy_masks": privacy_masks,
-            "cloud_privacy_mask_count": len(privacy_masks),
+            "gen2_zones": gen2_zones,
+            "gen2_zone_count": len(gen2_zones),
         }
-        if len(zones) == 0 and len(cloud_zones) == 0:
+        total = len(gen2_zones) or len(cloud_zones) or len(zones)
+        if total == 0:
             attrs["note"] = (
                 "No motion zones configured — use the Bosch app to set up zones"
             )
@@ -1015,3 +1018,127 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
             "active_count": len(active),
             "active_modules": active,
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPrivateAreasSensor(_BoschSensorBase):
+    """Sensor: privacy mask areas (Gen1 rectangles + Gen2 polygons).
+
+    Displays number of privacy masks. Attributes contain mask data
+    for overlay visualization on the camera image.
+      - cloud_privacy_masks: Gen1 rectangular masks (x/y/w/h normalized 0.0–1.0)
+      - gen2_private_areas: Gen2 polygon masks (points array, color)
+    """
+
+    _attr_icon = "mdi:eye-off"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Privacy Masks"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_privacy_masks"
+
+    @property
+    def native_value(self) -> int:
+        # Gen2 polygon private areas take priority
+        gen2_areas = self.coordinator._gen2_private_areas_cache.get(self._cam_id, [])
+        if len(gen2_areas) > 0:
+            return len(gen2_areas)
+        # Gen1 cloud privacy masks
+        cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
+        return len(cloud_masks)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "masks"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
+        gen2_areas = self.coordinator._gen2_private_areas_cache.get(self._cam_id, [])
+        attrs = {
+            "cloud_privacy_masks": cloud_masks,
+            "cloud_mask_count": len(cloud_masks),
+            "gen2_private_areas": gen2_areas,
+            "gen2_area_count": len(gen2_areas),
+        }
+        total = len(gen2_areas) or len(cloud_masks)
+        if total == 0:
+            attrs["note"] = (
+                "No privacy masks configured — use the Bosch app to set up masks"
+            )
+        return attrs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAmbientLightScheduleSensor(_BoschSensorBase):
+    """Sensor: ambient light schedule details (Gen2 only).
+
+    Shows the schedule mode (ENVIRONMENT = dusk-to-dawn, or manual times).
+    Attributes contain the full schedule config: enabled state, schedule type,
+    manual start/end times, and per-light-group brightness/whiteBalance settings.
+    Data source: GET /v11/video_inputs/{id}/lighting/ambient (fetched by coordinator, slow tier).
+    """
+
+    _attr_icon = "mdi:lightbulb-auto"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Dauerlicht Zeitplan"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ambient_schedule"
+
+    @property
+    def native_value(self) -> str | None:
+        cache = self.coordinator._ambient_lighting_cache.get(self._cam_id)
+        if not cache:
+            return None
+        enabled = cache.get("ambientLightEnabled", False)
+        if not enabled:
+            return "disabled"
+        schedule = cache.get("ambientLightSchedule", {})
+        # Schedule can be a string ("ENVIRONMENT") or dict ({"type": "ENVIRONMENT", ...})
+        schedule_type = schedule.get("type", schedule) if isinstance(schedule, dict) else schedule
+        if schedule_type == "ENVIRONMENT":
+            return "dusk_to_dawn"
+        return "manual"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._ambient_lighting_cache.get(self._cam_id) is not None
+            and len(self.coordinator._ambient_lighting_cache.get(self._cam_id, {})) > 0
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
+        if not cache:
+            return {}
+        attrs = {
+            "enabled": cache.get("ambientLightEnabled", False),
+            "schedule_type": cache.get("ambientLightSchedule", "ENVIRONMENT"),
+        }
+        # Manual schedule times (if set)
+        start = cache.get("ambientLightManualStartTime")
+        end = cache.get("ambientLightManualEndTime")
+        if start:
+            attrs["manual_start_time"] = start
+        if end:
+            attrs["manual_end_time"] = end
+        # Per-light-group brightness settings
+        for group_key in ("frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"):
+            group = cache.get(group_key)
+            if group and isinstance(group, dict):
+                prefix = group_key.replace("Settings", "").replace("Light", "_light").replace("Led", "_led")
+                attrs[f"{prefix}_brightness"] = group.get("brightness")
+                wb = group.get("whiteBalance")
+                if wb is not None:
+                    attrs[f"{prefix}_white_balance"] = wb
+                color = group.get("color")
+                if color is not None:
+                    attrs[f"{prefix}_color"] = color
+        return attrs
