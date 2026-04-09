@@ -78,9 +78,8 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
         self._color_hex: str | None = None
         self._last_color_hex: str | None = None  # remember last color for restore
         self._white_balance: float | None = None
-        self._last_white_balance: float | None = 0.0
+        self._last_white_balance: float | None = -1.0
         self._is_on: bool = False
-        self._state_loaded: bool = False  # True after first load from cache
 
     @property
     def device_info(self) -> dict:
@@ -109,9 +108,12 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
         return self.coordinator.last_update_success
 
     def _load_state_from_cache(self) -> None:
-        """Load initial state from coordinator lighting/switch cache."""
-        if self._state_loaded:
-            return
+        """Sync state from coordinator lighting/switch cache.
+
+        Called on every property access so HA reflects changes made via the
+        Bosch app (polled by the coordinator).  Remembers last non-zero
+        brightness and last color for restore-on-turn-on.
+        """
         lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         if not lsc:
             return
@@ -131,16 +133,15 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
             self._white_balance = wb
             self._last_white_balance = wb
             self._color_hex = None
-        self._state_loaded = True
 
     def _get_current_state(self) -> dict:
         """Get the current lighting/switch state from coordinator cache."""
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         # Default fallback if cache is empty
         return {
-            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
+            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
+            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
         }
 
     async def _put_lighting_switch(self, updates: dict) -> bool:
@@ -245,7 +246,7 @@ class _BoschRgbLedLight(_BoschLightBase):
         if color_hex:
             body = {self._led_key: {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}}
         else:
-            body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": 0.0}}
+            body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": -1.0}}
 
         self._brightness = api_brightness
         self._last_brightness = api_brightness
@@ -313,7 +314,7 @@ class BoschFrontLight(_BoschLightBase):
         self._attr_name = f"Bosch {self._cam_title} Frontlicht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_front_light_entity"
         self._attr_icon = "mdi:spotlight-beam"
-        self._white_balance = 0.0
+        self._white_balance = -1.0
 
     @property
     def color_temp_kelvin(self) -> int | None:
@@ -335,7 +336,7 @@ class BoschFrontLight(_BoschLightBase):
             wb = max(-1.0, min(1.0, wb))
             self._white_balance = wb
         else:
-            wb = self._white_balance if self._white_balance is not None else 0.0
+            wb = self._white_balance if self._white_balance is not None else -1.0
 
         body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": wb}}
         self._brightness = api_brightness
@@ -348,5 +349,10 @@ class BoschFrontLight(_BoschLightBase):
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
         self._brightness = 0
+        # Send brightness=0 to update cache + camera state (like the Bosch app does),
+        # then disable via switch endpoint. Without the PUT, the cache retains the old
+        # brightness, and any subsequent top/bottom LED PUT would re-enable the front light.
+        wb = self._white_balance if self._white_balance is not None else -1.0
+        await self._put_lighting_switch({self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}})
         await self._put_switch_endpoint("front", False)
         self.async_write_ha_state()
