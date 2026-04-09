@@ -327,7 +327,6 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschAmbientLightSensor(_BoschSensorBase):
     """Sensor: ambient light level as a percentage (0–100%).
-    Disabled by default — enable in HA entity settings if needed.
 
     Data source: GET /v11/video_inputs/{id}/ambient_light_sensor_level (fetched by coordinator).
     The API returns a float 0.0–1.0 which is converted to 0–100%.
@@ -340,7 +339,6 @@ class BoschAmbientLightSensor(_BoschSensorBase):
         self._attr_state_class                       = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement        = "%"
         self._attr_icon                              = "mdi:brightness-6"
-        self._attr_entity_registry_enabled_default   = False
 
     @property
     def native_value(self) -> int | None:

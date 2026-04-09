@@ -43,6 +43,8 @@ QUALITY_MAP_REVERSE = {v: k for k, v in QUALITY_MAP.items()}
 
 MOTION_SENSITIVITY_OPTIONS = ["SUPER_HIGH", "HIGH", "MEDIUM_HIGH", "MEDIUM_LOW", "LOW", "OFF"]
 
+DETECTION_MODE_OPTIONS = ["ALL_MOTIONS", "PERSON_DETECTION", "ZONES"]
+
 FCM_PUSH_MODE_OPTIONS = ["Auto", "Android", "iOS", "Polling"]
 FCM_PUSH_MODE_MAP = {"Auto": "auto", "Android": "android", "iOS": "ios", "Polling": "polling"}
 FCM_PUSH_MODE_MAP_REVERSE = {v: k for k, v in FCM_PUSH_MODE_MAP.items()}
@@ -58,6 +60,12 @@ async def async_setup_entry(
     for cam_id in coordinator.data:
         entities.append(BoschVideoQualitySelect(coordinator, cam_id, config_entry))
         entities.append(BoschMotionSensitivitySelect(coordinator, cam_id, config_entry))
+        # Gen2-only: detection mode select
+        cam_info = coordinator.data[cam_id].get("info", {})
+        hw = cam_info.get("hardwareVersion", "CAMERA")
+        from .models import get_model_config
+        if get_model_config(hw).generation >= 2:
+            entities.append(BoschDetectionModeSelect(coordinator, cam_id, config_entry))
     # Integration-level selects (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -336,4 +344,76 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
         mode = STREAM_MODE_MAP.get(option, "auto")
         self.coordinator._stream_type_override = mode
         _LOGGER.info("Stream mode set to %s (%s)", option, mode)
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
+    """Select entity: intrusion detection mode (Gen2 only).
+
+    Options: ALL_MOTIONS / PERSON_DETECTION
+    Reads from coordinator._intrusion_config_cache[cam_id]["detectionMode"].
+    Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig.
+    """
+
+    _attr_icon    = "mdi:shield-home-outline"
+    _attr_options = DETECTION_MODE_OPTIONS
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry  = entry
+        cam_data = coordinator.data.get(cam_id, {})
+        cam_info = cam_data.get("info", {})
+        self._cam_title = cam_info.get("title", cam_id)
+        self._attr_name      = f"Bosch {self._cam_title} Erkennungsmodus"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_detection_mode"
+
+    @property
+    def device_info(self) -> dict:
+        cam_data = self.coordinator.data.get(self._cam_id, {})
+        cam_info = cam_data.get("info", {})
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name":        f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model":       cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version":  cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str | None:
+        cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
+        val = cfg.get("detectionMode")
+        if val in DETECTION_MODE_OPTIONS:
+            return val
+        return None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in DETECTION_MODE_OPTIONS:
+            return
+        cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
+        if not cfg:
+            return
+        cfg["detectionMode"] = option
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "intrusionDetectionConfig", cfg
+        )
+        if success:
+            self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            _LOGGER.debug("Detection mode set to %s for %s", option, self._cam_id[:8])
+        else:
+            _LOGGER.warning("Failed to set detection mode for %s", self._cam_id[:8])
         self.async_write_ha_state()

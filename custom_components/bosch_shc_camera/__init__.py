@@ -251,6 +251,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._cloud_privacy_masks_cache: dict[str, list] = {}
         # Lighting options cache — keyed by cam_id, from GET /lighting_options
         self._lighting_options_cache: dict[str, dict] = {}
+        # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
+        self._intrusion_config_cache: dict[str, dict] = {}
+        # Separate timer for lighting/switch — polled every tick (60s) instead of slow tier (300s)
+        # Bosch app polls this every ~40s; slow tier (300s) is too slow for responsive light state
+        self._last_lighting_switch: float = -86400.0
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
@@ -949,6 +954,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, err)
 
+                # ── Gen2 lighting/switch — fetched every tick (60s) ──
+                # Bosch app polls this every ~40s. Slow tier (300s) is too slow
+                # for responsive light state sync when lights are changed via the app.
+                from .models import get_model_config as _gmc_tick
+                hw_tick = cam_raw.get("hardwareVersion", "")
+                if is_online and _gmc_tick(hw_tick).generation >= 2:
+                    try:
+                        async with asyncio.timeout(5):
+                            async with session.get(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/lighting/switch",
+                                headers=headers,
+                            ) as ls_resp:
+                                if ls_resp.status == 200:
+                                    self._lighting_switch_cache[cam_id_key] = await ls_resp.json()
+                    except Exception as err:
+                        _LOGGER.debug("lighting/switch fetch error for %s: %s", cam_id_key, err)
+
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
                 # These values change rarely — fetching every tick wastes bandwidth.
@@ -996,7 +1018,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # Gen2-only endpoints
                     from .models import get_model_config as _gmc2
                     if _gmc2(hw).generation >= 2:
-                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "lighting/switch"])
+                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig"])
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -1058,8 +1080,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 pass  # State synced via switch._is_on in next update
                         elif ep == "lighting/ambient":
                             self._ambient_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
-                        elif ep == "lighting/switch":
-                            self._lighting_switch_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "intrusionDetectionConfig":
+                            self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.

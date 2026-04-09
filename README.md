@@ -521,20 +521,19 @@ The integration supports three connection modes, configurable in **Settings → 
 
 ### WebRTC / go2rtc
 
-When [go2rtc](https://github.com/AlexxIT/go2rtc) is available, the card tries **WebRTC first** (~2 s latency) before falling back to HLS (~12 s latency).
+When [go2rtc](https://github.com/AlexxIT/go2rtc) is available, the card uses **WebRTC** (~2 s latency) instead of HLS (~12 s latency).
 
-**Setup:**
-1. Install [AlexxIT WebRTC Camera](https://github.com/AlexxIT/WebRTC) via HACS
-2. Add the integration: **Settings → Integrations → + Add → WebRTC Camera** (leave URL empty)
-3. go2rtc downloads automatically and starts on port 1984
-4. Restart HA — the integration auto-registers camera streams with go2rtc
-5. The card automatically detects WebRTC support and uses it
+**Setup (HA 2024.11+):**
+Since Home Assistant 2024.11, go2rtc is **built-in** — no separate add-on or installation needed. Just make sure `go2rtc:` is in your `configuration.yaml` (added by `default_config`). **Do NOT install go2rtc as a separate add-on** — this can cause conflicts.
+
+On stream start, the integration automatically registers the RTSP URL with go2rtc. The card detects WebRTC support and uses it. If WebRTC fails, it falls back to HLS automatically.
 
 **How it works:**
-- On stream start, the integration registers the RTSP URL with go2rtc's API
+- On stream start, the integration registers the RTSP URL with go2rtc's API (port 1984 inside HA container)
 - The card checks `camera/capabilities` — if `web_rtc` is available, it creates an `RTCPeerConnection`
 - Full ICE candidate exchange via HA's `camera/webrtc/offer` websocket
-- If WebRTC fails (go2rtc not installed, network issue), falls back to HLS automatically
+- On stream stop, the registration is removed from go2rtc
+- If WebRTC fails (go2rtc not running, network issue), falls back to HLS automatically
 
 ### Stream Watchdog
 
@@ -628,6 +627,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v9.0.3** | **Faster light sync + detection mode + ambient light + go2rtc docs.** Gen2 `lighting/switch` now polled every 60s (was 300s) — matches Bosch app behavior (~40s). New `Erkennungsmodus` select entity for Gen2 intrusion detection (ALL_MOTIONS / PERSON_DETECTION / ZONES). `intrusionDetectionConfig` moved to coordinator cache (shared by switch + select). Ambient light sensor enabled by default. Updated go2rtc docs: built-in since HA 2024.11, no add-on needed. |
 | **v9.0.2** | **Fix: Front light turns on when changing LED colors.** Front light turn-off now sends brightness=0 via PUT (matching Bosch app behavior) so the cache stays in sync — prevents stale brightness from re-enabling front light during top/bottom LED changes. Light entities now re-sync from coordinator cache on every poll (not just once), so changes made in the Bosch app are reflected faster. Default whiteBalance aligned with Bosch app (-1.0 instead of 0.0). Fixes [#3](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/3). |
 | **v9.0.1** | **Card cleanup + Gen2 fixes.** Compact light section with expandable brightness/color details. Separate "Automationen" accordion (configurable, works for Gen1+Gen2). Gen2 light state from `lighting/switch` cache (no more switch bounce-back). Light entities remember last brightness+color. Intrusion detection switch (DualRadar). Motion light sensitivity entity. Single JS file (removed legacy copies). MIT License. |
 | **v9.0.0** | **Gen2 camera support.** Full Eyes Außenkamera II + Innenkamera II support. Gen2 lighting API: 3 separate light groups (front=color temp, top/bottom=RGB with thousands of colors). Native HA light entities with color picker. Motion light, ambient light, status LED switches. Lens elevation, microphone level, top/bottom brightness entities. Firmware update detection (`UPDATING_REGULAR`). |

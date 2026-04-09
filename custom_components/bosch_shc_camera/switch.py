@@ -1085,7 +1085,10 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
         self._attr_name      = f"Bosch {self._cam_title} Einbrucherkennung"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_detection"
         self._attr_icon      = "mdi:shield-home"
-        self._config: dict = {}
+
+    @property
+    def _config(self) -> dict:
+        return self.coordinator._intrusion_config_cache.get(self._cam_id, {})
 
     @property
     def is_on(self) -> bool | None:
@@ -1104,35 +1107,15 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
         }
 
     async def _set_intrusion(self, enabled: bool) -> None:
-        # Read current config
-        if not self._config:
-            import aiohttp, asyncio
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
-            token = self.coordinator.token
-            if not token:
-                return
-            session = async_get_clientsession(self.hass, verify_ssl=False)
-            try:
-                async with asyncio.timeout(10):
-                    async with session.get(
-                        f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/intrusionDetectionConfig",
-                        headers={"Authorization": f"Bearer {token}"},
-                    ) as resp:
-                        if resp.status == 200:
-                            self._config = await resp.json()
-                        else:
-                            return
-            except Exception as err:
-                _LOGGER.warning("Intrusion GET error for %s: %s", self._cam_id[:8], err)
-                return
-
-        data = dict(self._config)
-        data["enabled"] = enabled
+        cfg = dict(self._config)
+        if not cfg:
+            return
+        cfg["enabled"] = enabled
         success = await self.coordinator.async_put_camera(
-            self._cam_id, "intrusionDetectionConfig", data
+            self._cam_id, "intrusionDetectionConfig", cfg
         )
         if success:
-            self._config = data
+            self.coordinator._intrusion_config_cache[self._cam_id] = cfg
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):
