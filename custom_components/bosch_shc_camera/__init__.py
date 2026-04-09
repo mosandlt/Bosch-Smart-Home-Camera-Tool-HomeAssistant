@@ -1008,12 +1008,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             return (endpoint, 0, None)
 
                     # Build task list (skip endpoints not applicable to this camera)
+                    from .models import get_model_config as _gmc2
+                    is_gen2 = _gmc2(hw).generation >= 2
                     endpoints = [
                         "wifiinfo", "ambient_light_sensor_level", "motion",
                         "audioAlarm", "firmware", "recording_options",
                         "unread_events_count", "commissioned", "timestamp",
-                        "notifications", "rules", "motion_sensitive_areas", "privacy_masks",
+                        "notifications", "rules",
                     ]
+                    # Gen1 uses motion_sensitive_areas + privacy_masks (rectangles)
+                    # Gen2 uses zones + privateAreas (polygons) — different endpoints!
+                    if is_gen2:
+                        endpoints.extend(["zones", "privateAreas"])
+                    else:
+                        endpoints.extend(["motion_sensitive_areas", "privacy_masks"])
                     if hw in ("INDOOR", "CAMERA_360"):
                         endpoints.append("privacy_sound_override")
                     if pan_limit:
@@ -1023,9 +1031,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         endpoints.append("lighting_options")
 
                     # Gen2-only endpoints
-                    from .models import get_model_config as _gmc2
-                    if _gmc2(hw).generation >= 2:
-                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig", "zones", "privateAreas"])
+                    if is_gen2:
+                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig"])
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -1090,9 +1097,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         elif ep == "intrusionDetectionConfig":
                             self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "zones":
-                            self._gen2_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                            zones_data = ep_data if isinstance(ep_data, list) else []
+                            self._gen2_zones_cache[cam_id_key] = zones_data
+                            _LOGGER.debug("Gen2 zones for %s: %d zones fetched", cam_id_key[:8], len(zones_data))
                         elif ep == "privateAreas":
-                            self._gen2_private_areas_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                            areas_data = ep_data if isinstance(ep_data, list) else []
+                            self._gen2_private_areas_cache[cam_id_key] = areas_data
+                            _LOGGER.debug("Gen2 privateAreas for %s: %d areas fetched", cam_id_key[:8], len(areas_data))
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
