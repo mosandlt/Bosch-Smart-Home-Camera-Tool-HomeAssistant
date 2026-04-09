@@ -148,6 +148,8 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
+const CARD_VERSION = "2.8.0";
+
 class BoschCameraCard extends HTMLElement {
   constructor() {
     super();
@@ -1171,7 +1173,7 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v2.8.0</div>
+          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v${CARD_VERSION}</div>
       </ha-card>
     `;
 
@@ -1589,7 +1591,7 @@ class BoschCameraCard extends HTMLElement {
       const nowMs = Date.now();
       const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
       if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v2.8.0 | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
+      dbg.textContent = `Card v${CARD_VERSION} | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
