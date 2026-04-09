@@ -1,8 +1,8 @@
 """Config flow for Bosch Smart Home Camera integration.
 
-Setup flow (two steps):
-  Step "user" — shows login URL as a read-only text field + instructions
-  Step "auth" — user pastes the redirect URL, tokens are exchanged
+Setup flow (automatic OAuth2 with PKCE):
+  One-click browser login via Bosch SingleKey ID.
+  Uses my.home-assistant.io redirect for automatic callback.
 
 Options flow:
   Step "init"          — feature toggles
@@ -11,8 +11,8 @@ Options flow:
 
 OAuth2 details:
   Issuer:       smarthome.authz.bosch.com/auth/realms/home_auth_provider
-  Client ID:    residential_app
-  Redirect URI: https://www.bosch.com/boschcam  (shows 404 — expected)
+  Client ID:    oss_residential_app
+  Redirect URI: https://my.home-assistant.io/redirect/oauth
   Scopes:       email offline_access profile openid
 """
 
@@ -21,6 +21,7 @@ import base64
 import hashlib
 import logging
 import secrets
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 import aiohttp
@@ -29,6 +30,12 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    AbstractOAuth2FlowHandler,
+    AbstractOAuth2Implementation,
+    async_register_implementation,
+    _encode_jwt,
+)
 from homeassistant.helpers.selector import (
     SelectSelector, SelectSelectorConfig, SelectSelectorMode, SelectOptionDict,
 )
@@ -44,7 +51,8 @@ KEYCLOAK_BASE = (
 CLIENT_ID     = "oss_residential_app"
 CLIENT_SECRET = base64.b64decode("RjFqWnpzRzVOdHc3eDJWVmM4SjZxZ3NuaXNNT2ZhWmc=").decode()
 SCOPES        = "email offline_access profile openid"
-REDIRECT_URI  = "https://www.bosch.com/boschcam"
+REDIRECT_URI  = "https://my.home-assistant.io/redirect/oauth"
+REDIRECT_URI_MANUAL = "https://www.bosch.com/boschcam"
 CLOUD_API     = "https://residential.cbs.boschsecurity.com"
 
 
@@ -57,12 +65,98 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+# ── OAuth2 Implementation (automatic flow via my.home-assistant.io) ──────────
+
+class BoschOAuth2Implementation(AbstractOAuth2Implementation):
+    """Bosch Keycloak OAuth2 implementation with PKCE."""
+
+    def __init__(self, hass) -> None:
+        self.hass = hass
+        self._last_verifier: str | None = None
+
+    @property
+    def name(self) -> str:
+        return "Bosch SingleKey ID"
+
+    @property
+    def domain(self) -> str:
+        return DOMAIN
+
+    @property
+    def redirect_uri(self) -> str:
+        return REDIRECT_URI
+
+    async def async_generate_authorize_url(self, flow_id: str) -> str:
+        """Generate Keycloak authorization URL with PKCE challenge."""
+        self._last_verifier, challenge = _pkce_pair()
+        redirect_uri = self.redirect_uri
+        state = _encode_jwt(self.hass, {
+            "flow_id": flow_id,
+            "redirect_uri": redirect_uri,
+        })
+        params = {
+            "client_id":             CLIENT_ID,
+            "response_type":         "code",
+            "scope":                 SCOPES,
+            "redirect_uri":          redirect_uri,
+            "code_challenge":        challenge,
+            "code_challenge_method": "S256",
+            "state":                 state,
+        }
+        return f"{KEYCLOAK_BASE}/auth?" + urlencode(params)
+
+    async def async_resolve_external_data(self, external_data: Any) -> dict:
+        """Exchange authorization code for tokens."""
+        code = external_data["code"]
+        redirect_uri = external_data["state"]["redirect_uri"]
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        async with session.post(
+            f"{KEYCLOAK_BASE}/token",
+            data={
+                "client_id":     CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "grant_type":    "authorization_code",
+                "code":          code,
+                "redirect_uri":  redirect_uri,
+                "code_verifier": self._last_verifier,
+            },
+            ssl=False,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                _LOGGER.error("Token exchange failed: HTTP %d — %s", resp.status, body[:200])
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def _async_refresh_token(self, token: dict) -> dict:
+        """Refresh access token via Keycloak."""
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        async with session.post(
+            f"{KEYCLOAK_BASE}/token",
+            data={
+                "client_id":     CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "grant_type":    "refresh_token",
+                "refresh_token": token["refresh_token"],
+            },
+            ssl=False,
+        ) as resp:
+            if resp.status >= 400:
+                _LOGGER.error("Token refresh failed: HTTP %d", resp.status)
+            resp.raise_for_status()
+            new_token = await resp.json()
+            return {**token, **new_token}
+
+
+# ── Manual flow helpers (for options re-login) ───────────────────────────────
+
 def _build_auth_url(code_challenge: str, state: str) -> str:
+    """Build auth URL for manual re-login (uses bosch.com redirect)."""
     params = {
         "client_id":             CLIENT_ID,
         "response_type":         "code",
         "scope":                 SCOPES,
-        "redirect_uri":          REDIRECT_URI,
+        "redirect_uri":          REDIRECT_URI_MANUAL,
         "code_challenge":        code_challenge,
         "code_challenge_method": "S256",
         "state":                 state,
@@ -82,10 +176,8 @@ def _extract_code(redirect_url: str) -> str | None:
     return codes[0] if codes else None
 
 
-# ── Token exchange / refresh ──────────────────────────────────────────────────
-
 async def _exchange_code(session, code: str, verifier: str) -> dict | None:
-    """Exchange auth code for access_token + refresh_token."""
+    """Exchange auth code for tokens (manual flow, bosch.com redirect)."""
     try:
         async with asyncio.timeout(15):
             async with session.post(
@@ -95,7 +187,7 @@ async def _exchange_code(session, code: str, verifier: str) -> dict | None:
                     "client_secret": CLIENT_SECRET,
                     "grant_type":    "authorization_code",
                     "code":          code,
-                    "redirect_uri":  REDIRECT_URI,
+                    "redirect_uri":  REDIRECT_URI_MANUAL,
                     "code_verifier": verifier,
                 },
                 ssl=False,
@@ -131,72 +223,37 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschSHCCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the initial setup flow — OAuth2 PKCE browser login."""
+class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
+    """Handle the initial setup flow — automatic OAuth2 PKCE browser login."""
 
+    DOMAIN = DOMAIN
     VERSION = 1
 
-    def __init__(self) -> None:
-        self._verifier: str = ""
-        self._auth_url: str = ""
+    @property
+    def logger(self) -> logging.Logger:
+        return _LOGGER
 
     async def async_step_user(self, user_input=None):
-        """
-        Step 1: Show the login URL as a pre-filled text field.
-        PKCE pair is generated once and stored — NOT regenerated on submit.
-        User copies the URL, opens it in browser, logs in, then clicks Submit.
-        """
+        """Start OAuth2 flow — register implementation, then delegate to parent."""
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        # Generate PKCE pair only once (not on every call)
-        if not self._verifier:
-            self._verifier, challenge = _pkce_pair()
-            state          = secrets.token_urlsafe(16)
-            self._auth_url = _build_auth_url(challenge, state)
-
-        if user_input is not None:
-            # User clicked Submit after opening the URL → go to paste step
-            return await self.async_step_auth()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Optional("login_url", default=self._auth_url): str,
-            }),
+        # Register our OAuth2 implementation (idempotent — safe to call multiple times)
+        async_register_implementation(
+            self.hass, DOMAIN, BoschOAuth2Implementation(self.hass)
         )
 
-    async def async_step_auth(self, user_input=None):
-        """Step 2: Paste the redirect URL, exchange code for tokens."""
-        errors = {}
+        return await super().async_step_user(user_input)
 
-        if user_input is not None:
-            redirect_url = user_input.get("redirect_url", "").strip()
-            code = _extract_code(redirect_url)
-
-            if not code:
-                errors["redirect_url"] = "invalid_redirect_url"
-            else:
-                session = async_get_clientsession(self.hass, verify_ssl=False)
-                tokens  = await _exchange_code(session, code, self._verifier)
-
-                if not tokens or not tokens.get("access_token"):
-                    errors["redirect_url"] = "token_exchange_failed"
-                else:
-                    return self.async_create_entry(
-                        title="Bosch Smart Home Camera",
-                        data={
-                            "bearer_token":  tokens["access_token"],
-                            "refresh_token": tokens.get("refresh_token", ""),
-                        },
-                    )
-
-        return self.async_show_form(
-            step_id="auth",
-            data_schema=vol.Schema({
-                vol.Required("redirect_url"): str,
-            }),
-            errors=errors,
+    async def async_oauth_create_entry(self, data: dict) -> config_entries.ConfigFlowResult:
+        """Create config entry from OAuth2 tokens — same format as before."""
+        token_data = data.get("token", {})
+        return self.async_create_entry(
+            title="Bosch Smart Home Camera",
+            data={
+                "bearer_token":  token_data.get("access_token", ""),
+                "refresh_token": token_data.get("refresh_token", ""),
+            },
         )
 
     @staticmethod

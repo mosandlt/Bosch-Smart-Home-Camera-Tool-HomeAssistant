@@ -1,35 +1,22 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "Bosch Smart Home Camera — Login (Step 1 of 2)",
-        "description": "**How to log in:**\n\n1. Copy the URL from the field below\n2. Open it in your browser\n3. Log in with your **Bosch SingleKey ID**\n4. Browser shows a **404 page** — this is expected\n5. Copy the **full URL** from the address bar\n6. Click **Submit** to continue",
-        "data": {
-          "login_url": "Bosch Login URL"
-        },
-        "data_description": {
-          "login_url": "Copy this URL and open it in your browser to log in."
-        }
-      },
-      "auth": {
-        "title": "Bosch Smart Home Camera — Paste URL (Step 2 of 2)",
-        "description": "Paste the redirect URL from your browser address bar below.\n\n**Important:** The code expires after ~60 seconds.",
-        "data": {
-          "redirect_url": "Redirect URL"
-        },
-        "data_description": {
-          "redirect_url": "The full URL from the browser address bar after login (starts with https://www.bosch.com/boschcam?code=...)"
-        }
+      "pick_implementation": {
+        "title": "Bosch Smart Home Camera"
       }
     },
-    "error": {
-      "invalid_redirect_url":  "No auth code found in the URL.",
-      "token_exchange_failed": "Login failed — the code may have expired. Try again.",
-      "cannot_connect":        "Cannot connect to Bosch servers.",
-      "timeout":               "Connection timed out."
-    },
     "abort": {
-      "already_configured": "Already configured."
+      "already_configured":               "Already configured.",
+      "missing_configuration":            "OAuth not configured. Please try again.",
+      "missing_credentials":              "OAuth credentials not configured.",
+      "oauth_implementation_unavailable": "OAuth implementation unavailable.",
+      "authorize_url_timeout":            "Timeout generating login URL.",
+      "no_url_available":                 "Home Assistant URL not configured. Please set your HA URL in Settings → System → Network.",
+      "oauth_timeout":                    "Login timed out. Please try again.",
+      "oauth_unauthorized":               "Authorization failed. Please try again.",
+      "oauth_failed":                     "Login failed. Please try again.",
+      "oauth_error":                      "Invalid token received. Please try again.",
+      "user_rejected_authorize":          "Login was rejected: {error}"
     }
   },
   "options": {

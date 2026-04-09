@@ -104,14 +104,14 @@ For more help with camera setup, see:
 
 1. Go to **Settings → Integrations → + Add Integration**
 2. Search for **"Bosch Smart Home Camera"**
-3. The setup wizard shows a **Bosch Login URL** — copy it and open in your browser
-4. Log in with your **Bosch SingleKey ID** (same account as the Bosch Smart Camera app)
-5. After login, the browser shows a **404 error page** — this is normal and expected
-6. Copy the **full URL** from the browser address bar (starts with `https://www.bosch.com/boschcam?code=...`)
-7. Go back to HA, click **Submit**, and paste the URL in the next step
-8. The integration discovers all your cameras automatically
+3. Your browser opens the **Bosch SingleKey ID** login page automatically
+4. Log in with your Bosch account (same credentials as the Bosch Smart Camera app)
+5. After login, the browser redirects back to Home Assistant automatically — **no manual URL copying needed**
+6. The integration discovers all your cameras automatically
 
 > **Token renewal is automatic.** The integration uses a refresh token to silently renew the Bearer token in the background — no manual action needed after initial setup.
+>
+> **Note:** The automatic redirect uses [my.home-assistant.io](https://my.home-assistant.io). If your HA instance URL is not configured there, you'll be prompted to set it up on first use.
 
 ### Step 2 — Configure Settings
 
@@ -627,6 +627,7 @@ cards:
 
 | Version | Changes |
 |---------|---------|
+| **v9.1.0** | **OAuth2 Auto-Login via my.home-assistant.io.** Setup is now one-click: browser opens Bosch SingleKey ID login automatically, Keycloak redirects back to HA after authentication — no more manual URL copy-paste. Uses HA's `AbstractOAuth2FlowHandler` with PKCE (S256) and the Bosch-registered redirect URI (`my.home-assistant.io/redirect/oauth`). Options flow re-login still uses the manual flow as fallback. Token storage format unchanged — no re-authentication needed for existing installations. |
 | **v9.0.5** | **Fix: Light settings no longer turn on the light.** Changing color, brightness, or color temperature while a light is off now saves the preference locally without physically turning on the light — settings are applied the next time the light is turned on. All sliders and pickers (RGB color, brightness, color temp) show the last-used value even when the light is off, instead of resetting to black/zero. Applies to all three Gen2 light entities (top LED, bottom LED, front light). |
 | **v9.0.4** | **Gen2 zones + privacy masks + ambient schedule + go2rtc auto-setup.** New sensors: `Privacy Masks` (Gen1 rects + Gen2 polygons), `Dauerlicht Zeitplan` (Gen2 ambient light schedule with times + per-group brightness). Enhanced `Motion Zones` sensor with Gen2 polygon zone support (trigger, color, points). Card v2.8.0: polygon overlay for Gen2 zones, separate privacy mask overlay with toggle, updated diagnostics. go2rtc WebRTC auto-setup: integration automatically creates go2rtc config entry for low-latency streaming (~2s vs ~12s HLS), configurable via options. Sensors always available (show 0 instead of unavailable when no zones/masks configured). |
 | **v9.0.3** | **Faster light sync + detection mode + ambient light + go2rtc docs.** Gen2 `lighting/switch` now polled every 60s (was 300s) — matches Bosch app behavior (~40s). New `Erkennungsmodus` select entity for Gen2 intrusion detection (ALL_MOTIONS / PERSON_DETECTION / ZONES). `intrusionDetectionConfig` moved to coordinator cache (shared by switch + select). Ambient light sensor enabled by default. Updated go2rtc docs: built-in since HA 2024.11, no add-on needed. |
