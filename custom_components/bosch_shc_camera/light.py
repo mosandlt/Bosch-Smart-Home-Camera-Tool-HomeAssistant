@@ -99,9 +99,14 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
 
     @property
     def brightness(self) -> int | None:
-        """HA brightness is 0-255, API brightness is 0-100."""
+        """HA brightness is 0-255, API brightness is 0-100.
+
+        When off, return last brightness so the UI slider keeps its position.
+        """
         self._load_state_from_cache()
-        return int(self._brightness * 255 / 100) if self._brightness else 0
+        if self._is_on:
+            return int(self._brightness * 255 / 100) if self._brightness else 0
+        return int(self._last_brightness * 255 / 100) if self._last_brightness else None
 
     @property
     def available(self) -> bool:
@@ -224,15 +229,14 @@ class _BoschRgbLedLight(_BoschLightBase):
         if color:
             h = color.lstrip("#")
             return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-        return None
+        # Default warm white when no color known (e.g. after HA restart with light off)
+        return (255, 180, 100)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
-
-        # Restore last brightness if not specified
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
+        was_off = not self._is_on
 
         if rgb:
             color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
@@ -242,6 +246,16 @@ class _BoschRgbLedLight(_BoschLightBase):
         else:
             # Restore last color
             color_hex = self._color_hex or self._last_color_hex
+
+        # Preference change while light is off: save locally, don't turn on
+        if was_off and (rgb or brightness) and not (rgb and brightness):
+            if brightness:
+                self._last_brightness = int(brightness * 100 / 255)
+            self.async_write_ha_state()
+            return
+
+        # Restore last brightness if not specified
+        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
 
         if color_hex:
             body = {self._led_key: {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}}
@@ -318,28 +332,44 @@ class BoschFrontLight(_BoschLightBase):
 
     @property
     def color_temp_kelvin(self) -> int | None:
-        """Convert whiteBalance (-1.0 to 1.0) to Kelvin (6500 to 2000)."""
-        if self._white_balance is None:
-            return 4250  # neutral
+        """Convert whiteBalance (-1.0 to 1.0) to Kelvin (6500 to 2000).
+
+        When off, return last value so the UI slider keeps its position.
+        """
+        self._load_state_from_cache()
+        wb = self._white_balance
+        if wb is None:
+            wb = self._last_white_balance if self._last_white_balance is not None else -1.0
         # -1.0 (cool) = 6500K, 1.0 (warm) = 2000K
-        return int(4250 - self._white_balance * 2250)
+        return int(4250 - wb * 2250)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         color_temp_k = kwargs.get(ATTR_COLOR_TEMP_KELVIN)
-
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._brightness or 100)
+        was_off = not self._is_on
 
         if color_temp_k:
             # Convert Kelvin to whiteBalance: 6500K = -1.0, 2000K = 1.0
             wb = round((4250 - color_temp_k) / 2250, 2)
             wb = max(-1.0, min(1.0, wb))
             self._white_balance = wb
+            self._last_white_balance = wb
         else:
             wb = self._white_balance if self._white_balance is not None else -1.0
 
+        # Preference change while light is off: save locally, don't turn on
+        if was_off and (brightness or color_temp_k) and not (brightness and color_temp_k):
+            if brightness:
+                self._last_brightness = int(brightness * 100 / 255)
+            self.async_write_ha_state()
+            return
+
+        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
+
         body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": wb}}
         self._brightness = api_brightness
+        self._last_brightness = api_brightness
         self._is_on = True
 
         if await self._put_lighting_switch(body):
