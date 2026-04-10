@@ -1,5 +1,16 @@
 # Bosch Smart Home Camera — Home Assistant Integration
 
+> ## ⚠️ MAJOR CHANGE: Auth provider changed (since v8.0.5)
+>
+> **Bosch switched to a new OAuth client (`oss_residential_app`) starting with v8.0.5.** Existing installations must **re-authenticate once**, otherwise the token will expire and the re-login will fail with a **404 error**.
+>
+> **Recommended (v9.1.0+ — Auto-Login):**
+> 1. Remove the integration → *Settings → Devices & Services → Bosch Smart Home Camera → Delete*
+> 2. Re-add the integration → browser opens automatically for Bosch SingleKey ID login
+> 3. After login you're redirected back to HA automatically — done!
+>
+> **Manual fallback:** *Configure → "Re-login" → open the URL in your browser → log in at Bosch → the 404 page (`bosch.com/boschcam`) is expected! → copy the **full URL** from the address bar (contains `?code=...`) and paste it into HA.*
+
 Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Includes a custom **Lovelace card** with live streaming, controls, and event info.
 
 **Supported models:** Eyes Außenkamera (Gen1), Eyes Außenkamera II (Gen2), 360 Innenkamera (Gen1), Eyes Innenkamera II (Gen2) — model-specific timing and configuration is automatic.
