@@ -228,6 +228,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False     # True after first alert sent
         self._token_fail_count: int = 0          # consecutive refresh failures
+        # Serializes _ensure_valid_token so concurrent refreshes don't race
+        # (Keycloak rotates refresh_token and invalidates the previous one —
+        # two parallel POSTs with the same token → first wins, second gets
+        # invalid_grant and permanently breaks the loop).
+        self._token_refresh_lock: asyncio.Lock = asyncio.Lock()
         # Timestamp overlay cache — keyed by cam_id, from GET /timestamp
         self._timestamp_cache: dict[str, bool | None] = {}
         # Status LED cache — keyed by cam_id, from GET /ledlights (Gen2 only)
@@ -341,17 +346,61 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return get_options(self._entry)
 
     # ── Token renewal ─────────────────────────────────────────────────────────
+    def _token_still_valid(self, min_remaining: int = 60) -> bool:
+        """Return True if the in-memory bearer token is valid for >= min_remaining seconds.
+
+        Used to skip unnecessary refreshes when a concurrent caller already
+        refreshed the token while we were waiting on the lock.
+        """
+        import base64 as _b64
+        import json as _json
+        import time as _time
+        token = self.token
+        if not token:
+            return False
+        try:
+            parts = token.split(".")
+            if len(parts) < 2:
+                return False
+            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            payload = _json.loads(_b64.urlsafe_b64decode(payload_b64))
+            return (payload.get("exp", 0) - _time.time()) >= min_remaining
+        except Exception:
+            return False
+
     async def _ensure_valid_token(self) -> str:
         """
         Return a valid bearer token.
         Called ONLY when we get a 401 — not on every tick.
         Refreshes via refresh_token with retry logic:
+          - Serialized via self._token_refresh_lock so two concurrent
+            callers never race on the same refresh_token (Keycloak
+            rotates and invalidates the previous token on success —
+            the loser of the race would get invalid_grant forever).
+          - Skip-if-still-valid: after acquiring the lock, re-check
+            the in-memory token; another caller may have already
+            refreshed it while we waited.
+          - Always re-read the freshest refresh_token from the
+            config entry under the lock so we never send a stale
+            token that was already rotated and persisted by the
+            previous caller.
           - 3 attempts with 2s delay between retries
           - Persists new refresh token to config entry data (non-reloading)
           - Only alerts after 3 consecutive complete failures
         """
+        async with self._token_refresh_lock:
+            return await self._refresh_token_locked()
+
+    async def _refresh_token_locked(self) -> str:
         from .config_flow import _do_refresh
-        refresh = getattr(self, "_refreshed_refresh", None) or self.refresh_token
+        # Another caller may have just refreshed the token while we were
+        # waiting on the lock — if so, skip the POST entirely.
+        if self._token_still_valid(min_remaining=60):
+            return self.token
+        # Always prefer the freshest refresh_token from the config entry
+        # (persisted by previous successful refresh) over our in-memory
+        # copy, which could be stale in edge cases (e.g. entry reload).
+        refresh = self._entry.data.get("refresh_token", "") or getattr(self, "_refreshed_refresh", None) or ""
         if not refresh:
             await self._async_token_failure_alert(
                 "Kein Refresh-Token vorhanden — bitte unter Einstellungen → Integrationen → "
