@@ -216,7 +216,11 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                _LOGGER.warning("Token refresh HTTP %d", resp.status)
+                body = (await resp.text())[:300]
+                _LOGGER.warning(
+                    "Token refresh HTTP %d — Keycloak response: %s",
+                    resp.status, body,
+                )
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token refresh error: %s", err)
     return None
