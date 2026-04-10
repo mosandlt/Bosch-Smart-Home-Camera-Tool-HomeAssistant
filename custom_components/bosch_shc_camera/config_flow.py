@@ -19,6 +19,7 @@ OAuth2 details:
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 import secrets
 from typing import Any
@@ -200,6 +201,26 @@ async def _exchange_code(session, code: str, verifier: str) -> dict | None:
     return None
 
 
+def _detect_token_client_id(bearer_token: str) -> str | None:
+    """Parse a Bosch Keycloak JWT and return the `azp` (authorized party) claim.
+
+    Returns e.g. "oss_residential_app" (new OSS client) or "residential_app"
+    (legacy client), or None if the token can't be parsed. Used by the options
+    flow to decide whether to show the "migrate to new OAuth client" button.
+    """
+    if not bearer_token:
+        return None
+    try:
+        parts = bearer_token.split(".")
+        if len(parts) < 2:
+            return None
+        payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("azp")
+    except Exception:
+        return None
+
+
 class RefreshTokenInvalidError(Exception):
     """Keycloak rejected the refresh token (invalid_grant / 400 / 401).
 
@@ -329,8 +350,14 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
         opts = dict(DEFAULT_OPTIONS)
         opts.update(self._config_entry.options)
 
+        current_client = _detect_token_client_id(
+            self._config_entry.data.get("bearer_token", "")
+        )
+        is_legacy_client = current_client == "residential_app"
+
         if user_input is not None:
             force_relogin = user_input.pop("force_relogin", False)
+            migrate_to_oss = user_input.pop("migrate_to_oss_client", False)
 
             for k in ["enable_snapshots", "enable_sensors",
                       "enable_snapshot_button", "enable_auto_download",
@@ -343,6 +370,21 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "debug_logging"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
+
+            if migrate_to_oss:
+                # Persist any other option changes first so they survive reauth
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry, options=user_input,
+                )
+                # Use HA's native reauth trigger — scheduled as a task so the
+                # options dialog closes before the reauth flow registers
+                # (prevents UI race with stacked dialogs). async_start_reauth
+                # is a coroutine in HA 2022.7+, so it must be awaited or
+                # wrapped in a task.
+                self.hass.async_create_task(
+                    self._config_entry.async_start_reauth(self.hass)
+                )
+                return self.async_abort(reason="migration_started")
 
             if force_relogin:
                 self._pending_options  = user_input
@@ -517,6 +559,9 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("debug_logging", False)),
                 ): bool,
                 vol.Optional("force_relogin", default=False): bool,
+                **({
+                    vol.Optional("migrate_to_oss_client", default=False): bool,
+                } if is_legacy_client else {}),
             }),
             description_placeholders={
                 "token_status": "active (auto-renews)" if has_refresh else "no refresh token",

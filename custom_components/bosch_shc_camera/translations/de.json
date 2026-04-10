@@ -80,7 +80,8 @@
           "smb_file_pattern": "Dateiname-Muster",
           "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)",
           "smb_disk_warn_mb": "Speicherwarnung unter (MB, 0 = deaktiviert)",
-          "force_relogin": "Neu anmelden (Browser-Login)"
+          "force_relogin": "Neu anmelden (Browser-Login)",
+          "migrate_to_oss_client": "Zu neuem OAuth-Client wechseln (oss_residential_app)"
         },
         "data_description": {
           "scan_interval": "Wie oft die Integration Daten von der Bosch Cloud abruft. Niedriger = schneller, mehr API-Aufrufe. Standard: 60",
@@ -119,7 +120,8 @@
           "smb_file_pattern": "Dateiname-Muster (ohne Endung). Variablen: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Standard: {camera}_{date}_{time}_{type}_{id}",
           "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich.",
           "smb_disk_warn_mb": "Alert senden wenn der freie Speicher auf dem NAS unter diesen Schwellwert fällt (in MB). 0 = deaktiviert. Standard: 5120 MB (5 GB). Nutzt konfigurierten Notify-Dienst, Fallback auf HA-Benachrichtigung.",
-          "force_relogin": "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten)."
+          "force_relogin": "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten).",
+          "migrate_to_oss_client": "Wechsle vom alten `residential_app`-Client zum dedizierten `oss_residential_app`-Client, den Bosch für Open-Source-Integrationen bereitstellt. Beim Aktivieren wird der Reauth-Flow gestartet — du musst dich einmalig über die Bosch SingleKey ID anmelden. Alle Entitäten, Automationen und Optionen bleiben erhalten."
         }
       },
       "relogin_show": {
@@ -147,6 +149,9 @@
       "invalid_redirect_url": "Kein Auth-Code gefunden. Komplette URL einfügen.",
       "token_exchange_failed": "Anmeldung fehlgeschlagen — Code abgelaufen. Erneut versuchen.",
       "cannot_connect": "Verbindung zu Bosch-Servern fehlgeschlagen."
+    },
+    "abort": {
+      "migration_started": "Migration gestartet — bitte schließe den Neu-konfigurieren-Flow auf der Integrationskarte ab."
     }
   },
   "entity": {

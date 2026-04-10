@@ -81,7 +81,8 @@
           "smb_retention_days": "Retention period (days, 0 = keep forever)",
           "smb_disk_warn_mb": "Low disk warning threshold (MB, 0 = disabled)",
           "debug_logging": "Debug logging (verbose TLS proxy & stream logs)",
-          "force_relogin": "Force new browser login"
+          "force_relogin": "Force new browser login",
+          "migrate_to_oss_client": "Migrate to new OAuth client (oss_residential_app)"
         },
         "data_description": {
           "scan_interval": "How often the integration fetches data from the Bosch cloud. Lower = faster, more API calls. Default: 60",
@@ -121,7 +122,8 @@
           "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
           "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
           "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use.",
-          "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare)."
+          "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
+          "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
         }
       },
       "relogin_show": {
@@ -149,6 +151,9 @@
       "invalid_redirect_url": "No auth code found. Paste the full URL.",
       "token_exchange_failed": "Login failed — code expired. Try again.",
       "cannot_connect": "Cannot connect to Bosch servers."
+    },
+    "abort": {
+      "migration_started": "Migration started — please complete the Reconfigure flow on the integration card."
     }
   },
   "entity": {
