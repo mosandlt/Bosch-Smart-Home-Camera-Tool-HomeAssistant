@@ -55,6 +55,7 @@ from .rcp import async_update_rcp_data, get_cached_rcp_session
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -392,7 +393,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return await self._refresh_token_locked()
 
     async def _refresh_token_locked(self) -> str:
-        from .config_flow import _do_refresh
+        from .config_flow import _do_refresh, RefreshTokenInvalidError
         # Another caller may have just refreshed the token while we were
         # waiting on the lock — if so, skip the POST entirely.
         if self._token_still_valid(min_remaining=60):
@@ -402,21 +403,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # copy, which could be stale in edge cases (e.g. entry reload).
         refresh = self._entry.data.get("refresh_token", "") or getattr(self, "_refreshed_refresh", None) or ""
         if not refresh:
-            await self._async_token_failure_alert(
-                "Kein Refresh-Token vorhanden — bitte unter Einstellungen → Integrationen → "
-                "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
-            )
-            raise UpdateFailed("No refresh token — go to Settings → Integrations → Configure → Force new login")
+            # No refresh token at all — trigger the built-in HA reauth button
+            # (shows "Reconfigure" on the integration card, runs our auto-login).
+            raise ConfigEntryAuthFailed("No refresh token — re-authentication required")
         session = async_get_clientsession(self.hass, verify_ssl=False)
-        # Retry up to 3 times with 2s delay
+        # Retry up to 3 times with 2s delay on TRANSIENT errors only.
+        # Hard auth errors (invalid_grant) raise RefreshTokenInvalidError
+        # which we convert to ConfigEntryAuthFailed immediately — retrying
+        # a rejected refresh token is pointless and just extends the user's
+        # broken state.
         tokens = None
-        for attempt in range(3):
-            tokens = await _do_refresh(session, refresh)
-            if tokens:
-                break
-            if attempt < 2:
-                _LOGGER.debug("Token refresh attempt %d failed, retrying in 2s...", attempt + 1)
-                await asyncio.sleep(2)
+        try:
+            for attempt in range(3):
+                tokens = await _do_refresh(session, refresh)
+                if tokens:
+                    break
+                if attempt < 2:
+                    _LOGGER.debug("Token refresh attempt %d failed (transient), retrying in 2s...", attempt + 1)
+                    await asyncio.sleep(2)
+        except RefreshTokenInvalidError as err:
+            _LOGGER.error(
+                "Refresh token rejected by Keycloak (invalid_grant) — "
+                "triggering reauth flow. Details: %s", err,
+            )
+            raise ConfigEntryAuthFailed(
+                "Refresh token invalid — please re-authenticate via the "
+                "Reconfigure button on the integration card."
+            ) from err
         if tokens:
             self._refreshed_token = tokens.get("access_token", "")
             new_refresh = tokens.get("refresh_token", refresh)
@@ -446,13 +459,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return self._refreshed_token
         self._token_fail_count += 1
         _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
-        # Only alert after 3 consecutive complete failures
+        # After 3 consecutive complete failures the refresh token is very
+        # likely invalidated on Keycloak's side (invalid_grant). Trigger the
+        # built-in HA reauth flow — a "Reconfigure" button appears on the
+        # integration card, which runs the same auto-login flow and updates
+        # the existing entry in place (keeps options, entities, automations).
         if self._token_fail_count >= 3:
-            await self._async_token_failure_alert(
-                "Token-Erneuerung fehlgeschlagen — bitte unter Einstellungen → Integrationen → "
-                "Bosch Smart Home Camera → Konfigurieren → Erneut anmelden."
+            raise ConfigEntryAuthFailed(
+                "Token refresh failed repeatedly — please re-authenticate via "
+                "the Reconfigure button on the integration card."
             )
-        raise UpdateFailed("Token refresh failed — check network or re-login")
+        raise UpdateFailed("Token refresh failed — will retry")
 
     async def _async_token_failure_alert(self, message: str) -> None:
         """Send a one-time alert when token refresh fails (notify + persistent notification)."""

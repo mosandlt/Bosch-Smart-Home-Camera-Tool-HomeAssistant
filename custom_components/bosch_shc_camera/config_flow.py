@@ -200,8 +200,22 @@ async def _exchange_code(session, code: str, verifier: str) -> dict | None:
     return None
 
 
+class RefreshTokenInvalidError(Exception):
+    """Keycloak rejected the refresh token (invalid_grant / 400 / 401).
+
+    This is non-recoverable without user interaction — the caller should
+    trigger the reauth flow instead of retrying.
+    """
+
+
 async def _do_refresh(session, refresh_token: str) -> dict | None:
-    """Silent renewal via saved refresh_token."""
+    """Silent renewal via saved refresh_token.
+
+    Returns the token dict on success.
+    Returns None on transient failures (network error, 5xx) — caller may retry.
+    Raises RefreshTokenInvalidError on 400/401 (invalid_grant) — caller should
+    trigger the reauth flow, retrying is pointless.
+    """
     try:
         async with asyncio.timeout(15):
             async with session.post(
@@ -221,6 +235,10 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
                     "Token refresh HTTP %d — Keycloak response: %s",
                     resp.status, body,
                 )
+                if resp.status in (400, 401):
+                    raise RefreshTokenInvalidError(
+                        f"Keycloak HTTP {resp.status}: {body}"
+                    )
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token refresh error: %s", err)
     return None
@@ -239,8 +257,11 @@ class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """Start OAuth2 flow — register implementation, then delegate to parent."""
-        await self.async_set_unique_id(DOMAIN)
-        self._abort_if_unique_id_configured()
+        # Only enforce unique_id uniqueness on fresh setup, not on reauth —
+        # reauth reuses the existing entry.
+        if self.source != config_entries.SOURCE_REAUTH:
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_configured()
 
         # Register our OAuth2 implementation (idempotent — safe to call multiple times)
         async_register_implementation(
@@ -249,15 +270,43 @@ class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
 
         return await super().async_step_user(user_input)
 
+    async def async_step_reauth(
+        self, entry_data: dict
+    ) -> config_entries.ConfigFlowResult:
+        """Start a reauth flow triggered by invalid_grant/expired refresh token.
+
+        Shows a confirmation dialog, then runs the normal auto-login flow
+        (browser → Bosch SingleKey ID → redirect back via my.home-assistant.io).
+        On success, the existing config entry is updated in place — options,
+        entities, and automations are preserved.
+        """
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Show confirmation, then delegate to the OAuth2 user flow."""
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_confirm")
+        return await self.async_step_user()
+
     async def async_oauth_create_entry(self, data: dict) -> config_entries.ConfigFlowResult:
-        """Create config entry from OAuth2 tokens — same format as before."""
+        """Handle completed OAuth2 flow — create new entry or update existing (reauth)."""
         token_data = data.get("token", {})
+        new_data = {
+            "bearer_token":  token_data.get("access_token", ""),
+            "refresh_token": token_data.get("refresh_token", ""),
+        }
+        # Reauth: update the existing entry in place (keeps options, entities,
+        # automations, FCM config, SMB settings — everything).
+        if self.source == config_entries.SOURCE_REAUTH:
+            existing = self._get_reauth_entry()
+            return self.async_update_reload_and_abort(
+                existing, data_updates=new_data,
+            )
         return self.async_create_entry(
             title="Bosch Smart Home Camera",
-            data={
-                "bearer_token":  token_data.get("access_token", ""),
-                "refresh_token": token_data.get("refresh_token", ""),
-            },
+            data=new_data,
         )
 
     @staticmethod
