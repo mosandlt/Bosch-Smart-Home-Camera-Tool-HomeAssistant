@@ -29,6 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, CLOUD_API
@@ -56,8 +57,14 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class _BoschLightBase(CoordinatorEntity, LightEntity):
-    """Base class for Gen2 light entities."""
+class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
+    """Base class for Gen2 light entities.
+
+    Inherits from RestoreEntity so `_last_color_hex`, `_last_brightness`,
+    and `_last_white_balance` survive HA restarts — without this, after a
+    restart the entity has no memory of the last user-picked color, and
+    the card's color circles fall back to warm-white default.
+    """
 
     _led_key: str = ""  # "frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"
 
@@ -81,6 +88,50 @@ class _BoschLightBase(CoordinatorEntity, LightEntity):
         self._white_balance: float | None = None
         self._last_white_balance: float | None = -1.0
         self._is_on: bool = False
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last-known color/brightness/whiteBalance across HA restarts."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.attributes is None:
+            return
+        # Prefer the extra attribute we wrote ourselves (kept when light is off)
+        lrc = last_state.attributes.get("last_rgb_color")
+        if isinstance(lrc, (list, tuple)) and len(lrc) == 3:
+            try:
+                r, g, b = (int(lrc[0]), int(lrc[1]), int(lrc[2]))
+                self._last_color_hex = f"#{r:02X}{g:02X}{b:02X}"
+            except (ValueError, TypeError):
+                pass
+        lbri = last_state.attributes.get("last_brightness_pct")
+        if isinstance(lbri, (int, float)) and 1 <= lbri <= 100:
+            self._last_brightness = int(lbri)
+        lwb = last_state.attributes.get("last_white_balance")
+        if isinstance(lwb, (int, float)) and -1.0 <= lwb <= 1.0:
+            self._last_white_balance = float(lwb)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose last-known values even when the light is off.
+
+        HA's light platform blanks `rgb_color` / `brightness` when state=="off",
+        so the Lovelace card can't read them to show the last user-picked
+        color on the color circle. These extra attributes stay populated
+        regardless of on/off state.
+        """
+        attrs: dict = {}
+        color_hex = self._color_hex or self._last_color_hex
+        if color_hex:
+            h = color_hex.lstrip("#")
+            try:
+                attrs["last_rgb_color"] = [int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)]
+            except ValueError:
+                pass
+        if self._last_brightness:
+            attrs["last_brightness_pct"] = self._last_brightness
+        if self._last_white_balance is not None:
+            attrs["last_white_balance"] = self._last_white_balance
+        return attrs
 
     @property
     def device_info(self) -> dict:

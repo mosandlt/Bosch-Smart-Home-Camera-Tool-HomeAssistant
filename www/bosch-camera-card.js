@@ -1,10 +1,14 @@
 /**
  * Bosch Camera Card — Custom Lovelace Card
- * Repo:  https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
- * Docs:  https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/blob/main/docs/card-architecture.md
+ * Repo:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
+ * Docs:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/blob/main/docs/card-architecture.md
  * License: MIT
+ *
+ * This file is auto-generated from src/bosch-camera-card.js by
+ * scripts/build-card.mjs. Do not edit directly — edit the src file and
+ * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.8.2";
+const CARD_VERSION = "2.8.3";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1203,15 +1207,24 @@ class BoschCameraCard extends HTMLElement {
     const hasBotLed = ents.bottomLedLight && hass.states[ents.bottomLedLight];
     const topLedBtn = this.shadowRoot.getElementById("btn-top-led");
     const botLedBtn = this.shadowRoot.getElementById("btn-bottom-led");
+    const pickColor = (entId, fallback) => {
+      const attrs = hass.states[entId]?.attributes;
+      if (!attrs) return fallback;
+      const rgb = attrs.rgb_color;
+      if (rgb && Array.isArray(rgb) && rgb.length === 3) return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      const lrc = attrs.last_rgb_color;
+      if (lrc && Array.isArray(lrc) && lrc.length === 3) return `rgb(${lrc[0]},${lrc[1]},${lrc[2]})`;
+      return fallback;
+    };
     if (topLedBtn) {
       topLedBtn.style.display = hasTopLed ? "" : "none";
       if (hasTopLed) {
         const isOn = hass.states[ents.topLedLight]?.state === "on";
         topLedBtn.classList.toggle("on", isOn);
-        const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
-        if (rgb) this._lastTopColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        const color = pickColor(ents.topLedLight, this._lastTopColor || "#555");
+        this._lastTopColor = color;
         const dot = this.shadowRoot.getElementById("top-led-color-mini");
-        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : this._lastTopColor || "#555";
+        if (dot) dot.style.background = color;
       }
     }
     if (botLedBtn) {
@@ -1219,25 +1232,25 @@ class BoschCameraCard extends HTMLElement {
       if (hasBotLed) {
         const isOn = hass.states[ents.bottomLedLight]?.state === "on";
         botLedBtn.classList.toggle("on", isOn);
-        const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
-        if (rgb) this._lastBotColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#555");
+        this._lastBotColor = color;
         const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
-        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : this._lastBotColor || "#555";
+        if (dot) dot.style.background = color;
       }
     }
     const rgbRow = this.shadowRoot.getElementById("rgb-lights-row");
     if (rgbRow) rgbRow.style.display = hasTopLed || hasBotLed ? "" : "none";
     const topCircle = this.shadowRoot.getElementById("top-led-color");
     if (topCircle && hasTopLed) {
-      const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
-      if (rgb) this._lastTopColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-      topCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : this._lastTopColor || "#333";
+      const color = pickColor(ents.topLedLight, this._lastTopColor || "#333");
+      this._lastTopColor = color;
+      topCircle.style.background = color;
     }
     const botCircle = this.shadowRoot.getElementById("bottom-led-color");
     if (botCircle && hasBotLed) {
-      const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
-      if (rgb) this._lastBotColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-      botCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : this._lastBotColor || "#333";
+      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#333");
+      this._lastBotColor = color;
+      botCircle.style.background = color;
     }
     const ctRow = this.shadowRoot.getElementById("colortemp-row");
     const ctSliderEl = this.shadowRoot.getElementById("colortemp-slider");
