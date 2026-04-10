@@ -34,7 +34,8 @@
       "timeout": "Connection timed out."
     },
     "abort": {
-      "already_configured": "Already configured."
+      "already_configured": "Already configured.",
+      "reauth_successful": "Re-authentication successful — your Bosch Smart Home Camera integration has been updated with a fresh token. All entities, automations, and options are preserved."
     }
   },
   "options": {

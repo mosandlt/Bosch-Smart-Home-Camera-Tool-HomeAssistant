@@ -34,7 +34,8 @@
       "timeout": "Zeitüberschreitung."
     },
     "abort": {
-      "already_configured": "Bereits konfiguriert."
+      "already_configured": "Bereits konfiguriert.",
+      "reauth_successful": "Erneute Anmeldung erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben."
     }
   },
   "options": {
