@@ -494,6 +494,48 @@ async def async_cloud_set_light_component(
             url = f"{base}/front"
             body = {"enabled": value}
         elif component == "wallwasher":
+            # Wallwasher controls BOTH top + bottom LEDs.
+            # Must sync brightness via /lighting/switch AND toggle via /topdown
+            # to keep light entities and wallwasher switch in sync.
+            lsc = coordinator._lighting_switch_cache.get(cam_id, {})
+            front_settings = lsc.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0})
+            if not hasattr(coordinator, "_last_topdown_brightness"):
+                coordinator._last_topdown_brightness = {}
+            if value:
+                # Turn ON: restore last brightness, then enable topdown
+                saved = coordinator._last_topdown_brightness.get(cam_id, {})
+                top_bri = saved.get("top", 100)
+                bot_bri = saved.get("bottom", 100)
+                top_settings = {**lsc.get("topLedLightSettings", {"color": None, "whiteBalance": -1.0}), "brightness": top_bri}
+                bot_settings = {**lsc.get("bottomLedLightSettings", {"color": None, "whiteBalance": -1.0}), "brightness": bot_bri}
+            else:
+                # Turn OFF: save current brightness, then zero it
+                cur_top = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                cur_bot = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                if cur_top > 0 or cur_bot > 0:
+                    coordinator._last_topdown_brightness[cam_id] = {"top": cur_top or 100, "bottom": cur_bot or 100}
+                top_settings = {**lsc.get("topLedLightSettings", {"color": None, "whiteBalance": -1.0}), "brightness": 0}
+                bot_settings = {**lsc.get("bottomLedLightSettings", {"color": None, "whiteBalance": -1.0}), "brightness": 0}
+            full_body = {
+                "frontLightSettings": front_settings,
+                "topLedLightSettings": top_settings,
+                "bottomLedLightSettings": bot_settings,
+            }
+            # Step 1: Set brightness via /lighting/switch
+            try:
+                async with asyncio.timeout(10):
+                    async with session.put(base, json=full_body, headers=headers) as resp:
+                        if resp.status in (200, 201, 204):
+                            try:
+                                rsp = await resp.json()
+                                coordinator._lighting_switch_cache[cam_id] = rsp
+                            except Exception:
+                                coordinator._lighting_switch_cache[cam_id] = full_body
+                        else:
+                            _LOGGER.warning("cloud_set_light_component (gen2): lighting/switch HTTP %d for %s", resp.status, cam_id[:8])
+            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.warning("cloud_set_light_component (gen2) lighting/switch error for %s: %s", cam_id, err)
+            # Step 2: Toggle topdown switch
             url = f"{base}/topdown"
             body = {"enabled": value}
         elif component == "intensity":

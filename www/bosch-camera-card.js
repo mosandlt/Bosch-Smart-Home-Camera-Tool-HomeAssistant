@@ -17,7 +17,7 @@
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.8.0
+ * Version: 2.8.1
  *
  * Changes vs 2.7.0:
  *   - Gen2 polygon zone overlay: renders polygon zones (from GET /zones) on camera image
@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.0";
+const CARD_VERSION = "2.8.1";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2406,8 +2406,9 @@ class BoschCameraCard extends HTMLElement {
         const isOn = hass.states[ents.topLedLight]?.state === "on";
         topLedBtn.classList.toggle("on", isOn);
         const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
+        if (rgb) this._lastTopColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
         const dot = this.shadowRoot.getElementById("top-led-color-mini");
-        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#555";
+        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : (this._lastTopColor || "#555");
       }
     }
     if (botLedBtn) {
@@ -2416,8 +2417,9 @@ class BoschCameraCard extends HTMLElement {
         const isOn = hass.states[ents.bottomLedLight]?.state === "on";
         botLedBtn.classList.toggle("on", isOn);
         const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
+        if (rgb) this._lastBotColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
         const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
-        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#555";
+        if (dot) dot.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : (this._lastBotColor || "#555");
       }
     }
 
@@ -2427,12 +2429,14 @@ class BoschCameraCard extends HTMLElement {
     const topCircle = this.shadowRoot.getElementById("top-led-color");
     if (topCircle && hasTopLed) {
       const rgb = hass.states[ents.topLedLight]?.attributes?.rgb_color;
-      topCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#333";
+      if (rgb) this._lastTopColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      topCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : (this._lastTopColor || "#333");
     }
     const botCircle = this.shadowRoot.getElementById("bottom-led-color");
     if (botCircle && hasBotLed) {
       const rgb = hass.states[ents.bottomLedLight]?.attributes?.rgb_color;
-      botCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "#333";
+      if (rgb) this._lastBotColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      botCircle.style.background = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : (this._lastBotColor || "#333");
     }
 
     const ctRow = this.shadowRoot.getElementById("colortemp-row");

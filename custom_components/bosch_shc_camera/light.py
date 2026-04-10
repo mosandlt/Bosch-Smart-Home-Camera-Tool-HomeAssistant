@@ -15,6 +15,7 @@ Gen1 cameras use a different API (lighting_override) and are handled by switch.p
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.light import (
@@ -232,6 +233,22 @@ class _BoschRgbLedLight(_BoschLightBase):
         # Default warm white when no color known (e.g. after HA restart with light off)
         return (255, 180, 100)
 
+    def _sync_wallwasher_cache(self) -> None:
+        """Sync wallwasher switch state from lighting/switch cache.
+
+        Called after light entity turn_on/turn_off to immediately update the
+        wallwasher switch without waiting for the next coordinator poll.
+        """
+        lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+        front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
+        cache_entry = self.coordinator._shc_state_cache.setdefault(self._cam_id, {})
+        cache_entry["wallwasher"] = top_bri > 0 or bot_bri > 0
+        cache_entry["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
+        self.coordinator._light_set_at[self._cam_id] = time.monotonic()
+        self.coordinator.async_update_listeners()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
@@ -268,6 +285,7 @@ class _BoschRgbLedLight(_BoschLightBase):
 
         if await self._put_lighting_switch(body):
             await self._put_switch_endpoint("topdown", True)
+        self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -280,6 +298,13 @@ class _BoschRgbLedLight(_BoschLightBase):
         self._is_on = False
         self._brightness = 0
         await self._put_lighting_switch(body)
+        # If BOTH top+bottom are now off, also disable topdown switch
+        lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+        if top_bri == 0 and bot_bri == 0:
+            await self._put_switch_endpoint("topdown", False)
+        self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
 
