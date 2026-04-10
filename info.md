@@ -4,15 +4,21 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera, Gen2 Eye
 
 ## ⚠️ MAJOR CHANGE: Auth provider changed (since v8.0.5)
 
-**Bosch switched to a new OAuth client (`oss_residential_app`) starting with v8.0.5.** Existing installations must **re-authenticate once**, otherwise the token will expire and the re-login will fail with a **404 error**.
+**Bosch switched to a new OAuth client (`oss_residential_app`) starting with v8.0.5.** Existing installations must **re-authenticate once** to migrate from the legacy `residential_app` client.
 
-### Recommended (v9.1.0+ — Auto-Login)
+### Easiest path (v9.1.5+ — in-place migration, no data loss)
 
-1. Remove the integration → *Settings → Devices & Services → Bosch Smart Home Camera → Delete*
-2. Re-add the integration → browser opens automatically for Bosch SingleKey ID login
-3. After login you're redirected back to HA automatically — done!
+1. Update to v9.1.5 or later via HACS
+2. *Settings → Devices & Services → Bosch Smart Home Camera → Configure*
+3. If you're still on the legacy client, a **"Migrate to new OAuth client (oss_residential_app)"** checkbox appears at the bottom — enable it and submit
+4. Click the **Reconfigure** banner that appears on the integration card → browser opens Bosch SingleKey ID login → log in
+5. Done! All your entities, automations, options, FCM config, and SMB settings are preserved.
 
-### Manual fallback
+### Also supported — automatic reauth banner (v9.1.4+)
+
+If your refresh token has already expired on Bosch's side, Home Assistant will automatically show a **Reconfigure** banner on the integration card the moment Keycloak rejects the stored token. Clicking it runs the same auto-login flow. No manual action required.
+
+### Legacy manual fallback (still works)
 
 1. *Settings → Devices & Services → Bosch Smart Home Camera → Configure*
 2. Enable **"Re-login"** at the bottom → Submit
