@@ -269,13 +269,44 @@ async def async_shc_set_privacy_mode(
         coordinator.async_update_listeners()
         coordinator.hass.async_create_task(coordinator.async_request_refresh())
         if not enabled:
-            cam = coordinator._camera_entities.get(cam_id)
-            if cam:
-                coordinator.hass.async_create_task(
-                    cam._async_trigger_image_refresh(delay=1.5)
-                )
+            _schedule_privacy_off_snapshot(coordinator, cam_id)
         return True
     return False
+
+
+def _schedule_privacy_off_snapshot(
+    coordinator: BoschCameraCoordinator, cam_id: str
+) -> None:
+    """Trigger a fresh snapshot after privacy mode was disabled.
+
+    Delay depends on the camera's hardware:
+    - **Outdoor cameras** (no physical shutter, instant-on): 0.5s — just enough
+      for the cloud API to propagate the privacy-off state so /snap.jpg returns
+      a fresh frame instead of the privacy placeholder.
+    - **Indoor cameras** (physical motor-driven shutter + lens cover): 4.0s —
+      Gen1 360 motor-drives the lens upward, Gen2 Indoor II tilts the head.
+      Snap.jpg will return the privacy placeholder until the shutter fully
+      opens AND the encoder produces a valid frame. 4s matches the measured
+      shutter-open time from capture traces.
+    """
+    cam = coordinator._camera_entities.get(cam_id)
+    if not cam:
+        return
+    hw = coordinator._hw_version.get(cam_id, "")
+    hw_lower = hw.lower()
+    is_indoor = (
+        hw in ("INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2")
+        or "indoor" in hw_lower
+        or "360" in hw_lower
+    )
+    delay = 4.0 if is_indoor else 0.5
+    _LOGGER.debug(
+        "Privacy-OFF snapshot trigger for %s (hw=%s, delay=%.1fs)",
+        cam_id[:8], hw, delay,
+    )
+    coordinator.hass.async_create_task(
+        cam._async_trigger_image_refresh(delay=delay)
+    )
 
 
 # ── Cloud API setters ────────────────────────────────────────────────────────
@@ -331,11 +362,7 @@ async def async_cloud_set_privacy_mode(
                             coordinator.async_request_refresh()
                         )
                         if not enabled:
-                            cam = coordinator._camera_entities.get(cam_id)
-                            if cam:
-                                coordinator.hass.async_create_task(
-                                    cam._async_trigger_image_refresh(delay=1.5)
-                                )
+                            _schedule_privacy_off_snapshot(coordinator, cam_id)
                         return True
                     if resp.status == 401:
                         # Retry with refreshed token
@@ -355,13 +382,7 @@ async def async_cloud_set_privacy_mode(
                                         coordinator.async_request_refresh()
                                     )
                                     if not enabled:
-                                        cam = coordinator._camera_entities.get(cam_id)
-                                        if cam:
-                                            coordinator.hass.async_create_task(
-                                                cam._async_trigger_image_refresh(
-                                                    delay=1.5
-                                                )
-                                            )
+                                        _schedule_privacy_off_snapshot(coordinator, cam_id)
                                     return True
                     _LOGGER.warning(
                         "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id

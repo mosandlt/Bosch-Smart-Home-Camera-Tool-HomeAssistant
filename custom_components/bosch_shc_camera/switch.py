@@ -46,6 +46,49 @@ from . import DOMAIN, get_options, CLOUD_API
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _warn_if_privacy_on(entity, feature_name: str) -> bool:
+    """Show a persistent notification when the user tries to change a
+    privacy-gated setting while privacy mode is ON. Returns True if the
+    write was blocked.
+
+    The Bosch cloud API returns HTTP 443 "sh:camera.in.privacy.mode" on
+    reads and writes to /intrusionDetectionConfig, /zones, /privateAreas,
+    /motion, and some lighting endpoints while the camera is in privacy
+    mode. Without a guard the write silently fails in the logs; with this
+    guard the user sees a clear notification explaining why.
+    """
+    coordinator = entity.coordinator
+    cam_id = entity._cam_id
+    cache = coordinator._shc_state_cache.get(cam_id, {})
+    privacy_on = bool(cache.get("privacy_mode"))
+    if not privacy_on:
+        return False
+    cam_title = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+    _LOGGER.warning(
+        "%s write blocked for %s — camera is in privacy mode (HTTP 443 would follow).",
+        feature_name, cam_title,
+    )
+    try:
+        await entity.hass.services.async_call(
+            "persistent_notification", "create",
+            {
+                "title": f"{feature_name} — Kamera im Privacy-Mode",
+                "message": (
+                    f"Die Einstellung **{feature_name}** für **{cam_title}** kann nicht "
+                    f"geändert werden, solange der Privacy-Mode aktiv ist.\n\n"
+                    f"Die Kamera liefert in diesem Zustand `HTTP 443 sh:camera.in.privacy.mode` "
+                    f"auf Schreibzugriffe. Schalte zuerst den Privacy-Mode aus "
+                    f"(`switch.bosch_{cam_title.lower()}_privacy_mode`) und versuche es erneut."
+                ),
+                "notification_id": f"bosch_privacy_blocked_{cam_id}",
+            },
+            blocking=False,
+        )
+    except Exception as err:
+        _LOGGER.debug("persistent_notification create failed: %s", err)
+    return True
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):
     """Shared base for Bosch camera switch entities."""
@@ -1191,6 +1234,11 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
         }
 
     async def _set_intrusion(self, enabled: bool) -> None:
+        # Write-guard: /intrusionDetectionConfig returns HTTP 443
+        # "sh:camera.in.privacy.mode" while privacy is ON. Warn the user
+        # visibly instead of failing silently in the logs.
+        if await _warn_if_privacy_on(self, "Einbrucherkennung"):
+            return
         cfg = dict(self._config)
         if not cfg:
             return

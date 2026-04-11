@@ -404,6 +404,12 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         if option not in DETECTION_MODE_OPTIONS:
             return
+        # Write-guard: /intrusionDetectionConfig returns HTTP 443 while
+        # privacy mode is ON. Show persistent notification instead of
+        # silently failing in the logs.
+        from .switch import _warn_if_privacy_on
+        if await _warn_if_privacy_on(self, "Erkennungsmodus"):
+            return
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return

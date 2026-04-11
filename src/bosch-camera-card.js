@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.5";
+const CARD_VERSION = "2.8.6";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -544,6 +544,38 @@ class BoschCameraCard extends HTMLElement {
           font-size: 13px; color: rgba(255,255,255,.75); font-weight: 500;
         }
 
+        /* Offline overlay — shown when status sensor is OFFLINE */
+        .offline-overlay {
+          position: absolute; inset: 0; z-index: 8;
+          display: none;
+          flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(20, 20, 20, 0.82);
+          backdrop-filter: grayscale(100%) blur(3px);
+          -webkit-backdrop-filter: grayscale(100%) blur(3px);
+          gap: 10px;
+          pointer-events: none;
+          animation: offline-pulse 3s ease-in-out infinite;
+        }
+        .offline-overlay.visible { display: flex; }
+        @keyframes offline-pulse {
+          0%, 100% { background: rgba(20, 20, 20, 0.78); }
+          50%      { background: rgba(40, 20, 20, 0.88); }
+        }
+        .offline-overlay svg {
+          width: 48px; height: 48px;
+          stroke: #ff453a; stroke-width: 2; fill: none;
+          filter: drop-shadow(0 0 8px rgba(255, 69, 58, 0.5));
+        }
+        .offline-overlay .offline-title {
+          font-size: 18px; font-weight: 700; color: #ff453a;
+          letter-spacing: 1px; text-transform: uppercase;
+          text-shadow: 0 0 10px rgba(255, 69, 58, 0.4);
+        }
+        .offline-overlay .offline-subtitle {
+          font-size: 12px; color: rgba(255,255,255,.7);
+          font-weight: 400; max-width: 80%; text-align: center; line-height: 1.4;
+        }
+
         /* Image overlay (last event / events today) */
         .img-overlay {
           position: absolute; bottom: 0; left: 0; right: 0;
@@ -751,6 +783,19 @@ class BoschCameraCard extends HTMLElement {
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
+          </div>
+          <div class="offline-overlay" id="offline-overlay">
+            <svg viewBox="0 0 24 24">
+              <path d="M1 1l22 22"/>
+              <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+              <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+              <path d="M10.71 5.05A16 16 0 0 1 22.58 9"/>
+              <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+              <line x1="12" y1="20" x2="12.01" y2="20"/>
+            </svg>
+            <div class="offline-title">Kamera Offline</div>
+            <div class="offline-subtitle" id="offline-subtitle">Keine Verbindung zur Bosch Cloud</div>
           </div>
           <div class="privacy-placeholder" id="privacy-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2253,6 +2298,24 @@ class BoschCameraCard extends HTMLElement {
     const infoStatus  = this.shadowRoot.getElementById("info-status");
     if (statusDot) statusDot.className = "status-dot " + ({ ONLINE: "online", OFFLINE: "offline" }[statusState] || "unknown");
     if (infoStatus) infoStatus.textContent = statusState;
+
+    // Offline overlay — prominent indicator when camera is physically unreachable
+    const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
+    if (offlineOverlay) {
+      const isOffline = statusState === "OFFLINE";
+      offlineOverlay.classList.toggle("visible", isOffline);
+      if (isOffline) {
+        // Show last-seen timestamp as subtitle for context
+        const lastChanged = hass.states[ents.status]?.last_changed;
+        const sub = this.shadowRoot.getElementById("offline-subtitle");
+        if (sub && lastChanged) {
+          try {
+            const d = new Date(lastChanged);
+            sub.textContent = `Zuletzt gesehen: ${d.toLocaleString("de-DE", {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"})}`;
+          } catch { /* fall back to default text */ }
+        }
+      }
+    }
 
     // Streaming state
     const isStreaming  = this._isStreaming();

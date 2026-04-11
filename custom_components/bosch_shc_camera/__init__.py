@@ -109,7 +109,7 @@ DEFAULT_OPTIONS = {
     "smb_retention_days": 180,  # Delete files older than N days (0 = keep forever)
     "smb_disk_warn_mb": 5120,   # Alert when free space on SMB share falls below N MB (0 = disable)
     "debug_logging": False,     # Enable verbose debug logging for stream/TLS proxy troubleshooting
-    "enable_go2rtc": True,       # Auto-setup go2rtc integration for WebRTC streaming (low-latency ~2s vs HLS ~12s)
+    "enable_go2rtc": True,       # Auto-setup HAs built-in go2rtc integration for WebRTC streaming (low-latency ~2s vs HLS ~12s). User explicitly wants this activated by the Bosch integration.
 }
 
 
@@ -1362,11 +1362,34 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             self._stream_locks[cam_id] = asyncio.Lock()
         return self._stream_locks[cam_id]
 
+    def clear_stream_warming(self, cam_id: str) -> None:
+        """Force-clear the stream-warming flag for a camera.
+
+        Used by is_stream_warming() when the flag is stale (live_connections
+        no longer has the cam_id, so the warm-up must have completed or
+        errored out without resetting the flag).
+        """
+        if hasattr(self, "_stream_warming"):
+            self._stream_warming.discard(cam_id)
+
     def is_stream_warming(self, cam_id: str) -> bool:
-        """True if this camera is currently in the warm-up phase."""
+        """True if this camera is currently in the warm-up phase.
+
+        Auto-clears stale flags: if the cam_id is in `_stream_warming` but
+        NOT in `_live_connections`, the previous warm-up must have completed
+        or errored out without resetting the flag. In that case we drop the
+        flag and return False — otherwise a stream failure leaves privacy
+        toggles permanently blocked until HA restart. Fix 2026-04-11.
+        """
         if not hasattr(self, "_stream_warming"):
             self._stream_warming: set[str] = set()
-        return cam_id in self._stream_warming
+        if cam_id not in self._stream_warming:
+            return False
+        if cam_id not in self._live_connections:
+            _LOGGER.debug("Clearing stale stream-warming flag for %s", cam_id[:8])
+            self._stream_warming.discard(cam_id)
+            return False
+        return True
 
     # ── Live stream ───────────────────────────────────────────────────────────
     async def try_live_connection(self, cam_id: str, is_renewal: bool = False) -> dict | None:
