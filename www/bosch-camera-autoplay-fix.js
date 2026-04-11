@@ -1,6 +1,6 @@
 /**
  * Bosch Camera Autoplay Fix — Lovelace helper script
- * Repo: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
+ * Repo:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
  * License: MIT
  */
 (function() {

@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.8.3";
+const CARD_VERSION = "2.8.4";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -224,11 +224,19 @@ class BoschCameraCard extends HTMLElement {
         if (v) v.textContent = topBriSlider.value + "%";
       });
       topBriSlider.addEventListener("change", () => {
-        if (!this._hass || !this._entities.topBrightness) return;
-        this._hass.callService("number", "set_value", {
-          entity_id: this._entities.topBrightness,
-          value: parseInt(topBriSlider.value)
-        }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        if (!this._hass) return;
+        const pct = parseInt(topBriSlider.value);
+        if (this._entities.topLedLight && this._hass.states[this._entities.topLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.topLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100))
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        } else if (this._entities.topBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.topBrightness,
+            value: pct
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        }
       });
     }
     const botBriSlider = this.shadowRoot.getElementById("bottom-bri-slider");
@@ -238,11 +246,19 @@ class BoschCameraCard extends HTMLElement {
         if (v) v.textContent = botBriSlider.value + "%";
       });
       botBriSlider.addEventListener("change", () => {
-        if (!this._hass || !this._entities.bottomBrightness) return;
-        this._hass.callService("number", "set_value", {
-          entity_id: this._entities.bottomBrightness,
-          value: parseInt(botBriSlider.value)
-        }).catch(e => console.warn("bosch-camera-card: bottom-bri", e));
+        if (!this._hass) return;
+        const pct = parseInt(botBriSlider.value);
+        if (this._entities.bottomLedLight && this._hass.states[this._entities.bottomLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.bottomLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100))
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        } else if (this._entities.bottomBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.bottomBrightness,
+            value: pct
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        }
       });
     }
     this.shadowRoot.getElementById("btn-top-led")?.querySelector(".sw-toggle")?.addEventListener("click", () => {
@@ -1183,13 +1199,21 @@ class BoschCameraCard extends HTMLElement {
       motSensEl.value = Math.round(sv);
       motSensVal.textContent = Math.round(sv);
     }
+    const pickBriPct = (lightEnt, numberEnt) => {
+      const lightSt = lightEnt ? hass.states[lightEnt] : null;
+      if (lightSt && lightSt.state === "off") {
+        const lbp = lightSt.attributes?.last_brightness_pct;
+        if (typeof lbp === "number") return lbp;
+      }
+      return parseFloat(hass.states[numberEnt]?.state) || 0;
+    };
     const topBriRow = this.shadowRoot.getElementById("top-bri-row");
     const topBriEl = this.shadowRoot.getElementById("top-bri-slider");
     const topBriVal = this.shadowRoot.getElementById("top-bri-value");
     const hasTopBri = ents.topBrightness && hass.states[ents.topBrightness] && hass.states[ents.topBrightness].state !== "unavailable" && hass.states[ents.topBrightness].state !== "unknown";
     if (topBriRow) topBriRow.style.display = hasTopBri ? "flex" : "none";
     if (hasTopBri && topBriEl && topBriVal && !topBriEl.matches(":active")) {
-      const v = parseFloat(hass.states[ents.topBrightness]?.state) || 0;
+      const v = pickBriPct(ents.topLedLight, ents.topBrightness);
       topBriEl.value = Math.round(v);
       topBriVal.textContent = Math.round(v) + "%";
     }
@@ -1199,7 +1223,7 @@ class BoschCameraCard extends HTMLElement {
     const hasBotBri = ents.bottomBrightness && hass.states[ents.bottomBrightness] && hass.states[ents.bottomBrightness].state !== "unavailable" && hass.states[ents.bottomBrightness].state !== "unknown";
     if (botBriRow) botBriRow.style.display = hasBotBri ? "flex" : "none";
     if (hasBotBri && botBriEl && botBriVal && !botBriEl.matches(":active")) {
-      const v = parseFloat(hass.states[ents.bottomBrightness]?.state) || 0;
+      const v = pickBriPct(ents.bottomLedLight, ents.bottomBrightness);
       botBriEl.value = Math.round(v);
       botBriVal.textContent = Math.round(v) + "%";
     }
@@ -1221,7 +1245,7 @@ class BoschCameraCard extends HTMLElement {
       if (hasTopLed) {
         const isOn = hass.states[ents.topLedLight]?.state === "on";
         topLedBtn.classList.toggle("on", isOn);
-        const color = pickColor(ents.topLedLight, this._lastTopColor || "#555");
+        const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
         this._lastTopColor = color;
         const dot = this.shadowRoot.getElementById("top-led-color-mini");
         if (dot) dot.style.background = color;
@@ -1232,7 +1256,7 @@ class BoschCameraCard extends HTMLElement {
       if (hasBotLed) {
         const isOn = hass.states[ents.bottomLedLight]?.state === "on";
         botLedBtn.classList.toggle("on", isOn);
-        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#555");
+        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
         this._lastBotColor = color;
         const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
         if (dot) dot.style.background = color;
@@ -1242,13 +1266,13 @@ class BoschCameraCard extends HTMLElement {
     if (rgbRow) rgbRow.style.display = hasTopLed || hasBotLed ? "" : "none";
     const topCircle = this.shadowRoot.getElementById("top-led-color");
     if (topCircle && hasTopLed) {
-      const color = pickColor(ents.topLedLight, this._lastTopColor || "#333");
+      const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
       this._lastTopColor = color;
       topCircle.style.background = color;
     }
     const botCircle = this.shadowRoot.getElementById("bottom-led-color");
     if (botCircle && hasBotLed) {
-      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#333");
+      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
       this._lastBotColor = color;
       botCircle.style.background = color;
     }

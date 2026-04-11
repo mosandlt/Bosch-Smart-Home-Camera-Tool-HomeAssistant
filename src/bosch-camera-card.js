@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.3";
+const CARD_VERSION = "2.8.4";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1236,7 +1236,10 @@ class BoschCameraCard extends HTMLElement {
       });
     }
 
-    // Gen2: Top/Bottom brightness sliders
+    // Gen2: Top/Bottom brightness sliders.
+    // Route through light.turn_on so that changes while the light is OFF are
+    // preconfigured locally by the integration (don't physically turn the
+    // light on). When the light is ON the same call updates brightness live.
     const topBriSlider = this.shadowRoot.getElementById("top-bri-slider");
     if (topBriSlider) {
       topBriSlider.addEventListener("input", () => {
@@ -1244,10 +1247,18 @@ class BoschCameraCard extends HTMLElement {
         if (v) v.textContent = topBriSlider.value + "%";
       });
       topBriSlider.addEventListener("change", () => {
-        if (!this._hass || !this._entities.topBrightness) return;
-        this._hass.callService("number", "set_value", {
-          entity_id: this._entities.topBrightness, value: parseInt(topBriSlider.value),
-        }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        if (!this._hass) return;
+        const pct = parseInt(topBriSlider.value);
+        if (this._entities.topLedLight && this._hass.states[this._entities.topLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.topLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100)),
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        } else if (this._entities.topBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.topBrightness, value: pct,
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        }
       });
     }
     const botBriSlider = this.shadowRoot.getElementById("bottom-bri-slider");
@@ -1257,10 +1268,18 @@ class BoschCameraCard extends HTMLElement {
         if (v) v.textContent = botBriSlider.value + "%";
       });
       botBriSlider.addEventListener("change", () => {
-        if (!this._hass || !this._entities.bottomBrightness) return;
-        this._hass.callService("number", "set_value", {
-          entity_id: this._entities.bottomBrightness, value: parseInt(botBriSlider.value),
-        }).catch(e => console.warn("bosch-camera-card: bottom-bri", e));
+        if (!this._hass) return;
+        const pct = parseInt(botBriSlider.value);
+        if (this._entities.bottomLedLight && this._hass.states[this._entities.bottomLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.bottomLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100)),
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        } else if (this._entities.bottomBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.bottomBrightness, value: pct,
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        }
       });
     }
     // Gen2: separate top/bottom LED toggles via light.turn_on/turn_off
@@ -2373,14 +2392,26 @@ class BoschCameraCard extends HTMLElement {
       motSensVal.textContent = Math.round(sv);
     }
 
-    // Gen2: Top/Bottom brightness sliders sync
+    // Gen2: Top/Bottom brightness sliders sync.
+    // When the light is OFF the API returns brightness=0, but the integration
+    // remembers the last non-zero value in the light entity's
+    // `last_brightness_pct` attribute — prefer that so the slider shows what
+    // will be applied on next turn-on.
+    const pickBriPct = (lightEnt, numberEnt) => {
+      const lightSt = lightEnt ? hass.states[lightEnt] : null;
+      if (lightSt && lightSt.state === "off") {
+        const lbp = lightSt.attributes?.last_brightness_pct;
+        if (typeof lbp === "number") return lbp;
+      }
+      return parseFloat(hass.states[numberEnt]?.state) || 0;
+    };
     const topBriRow = this.shadowRoot.getElementById("top-bri-row");
     const topBriEl = this.shadowRoot.getElementById("top-bri-slider");
     const topBriVal = this.shadowRoot.getElementById("top-bri-value");
     const hasTopBri = ents.topBrightness && hass.states[ents.topBrightness] && hass.states[ents.topBrightness].state !== "unavailable" && hass.states[ents.topBrightness].state !== "unknown";
     if (topBriRow) topBriRow.style.display = hasTopBri ? "flex" : "none";
     if (hasTopBri && topBriEl && topBriVal && !topBriEl.matches(":active")) {
-      const v = parseFloat(hass.states[ents.topBrightness]?.state) || 0;
+      const v = pickBriPct(ents.topLedLight, ents.topBrightness);
       topBriEl.value = Math.round(v);
       topBriVal.textContent = Math.round(v) + "%";
     }
@@ -2390,7 +2421,7 @@ class BoschCameraCard extends HTMLElement {
     const hasBotBri = ents.bottomBrightness && hass.states[ents.bottomBrightness] && hass.states[ents.bottomBrightness].state !== "unavailable" && hass.states[ents.bottomBrightness].state !== "unknown";
     if (botBriRow) botBriRow.style.display = hasBotBri ? "flex" : "none";
     if (hasBotBri && botBriEl && botBriVal && !botBriEl.matches(":active")) {
-      const v = parseFloat(hass.states[ents.bottomBrightness]?.state) || 0;
+      const v = pickBriPct(ents.bottomLedLight, ents.bottomBrightness);
       botBriEl.value = Math.round(v);
       botBriVal.textContent = Math.round(v) + "%";
     }
@@ -2423,7 +2454,7 @@ class BoschCameraCard extends HTMLElement {
       if (hasTopLed) {
         const isOn = hass.states[ents.topLedLight]?.state === "on";
         topLedBtn.classList.toggle("on", isOn);
-        const color = pickColor(ents.topLedLight, this._lastTopColor || "#555");
+        const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
         this._lastTopColor = color;
         const dot = this.shadowRoot.getElementById("top-led-color-mini");
         if (dot) dot.style.background = color;
@@ -2434,7 +2465,7 @@ class BoschCameraCard extends HTMLElement {
       if (hasBotLed) {
         const isOn = hass.states[ents.bottomLedLight]?.state === "on";
         botLedBtn.classList.toggle("on", isOn);
-        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#555");
+        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
         this._lastBotColor = color;
         const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
         if (dot) dot.style.background = color;
@@ -2446,13 +2477,13 @@ class BoschCameraCard extends HTMLElement {
     if (rgbRow) rgbRow.style.display = (hasTopLed || hasBotLed) ? "" : "none";
     const topCircle = this.shadowRoot.getElementById("top-led-color");
     if (topCircle && hasTopLed) {
-      const color = pickColor(ents.topLedLight, this._lastTopColor || "#333");
+      const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
       this._lastTopColor = color;
       topCircle.style.background = color;
     }
     const botCircle = this.shadowRoot.getElementById("bottom-led-color");
     if (botCircle && hasBotLed) {
-      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "#333");
+      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
       this._lastBotColor = color;
       botCircle.style.background = color;
     }

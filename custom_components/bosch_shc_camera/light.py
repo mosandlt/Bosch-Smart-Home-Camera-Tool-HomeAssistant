@@ -84,7 +84,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
         self._brightness: int = 0
         self._last_brightness: int = 100  # remember last non-zero brightness for restore on turn_on
         self._color_hex: str | None = None
-        self._last_color_hex: str | None = None  # remember last color for restore
+        self._last_color_hex: str | None = None  # None = user has never picked a color
         self._white_balance: float | None = None
         self._last_white_balance: float | None = -1.0
         self._is_on: bool = False
@@ -127,6 +127,12 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
                 attrs["last_rgb_color"] = [int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)]
             except ValueError:
                 pass
+        else:
+            # Display-only warm-white default so the card's color dot isn't
+            # grey before the user has ever picked a color. Never written to
+            # the API — the turn_on fallback sends `color: null` instead so
+            # the camera keeps its own default.
+            attrs["last_rgb_color"] = [255, 180, 100]
         if self._last_brightness:
             attrs["last_brightness_pct"] = self._last_brightness
         if self._last_white_balance is not None:
@@ -315,15 +321,20 @@ class _BoschRgbLedLight(_BoschLightBase):
             # Restore last color
             color_hex = self._color_hex or self._last_color_hex
 
-        # Preference change while light is off: save locally, don't turn on
-        if was_off and (rgb or brightness) and not (rgb and brightness):
-            if brightness:
-                self._last_brightness = int(brightness * 100 / 255)
+        if brightness:
+            # Round up so brightness=1 (card sentinel for "at least 1 step")
+            # doesn't collapse to 0% and skip the last_brightness_pct attribute.
+            self._last_brightness = max(1, round(brightness * 100 / 255))
+
+        # Preconfigure while off: any color/brightness change is stored locally
+        # but the light stays physically off. User must explicitly toggle the
+        # switch row (turn_on with no kwargs) to apply the stored settings.
+        if was_off and (rgb or brightness):
             self.async_write_ha_state()
             return
 
         # Restore last brightness if not specified
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
+        api_brightness = max(1, round(brightness * 100 / 255)) if brightness else (self._last_brightness or 100)
 
         if color_hex:
             body = {self._led_key: {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}}
@@ -434,14 +445,16 @@ class BoschFrontLight(_BoschLightBase):
         else:
             wb = self._white_balance if self._white_balance is not None else -1.0
 
-        # Preference change while light is off: save locally, don't turn on
-        if was_off and (brightness or color_temp_k) and not (brightness and color_temp_k):
-            if brightness:
-                self._last_brightness = int(brightness * 100 / 255)
+        if brightness:
+            self._last_brightness = max(1, round(brightness * 100 / 255))
+
+        # Preconfigure while off: any change is stored locally, light stays off.
+        # User must explicitly toggle the switch row to apply the stored values.
+        if was_off and (brightness or color_temp_k):
             self.async_write_ha_state()
             return
 
-        api_brightness = int(brightness * 100 / 255) if brightness else (self._last_brightness or 100)
+        api_brightness = max(1, round(brightness * 100 / 255)) if brightness else (self._last_brightness or 100)
 
         body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": wb}}
         self._brightness = api_brightness
