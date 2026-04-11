@@ -263,6 +263,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._lighting_options_cache: dict[str, dict] = {}
         # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
         self._intrusion_config_cache: dict[str, dict] = {}
+        # Alarm settings cache — from GET /alarm_settings (Gen2 Indoor II only).
+        # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
+        #          preAlarmMode, preAlarmDelayInSeconds
+        self._alarm_settings_cache: dict[str, dict] = {}
+        # Audio alarm cache — from GET /audioAlarm (all cameras with mic).
+        # Persistent across ticks (unlike data[cam_id]["audioAlarm"] which is
+        # rebuilt every 60s — audioAlarm is only fetched in the slow tier / 300s,
+        # so it disappears from data[cam_id] between slow ticks). Stored here
+        # for stable entity availability.
+        self._audio_alarm_cache: dict[str, dict] = {}
+        # Alarm status cache — from GET /alarmStatus (Gen2 Indoor II only).
+        self._alarm_status_cache: dict[str, dict] = {}
+        # Intrusion system arming cache — derived from alarmStatus (armed/disarmed).
+        # Set by BoschAlarmSystemArmSwitch on successful PUT /intrusionSystem/arming.
+        self._arming_cache: dict[str, bool] = {}
+        # Status LED brightness cache (Gen2 Indoor II) — from GET /iconLedBrightness.
+        # Value range: 0-4 (0 = off, 4 = max).
+        self._icon_led_brightness_cache: dict[str, int] = {}
         # Gen2 polygon zones cache — keyed by cam_id, from GET /zones (Gen2 only)
         # Contains polygon zones with trigger: "PERSON", maskType, color fields
         self._gen2_zones_cache: dict[str, list] = {}
@@ -882,6 +900,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             )
                         newest_event  = events[0]
                         event_type    = newest_event.get("eventType", "")
+                        event_tags    = newest_event.get("eventTags", []) or []
+                        # Gen2 DualRadar fires eventType=MOVEMENT w/ eventTags=["PERSON"]
+                        # when a human is detected — the tag is more specific, so upgrade.
+                        if "PERSON" in event_tags and event_type == "MOVEMENT":
+                            event_type = "PERSON"
                         cam_name      = cam.get("title", cam_id)
                         event_payload = {
                             "camera_id":   cam_id,
@@ -1086,12 +1109,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         "notifications", "rules",
                     ]
                     # Gen1 uses motion_sensitive_areas + privacy_masks (rectangles)
-                    # Gen2 uses zones + privateAreas (polygons) — different endpoints!
+                    # Gen2 Outdoor II uses zones + privateAreas (polygons) — different endpoints!
+                    # Gen2 Indoor II returns 442 ("hardware not supported") on privateAreas
+                    # — confirmed by direct API test 2026-04-11. Only poll zones.
                     if is_gen2:
-                        endpoints.extend(["zones", "privateAreas"])
+                        endpoints.append("zones")
+                        if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+                            endpoints.append("privateAreas")
                     else:
                         endpoints.extend(["motion_sensitive_areas", "privacy_masks"])
-                    if hw in ("INDOOR", "CAMERA_360"):
+                    if hw in ("INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
                         endpoints.append("privacy_sound_override")
                     if pan_limit:
                         endpoints.append("autofollow")
@@ -1102,6 +1129,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     # Gen2-only endpoints
                     if is_gen2:
                         endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "lighting", "intrusionDetectionConfig"])
+                    # Gen2 Indoor II-only endpoints (alarm system + power-LED).
+                    # privacy_sound_override is added above (same as Gen1 Indoor).
+                    if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+                        endpoints.extend([
+                            "alarm_settings",
+                            "alarmStatus",
+                            "iconLedBrightness",
+                        ])
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -1122,6 +1157,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         elif ep == "motion":
                             data[cam_id_key]["motion"] = ep_data
                         elif ep == "audioAlarm":
+                            # Persistent cache (self-level) so entities stay available
+                            # between slow-tier ticks. Also mirror into data[cam_id]
+                            # for backward compatibility with audio_alarm_settings().
+                            self._audio_alarm_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                             data[cam_id_key]["audioAlarm"] = ep_data
                         elif ep == "firmware":
                             self._firmware_cache[cam_id_key] = ep_data
@@ -1167,6 +1206,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._global_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "intrusionDetectionConfig":
                             self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "alarm_settings":
+                            self._alarm_settings_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "alarmStatus":
+                            # Actual response format confirmed 2026-04-11:
+                            #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
+                            self._alarm_status_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            if isinstance(ep_data, dict):
+                                intrusion = str(ep_data.get("intrusionSystem", "")).upper()
+                                if intrusion == "ACTIVE":
+                                    self._arming_cache[cam_id_key] = True
+                                elif intrusion == "INACTIVE":
+                                    self._arming_cache[cam_id_key] = False
+                        elif ep == "iconLedBrightness":
+                            # Power-LED brightness 0-4 (5 discrete steps: off + 4 levels)
+                            try:
+                                val = int(ep_data.get("value", 0)) if isinstance(ep_data, dict) else 0
+                                self._icon_led_brightness_cache[cam_id_key] = max(0, min(4, val))
+                            except (TypeError, ValueError):
+                                self._icon_led_brightness_cache[cam_id_key] = 0
                         elif ep == "zones":
                             zones_data = ep_data if isinstance(ep_data, list) else []
                             self._gen2_zones_cache[cam_id_key] = zones_data
@@ -2308,7 +2366,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         return self.data.get(cam_id, {}).get("motion", {})
 
     def audio_alarm_settings(self, cam_id: str) -> dict:
-        """Return audio alarm settings dict, or empty dict."""
+        """Return audio alarm settings dict, or empty dict.
+
+        Prefers the persistent self-level cache (_audio_alarm_cache) because
+        `data[cam_id]["audioAlarm"]` is only present right after a slow-tier
+        fetch — `data` is rebuilt every 60s tick while slow-tier runs every
+        300s, so the transient key disappears on intermediate ticks.
+        """
+        if self._audio_alarm_cache.get(cam_id):
+            return self._audio_alarm_cache[cam_id]
         return self.data.get(cam_id, {}).get("audioAlarm", {})
 
     def recording_options(self, cam_id: str) -> dict:

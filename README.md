@@ -638,10 +638,92 @@ cards:
 
 ---
 
+## Alarmanlage / Automation Setup
+
+The Eyes Innenkamera II (Gen2) adds a built-in alarm system with integrated 75 dB siren. Here's how to wire it into a typical HA alarm automation alongside your existing cameras:
+
+### Entities for the alarm system (v9.1.10+, Gen2 Indoor II only)
+
+| Entity | Purpose |
+|---|---|
+| `switch.bosch_{name}_alarmanlage` | Arm / disarm the built-in intrusion system (`PUT /intrusionSystem/arming`). Derived state from `alarmStatus.intrusionSystem` (INACTIVE / ACTIVE). |
+| `switch.bosch_{name}_sirene` | Main 75 dB siren on/off (`alarm_settings.alarmMode`). Disabling this lets you use the other alarm features without actually firing the siren. |
+| `switch.bosch_{name}_pre_alarm` | Pre-alarm red-LED warning before the siren fires (`alarm_settings.preAlarmMode`). |
+| `switch.bosch_{name}_audio_plus` | Sound-level event detection (ambient-noise threshold — "Geräusche" toggle in the iOS app). Free tier — this is NOT the paid Audio+ premium (glass-break / smoke / CO). |
+| `sensor.bosch_{name}_alarm_status` | `INACTIVE` / `ACTIVE` / `UNKNOWN` — state machine for the alarm. Attributes include `alarm_type` (`NONE` when idle), `siren_duration_s`, `activation_delay_s`, `pre_alarm_duration_s`. |
+| `number.bosch_{name}_sirenen_dauer` | Siren duration in seconds (`alarm_settings.alarmDelayInSeconds`, 10–300). |
+| `number.bosch_{name}_alarm_verzogerung` | Activation delay in seconds (`alarmActivationDelaySeconds`, 0–600). |
+| `number.bosch_{name}_pre_alarm_dauer` | Pre-alarm LED-warning duration (`preAlarmDelayInSeconds`, 0–300). |
+| `number.bosch_{name}_power_led` | White Power-LED brightness 0–4 (*not* 0–100% — the iOS slider is misleading, the API only accepts 5 discrete steps). |
+
+### Privacy mode — important!
+
+Several settings only work when the camera is **actively recording** (privacy OFF):
+- `switch.bosch_{name}_einbrucherkennung` (intrusion detection)
+- `select.bosch_{name}_erkennungsmodus` (detection mode: `ALL_MOTIONS` / `ONLY_HUMANS` / `ZONES`)
+- `number.bosch_{name}_microphone_level`
+
+When privacy is ON, the Bosch cloud API returns HTTP 443 `"sh:camera.in.privacy.mode"` on reads/writes to these endpoints, so the entities show as `unavailable`. The integration caches the **last-known-good** values — so if you've ever had privacy OFF since HA started, the cached settings remain visible. If the camera has been in privacy mode since the HA restart, the entities stay unavailable until you turn off privacy once.
+
+**Note on event clips:** Bosch records clips only when the camera is actively monitoring. If all cameras are in privacy mode, `videoClipUploadStatus=Unavailable` is returned for every event — you'll get the text + snapshot alert but no video attachment. This is not a bug in the integration.
+
+### Example: Integrate the Gen2 Indoor II into an existing Alarmanlage automation
+
+If you already have an alarm automation that toggles `privacy_mode` on your other cameras based on presence / schedule / garage door, just add the new camera's privacy switch alongside:
+
+```yaml
+- alias: "Alle weg → Alarmanlage aktivieren + Kameras freigeben"
+  sequence:
+    - action: switch.turn_off
+      target:
+        entity_id:
+          - switch.bosch_terrasse_privacy_mode      # Gen2 Outdoor
+          - switch.bosch_innenbereich_privacy_mode  # Gen2 Indoor II  (new in v9.1.10)
+          - switch.bosch_kamera_privacy_mode        # Gen1 360
+    - action: switch.turn_on
+      target:
+        entity_id: switch.bosch_innenbereich_alarmanlage  # arm the built-in siren
+```
+
+### Example: Intrusion event → notify + optional siren
+
+```yaml
+- alias: "Innenkamera → Person erkannt"
+  triggers:
+    - platform: state
+      entity_id: binary_sensor.bosch_innen_person
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: switch.bosch_innen_alarmanlage
+      state: "on"   # only when armed
+  actions:
+    - action: notify.mobile_app_xxx   # replace with your notify service
+      data:
+        message: "🚨 Person im Innenbereich erkannt"
+    # Optional: fire the siren (remove this line to silent-alarm)
+    # - action: switch.turn_on
+    #   target:
+    #     entity_id: switch.bosch_innen_sirene
+```
+
+### Lovelace card setup
+
+The custom Lovelace card automatically shows the new alarm rows (Alarmanlage, Sirene, Pre-Alarm, Geräusch-Erkennung, Power-LED) when the alarm entities exist and the alarm system is gated behind the presence of `switch.{base}_alarmanlage`. No card config changes needed:
+
+```yaml
+type: custom:bosch-camera-card
+camera_entity: camera.bosch_innenbereich
+title: "Eyes Innenkamera II"
+```
+
+Everything renders automatically when the integration detects a Gen2 Indoor II.
+
 ## Version History
 
 | Version | Changes |
 |---------|---------|
+| **v9.1.10** | **Gen2 Eyes Innenkamera II — alarm system, event-tag PERSON detection, audio, power-LED, detection mode + 3 Bosch API surprises.** Based on a fresh mitmproxy capture of the newly arrived Indoor II unit (569 flows) plus a comprehensive historical scan of 116k+ events across 12 prior captures. **(12) Event-tag aware notifications.** Historical-capture tag inventory showed 5 unique `(eventType, eventTags)` combinations across 116K events: `MOVEMENT/[MOVEMENT]` (114,379x), `AUDIO_ALARM/[AUDIO_ALARM]` (1,308x), **`MOVEMENT/[PERSON]` (240x — the tag is more specific than the eventType!)**, `TROUBLE_CONNECT/[TROUBLE_CONNECT]` (126x), `TROUBLE_DISCONNECT/[TROUBLE_DISCONNECT]` (114x). Previously the FCM handler and polling fallback both keyed only off `eventType`, so Gen2 DualRadar PERSON events were sent as "Bewegung". Now both paths upgrade `event_type` from `MOVEMENT` to `PERSON` when `"PERSON" in eventTags`, and the German label map was expanded to 6 labels with emoji icons (📷 Bewegung, 🧑 Person erkannt, 🔊 Audio-Alarm, 🟢 Verbindung hergestellt, 🔴 Verbindung getrennt, 🚨 Kamera-Alarm). The notification-switch type-map also got `TROUBLE_CONNECT` / `TROUBLE_DISCONNECT` routed to the existing `trouble` slug so users can silence the noisy system events without affecting motion/person alerts. **Byproduct:** confirmed that `AUDIO_ALARM` and `PERSON` events have `videoClipUploadStatus: "Unavailable"` (only plain `MOVEMENT` events get a recorded clip) — so the 90s clip-poll is already short-circuited for these types, the missing video is a Bosch server behavior not a bug. Based on a fresh mitmproxy capture of the newly arrived Indoor II unit (569 flows) plus four iOS app screenshots, this release wires every Gen2-Indoor-specific endpoint into the integration: **(1) 75 dB siren (`alarm_settings`):** new `BoschAlarmModeSwitch` (main alarm ON/OFF) + `BoschPreAlarmSwitch` (red-LED warning before siren) + three number entities for the configurable delays — `Sirenen-Dauer` (siren duration), `Alarm-Verzögerung` (activation delay), `Pre-Alarm Dauer`. **(2) Alarm system arming (`intrusionSystem/arming`):** new `BoschAlarmSystemArmSwitch` with `{arm: true/false}` body and optimistic state cached from the switch, backed by polled `GET /alarmStatus`. **(3) Audio+ (`audioAlarm`):** new `BoschAudioAlarmSwitch` (enable/disable glass-break/smoke/CO detection, preserves sensitivity/threshold/configuration fields from the capture — previous setter was dropping them) + new `BoschAudioAlarmSensitivityNumber` (0-10) + fixed `BoschAudioThresholdNumber` to preserve `sensitivity` + `audioAlarmConfiguration: "CUSTOM"` on every write (previously overwrote with a shorter body, losing paid-tier config). **(4) Power-LED vs Status-LED clarification:** the iOS app has two separate LED controls — *Status-LED* (red, recording indicator, already implemented as `BoschStatusLedSwitch` via `/ledlights`) and a second *Power-LED* (white, continuous brightness slider). The capture showed `PUT /iconLedBrightness {value: 0-100}`; that's the Power-LED as a new `BoschPowerLedBrightnessNumber` (0-100%, SLIDER mode, config category). **(5) Privacy sound (`privacy_sound_override`) now works on Indoor II:** existing `BoschPrivacySoundSwitch` was hardcoded to `CAMERA_360` and read from the wrong coordinator field (`data[cam_id]["privacy_sound_override"]`, which is never populated — real cache is `_privacy_sound_cache`). Both bugs fixed; the switch now reads from the correct cache and is registered for `CAMERA_360`, `INDOOR`, `HOME_Eyes_Indoor`, `CAMERA_INDOOR_GEN2`. **(6) Detection-mode value fix:** `BoschDetectionModeSelect` was offering `PERSON_DETECTION` as an option, but the real API value (confirmed in the capture) is `ONLY_HUMANS`. Writing the old value would have failed silently. Corrected to `["ALL_MOTIONS", "ONLY_HUMANS", "ZONES"]`. **(7) `troubleEmail` notification toggle:** the "Störung" row in the iOS app has **two** checkboxes (push + email), matching the `notifications` PUT body which has both `trouble` and `troubleEmail` fields. The per-type notification loop previously iterated `("movement", "person", "audio", "trouble", "cameraAlarm")` — `troubleEmail` is now added as a sixth entity so users can control the email channel independently. **(8) New polled endpoints (Gen2 Indoor II only):** `alarm_settings`, `alarmStatus`, `iconLedBrightness` — three new coordinator caches (`_alarm_settings_cache`, `_alarm_status_cache`, `_arming_cache`, `_icon_led_brightness_cache`) with the Indoor II-gated polling block. **(9) Model-specific entity gating:** Indoor II does not have the Gen2 Outdoor RGB light system (no wallwasher, no top/bottom LEDs, no motion/ambient light) — the number/sensor platforms now skip `BoschWhiteBalanceNumber`, `BoschTopLedBrightnessNumber`, `BoschBottomLedBrightnessNumber`, `BoschMotionLightSensitivityNumber`, `BoschDarknessThresholdNumber`, `BoschLensElevationNumber`, and `BoschAmbientLightScheduleSensor` for `HOME_Eyes_Indoor` / `CAMERA_INDOOR_GEN2`. **(10) New `BoschAlarmStateSensor`** (Gen2 Indoor II only) — exposes `ARMED` / `DISARMED` / `ALARM_ACTIVE` / `UNKNOWN` as the state, with all alarm_settings timing values + lastAlarmTime/lastAlarmType as attributes. **(11) Negative finding documented:** Tested whether the Setup-AP WPA2 password printed on the device sticker doubles as a permanent local Digest password (would replace the ephemeral cloud-issued LOCAL credentials). Tried `service`, `live`, `user`, `admin`, `installer`, `root`, `bosch` with Digest and Basic auth — all 401. Only port 443 open, no ONVIF (3702), no plain RTSP (554), no legacy HTTP (80). Confirmed: the sticker credentials are Setup-AP-only; permanent local user is still on Sebastian Raff's roadmap for summer 2026. |
 | **v9.1.9** | **Gen2 global lighting endpoint + Gen2 Eyes Innenkamera II first successful pairing.** Two things shipped together: **(1) Global lighting config as new entities.** The `GET/PUT /v11/video_inputs/{id}/lighting` endpoint (Gen2 only) returns `{darknessThreshold: 0.0–1.0, softLightFading: bool}` and wasn't exposed anywhere — now wired into a new `_global_lighting_cache` (slow-tier, 300s poll) and surfaced as two config entities: **Switch "Weiches Lichtfading"** (smooth transition between light states) and **Number "Dunkelheitsschwelle"** (0–100%, when the camera switches from day to night lighting mode; stored internally as the API's 0.0–1.0 float). Category `CONFIG`, so they appear under the device info configuration section. **(2) Gen2 Indoor first light.** When the Eyes Innenkamera II was freshly paired via the Bosch app, the integration auto-detected it as `hardwareVersion: HOME_Eyes_Indoor` / model `Eyes Innenkamera II` — the speculative model registry entry added in v9.0.0 turned out to be exactly right. Confirmed working entities: camera feed, privacy mode, notifications, status LED, audio/mic level, lens elevation, WiFi signal, firmware update, live stream, events. Unavailable (as expected for an indoor model with no wallwasher / front light): top/bottom LED, darkness threshold, ambient light sensor, DualRadar intrusion detection, motion light. No errors in the HA log on first poll — the integration handles Gen2 Indoor gracefully out of the box. **(3) Capture re-analysis note.** A targeted re-scan of the 2026-04-08 Gen2 Terrasse captures (reviewing every `PUT /lighting*` body, not just `/lighting/switch`) confirmed that the Bosch app *does* send RGB hex colors like `#4DFF7D` / `#FF453A`, and the existing `_BoschRgbLedLight` code already uses the exact correct body shape (`color: "#RRGGBB"`, `whiteBalance: null`). My earlier "every color is null" assessment from v9.1.8 was a scan artefact — no bug, code was correct. |
 | **v9.1.8** | **Fix: Stop wasting a wrong API call when marking events as read.** Network capture analysis (`bosch_flows_2026-04-08`) confirmed that `/v11/events/bulk` is `POST {ids, action: "DELETE"}` only — there is no bulk mark-as-read variant. The integration's `async_mark_events_read` previously tried `PUT /v11/events/bulk` with `{events: [{id, isRead}]}` first (always failed), then fell back to per-event `PUT /v11/events`. The bulk attempt is now removed; per-event PUT is the only path. Saves one wasted call per FCM event burst. Same fix applied to the Python CLI (`bosch_camera.py:api_mark_events_read`) — also corrected the wrong key (`isSeen` → `isRead`) and the wrong fallback path (`PUT /v11/events/{id}` → `PUT /v11/events` with body `{id, isRead}`). **Bonus:** `Dauerlicht Zeitplan` sensor's `schedule_type` attribute used to leak the raw dict for Gen2 cameras — now normalized to a string (`ENVIRONMENT` / `ENVIRONMENT_WITH_OFFTIME` / manual time string) and `schedule_on_time` / `schedule_off_time` are exposed as separate attributes when the camera reports a schedule dict. |
 | **v9.1.7** | **Fix: Preconfigure Gen2 light settings while off — no more grey dots, no more accidental turn-on.** Two bugs were preventing the "preconfigure while off, apply on turn-on" flow from working: (1) The preconfigure branch in `_BoschRgbLedLight.async_turn_on` / `BoschFrontLight.async_turn_on` only ran when **exactly one** of `rgb_color` / `brightness` (or `color_temp_kelvin` / `brightness`) was provided — so the card's color picker, which sends `rgb_color` + `brightness: 200` together, fell through and physically turned the light on instead of just storing the new color. Simplified: **any** color/brightness change while off is now stored locally, and the light stays physically off until the user explicitly toggles the switch row. (2) `_last_color_hex` was initialized to `None`, so the card's mini color dot fell back to grey (`#555`) until the user picked a color for the first time — seeded to warm white `#FFB464` so the dot has a sensible default, and RestoreEntity overrides it with the user's last-picked color as soon as one exists. **Card v2.8.4:** grey fallbacks for top/bottom LED dots and picker circles replaced with warm white `rgb(255,180,100)`; top/bottom brightness sliders now call `light.turn_on` (which routes through the integration's preconfigure branch) instead of `number.set_value` (which would push brightness=X to the API and physically turn the light on); slider display reads `last_brightness_pct` from the light entity's extra attributes when the light is off, so the slider shows the stored brightness that will be applied next time — not 0%. Fixes [#3](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/3). |

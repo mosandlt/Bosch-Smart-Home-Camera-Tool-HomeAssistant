@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.4";
+const CARD_VERSION = "2.8.5";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -263,6 +263,17 @@ class BoschCameraCard extends HTMLElement {
       frontLightEntity: config.front_light_color_entity || `light.${base}_frontlicht`,
       topBrightness: config.top_brightness_entity || `number.${base}_helligkeit_oberes_licht`,
       bottomBrightness: config.bottom_brightness_entity || `number.${base}_helligkeit_unteres_licht`,
+      // Gen2 Indoor II — alarm system (75 dB siren) + Audio+ + Power LED
+      alarmSystemArm:  config.alarm_system_arm_entity  || `switch.${base}_alarmanlage`,
+      alarmMode:       config.alarm_mode_entity        || `switch.${base}_sirene`,
+      preAlarm:        config.pre_alarm_entity         || `switch.${base}_pre_alarm`,
+      audioAlarm:      config.audio_alarm_entity       || `switch.${base}_audio_plus`,
+      alarmState:      config.alarm_state_entity       || `sensor.${base}_alarm_status`,
+      sirenDuration:   config.siren_duration_entity    || `number.${base}_sirenen_dauer`,
+      alarmActivationDelay: config.alarm_activation_delay_entity || `number.${base}_alarm_verzogerung`,
+      preAlarmDelay:   config.prealarm_delay_entity    || `number.${base}_pre_alarm_dauer`,
+      powerLedBrightness: config.power_led_entity      || `number.${base}_power_led`,
+      audioAlarmSensitivity: config.audio_alarm_sensitivity_entity || `number.${base}_audio_plus_empfindlichkeit`,
     };
 
     this._showMotionZones = this._config.show_motion_zones;
@@ -1027,6 +1038,12 @@ class BoschCameraCard extends HTMLElement {
                 <div class="sw-row" id="btn-ambient-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><span>Dauerlicht</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div class="sw-row" id="btn-intrusion" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Einbrucherkennung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div id="motion-sens-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Empfindlichkeit</span><input type="range" id="motion-sens-slider" min="1" max="5" step="1" style="flex:1;accent-color:#ff9500;height:4px"><span id="motion-sens-value" style="min-width:16px;text-align:right;color:#999">—</span></div>
+                <!-- Gen2 Indoor II — Alarm system (75 dB siren) -->
+                <div class="sw-row" id="btn-alarm-arm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span>Alarmanlage scharf</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-alarm-mode" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span>Sirene (75 dB)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-prealarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span>Pre-Alarm (rote LED)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-audio-alarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 013 3v8a3 3 0 01-6 0V4a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/></svg><span>Geräusch-Erkennung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="power-led-row" style="display:none;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Power-LED</span><input type="range" id="power-led-slider" min="0" max="100" step="5" style="flex:1;accent-color:#ff9500;height:4px"><span id="power-led-value" style="min-width:34px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
           </div>
@@ -1323,6 +1340,43 @@ class BoschCameraCard extends HTMLElement {
     if (intrusionBtn) intrusionBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
       this._toggleSwitch(this._entities.intrusionDetection)
     );
+
+    // Gen2 Indoor II: Alarm system controls
+    const alarmArmBtn = this.shadowRoot.getElementById("btn-alarm-arm");
+    if (alarmArmBtn) alarmArmBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.alarmSystemArm)
+    );
+    const alarmModeBtn = this.shadowRoot.getElementById("btn-alarm-mode");
+    if (alarmModeBtn) alarmModeBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.alarmMode)
+    );
+    const preAlarmBtn = this.shadowRoot.getElementById("btn-prealarm");
+    if (preAlarmBtn) preAlarmBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.preAlarm)
+    );
+    const audioAlarmBtn = this.shadowRoot.getElementById("btn-audio-alarm");
+    if (audioAlarmBtn) audioAlarmBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
+      this._toggleSwitch(this._entities.audioAlarm)
+    );
+    // Gen2 Indoor II: Power-LED brightness slider
+    const powerLedSlider = this.shadowRoot.getElementById("power-led-slider");
+    if (powerLedSlider) {
+      let powerLedDebounce = null;
+      powerLedSlider.addEventListener("input", () => {
+        const valEl = this.shadowRoot.getElementById("power-led-value");
+        if (valEl) valEl.textContent = powerLedSlider.value + "%";
+      });
+      powerLedSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.powerLedBrightness) return;
+        clearTimeout(powerLedDebounce);
+        powerLedDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.powerLedBrightness,
+            value: parseInt(powerLedSlider.value),
+          }).catch(err => console.warn("bosch-camera-card: power-led", err));
+        }, 200);
+      });
+    }
 
     // Automation toggles — dynamically generated from config.automations array
     const autoContainer = this.shadowRoot.getElementById("automations-container");
@@ -2366,6 +2420,34 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-motion-light", ents.motionLight, hass.states[ents.motionLight]);
     this._updateToggleBtn("btn-ambient-light", ents.ambientLight, hass.states[ents.ambientLight]);
     this._updateToggleBtn("btn-intrusion", ents.intrusionDetection, hass.states[ents.intrusionDetection]);
+
+    // Gen2 Indoor II — alarm system controls (only shown when the alarm switch entity exists)
+    const hasAlarmSystem = ents.alarmSystemArm && hass.states[ents.alarmSystemArm];
+    for (const [rowId, entId] of [
+      ["btn-alarm-arm",   ents.alarmSystemArm],
+      ["btn-alarm-mode",  ents.alarmMode],
+      ["btn-prealarm",    ents.preAlarm],
+      ["btn-audio-alarm", ents.audioAlarm],
+    ]) {
+      const row = this.shadowRoot.getElementById(rowId);
+      if (row) row.style.display = (hasAlarmSystem && entId && hass.states[entId]) ? "flex" : "none";
+    }
+    this._updateToggleBtn("btn-alarm-arm",   ents.alarmSystemArm, hass.states[ents.alarmSystemArm]);
+    this._updateToggleBtn("btn-alarm-mode",  ents.alarmMode,      hass.states[ents.alarmMode]);
+    this._updateToggleBtn("btn-prealarm",    ents.preAlarm,       hass.states[ents.preAlarm]);
+    this._updateToggleBtn("btn-audio-alarm", ents.audioAlarm,     hass.states[ents.audioAlarm]);
+
+    // Gen2 Indoor II — Power-LED brightness slider
+    const powerLedRow = this.shadowRoot.getElementById("power-led-row");
+    const powerLedEnt = hass.states[ents.powerLedBrightness];
+    if (powerLedRow) powerLedRow.style.display = powerLedEnt ? "flex" : "none";
+    if (powerLedEnt) {
+      const slider = this.shadowRoot.getElementById("power-led-slider");
+      const valEl  = this.shadowRoot.getElementById("power-led-value");
+      const val    = parseInt(powerLedEnt.state) || 0;
+      if (slider && document.activeElement !== slider) slider.value = val;
+      if (valEl) valEl.textContent = val + "%";
+    }
 
     // Automation toggles — update state + name from HA
     if (ents.automations?.length) {

@@ -114,9 +114,9 @@ async def async_setup_entry(
         # Intercom (two-way audio) — disabled by default
         entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
         # Privacy sound — only for cameras where the endpoint returns 200 (not 442)
-        # Indoor CAMERA_360 supports it, outdoor CAMERA_EYES returns 442
+        # Indoor CAMERA_360 (Gen1) + HOME_Eyes_Indoor (Gen2) support it; outdoor returns 442.
         hw_version = cam_info.get("hardwareVersion", "")
-        if hw_version == "CAMERA_360":
+        if hw_version in ("CAMERA_360", "INDOOR", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
         # Timestamp overlay — available for all cameras
         entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
@@ -128,9 +128,16 @@ async def async_setup_entry(
             entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry))
-        # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm
-        for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm"):
+        # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm,
+        # troubleEmail (second "Störung" checkbox in the iOS app — email channel, separate from push)
+        for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm", "troubleEmail"):
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
+        # Gen2 Indoor II — alarm system (integrated 75 dB siren) + audio alarm (glass/smoke/CO)
+        if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+            entities.append(BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschAudioAlarmSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -807,10 +814,12 @@ class BoschIntercomSwitch(_BoschSwitchBase):
 class BoschPrivacySoundSwitch(_BoschSwitchBase):
     """Switch: ON = privacy sound override active, OFF = privacy sound off.
 
-    When enabled, the camera plays an audible tone when privacy mode changes.
+    Maps to the iOS app "Ton" toggle under Kamera-Funktionen — when enabled,
+    the camera plays an audible tone when privacy mode changes.
     Uses cloud API: GET/PUT /v11/video_inputs/{id}/privacy_sound_override
     Body: {"result": true/false}
-    Only available on CAMERA_360 (indoor) — outdoor cameras return 442.
+    Supported: CAMERA_360 (Gen1 Indoor), HOME_Eyes_Indoor (Gen2 Indoor II).
+    Outdoor cameras return 442.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -822,26 +831,34 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
-        data = self.coordinator.data.get(self._cam_id, {}).get("privacy_sound_override")
-        if data is None:
-            return None
-        return data.get("result", False)
+        return self.coordinator._privacy_sound_cache.get(self._cam_id)
 
     @property
     def icon(self) -> str:
         return "mdi:volume-high" if self.is_on else "mdi:volume-off"
 
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._privacy_sound_cache.get(self._cam_id) is not None
+        )
+
     async def async_turn_on(self, **kwargs):
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "privacy_sound_override", {"result": True}
         )
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        if success:
+            self.coordinator._privacy_sound_cache[self._cam_id] = True
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "privacy_sound_override", {"result": False}
         )
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        if success:
+            self.coordinator._privacy_sound_cache[self._cam_id] = False
+        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1194,19 +1211,21 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 _NOTIF_TYPE_ICONS = {
-    "movement":    "mdi:motion-sensor",
-    "person":      "mdi:account-eye",
-    "audio":       "mdi:volume-high",
-    "trouble":     "mdi:alert-circle",
-    "cameraAlarm": "mdi:alarm-light",
+    "movement":     "mdi:motion-sensor",
+    "person":       "mdi:account-eye",
+    "audio":        "mdi:volume-high",
+    "trouble":      "mdi:alert-circle",
+    "cameraAlarm":  "mdi:alarm-light",
+    "troubleEmail": "mdi:email-alert",
 }
 
 _NOTIF_TYPE_LABELS = {
-    "movement":    "Movement Notifications",
-    "person":      "Person Notifications",
-    "audio":       "Audio Notifications",
-    "trouble":     "Trouble Notifications",
-    "cameraAlarm": "Camera Alarm Notifications",
+    "movement":     "Movement Notifications",
+    "person":       "Person Notifications",
+    "audio":        "Audio Notifications",
+    "trouble":      "Trouble Notifications (Push)",
+    "cameraAlarm":  "Camera Alarm Notifications",
+    "troubleEmail": "Trouble Notifications (Email)",
 }
 
 
@@ -1261,3 +1280,189 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs):
         await self._set_type(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gen2 Indoor II — Alarm System (integrated 75 dB siren)
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
+    """Switch: scharf/unscharf (armed / disarmed) for the integrated alarm system.
+
+    PUT /v11/video_inputs/{id}/intrusionSystem/arming  body: {"arm": true/false}
+    State is derived from GET /v11/video_inputs/{id}/alarmStatus polling +
+    optimistic update on successful PUT.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Alarmanlage"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_arm"
+
+    @property
+    def icon(self) -> str:
+        return "mdi:shield-lock" if self.is_on else "mdi:shield-off-outline"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator._arming_cache.get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        status = self.coordinator._alarm_status_cache.get(self._cam_id, {})
+        return {
+            "alarm_type":       status.get("alarmType"),
+            "intrusion_system": status.get("intrusionSystem"),
+        }
+
+    async def _set_arm(self, arm: bool) -> None:
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "intrusionSystem/arming", {"arm": arm}
+        )
+        if success:
+            self.coordinator._arming_cache[self._cam_id] = arm
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set_arm(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set_arm(False)
+
+
+class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
+    """Shared base for alarm_settings boolean toggles (alarmMode / preAlarmMode)."""
+
+    _field: str = ""   # field to toggle (alarmMode / preAlarmMode)
+
+    @property
+    def _settings(self) -> dict:
+        return self.coordinator._alarm_settings_cache.get(self._cam_id, {})
+
+    @property
+    def is_on(self) -> bool | None:
+        val = self._settings.get(self._field)
+        if val is None:
+            return None
+        return str(val).upper() == "ON"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self._settings)
+        )
+
+    async def _set(self, enabled: bool) -> None:
+        cfg = dict(self._settings)
+        if not cfg:
+            return
+        cfg[self._field] = "ON" if enabled else "OFF"
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "alarm_settings", cfg
+        )
+        if success:
+            self.coordinator._alarm_settings_cache[self._cam_id] = cfg
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set(False)
+
+
+class BoschAlarmModeSwitch(_BoschAlarmSettingsSwitchBase):
+    """Switch: main alarm (75 dB siren) ON/OFF — alarm_settings.alarmMode."""
+
+    _field = "alarmMode"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Sirene"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_mode"
+        self._attr_icon      = "mdi:alarm-light"
+
+
+class BoschPreAlarmSwitch(_BoschAlarmSettingsSwitchBase):
+    """Switch: Pre-Alarm (LED warning before siren) ON/OFF — alarm_settings.preAlarmMode."""
+
+    _field = "preAlarmMode"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Pre-Alarm"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm"
+        self._attr_icon      = "mdi:led-on"
+
+
+class BoschAudioAlarmSwitch(_BoschSwitchBase):
+    """Switch: basic sound/noise detection ON/OFF (free tier, not Audio+ premium).
+
+    Maps to the "Geräusche" toggle in the iOS app under Ereignisse → Audio.
+    This is the FREE sound-threshold detection that triggers an event when the
+    ambient noise level exceeds the configured threshold.
+
+    Do NOT confuse with Audio+ (paid subscription) which adds glass-break / smoke /
+    CO detection — Audio+ uses a different `audioAlarmConfiguration` value and is
+    gated behind a /v11/purchases check. When this switch is ON, the camera's
+    audioAlarmConfiguration is "CUSTOM" (free threshold-based detection); "OFF"
+    fully disables sound detection.
+
+    PUT /v11/video_inputs/{id}/audioAlarm  body preserves sensitivity/threshold/config,
+    only toggles the enabled field.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Geraeusch-Erkennung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm"
+        self._attr_icon      = "mdi:ear-hearing"
+
+    @property
+    def _settings(self) -> dict:
+        return self.coordinator.audio_alarm_settings(self._cam_id) or {}
+
+    @property
+    def is_on(self) -> bool | None:
+        s = self._settings
+        if not s:
+            return None
+        return bool(s.get("enabled", False))
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and bool(self._settings)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        s = self._settings
+        return {
+            "sensitivity":  s.get("sensitivity"),
+            "threshold":    s.get("threshold"),
+            "configuration": s.get("audioAlarmConfiguration"),
+        }
+
+    async def _set(self, enabled: bool) -> None:
+        current = dict(self._settings)
+        if not current:
+            return
+        current["enabled"] = enabled
+        # Preserve all other fields — capture shows full body with sensitivity/threshold/config
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "audioAlarm", current
+        )
+        if success:
+            cam_data = self.coordinator.data.get(self._cam_id)
+            if cam_data is not None:
+                cam_data["audioAlarm"] = current
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set(False)

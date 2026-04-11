@@ -80,7 +80,12 @@ async def async_setup_entry(
         from .models import get_model_config as _gmc_setup
         hw_setup = cam_info.get("hardwareVersion", "")
         if _gmc_setup(hw_setup).generation >= 2:
-            entities.append(BoschAmbientLightScheduleSensor(coordinator, cam_id, config_entry))
+            # Ambient-light schedule is Outdoor-only (Indoor II has no RGB lights)
+            if hw_setup not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+                entities.append(BoschAmbientLightScheduleSensor(coordinator, cam_id, config_entry))
+        # Gen2 Indoor II — alarm state sensor
+        if hw_setup in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+            entities.append(BoschAlarmStateSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -1152,3 +1157,53 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
                 if color is not None:
                     attrs[f"{prefix}_color"] = color
         return attrs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAlarmStateSensor(_BoschSensorBase):
+    """Sensor: alarm state (Gen2 Indoor II only).
+
+    Actual API response (confirmed 2026-04-11):
+        GET /v11/video_inputs/{id}/alarmStatus
+        → {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
+
+    Sensor state = intrusionSystem field (INACTIVE = disarmed, ACTIVE = armed).
+    `alarm_type` in attributes exposes what kind of alarm last fired (NONE when idle).
+    """
+
+    _attr_icon = "mdi:alarm-light-outline"
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Alarm-Status"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_state"
+
+    @property
+    def native_value(self) -> str:
+        status = self.coordinator._alarm_status_cache.get(self._cam_id, {})
+        if status:
+            return str(status.get("intrusionSystem", "UNKNOWN")).upper()
+        armed = self.coordinator._arming_cache.get(self._cam_id)
+        if armed is True:
+            return "ACTIVE"
+        if armed is False:
+            return "INACTIVE"
+        return "UNKNOWN"
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        settings = self.coordinator._alarm_settings_cache.get(self._cam_id, {})
+        status   = self.coordinator._alarm_status_cache.get(self._cam_id, {})
+        return {
+            "alarm_mode":               settings.get("alarmMode"),
+            "pre_alarm_mode":           settings.get("preAlarmMode"),
+            "siren_duration_s":         settings.get("alarmDelayInSeconds"),
+            "activation_delay_s":       settings.get("alarmActivationDelaySeconds"),
+            "pre_alarm_duration_s":     settings.get("preAlarmDelayInSeconds"),
+            "alarm_type":               status.get("alarmType"),
+            "intrusion_system":         status.get("intrusionSystem"),
+        }

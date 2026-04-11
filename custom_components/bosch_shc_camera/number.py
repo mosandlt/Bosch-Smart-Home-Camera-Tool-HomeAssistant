@@ -49,13 +49,25 @@ async def async_setup_entry(
         from .models import get_model_config
         hw = cam_info.get("hardwareVersion", "CAMERA")
         if get_model_config(hw).generation >= 2:
+            # lens_elevation works on both Indoor II and Outdoor II
+            # (Indoor II slow-tier returns 200 on this endpoint, confirmed 2026-04-11)
             entities.append(BoschLensElevationNumber(coordinator, cam_id, config_entry))
             entities.append(BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschWhiteBalanceNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschDarknessThresholdNumber(coordinator, cam_id, config_entry))
+            # Light-related entities only for cameras that actually expose Gen2 lighting
+            # (Indoor II has no RGB/wallwasher lights — only Power-LED via iconLedBrightness).
+            if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+                entities.append(BoschWhiteBalanceNumber(coordinator, cam_id, config_entry))
+                entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
+                entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
+                entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
+                entities.append(BoschDarknessThresholdNumber(coordinator, cam_id, config_entry))
+        # Gen2 Indoor II — alarm delays + power-LED brightness + audio alarm sensitivity
+        if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+            entities.append(BoschPowerLedBrightnessNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschAlarmDelayNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschAlarmActivationDelayNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschPreAlarmDelayNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschAudioAlarmSensitivityNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -177,22 +189,25 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write the new threshold to the camera via cloud API."""
+        """Write the new threshold to the camera via cloud API.
+
+        Preserves sensitivity + audioAlarmConfiguration fields — the Bosch app
+        sends the full body (capture 2026-04-11):
+            {"sensitivity":0,"threshold":72,"enabled":true,"audioAlarmConfiguration":"CUSTOM"}
+        """
         threshold = int(round(value))
-        # Read current enabled state (preserve it; default True if unknown)
-        settings = self.coordinator.audio_alarm_settings(self._cam_id)
-        enabled  = settings.get("enabled", True)
-        success  = await self.coordinator.async_put_camera(
-            self._cam_id,
-            "audioAlarm",
-            {"threshold": threshold, "enabled": enabled},
+        current   = dict(self.coordinator.audio_alarm_settings(self._cam_id) or {})
+        current["threshold"] = threshold
+        current.setdefault("enabled", True)
+        current.setdefault("sensitivity", 0)
+        current.setdefault("audioAlarmConfiguration", "CUSTOM")
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "audioAlarm", current
         )
         if success:
             # Optimistically update coordinator data so UI reflects immediately
-            audio_data = self.coordinator.data.get(self._cam_id, {}).get("audioAlarm", {})
-            audio_data["threshold"] = threshold
             if self._cam_id in self.coordinator.data:
-                self.coordinator.data[self._cam_id]["audioAlarm"] = audio_data
+                self.coordinator.data[self._cam_id]["audioAlarm"] = current
             _LOGGER.debug("Audio threshold set to %d dB for %s", threshold, self._cam_id)
         else:
             _LOGGER.warning("Failed to set audio threshold for %s", self._cam_id)
@@ -694,4 +709,199 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
         )
         if success:
             self.coordinator._global_lighting_cache[self._cam_id] = body
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gen2 Indoor II — Power-LED brightness + Alarm delays + Audio alarm sensitivity
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
+    """Number: Power-LED brightness (0-4, 5 discrete steps) — white LED showing camera is powered.
+
+    Maps to "Power-LED" slider in iOS app → Kamera-Funktionen.
+    Distinct from Status-LED (red, recording indicator, BoschStatusLedSwitch).
+    PUT /v11/video_inputs/{id}/iconLedBrightness  body: {"value": 0-4}
+    Confirmed by direct API test 2026-04-11: writing value=5 → HTTP 400
+    "must be less than or equal to 4". The iOS app shows this as a percent
+    slider but internally maps to 5 discrete positions (0 = off, 4 = max).
+    """
+
+    _attr_icon                        = "mdi:led-on"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 4
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_entity_category             = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Power-LED"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_power_led_brightness"
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator._icon_led_brightness_cache.get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._icon_led_brightness_cache.get(self._cam_id) is not None
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        val = int(round(max(0, min(4, value))))
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "iconLedBrightness", {"value": val}
+        )
+        if success:
+            self.coordinator._icon_led_brightness_cache[self._cam_id] = val
+        self.async_write_ha_state()
+
+
+class _BoschAlarmDelayBase(_BoschGen2NumberBase):
+    """Shared base for alarm_settings integer fields."""
+
+    _field: str = ""
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.BOX
+    _attr_native_unit_of_measurement  = "s"
+    _attr_entity_category             = EntityCategory.CONFIG
+
+    @property
+    def _settings(self) -> dict:
+        return self.coordinator._alarm_settings_cache.get(self._cam_id, {})
+
+    @property
+    def native_value(self) -> float | None:
+        val = self._settings.get(self._field)
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self._settings)
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        cfg = dict(self._settings)
+        if not cfg:
+            return
+        cfg[self._field] = int(round(value))
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "alarm_settings", cfg
+        )
+        if success:
+            self.coordinator._alarm_settings_cache[self._cam_id] = cfg
+        self.async_write_ha_state()
+
+
+class BoschAlarmDelayNumber(_BoschAlarmDelayBase):
+    """Number: siren duration (alarm_settings.alarmDelayInSeconds).
+
+    How long the 75 dB siren stays active when triggered.
+    Observed range from capture: 52–76s.
+    """
+
+    _field                  = "alarmDelayInSeconds"
+    _attr_icon              = "mdi:timer-alert"
+    _attr_native_min_value  = 10
+    _attr_native_max_value  = 300
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Sirenen-Dauer"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_delay"
+
+
+class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
+    """Number: siren activation delay (alarm_settings.alarmActivationDelaySeconds).
+
+    Time between detection and siren activation. Observed: 1–180s.
+    """
+
+    _field                  = "alarmActivationDelaySeconds"
+    _attr_icon              = "mdi:timer-sand"
+    _attr_native_min_value  = 0
+    _attr_native_max_value  = 600
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Alarm-Verzögerung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_activation_delay"
+
+
+class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
+    """Number: pre-alarm duration (alarm_settings.preAlarmDelayInSeconds).
+
+    How long the LED warning stays active before the siren fires.
+    Observed: 30–38s.
+    """
+
+    _field                  = "preAlarmDelayInSeconds"
+    _attr_icon              = "mdi:led-on"
+    _attr_native_min_value  = 0
+    _attr_native_max_value  = 300
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Pre-Alarm Dauer"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm_delay"
+
+
+class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
+    """Number: audio alarm sensitivity (audioAlarm.sensitivity, 0-10).
+
+    Write-only — `GET /audioAlarm` returns only {threshold, enabled, audioAlarmConfiguration}
+    (confirmed by direct API test 2026-04-11). The sensitivity field is sent in PUT bodies
+    but not echoed back. We track the last-written value optimistically and default to 0.
+    Disabled by default since there's no read-side value to show.
+    """
+
+    _attr_icon                        = "mdi:microphone"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 10
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_entity_category             = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Geraeusch Empfindlichkeit"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_sensitivity"
+        self._last_written: int = 0
+
+    @property
+    def _settings(self) -> dict:
+        return self.coordinator.audio_alarm_settings(self._cam_id) or {}
+
+    @property
+    def native_value(self) -> float | None:
+        # GET response doesn't echo sensitivity — return last-written value (default 0)
+        val = self._settings.get("sensitivity", self._last_written)
+        return float(val)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and bool(self._settings)
+
+    async def async_set_native_value(self, value: float) -> None:
+        current = dict(self._settings)
+        if not current:
+            return
+        new_val = int(round(value))
+        current["sensitivity"] = new_val
+        current.setdefault("enabled", True)
+        current.setdefault("threshold", 54)
+        current.setdefault("audioAlarmConfiguration", "CUSTOM")
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "audioAlarm", current
+        )
+        if success:
+            self._last_written = new_val
+            cam = self.coordinator.data.get(self._cam_id)
+            if cam is not None:
+                cam["audioAlarm"] = current
         self.async_write_ha_state()

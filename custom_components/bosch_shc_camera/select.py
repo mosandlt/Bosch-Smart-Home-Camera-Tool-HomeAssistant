@@ -43,7 +43,7 @@ QUALITY_MAP_REVERSE = {v: k for k, v in QUALITY_MAP.items()}
 
 MOTION_SENSITIVITY_OPTIONS = ["SUPER_HIGH", "HIGH", "MEDIUM_HIGH", "MEDIUM_LOW", "LOW", "OFF"]
 
-DETECTION_MODE_OPTIONS = ["ALL_MOTIONS", "PERSON_DETECTION", "ZONES"]
+DETECTION_MODE_OPTIONS = ["ALL_MOTIONS", "ONLY_HUMANS", "ZONES"]
 
 FCM_PUSH_MODE_OPTIONS = ["Auto", "Android", "iOS", "Polling"]
 FCM_PUSH_MODE_MAP = {"Auto": "auto", "Android": "android", "iOS": "ios", "Polling": "polling"}

@@ -282,11 +282,19 @@ async def async_handle_fcm_push(coordinator) -> None:
 
                 newest_event = events[0]
                 event_type   = newest_event.get("eventType", "")
+                event_tags   = newest_event.get("eventTags", []) or []
                 cam_name     = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
 
+                # Gen2 cameras (Outdoor II w/ DualRadar, Indoor II) send
+                # eventType=MOVEMENT with eventTags=["PERSON"] when a human is
+                # detected — the tag is more specific than the type, so upgrade.
+                # Confirmed 2026-04-11 via /v11/events on Terrasse: 15x tags=['PERSON'].
+                if "PERSON" in event_tags and event_type == "MOVEMENT":
+                    event_type = "PERSON"
+
                 _LOGGER.info(
-                    "FCM push -> new %s event for %s (id=%s)",
-                    event_type, cam_name, newest_id[:8],
+                    "FCM push -> new %s event for %s (id=%s, tags=%s)",
+                    event_type, cam_name, newest_id[:8], event_tags,
                 )
 
                 # Update cached events (write to cache only — coordinator tick merges)
@@ -319,7 +327,20 @@ async def async_handle_fcm_push(coordinator) -> None:
                     _LOGGER.debug("Alert suppressed: %s is OFF", _master_eid)
                     _alert_blocked = True
                 # Type-specific check
-                _type_map = {"MOVEMENT": "movement", "AUDIO_ALARM": "audio", "PERSON": "person", "CAMERA_ALARM": "camera_alarm", "TROUBLE": "trouble"}
+                # Map raw event types to the notification-switch slug used by
+                # BoschNotificationTypeSwitch (switch.bosch_{base}_{slug}_notifications).
+                # TROUBLE_CONNECT + TROUBLE_DISCONNECT both follow the `trouble` switch —
+                # they're system events and can be silenced together without affecting
+                # motion/person alerts.
+                _type_map = {
+                    "MOVEMENT":           "movement",
+                    "PERSON":             "person",
+                    "AUDIO_ALARM":        "audio",
+                    "CAMERA_ALARM":       "camera_alarm",
+                    "TROUBLE":            "trouble",
+                    "TROUBLE_CONNECT":    "trouble",
+                    "TROUBLE_DISCONNECT": "trouble",
+                }
                 _type_key = _type_map.get(event_type)
                 if _type_key and not _alert_blocked:
                     _type_eid = f"switch.bosch_{_base}_{_type_key}_notifications"
@@ -444,8 +465,28 @@ async def async_send_alert(
     delete_after   = opts.get("alert_delete_after_send", True)
     ts_short       = timestamp[11:19] if len(timestamp) >= 19 else timestamp
 
-    type_label = {"MOVEMENT": "Bewegung", "AUDIO_ALARM": "Audio-Alarm", "PERSON": "Person erkannt"}.get(event_type, event_type)
-    type_icon  = {"MOVEMENT": "\U0001f4f7", "AUDIO_ALARM": "\U0001f50a", "PERSON": "\U0001f9d1"}.get(event_type, "\u26a0\ufe0f")
+    # Event type → German label + emoji icon.
+    # Derived from full mitmproxy capture analysis (116K+ events across 12 captures,
+    # 2026-04-11): 5 unique (eventType, eventTags) combinations observed.
+    # Key finding: PERSON events are eventType=MOVEMENT + eventTags=["PERSON"] (Gen2
+    # DualRadar) — the caller is expected to have already upgraded event_type from
+    # "MOVEMENT" to "PERSON" when tag is present (see __init__.py + fcm.py push path).
+    type_label = {
+        "MOVEMENT":           "Bewegung",
+        "PERSON":             "Person erkannt",
+        "AUDIO_ALARM":        "Audio-Alarm",
+        "TROUBLE_CONNECT":    "Verbindung hergestellt",
+        "TROUBLE_DISCONNECT": "Verbindung getrennt",
+        "CAMERA_ALARM":       "Kamera-Alarm",
+    }.get(event_type, event_type)
+    type_icon = {
+        "MOVEMENT":           "\U0001f4f7",   # 📷
+        "PERSON":             "\U0001f9d1",   # 🧑
+        "AUDIO_ALARM":        "\U0001f50a",   # 🔊
+        "TROUBLE_CONNECT":    "\U0001f7e2",   # 🟢
+        "TROUBLE_DISCONNECT": "\U0001f534",   # 🔴
+        "CAMERA_ALARM":       "\U0001f6a8",   # 🚨
+    }.get(event_type, "\u26a0\ufe0f")       # ⚠️ fallback
 
     # www/bosch_alerts/ is served as /local/bosch_alerts/ — needed for mobile_app notifications
     alert_dir = os.path.join(coordinator.hass.config.config_dir, "www", "bosch_alerts")
