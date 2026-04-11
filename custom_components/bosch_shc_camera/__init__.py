@@ -248,6 +248,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._ambient_lighting_cache: dict[str, dict] = {}
         # Lighting switch cache — keyed by cam_id, from GET /lighting/switch (Gen2 only)
         self._lighting_switch_cache: dict[str, dict] = {}
+        # Global lighting config cache — keyed by cam_id, from GET /lighting (Gen2 only)
+        # Contains: darknessThreshold (0.0-1.0), softLightFading (bool)
+        self._global_lighting_cache: dict[str, dict] = {}
         # Notification type toggles cache — keyed by cam_id, from GET /notifications
         self._notifications_cache: dict[str, dict] = {}
         # Rules cache — keyed by cam_id, from GET /rules
@@ -1098,7 +1101,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                     # Gen2-only endpoints
                     if is_gen2:
-                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "intrusionDetectionConfig"])
+                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "lighting", "intrusionDetectionConfig"])
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -1160,6 +1163,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 pass  # State synced via switch._is_on in next update
                         elif ep == "lighting/ambient":
                             self._ambient_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                        elif ep == "lighting":
+                            self._global_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "intrusionDetectionConfig":
                             self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "zones":

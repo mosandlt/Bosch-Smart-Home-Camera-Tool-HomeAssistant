@@ -18,6 +18,7 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -54,6 +55,7 @@ async def async_setup_entry(
             entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
             entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
             entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschDarknessThresholdNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -645,4 +647,51 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
         )
         if success:
             self.coordinator._motion_light_cache[self._cam_id] = cache
+        self.async_write_ha_state()
+
+
+class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
+    """Number entity: darkness threshold 0-100% (Gen2 only).
+
+    Controls when the camera switches from day to night lighting mode.
+    0 = always day, 100 = always night.
+    Reads from GET /v11/video_inputs/{id}/lighting → {"darknessThreshold": 0.47, "softLightFading": bool}
+    Writes via PUT /v11/video_inputs/{id}/lighting with full body.
+    """
+
+    _attr_icon                        = "mdi:weather-night"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 100
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "%"
+    _attr_entity_category             = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Dunkelheitsschwelle"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_darkness_threshold"
+
+    @property
+    def native_value(self) -> float | None:
+        cache = self.coordinator._global_lighting_cache.get(self._cam_id, {})
+        val = cache.get("darknessThreshold")
+        return round(float(val) * 100, 0) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._global_lighting_cache.get(self._cam_id))
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        cache = self.coordinator._global_lighting_cache.get(self._cam_id, {})
+        soft_fading = cache.get("softLightFading", True)
+        body = {"darknessThreshold": round(value / 100, 4), "softLightFading": soft_fading}
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "lighting", body
+        )
+        if success:
+            self.coordinator._global_lighting_cache[self._cam_id] = body
         self.async_write_ha_state()

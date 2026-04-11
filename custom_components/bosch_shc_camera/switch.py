@@ -126,6 +126,7 @@ async def async_setup_entry(
             entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschMotionLightSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
+            entities.append(BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry))
         # Notification type toggles — per-type on/off for movement, person, audio, trouble, cameraAlarm
         for ntype in ("movement", "person", "audio", "trouble", "cameraAlarm"):
@@ -1068,6 +1069,72 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs):
         await self._set_ambient_light(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschSoftLightFadingSwitch(_BoschSwitchBase):
+    """Switch: soft light fading (Gen2 only).
+
+    When ON, lights fade smoothly instead of snapping on/off.
+    Uses cloud API: GET/PUT /v11/video_inputs/{id}/lighting
+    Body: {"darknessThreshold": float, "softLightFading": bool}
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = f"Bosch {self._cam_title} Weiches Lichtfading"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_soft_light_fading"
+        self._attr_icon      = "mdi:transition"
+
+    @property
+    def is_on(self) -> bool | None:
+        cache = self.coordinator._global_lighting_cache.get(self._cam_id, {})
+        return cache.get("softLightFading") if cache else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._global_lighting_cache.get(self._cam_id))
+        )
+
+    async def _put_global_lighting(self, enabled: bool) -> None:
+        import aiohttp
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        token = self.coordinator.token
+        if not token:
+            return
+        cache = self.coordinator._global_lighting_cache.get(self._cam_id, {})
+        # Preserve existing darknessThreshold
+        threshold = cache.get("darknessThreshold", 0.5)
+        body = {"darknessThreshold": threshold, "softLightFading": enabled}
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting"
+        try:
+            async with asyncio.timeout(10):
+                async with session.put(url, headers=headers, json=body) as resp:
+                    if resp.status in (200, 204):
+                        # Update cache
+                        try:
+                            rsp = await resp.json()
+                            if isinstance(rsp, dict):
+                                self.coordinator._global_lighting_cache[self._cam_id] = rsp
+                            else:
+                                self.coordinator._global_lighting_cache[self._cam_id] = body
+                        except Exception:
+                            self.coordinator._global_lighting_cache[self._cam_id] = body
+        except Exception as err:
+            _LOGGER.warning("Soft fading error for %s: %s", self._cam_id[:8], err)
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._put_global_lighting(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._put_global_lighting(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
