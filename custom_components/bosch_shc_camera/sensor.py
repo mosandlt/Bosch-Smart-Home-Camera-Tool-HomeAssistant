@@ -1118,10 +1118,20 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
         cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
         if not cache:
             return {}
+        schedule = cache.get("ambientLightSchedule", "ENVIRONMENT")
+        if isinstance(schedule, dict):
+            schedule_str = schedule.get("type", "ENVIRONMENT")
+        else:
+            schedule_str = schedule
         attrs = {
             "enabled": cache.get("ambientLightEnabled", False),
-            "schedule_type": cache.get("ambientLightSchedule", "ENVIRONMENT"),
+            "schedule_type": schedule_str,
         }
+        if isinstance(schedule, dict):
+            if schedule.get("lightOnTime"):
+                attrs["schedule_on_time"] = schedule["lightOnTime"]
+            if schedule.get("lightOffTime"):
+                attrs["schedule_off_time"] = schedule["lightOffTime"]
         # Manual schedule times (if set)
         start = cache.get("ambientLightManualStartTime")
         end = cache.get("ambientLightManualEndTime")

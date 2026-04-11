@@ -673,10 +673,10 @@ async def async_send_alert(
 # ── Mark events as read ──────────────────────────────────────────────────────
 
 async def async_mark_events_read(coordinator, event_ids: list[str]) -> bool:
-    """Mark events as read/seen on the Bosch cloud.
+    """Mark events as read/seen on the Bosch cloud via PUT /v11/events.
 
-    Tries PUT /v11/events/bulk first, falls back to individual PUT.
-    Best-effort — never raises.
+    The /v11/events/bulk endpoint only supports `{ids, action: "DELETE"}` —
+    there is no bulk mark-as-read. Best-effort — never raises.
     """
     if not event_ids:
         return True
@@ -691,21 +691,6 @@ async def async_mark_events_read(coordinator, event_ids: list[str]) -> bool:
         "Content-Type": "application/json",
     }
 
-    # Try bulk update
-    try:
-        body = {"events": [{"id": eid, "isRead": True} for eid in event_ids]}
-        async with asyncio.timeout(10):
-            async with session.put(
-                f"{CLOUD_API}/v11/events/bulk", headers=headers, json=body
-            ) as resp:
-                if resp.status in (200, 204):
-                    _LOGGER.debug("Marked %d events as read (bulk)", len(event_ids))
-                    return True
-                _LOGGER.debug("Bulk mark-read HTTP %d — trying individual", resp.status)
-    except Exception as err:
-        _LOGGER.debug("Bulk mark-read error: %s — trying individual", err)
-
-    # Fallback: individual PUT /v11/events with {"id": eid, "isRead": true}
     success = False
     for eid in event_ids:
         try:
@@ -720,5 +705,5 @@ async def async_mark_events_read(coordinator, event_ids: list[str]) -> bool:
             pass
 
     if success:
-        _LOGGER.debug("Marked events as read (individual)")
+        _LOGGER.debug("Marked %d events as read", len(event_ids))
     return success
