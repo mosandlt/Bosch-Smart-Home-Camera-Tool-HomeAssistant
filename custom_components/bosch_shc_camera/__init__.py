@@ -60,57 +60,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN     = "bosch_shc_camera"
-CLOUD_API  = "https://residential.cbs.boschsecurity.com"
-
-ALL_PLATFORMS = ["binary_sensor", "camera", "sensor", "button", "switch", "number", "select", "update", "light"]
-
-# ConnectionType enum — confirmed working value: "REMOTE"
-LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
-LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
-
-
-DEFAULT_OPTIONS = {
-    "scan_interval":      60,    # coordinator tick interval (seconds)
-    "interval_status":   300,   # ping camera status every 5 minutes
-    "interval_events":   300,   # fetch new events every 5 minutes
-    "snapshot_interval": 1800,  # how often to fetch a fresh cloud snapshot (seconds, 30 min)
-    "enable_snapshots":       True,
-    "enable_sensors":         True,
-    "enable_snapshot_button": True,
-    "enable_auto_download":   False,
-    "download_path":          "",
-    "shc_ip":        "",
-    "shc_cert_path": "",
-    "shc_key_path":  "",
-    "high_quality_video": False,
-    "stream_connection_type": "auto",    # "auto" (local first, fallback remote), "local", or "remote" (cloud proxy)
-    "enable_binary_sensors": True,
-    "enable_fcm_push": False,  # FCM push notifications for near-instant event detection (opt-in)
-    "alert_notify_service": "",   # notify service for alerts (e.g. "notify.signal_messenger"), empty = disabled
-    # Per-type notification routing (empty = falls back to alert_notify_service for backward compat)
-    "alert_notify_system": "",      # System alerts (token failure, disk warning) — empty = uses alert_notify_service
-    "alert_notify_information": "", # Step 1: text event notification — empty = uses alert_notify_service
-    "alert_notify_screenshot": "",  # Step 2: snapshot image — empty = uses alert_notify_service
-    "alert_notify_video": "",       # Step 3: video clip — empty = uses alert_notify_service
-    "alert_save_snapshots": False, # save event snapshots locally to /config/www/bosch_alerts/
-    "alert_delete_after_send": True, # delete local snapshot after sending (only when alert_save_snapshots=False)
-    "fcm_push_mode": "auto",  # "auto" (ios→android→polling fallback), "android", "ios", "polling"
-    "audio_default_on": True,  # Audio default ON when starting a live stream
-    "enable_intercom": False,  # Two-way audio (intercom) switch — disabled by default
-    "enable_smb_upload": False,  # Upload events to SMB/NAS share (opt-in)
-    "smb_server": "",            # SMB server IP/hostname (e.g. 192.168.1.1 for FRITZ!Box)
-    "smb_share": "",             # Share name (e.g. "FRITZ.NAS")
-    "smb_username": "",          # SMB username
-    "smb_password": "",          # SMB password
-    "smb_base_path": "Bosch-Kameras",  # Base folder on the share
-    "smb_folder_pattern": "{year}/{month}",  # Subfolder pattern (default: YYYY/MM)
-    "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",  # File name pattern
-    "smb_retention_days": 180,  # Delete files older than N days (0 = keep forever)
-    "smb_disk_warn_mb": 5120,   # Alert when free space on SMB share falls below N MB (0 = disable)
-    "debug_logging": False,     # Enable verbose debug logging for stream/TLS proxy troubleshooting
-    "enable_go2rtc": True,       # Auto-setup HAs built-in go2rtc integration for WebRTC streaming (low-latency ~2s vs HLS ~12s). User explicitly wants this activated by the Bosch integration.
-}
+from .const import (  # noqa: E402
+    DOMAIN,
+    CLOUD_API,
+    ALL_PLATFORMS,
+    LIVE_TYPE_CANDIDATES,
+    LIVE_SESSION_TTL,
+    DEFAULT_OPTIONS,
+)
 
 
 def get_options(entry: ConfigEntry) -> dict:
