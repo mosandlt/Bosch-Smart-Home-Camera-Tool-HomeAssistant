@@ -195,6 +195,9 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):
         sends the full body (capture 2026-04-11):
             {"sensitivity":0,"threshold":72,"enabled":true,"audioAlarmConfiguration":"CUSTOM"}
         """
+        from .switch import _is_gen2_indoor, _warn_if_privacy_on
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Audio-Schwellenwert"):
+            return
         threshold = int(round(value))
         current   = dict(self.coordinator.audio_alarm_settings(self._cam_id) or {})
         current["threshold"] = threshold
@@ -456,6 +459,9 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
         )
 
     async def async_set_native_value(self, value: float) -> None:
+        from .switch import _is_gen2_indoor, _warn_if_privacy_on
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Mikrofon-Lautstärke"):
+            return
         audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
         audio["microphoneLevel"] = int(round(value))
         await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
@@ -888,6 +894,9 @@ class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
         return self.coordinator.last_update_success and bool(self._settings)
 
     async def async_set_native_value(self, value: float) -> None:
+        from .switch import _is_gen2_indoor, _warn_if_privacy_on
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Geräusch-Empfindlichkeit"):
+            return
         current = dict(self._settings)
         if not current:
             return

@@ -206,6 +206,9 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
         if option not in MOTION_SENSITIVITY_OPTIONS:
             _LOGGER.warning("Invalid motion sensitivity option: %s", option)
             return
+        from .switch import _is_gen2_indoor, _warn_if_privacy_on
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungsempfindlichkeit"):
+            return
         # Read current enabled state (preserve it; default True if unknown)
         settings = self.coordinator.motion_settings(self._cam_id)
         enabled  = settings.get("enabled", True)

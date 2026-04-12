@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.6";
+const CARD_VERSION = "2.8.7";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -411,6 +411,8 @@ class BoschCameraCard extends HTMLElement {
         .stream-badge.idle       { background: rgba(99,99,102,.25); color: #8e8e93; }
         .stream-badge.streaming  { background: rgba(0,122,255,.2); color: #0a84ff; box-shadow: 0 0 0 1px rgba(0,122,255,.3); }
         .stream-badge.connecting { background: rgba(255,159,10,.2); color: #ff9f0a; box-shadow: 0 0 0 1px rgba(255,159,10,.3); }
+        .stream-badge.offline    { background: rgba(255,69,58,.15); color: #ff453a; }
+        .stream-badge.offline .dot { background: #ff453a; }
         .stream-badge .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
         .stream-badge.idle .dot       { background: #636366; }
         .stream-badge.streaming .dot  { background: #0a84ff; animation: pulse 1.5s infinite; }
@@ -2299,13 +2301,12 @@ class BoschCameraCard extends HTMLElement {
     if (statusDot) statusDot.className = "status-dot " + ({ ONLINE: "online", OFFLINE: "offline" }[statusState] || "unknown");
     if (infoStatus) infoStatus.textContent = statusState;
 
-    // Offline overlay — prominent indicator when camera is physically unreachable
+    // Offline overlay
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
+    const isOffline = statusState === "OFFLINE";
     if (offlineOverlay) {
-      const isOffline = statusState === "OFFLINE";
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {
-        // Show last-seen timestamp as subtitle for context
         const lastChanged = hass.states[ents.status]?.last_changed;
         const sub = this.shadowRoot.getElementById("offline-subtitle");
         if (sub && lastChanged) {
@@ -2316,6 +2317,7 @@ class BoschCameraCard extends HTMLElement {
         }
       }
     }
+    this._isOffline = isOffline;
 
     // Streaming state
     const isStreaming  = this._isStreaming();
@@ -2326,10 +2328,11 @@ class BoschCameraCard extends HTMLElement {
 
     // "connecting" while HLS is negotiating (startingLiveVideo), "streaming" once live,
     // "idle" when off. Badge label shows uptime counter once streaming (updated per frame).
-    const streamBadgeState = this._startingLiveVideo ? "connecting"
-                           : (isStreaming ? "streaming" : "idle");
+    const streamBadgeState = isOffline ? "offline"
+                           : (this._startingLiveVideo ? "connecting"
+                           : (isStreaming ? "streaming" : "idle"));
     if (badge)        badge.className = "stream-badge " + streamBadgeState;
-    if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState; // "idle"/"connecting"
+    if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
     // "streaming" label text is updated by _onImageLoaded() with uptime counter
     if (btnStream)    btnStream.className = "btn btn-stream" + (isStreaming ? " active" : "");
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
@@ -2784,6 +2787,23 @@ class BoschCameraCard extends HTMLElement {
       if (hasQuality && qualitySel.value !== qualityState.state) {
         qualitySel.value = qualityState.state;
       }
+    }
+
+    // Offline: hide ALL controls below the image (runs last to override accordion logic)
+    if (this._isOffline) {
+      for (const sel of [".info-row", ".btn-row", ".switch-rows"]) {
+        const el = this.shadowRoot.querySelector(sel);
+        if (el) el.style.display = "none";
+      }
+      for (const acc of this.shadowRoot.querySelectorAll(".accordion")) {
+        acc.style.display = "none";
+      }
+      const panSec = this.shadowRoot.getElementById("pan-section");
+      if (panSec) panSec.style.display = "none";
+      const qualSec = this.shadowRoot.getElementById("quality-section");
+      if (qualSec) qualSec.style.display = "none";
+      const dbgLine = this.shadowRoot.getElementById("debug-line");
+      if (dbgLine) dbgLine.style.display = "none";
     }
   }
 

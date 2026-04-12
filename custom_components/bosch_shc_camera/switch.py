@@ -46,6 +46,17 @@ from . import DOMAIN, get_options, CLOUD_API
 _LOGGER = logging.getLogger(__name__)
 
 
+_GEN2_INDOOR_HW = {"HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
+
+
+def _is_gen2_indoor(entity) -> bool:
+    """Return True if the entity's camera is a Gen2 Indoor model."""
+    hw = entity.coordinator.data.get(entity._cam_id, {}).get(
+        "info", {}
+    ).get("hardwareVersion", "")
+    return hw in _GEN2_INDOOR_HW
+
+
 async def _warn_if_privacy_on(entity, feature_name: str) -> bool:
     """Show a persistent notification when the user tries to change a
     privacy-gated setting while privacy mode is ON. Returns True if the
@@ -664,6 +675,8 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
         return settings.get("enabled", False)
 
     async def async_turn_on(self, **kwargs):
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungserkennung"):
+            return
         settings = self.coordinator.motion_settings(self._cam_id)
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
         await self.coordinator.async_put_camera(
@@ -674,6 +687,8 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_turn_off(self, **kwargs):
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungserkennung"):
+            return
         settings = self.coordinator.motion_settings(self._cam_id)
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
         await self.coordinator.async_put_camera(
@@ -1495,6 +1510,8 @@ class BoschAudioAlarmSwitch(_BoschSwitchBase):
         }
 
     async def _set(self, enabled: bool) -> None:
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Geräusch-Erkennung"):
+            return
         current = dict(self._settings)
         if not current:
             return
