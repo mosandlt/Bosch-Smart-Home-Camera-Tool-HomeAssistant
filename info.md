@@ -38,6 +38,8 @@ If your refresh token has already expired on Bosch's side, Home Assistant will a
 - **FCM push notifications** — real-time motion alerts via Bosch's Firebase backend
 - **Privacy mode**, **camera light**, **wallwasher** (Gen2: top + bottom RGB LEDs with color picker)
 - **Motion zones**, **privacy masks**, **detection mode** (DualRadar on Gen2)
+- **Alarm system** — 75 dB siren, pre-alarm LED, arming/disarming (Gen2 Indoor)
+- **3-step alerts** — instant text → snapshot (5s) → video clip (30-90s) via any HA notify service
 
 ## Documentation
 
