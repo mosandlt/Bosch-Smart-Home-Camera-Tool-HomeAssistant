@@ -118,6 +118,22 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):
         self._mac       = info.get("macAddress", "")
 
     @property
+    def available(self) -> bool:
+        """Base availability: coordinator running AND camera is ONLINE.
+
+        Prevents automation triggers and service calls from reaching cameras
+        that are currently offline or unreachable. Cloud-only switches
+        (BoschPrivacyModeSwitch, BoschNotificationsSwitch, notification type
+        switches) override this to skip the per-camera online check, since
+        those API calls go through the Bosch cloud and succeed even when
+        the camera itself is unreachable.
+        """
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
+
+    @property
     def device_info(self) -> dict:
         return {
             "identifiers":  {(DOMAIN, self._cam_id)},
@@ -412,12 +428,15 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        """Available when coordinator is running and camera has light support.
+        """Available when coordinator is running, camera online, and light support present.
 
-        Light state comes from cloud API featureStatus (no SHC needed).
         Control uses cloud API (PUT /v11/video_inputs/{id}/lighting_override).
+        Requires camera ONLINE: light control needs camera to respond.
         """
-        return self.coordinator.last_update_success
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
 
     @property
     def icon(self) -> str:
@@ -448,10 +467,6 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
     def is_on(self) -> bool | None:
         return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("front_light")
 
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
-
     async def async_turn_on(self, **kwargs) -> None:
         await self.coordinator.async_cloud_set_light_component(self._cam_id, "front", True)
 
@@ -481,10 +496,6 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
     @property
     def is_on(self) -> bool | None:
         return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("wallwasher")
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
 
     async def async_turn_on(self, **kwargs) -> None:
         await self.coordinator.async_cloud_set_light_component(self._cam_id, "wallwasher", True)
@@ -519,10 +530,11 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        """Available as soon as the coordinator has fetched camera data.
+        """Cloud-only: available without camera being ONLINE.
 
-        Unlike camera light (which needs SHC), privacy state comes from the
-        cloud API response — no SHC configuration needed.
+        Privacy state comes from the cloud API response — the camera does not
+        need to be locally reachable for this to work. Overrides the base class
+        is_camera_online() guard intentionally.
         """
         return (
             self.coordinator.last_update_success
@@ -626,6 +638,11 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        """Cloud-only: available without camera being ONLINE.
+
+        Notification state comes from the cloud API — overrides base class
+        is_camera_online() guard intentionally.
+        """
         return (
             self.coordinator.last_update_success
             and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status") is not None
@@ -899,6 +916,7 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
             and self.coordinator._privacy_sound_cache.get(self._cam_id) is not None
         )
 
@@ -947,6 +965,7 @@ class BoschTimestampSwitch(_BoschSwitchBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
             and self.coordinator._timestamp_cache.get(self._cam_id) is not None
         )
 
@@ -992,6 +1011,7 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
             and self.coordinator._ledlights_cache.get(self._cam_id) is not None
         )
 
@@ -1037,7 +1057,10 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
 
     async def _set_motion_light(self, enabled: bool) -> None:
         """Read current motion light config, toggle enabled, write back."""
@@ -1112,7 +1135,10 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
 
     async def _set_ambient_light(self, enabled: bool) -> None:
         import aiohttp
@@ -1172,6 +1198,7 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
             and bool(self.coordinator._global_lighting_cache.get(self._cam_id))
         )
 
@@ -1238,7 +1265,11 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and bool(self._config)
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+            and bool(self._config)
+        )
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1322,6 +1353,11 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        """Cloud-only: available without camera being ONLINE.
+
+        Notification type toggles go through the Bosch cloud API — overrides
+        base class is_camera_online() guard intentionally.
+        """
         return (
             self.coordinator.last_update_success
             and bool(self.coordinator._notifications_cache.get(self._cam_id))
@@ -1371,7 +1407,10 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1416,6 +1455,7 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
             and bool(self._settings)
         )
 
@@ -1498,7 +1538,11 @@ class BoschAudioAlarmSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and bool(self._settings)
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+            and bool(self._settings)
+        )
 
     @property
     def extra_state_attributes(self) -> dict:

@@ -311,6 +311,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         hw = self._hw_version.get(cam_id, "CAMERA")
         return get_model_config(hw)
 
+    def is_camera_online(self, cam_id: str) -> bool:
+        """Return True if this camera's last known status is ONLINE.
+
+        Used by switch/sensor entities to gate availability — prevents commands
+        from firing at offline cameras where they cannot be executed.
+        Cloud-only switches (Privacy, Notifications) bypass this check since
+        those API calls succeed regardless of camera reachability.
+        """
+        return self.data.get(cam_id, {}).get("status", "UNKNOWN") == "ONLINE"
+
     def record_stream_error(self, cam_id: str) -> None:
         """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
         count = self._stream_error_count.get(cam_id, 0) + 1
