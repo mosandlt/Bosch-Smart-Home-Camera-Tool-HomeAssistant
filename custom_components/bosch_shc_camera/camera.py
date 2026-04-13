@@ -32,7 +32,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options
+from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -713,6 +713,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         for ev in events:
             img_url = ev.get("imageUrl")
             if not img_url:
+                continue
+            if not _is_safe_bosch_url(img_url):
+                _LOGGER.warning("Unsafe imageUrl rejected: %s", img_url[:60])
                 continue
             try:
                 async with asyncio.timeout(20):

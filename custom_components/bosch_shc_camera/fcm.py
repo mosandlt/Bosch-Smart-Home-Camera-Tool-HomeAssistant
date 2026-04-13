@@ -19,8 +19,23 @@ import time
 from typing import TYPE_CHECKING
 
 import aiohttp
+from urllib.parse import urlparse
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+
+# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
+_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
+
+
+def _is_safe_bosch_url(url: str) -> bool:
+    """Validate that a URL points to a known Bosch domain (HTTPS only)."""
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
+    )
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -145,7 +160,7 @@ async def async_start_fcm_push(coordinator) -> None:
 
         try:
             coordinator._fcm_token = await coordinator._fcm_client.checkin_or_register()
-            _LOGGER.info("FCM registered (mode=%s) — token: %s...", mode, coordinator._fcm_token[:40])
+            _LOGGER.debug("FCM registered (mode=%s) — token: %s...", mode, coordinator._fcm_token[:8])
         except Exception as err:
             _LOGGER.warning("FCM registration failed (mode=%s): %s", mode, err)
             coordinator._fcm_client = None
@@ -538,8 +553,9 @@ async def async_send_alert(
             _LOGGER.debug("Alert: re-fetch events failed: %s", err)
 
     if image_url:
-        if not image_url.startswith("http"):
-            _LOGGER.debug("Alert: invalid image_url: %s", image_url[:60])
+        if not _is_safe_bosch_url(image_url):
+            _LOGGER.warning("Alert: unsafe imageUrl rejected: %s", image_url[:60])
+            image_url = ""
         else:
             await asyncio.sleep(5)
         snap_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.jpg")
@@ -634,7 +650,7 @@ async def async_send_alert(
                 except Exception:
                     continue
 
-        if found_clip_url:
+        if found_clip_url and _is_safe_bosch_url(found_clip_url):
             try:
                 dl_headers = {"Authorization": f"Bearer {coordinator.token}", "Accept": "*/*"}
                 async with asyncio.timeout(60):

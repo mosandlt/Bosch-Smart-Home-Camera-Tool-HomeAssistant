@@ -163,7 +163,7 @@ async def rcp_read(
       <rcp ... ><err>0xa0</err></rcp>
 
     This function extracts the hex payload and returns it as bytes.
-    Uses the HA shared session (verify_ssl=False) to avoid socket exhaustion.
+    Uses the HA shared session (verify_ssl=False for cloud proxy — non-standard certs).
     """
     params: dict[str, str] = {
         "command": command,

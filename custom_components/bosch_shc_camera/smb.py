@@ -7,9 +7,33 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
+from urllib.parse import urlparse
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
+_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
+
+
+def _is_safe_bosch_url(url: str) -> bool:
+    """Validate that a URL points to a known Bosch domain (HTTPS only)."""
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
+    )
+
+
+def _safe_name(name: str) -> str:
+    """Sanitize a camera name for use as a directory/file name component.
+
+    Removes path traversal sequences and non-safe characters, truncates to 64 chars.
+    """
+    return re.sub(r"[^\w\-. ]", "_", name.replace("..", "_"))[:64]
 
 
 # ── Auto-download (runs in executor thread) ───────────────────────────────────

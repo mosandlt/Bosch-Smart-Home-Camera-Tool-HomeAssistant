@@ -281,9 +281,9 @@ def _digest_auth(
     realm: str, nonce: str,
 ) -> str:
     """Compute Digest auth header value."""
-    ha1 = hashlib.md5(f"{user}:{realm}:{password}".encode()).hexdigest()
-    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
-    resp = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+    ha1 = hashlib.md5(f"{user}:{realm}:{password}".encode(), usedforsecurity=False).hexdigest()
+    ha2 = hashlib.md5(f"{method}:{uri}".encode(), usedforsecurity=False).hexdigest()
+    resp = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode(), usedforsecurity=False).hexdigest()
     return (
         f'Digest username="{user}",realm="{realm}",'
         f'nonce="{nonce}",uri="{uri}",response="{resp}"'

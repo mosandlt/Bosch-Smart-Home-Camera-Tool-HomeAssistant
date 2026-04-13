@@ -23,11 +23,27 @@ No user data is hardcoded. All configuration via the HA UI.
 import asyncio
 import logging
 import os
+import re as _re_mod
 
 import time
 from datetime import timedelta
+from urllib.parse import urlparse
 
 import aiohttp
+
+
+# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
+_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
+
+
+def _is_safe_bosch_url(url: str) -> bool:
+    """Validate that a URL points to a known Bosch domain (HTTPS only)."""
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
+    )
 
 from .fcm import (
     fetch_firebase_config as _fcm_fetch_firebase_config,
@@ -177,7 +193,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "9.0.4"
+        self._integration_version = "9.2.1"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -244,6 +260,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Gen2 private areas cache — keyed by cam_id, from GET /privateAreas (Gen2 only)
         # Contains privacy mask polygons with color: "#000000"
         self._gen2_private_areas_cache: dict[str, list] = {}
+        # userToken cache — keyed by cam_id, from GET /credentials
+        # Preparation for Bosch's planned permanent local user (summer 2026)
+        self._user_token_cache: dict[str, str] = {}
         # Separate timer for lighting/switch — polled every tick (60s) instead of slow tier (300s)
         # Bosch app polls this every ~40s; slow tier (300s) is too slow for responsive light state
         self._last_lighting_switch: float = -86400.0
@@ -1374,9 +1393,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         # Use a dedicated session with SSL verification disabled.
-        # async_get_clientsession(verify_ssl=False) shares a session but the
-        # verify_ssl flag may not apply to all requests in newer HA versions.
-        # async_create_clientsession creates a fresh session we fully control.
+        # Bosch Cloud API uses a private CA (Video CA 2A).
         connector = aiohttp.TCPConnector(ssl=False)
         session   = aiohttp.ClientSession(connector=connector)
 
@@ -1794,6 +1811,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             for ev in events:
                 img_url = ev.get("imageUrl")
                 if not img_url:
+                    continue
+                if not _is_safe_bosch_url(img_url):
+                    _LOGGER.warning("Unsafe imageUrl rejected: %s", img_url[:60])
                     continue
                 try:
                     async with asyncio.timeout(20):
@@ -2259,7 +2279,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     ) -> bytes | None:
         """READ an RCP command and return the raw payload bytes, or None on failure.
 
-        Uses the HA shared session (verify_ssl=False) to avoid creating a new
+        Uses the HA shared session to avoid creating a new
         connector+session per RCP command (prevents socket exhaustion).
         """
         params: dict = {
