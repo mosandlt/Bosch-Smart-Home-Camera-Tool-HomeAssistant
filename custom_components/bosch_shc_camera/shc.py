@@ -390,12 +390,59 @@ async def async_cloud_set_privacy_mode(
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
 
+    # -- Gen2 LOCAL RCP fallback (cloud outage) --------------------------------
+    # When the Bosch cloud (auth server or API) is unreachable, Gen2 cameras
+    # still answer unauthenticated RCP commands on their LAN IP. Try this
+    # before SHC — LOCAL RCP works directly against the camera without any
+    # Bosch infrastructure involved.
+    if _is_gen2(coordinator, cam_id):
+        creds = coordinator._local_creds_cache.get(cam_id)
+        cam_host = creds.get("host") if creds else coordinator._rcp_lan_ip_cache.get(cam_id)
+        if cam_host:
+            from .rcp import rcp_local_write_privacy
+            ok = await rcp_local_write_privacy(coordinator.hass, cam_host, enabled)
+            if ok:
+                _LOGGER.info(
+                    "cloud_set_privacy_mode: cloud failed, Gen2 LOCAL RCP succeeded for %s",
+                    cam_id,
+                )
+                coordinator._shc_state_cache.setdefault(cam_id, {})[
+                    "privacy_mode"
+                ] = enabled
+                coordinator._privacy_set_at[cam_id] = time.monotonic()
+                coordinator.async_update_listeners()
+                return True
+            _LOGGER.debug(
+                "cloud_set_privacy_mode: Gen2 LOCAL RCP fallback failed for %s — "
+                "camera may not accept unauthenticated writes",
+                cam_id,
+            )
+
     # -- SHC local API fallback (offline mode) ---------------------------------
     if shc_ready(coordinator):
         _LOGGER.info(
             "cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id
         )
         return await async_shc_set_privacy_mode(coordinator, cam_id, enabled)
+
+    # -- All fallbacks exhausted — surface a persistent notification ----------
+    if coordinator._auth_outage_count > 0:
+        try:
+            await coordinator.hass.services.async_call(
+                "persistent_notification", "create",
+                {
+                    "title": "Bosch Kamera — Privacy-Befehl nicht zugestellt",
+                    "message": (
+                        f"Privacy-Mode {'ON' if enabled else 'OFF'} für `{cam_id[:8]}…` "
+                        "konnte nicht gesetzt werden: Bosch-Cloud nicht erreichbar "
+                        "und lokaler Fallback fehlgeschlagen.\n\n"
+                        "Sobald die Cloud wieder online ist, bitte erneut schalten."
+                    ),
+                    "notification_id": f"bosch_privacy_queued_{cam_id[:8]}",
+                },
+            )
+        except Exception:
+            pass
     return False
 
 

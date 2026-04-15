@@ -76,6 +76,20 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _redact_creds(d: dict) -> dict:
+    """Return a copy of a dict with the `password` field redacted for safe logging.
+
+    The camera-issued Digest password is ephemeral (rotates on camera reboot)
+    but still a credential — replacing it with a short prefix + length keeps
+    the log line useful for diagnostics without exposing the secret.
+    """
+    return {
+        k: (f"{v[:3]}***({len(v)} chars)" if k == "password" and isinstance(v, str) else v)
+        for k, v in d.items()
+    }
+
+
 from .const import (  # noqa: E402
     DOMAIN,
     CLOUD_API,
@@ -208,6 +222,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._auth_outage_count: int = 0         # consecutive 5xx responses
         self._auth_outage_alert_sent: bool = False
         self._auth_outage_next_retry_ts: float = 0.0  # monotonic time gate
+        # Cached LOCAL Digest credentials per camera — survives live-connection
+        # teardown. Populated on every successful PUT /connection LOCAL and used
+        # as a fallback path (snap.jpg, Gen2 RCP privacy writes) when the Bosch
+        # cloud is unreachable. Creds are ephemeral (camera rotates them on
+        # reboot) but usually stable for minutes to hours.
+        # {cam_id: {"user": str, "password": str, "host": str, "port": int, "ts": monotonic}}
+        self._local_creds_cache: dict[str, dict] = {}
         # Serializes _ensure_valid_token so concurrent refreshes don't race
         # (Keycloak rotates refresh_token and invalidates the previous one —
         # two parallel POSTs with the same token → first wins, second gets
@@ -1543,14 +1564,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         )
                         body = await resp.text()
                     _LOGGER.debug(
-                        "PUT /connection type=%s → HTTP %d: %s",
-                        type_val, resp.status, body[:200],
+                        "PUT /connection type=%s → HTTP %d (%d bytes)",
+                        type_val, resp.status, len(body),
                     )
                     if resp.status in (200, 201):
                         import json as _json
                         result = _json.loads(body)
                         _LOGGER.info(
-                            "Live connection opened! type=%s → %s", type_val, result
+                            "Live connection opened! type=%s → %s",
+                            type_val, _redact_creds(result),
                         )
                         audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
                         # Extract bufferingTime for FFmpeg tuning (LOCAL=500ms, REMOTE=1000ms)
@@ -1568,6 +1590,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if urls:
                                 from urllib.parse import quote as _q
                                 cam_addr = urls[0]  # "192.168.x.x:443"
+                                # Cache LOCAL creds for cloud-outage fallback paths.
+                                # Stays populated after the live connection is torn down.
+                                try:
+                                    _host, _port = cam_addr.split(":")
+                                    self._local_creds_cache[cam_id] = {
+                                        "user":     local_user,
+                                        "password": local_pass,
+                                        "host":     _host,
+                                        "port":     int(_port),
+                                        "ts":       time.monotonic(),
+                                    }
+                                except Exception as _e:
+                                    _LOGGER.debug("LOCAL creds cache skip for %s: %s", cam_id[:8], _e)
                                 result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
                                 cam_host, cam_port = cam_addr.split(":")
                                 proxy_port = await self._start_tls_proxy(
@@ -1966,8 +2001,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         urls     = result.get("urls", [])
         if not user or not password or not urls:
             _LOGGER.debug(
-                "fetch_live_snapshot_local: missing credentials/urls for %s: %s",
-                cam_id, result,
+                "fetch_live_snapshot_local: missing credentials/urls for %s "
+                "(has_user=%s, has_password=%s, urls=%d)",
+                cam_id, bool(user), bool(password), len(urls),
             )
             return None
 
@@ -2674,7 +2710,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord := edata.get("coordinator"):
                 result = await coord.try_live_connection(cam_id)
                 if result:
-                    _LOGGER.info("Live connection established: %s", result)
+                    _LOGGER.info("Live connection established: %s", _redact_creds(result))
 
     async def handle_create_rule(call: ServiceCall) -> None:
         """Create a cloud-side schedule rule for a camera."""

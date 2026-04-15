@@ -144,6 +144,139 @@ async def rcp_session(
         await connector.close()
 
 
+# ── Direct LOCAL RCP (no cloud proxy, no auth — Gen2 only) ───────────────────
+#
+# Gen2 cameras accept RCP commands on http://CAM_IP/rcp.xml without any
+# authentication. Used as a fallback path when the Bosch cloud API or
+# auth server is unreachable, so the integration can still read and
+# (best-effort) write privacy state without going through the cloud.
+
+
+async def rcp_local_read(
+    hass: "HomeAssistant",
+    cam_ip: str,
+    command: str,
+    type_: str = "P_OCTET",
+    num: int = 0,
+) -> bytes | None:
+    """Read an RCP value directly from the camera's LAN HTTP endpoint.
+
+    Returns the decoded payload bytes on success, None on any failure.
+    Gen2 cameras answer unauthenticated RCP queries on port 80; Gen1 returns
+    401 and this function will simply return None (graceful).
+    """
+    base = f"http://{cam_ip}/rcp.xml"
+    params: dict[str, str] = {
+        "command":   command,
+        "direction": "READ",
+        "type":      type_,
+    }
+    if num:
+        params["num"] = str(num)
+    session = async_get_clientsession(hass, verify_ssl=False)
+    try:
+        async with asyncio.timeout(5):
+            async with session.get(base, params=params) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "rcp_local_read: %s@%s HTTP %d", command, cam_ip, resp.status,
+                    )
+                    return None
+                raw = await resp.read()
+                err_m = _re.search(rb"<err>(\S+)</err>", raw, _re.IGNORECASE)
+                if err_m:
+                    _LOGGER.debug(
+                        "rcp_local_read: %s@%s err=%s",
+                        command, cam_ip,
+                        err_m.group(1).decode("ascii", errors="replace"),
+                    )
+                    return None
+                payload_m = (
+                    _re.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE)
+                    or _re.search(rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE)
+                )
+                if payload_m:
+                    return bytes.fromhex(payload_m.group(1).decode("ascii"))
+                if raw and not raw.startswith(b"<"):
+                    return raw
+    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        _LOGGER.debug("rcp_local_read: %s@%s %s", command, cam_ip, err)
+    return None
+
+
+async def rcp_local_write(
+    hass: "HomeAssistant",
+    cam_ip: str,
+    command: str,
+    payload_hex: str,
+    type_: str = "P_OCTET",
+) -> bool:
+    """Write an RCP value directly via the camera's LAN HTTP endpoint.
+
+    Returns True on success. `payload_hex` may start with "0x" or not.
+    Best-effort: any error returns False (caller should handle gracefully).
+    """
+    base = f"http://{cam_ip}/rcp.xml"
+    if not payload_hex.lower().startswith("0x"):
+        payload_hex = "0x" + payload_hex
+    params = {
+        "command":   command,
+        "direction": "WRITE",
+        "type":      type_,
+        "payload":   payload_hex,
+    }
+    session = async_get_clientsession(hass, verify_ssl=False)
+    try:
+        async with asyncio.timeout(5):
+            async with session.get(base, params=params) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "rcp_local_write: %s@%s HTTP %d",
+                        command, cam_ip, resp.status,
+                    )
+                    return False
+                raw = await resp.read()
+                if b"<err>" in raw.lower():
+                    _LOGGER.debug(
+                        "rcp_local_write: %s@%s RCP error in response",
+                        command, cam_ip,
+                    )
+                    return False
+                return True
+    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        _LOGGER.debug("rcp_local_write: %s@%s %s", command, cam_ip, err)
+    return False
+
+
+async def rcp_local_read_privacy(
+    hass: "HomeAssistant", cam_ip: str,
+) -> bool | None:
+    """Read privacy-mode state via direct LOCAL RCP (Gen2, no auth).
+
+    Uses command 0x0d00 (privacy mask), which returns 4 bytes where byte[1]
+    indicates privacy state: 0=OFF, 1=ON. Returns None if unavailable.
+    """
+    raw = await rcp_local_read(hass, cam_ip, "0x0d00", "P_OCTET")
+    if raw and len(raw) >= 2:
+        return bool(raw[1])
+    return None
+
+
+async def rcp_local_write_privacy(
+    hass: "HomeAssistant", cam_ip: str, enabled: bool,
+) -> bool:
+    """Write privacy-mode state via direct LOCAL RCP (Gen2, no auth).
+
+    Best-effort fallback used when the cloud API is unreachable. Not all
+    Gen2 models accept privacy writes over unauthenticated RCP — a False
+    return means the caller should surface this to the user.
+    """
+    # Privacy mask payload: 4 bytes, byte[1] carries the mode. Keep the
+    # remaining bytes zero so we don't stamp over other mask fields.
+    payload = "00010000" if enabled else "00000000"
+    return await rcp_local_write(hass, cam_ip, "0x0d00", payload, "P_OCTET")
+
+
 # ── Read operations ──────────────────────────────────────────────────────────
 
 
