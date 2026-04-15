@@ -229,13 +229,25 @@ class RefreshTokenInvalidError(Exception):
     """
 
 
+class AuthServerOutageError(Exception):
+    """Bosch Keycloak auth server returned 5xx — server-side outage.
+
+    The refresh token is probably still valid; retrying later will recover
+    once Bosch's infrastructure is back. Caller should NOT trigger the
+    reauth flow (nothing for the user to fix) — just back off and retry.
+    """
+
+
 async def _do_refresh(session, refresh_token: str) -> dict | None:
     """Silent renewal via saved refresh_token.
 
     Returns the token dict on success.
-    Returns None on transient failures (network error, 5xx) — caller may retry.
+    Returns None on transient client-side failures (network error, timeout)
+    — caller may retry.
     Raises RefreshTokenInvalidError on 400/401 (invalid_grant) — caller should
     trigger the reauth flow, retrying is pointless.
+    Raises AuthServerOutageError on 5xx — Bosch server is down, retry later
+    but do NOT trigger reauth.
     """
     try:
         async with asyncio.timeout(15):
@@ -259,6 +271,10 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
                 if resp.status in (400, 401):
                     raise RefreshTokenInvalidError(
                         f"Keycloak HTTP {resp.status}: {body}"
+                    )
+                if 500 <= resp.status < 600:
+                    raise AuthServerOutageError(
+                        f"Bosch Keycloak HTTP {resp.status}"
                     )
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token refresh error: %s", err)

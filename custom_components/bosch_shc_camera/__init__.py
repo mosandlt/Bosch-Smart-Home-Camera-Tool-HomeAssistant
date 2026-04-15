@@ -202,6 +202,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False     # True after first alert sent
         self._token_fail_count: int = 0          # consecutive refresh failures
+        # Bosch auth-server outage tracking — distinct from hard failures.
+        # 5xx from Keycloak = Bosch infrastructure problem, NOT user/config issue:
+        # no reauth trigger, no escalation, just back off and retry.
+        self._auth_outage_count: int = 0         # consecutive 5xx responses
+        self._auth_outage_alert_sent: bool = False
+        self._auth_outage_next_retry_ts: float = 0.0  # monotonic time gate
         # Serializes _ensure_valid_token so concurrent refreshes don't race
         # (Keycloak rotates refresh_token and invalidates the previous one —
         # two parallel POSTs with the same token → first wins, second gets
@@ -400,11 +406,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return await self._refresh_token_locked()
 
     async def _refresh_token_locked(self) -> str:
-        from .config_flow import _do_refresh, RefreshTokenInvalidError
+        from .config_flow import _do_refresh, RefreshTokenInvalidError, AuthServerOutageError
         # Another caller may have just refreshed the token while we were
         # waiting on the lock — if so, skip the POST entirely.
         if self._token_still_valid(min_remaining=60):
             return self.token
+        # If we're in a Bosch auth-server outage, skip the POST entirely
+        # until the back-off gate opens — avoids hammering a server that
+        # is already known to be down.
+        import time as _time
+        now_m = _time.monotonic()
+        if self._auth_outage_count > 0 and now_m < self._auth_outage_next_retry_ts:
+            remaining = int(self._auth_outage_next_retry_ts - now_m)
+            raise UpdateFailed(
+                f"Bosch auth server outage — next retry in {remaining}s "
+                f"(outage count: {self._auth_outage_count})"
+            )
         # Always prefer the freshest refresh_token from the config entry
         # (persisted by previous successful refresh) over our in-memory
         # copy, which could be stale in edge cases (e.g. entry reload).
@@ -419,6 +436,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # which we convert to ConfigEntryAuthFailed immediately — retrying
         # a rejected refresh token is pointless and just extends the user's
         # broken state.
+        # Server outage (5xx) raises AuthServerOutageError — we back off
+        # and retry later without triggering reauth (nothing for the user to fix).
         tokens = None
         try:
             for attempt in range(3):
@@ -436,6 +455,45 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             raise ConfigEntryAuthFailed(
                 "Refresh token invalid — please re-authenticate via the "
                 "Reconfigure button on the integration card."
+            ) from err
+        except AuthServerOutageError as err:
+            self._auth_outage_count += 1
+            # Exponential back-off: 60s, 120s, 240s, 480s, capped at 600s (10 min)
+            backoff = min(60 * (2 ** (self._auth_outage_count - 1)), 600)
+            self._auth_outage_next_retry_ts = now_m + backoff
+            _LOGGER.warning(
+                "Bosch Keycloak auth server outage (%s) — NOT triggering reauth "
+                "(server-side problem, refresh token is probably still valid). "
+                "Backing off %ds before next attempt (outage #%d).",
+                err, backoff, self._auth_outage_count,
+            )
+            # One-time persistent notification after 3 consecutive outages so
+            # the user understands why entities are unavailable.
+            if self._auth_outage_count >= 3 and not self._auth_outage_alert_sent:
+                self._auth_outage_alert_sent = True
+                try:
+                    await self.hass.services.async_call(
+                        "persistent_notification", "create",
+                        {
+                            "title": "Bosch Kamera — Auth-Server Störung",
+                            "message": (
+                                "Der Bosch-Authentifizierungsserver "
+                                f"(`smarthome.authz.bosch.com`) antwortet aktuell mit "
+                                f"HTTP {err}. Das ist ein Problem auf Bosch-Seite, "
+                                "kein Fehler bei dir.\n\n"
+                                "Die Integration versucht automatisch weiter "
+                                "(Exponential Backoff bis 10 Minuten). "
+                                "Entitäten sind solange nicht verfügbar.\n\n"
+                                "Kein Handlungsbedarf — sobald Bosch wieder online ist, "
+                                "stellt sich alles von selbst wieder her."
+                            ),
+                            "notification_id": "bosch_auth_server_outage",
+                        },
+                    )
+                except Exception as err2:
+                    _LOGGER.debug("Persistent notification failed: %s", err2)
+            raise UpdateFailed(
+                f"Bosch auth server outage — will retry in {backoff}s"
             ) from err
         if tokens:
             self._refreshed_token = tokens.get("access_token", "")
@@ -463,6 +521,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
             self._token_fail_count = 0
             self._token_alert_sent = False
+            # Clear auth-server outage state + dismiss the outage notification
+            if self._auth_outage_count > 0:
+                _LOGGER.info(
+                    "Bosch auth server recovered after %d outage cycles",
+                    self._auth_outage_count,
+                )
+                self._auth_outage_count = 0
+                self._auth_outage_next_retry_ts = 0.0
+                if self._auth_outage_alert_sent:
+                    self._auth_outage_alert_sent = False
+                    try:
+                        await self.hass.services.async_call(
+                            "persistent_notification", "dismiss",
+                            {"notification_id": "bosch_auth_server_outage"},
+                        )
+                    except Exception:
+                        pass
             return self._refreshed_token
         self._token_fail_count += 1
         _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
