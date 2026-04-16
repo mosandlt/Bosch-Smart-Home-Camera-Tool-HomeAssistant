@@ -448,20 +448,20 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
                 vol.Optional(
                     "download_path",
-                    default=str(opts.get("download_path", "")),
+                    description={"suggested_value": opts.get("download_path", "")},
                 ): str,
                 # SHC local API — camera light + privacy mode
                 vol.Optional(
                     "shc_ip",
-                    default=str(opts.get("shc_ip", "")),
+                    description={"suggested_value": opts.get("shc_ip", "")},
                 ): str,
                 vol.Optional(
                     "shc_cert_path",
-                    default=str(opts.get("shc_cert_path", "")),
+                    description={"suggested_value": opts.get("shc_cert_path", "")},
                 ): str,
                 vol.Optional(
                     "shc_key_path",
-                    default=str(opts.get("shc_key_path", "")),
+                    description={"suggested_value": opts.get("shc_key_path", "")},
                 ): str,
                 vol.Optional(
                     "high_quality_video",
@@ -488,23 +488,23 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
                 vol.Optional(
                     "alert_notify_service",
-                    default=str(opts.get("alert_notify_service", "")),
+                    description={"suggested_value": opts.get("alert_notify_service", "")},
                 ): str,
                 vol.Optional(
                     "alert_notify_system",
-                    default=str(opts.get("alert_notify_system", "")),
+                    description={"suggested_value": opts.get("alert_notify_system", "")},
                 ): str,
                 vol.Optional(
                     "alert_notify_information",
-                    default=str(opts.get("alert_notify_information", "")),
+                    description={"suggested_value": opts.get("alert_notify_information", "")},
                 ): str,
                 vol.Optional(
                     "alert_notify_screenshot",
-                    default=str(opts.get("alert_notify_screenshot", "")),
+                    description={"suggested_value": opts.get("alert_notify_screenshot", "")},
                 ): str,
                 vol.Optional(
                     "alert_notify_video",
-                    default=str(opts.get("alert_notify_video", "")),
+                    description={"suggested_value": opts.get("alert_notify_video", "")},
                 ): str,
                 vol.Optional(
                     "alert_save_snapshots",
@@ -532,31 +532,31 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
                 vol.Optional(
                     "smb_server",
-                    default=str(opts.get("smb_server", "")),
+                    description={"suggested_value": opts.get("smb_server", "")},
                 ): str,
                 vol.Optional(
                     "smb_share",
-                    default=str(opts.get("smb_share", "")),
+                    description={"suggested_value": opts.get("smb_share", "")},
                 ): str,
                 vol.Optional(
                     "smb_username",
-                    default=str(opts.get("smb_username", "")),
+                    description={"suggested_value": opts.get("smb_username", "")},
                 ): str,
                 vol.Optional(
                     "smb_password",
-                    default=str(opts.get("smb_password", "")),
+                    description={"suggested_value": opts.get("smb_password", "")},
                 ): str,
                 vol.Optional(
                     "smb_base_path",
-                    default=str(opts.get("smb_base_path", "Bosch-Kameras")),
+                    description={"suggested_value": opts.get("smb_base_path", "Bosch-Kameras")},
                 ): str,
                 vol.Optional(
                     "smb_folder_pattern",
-                    default=str(opts.get("smb_folder_pattern", "{year}/{month}")),
+                    description={"suggested_value": opts.get("smb_folder_pattern", "{year}/{month}")},
                 ): str,
                 vol.Optional(
                     "smb_file_pattern",
-                    default=str(opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}")),
+                    description={"suggested_value": opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}")},
                 ): str,
                 vol.Optional(
                     "smb_retention_days",
