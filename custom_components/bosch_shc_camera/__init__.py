@@ -118,6 +118,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         opts = get_options(entry)
+        # Snapshot of options at coordinator creation — used by _async_options_updated
+        # to distinguish real options edits from data-only updates (e.g. token refresh).
+        # Must be a deep-ish copy so later entry.options mutations don't silently update it.
+        self._options_snapshot: dict = dict(opts)
         super().__init__(
             hass,
             _LOGGER,
@@ -2681,7 +2685,7 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     coord = edata.get("coordinator")
     if coord:
-        prev_opts = coord.options
+        prev_opts = coord._options_snapshot
         new_opts = get_options(entry)
         if prev_opts == new_opts:
             _LOGGER.debug("Config entry updated (data only) — skipping reload")
