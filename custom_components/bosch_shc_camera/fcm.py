@@ -407,12 +407,13 @@ async def async_handle_fcm_push(coordinator) -> None:
 def get_alert_services(coordinator, type_key: str) -> list[str]:
     """Return notify services for a given alert type key.
 
-    Falls back to alert_notify_service if the type-specific field is empty.
+    "system" and "information" fall back to alert_notify_service when empty.
+    "screenshot" and "video" do NOT fall back — empty means skip that step.
     type_key: "system" | "information" | "screenshot" | "video"
     """
     opts = coordinator.options
     raw = opts.get(f"alert_notify_{type_key}", "").strip()
-    if not raw:
+    if not raw and type_key not in ("screenshot", "video"):
         raw = opts.get("alert_notify_service", "").strip()
     return [s.strip() for s in raw.split(",") if s.strip()]
 
