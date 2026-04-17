@@ -1,0 +1,182 @@
+"""Camera model definitions and timing configurations.
+
+Each Bosch Smart Home camera model has different hardware characteristics
+that affect stream startup, encoder warm-up, and session management.
+All timing values are empirically measured and model-specific.
+
+Supported models (Gen1, firmware 7.91.56):
+  - "360 Innenkamera"   (API: INDOOR / CAMERA_360)
+  - "Eyes Außenkamera"   (API: OUTDOOR / CAMERA_EYES)
+
+Supported models (Gen2, firmware 9.40.25):
+  - "Eyes Außenkamera II"  (API: HOME_Eyes_Outdoor / CAMERA_OUTDOOR_GEN2)
+  - "Eyes Innenkamera II"  (API: HOME_Eyes_Indoor / CAMERA_INDOOR_GEN2)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class CameraModelConfig:
+    """Timing and behavior configuration for a specific camera model."""
+
+    # ── Display ──────────────────────────────────────────────────────────
+    display_name: str           # Official Bosch product name
+    generation: int = 1         # Hardware generation (1 or 2)
+
+    # ── Pre-warm (RTSP DESCRIBE to wake H.264 encoder) ───────────────────
+    pre_warm_delay: int = 2     # Seconds to wait after PUT /connection before first DESCRIBE
+    pre_warm_retries: int = 5   # Max DESCRIBE attempts before giving up
+    pre_warm_retry_wait: int = 3  # Seconds between failed DESCRIBE attempts
+    post_warm_buffer: int = 3   # Seconds to wait after successful DESCRIBE (TLS cleanup)
+    describe_timeout: int = 5   # Timeout per DESCRIBE read (seconds)
+
+    # ── Stream startup ───────────────────────────────────────────────────
+    min_total_wait: int = 30    # Minimum seconds from PUT /connection until RTSP URL exposed
+                                # Ensures encoder produces valid H.264 frames.
+                                # For renewals: 2/3 of this value is used (camera already warm).
+
+    # ── Session management ───────────────────────────────────────────────
+    renewal_interval: int = 500  # Seconds between auto-renewal cycles.
+                                 # Camera accepts maxSessionDuration=3600 in RTSP URL,
+                                 # but some models reset the connection earlier.
+    max_session_duration: int = 3600  # Value sent in RTSP URL maxSessionDuration parameter.
+    heartbeat_interval: int = 30  # Seconds between PUT /connection heartbeats during LOCAL stream.
+                                  # Bosch app uses ~1s. Outdoor needs more aggressive keepalive.
+
+    # ── Fallback / error recovery ────────────────────────────────────────
+    max_stream_errors: int = 3   # After this many consecutive FFmpeg errors, fall back to REMOTE
+    min_wifi_for_local: int = 40  # Minimum WiFi signal % to attempt LOCAL (below → use REMOTE)
+
+    # ── Snapshots ────────────────────────────────────────────────────────
+    snapshot_warmup: int = 4    # Seconds to wait before LOCAL snap.jpg fetch
+                                # (encoder must be running for fresh frame)
+
+
+# ── Model registry ───────────────────────────────────────────────────────
+# Keyed by API hardwareVersion values from GET /v11/video_inputs response.
+
+MODELS: dict[str, CameraModelConfig] = {
+    # ── Gen1 Indoor: 360 Innenkamera ─────────────────────────────────────
+    # Faster SoC, encoder ready in ~5s, pre-warm usually succeeds on 1st attempt.
+    # Session stable for 3500s+ (tested 90s+ without renewal, no disconnect).
+    "INDOOR": CameraModelConfig(
+        display_name="360 Innenkamera",
+        generation=1,
+        pre_warm_delay=1,
+        pre_warm_retries=3,
+        pre_warm_retry_wait=3,
+        post_warm_buffer=2,
+        describe_timeout=5,
+        min_total_wait=25,
+        renewal_interval=3500,
+        max_session_duration=3600,
+        heartbeat_interval=30,
+        snapshot_warmup=3,
+    ),
+
+    # ── Gen1 Outdoor: Eyes Außenkamera ────────────────────────────────────
+    # Slower encoder init (~25s), pre-warm needs 3-4 DESCRIBE attempts.
+    # Previously dropped connections after 2-10 min without heartbeat.
+    # Now stable with 10s heartbeat (PUT /connection) + FFmpeg GET_PARAMETER
+    # + TCP keep-alive on proxy sockets. Tested 2:20+ without renewal.
+    # renewal_interval=3500 — no proactive renewal needed. Heartbeat keeps
+    # session alive. Proactive renewal causes HLS interruptions + pipe errors.
+    # Emergency renewal still triggers after 3 consecutive heartbeat failures.
+    # heartbeat_interval=10 — aggressive cloud keepalive (Bosch app uses ~1s).
+    "OUTDOOR": CameraModelConfig(
+        display_name="Eyes Außenkamera",
+        generation=1,
+        pre_warm_delay=2,
+        pre_warm_retries=8,
+        pre_warm_retry_wait=5,
+        post_warm_buffer=3,
+        describe_timeout=8,
+        min_total_wait=35,
+        renewal_interval=3500,
+        max_session_duration=3600,
+        heartbeat_interval=10,
+        snapshot_warmup=5,
+    ),
+}
+
+# Legacy API values map to the same configs
+MODELS["CAMERA_360"] = MODELS["INDOOR"]
+MODELS["CAMERA_EYES"] = MODELS["OUTDOOR"]
+
+# ── Gen2: Eyes Außenkamera II ────────────────────────────────────────────
+# API hardwareVersion: "HOME_Eyes_Outdoor" (confirmed by user DrNiKa, FW 9.40.25)
+# App product type: "CAMERA_OUTDOOR_GEN2" (from Bosch product catalog)
+# Timing values are initial estimates — will be tuned once we have test hardware.
+MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
+    display_name="Eyes Außenkamera II",
+    generation=2,
+    pre_warm_delay=2,
+    pre_warm_retries=8,
+    pre_warm_retry_wait=5,
+    post_warm_buffer=3,
+    describe_timeout=8,
+    min_total_wait=35,
+    renewal_interval=3500,
+    max_session_duration=3600,
+    heartbeat_interval=10,
+    snapshot_warmup=5,
+)
+MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
+
+# ── Gen2: Eyes Innenkamera II ────────────────────────────────────────────
+# API hardwareVersion: "HOME_Eyes_Indoor" (expected, not yet confirmed)
+# App product type: "CAMERA_INDOOR_GEN2" (expected)
+MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
+    display_name="Eyes Innenkamera II",
+    generation=2,
+    pre_warm_delay=1,
+    pre_warm_retries=3,
+    pre_warm_retry_wait=3,
+    post_warm_buffer=2,
+    describe_timeout=5,
+    min_total_wait=25,
+    renewal_interval=3500,
+    max_session_duration=3600,
+    heartbeat_interval=30,
+    snapshot_warmup=3,
+)
+MODELS["CAMERA_INDOOR_GEN2"] = MODELS["HOME_Eyes_Indoor"]
+
+
+# Default for unknown models
+DEFAULT_MODEL = CameraModelConfig(
+    display_name="Unknown Camera",
+    generation=1,
+    pre_warm_delay=2,
+    pre_warm_retries=5,
+    pre_warm_retry_wait=3,
+    post_warm_buffer=3,
+    describe_timeout=5,
+    min_total_wait=30,
+    renewal_interval=3500,
+    max_session_duration=3600,
+    heartbeat_interval=15,
+    snapshot_warmup=4,
+)
+
+
+def get_model_config(hw_version: str) -> CameraModelConfig:
+    """Return model config for a hardwareVersion string."""
+    return MODELS.get(hw_version, DEFAULT_MODEL)
+
+
+def get_display_name(hw_version: str) -> str:
+    """Return human-readable model name for a hardwareVersion string."""
+    cfg = MODELS.get(hw_version)
+    if cfg:
+        return cfg.display_name
+    # Dynamic fallback for unknown models
+    hw_lower = hw_version.lower()
+    if "indoor" in hw_lower or "360" in hw_lower:
+        return f"Innenkamera ({hw_version})"
+    if "outdoor" in hw_lower or "eyes" in hw_lower:
+        return f"Außenkamera ({hw_version})"
+    return hw_version  # raw value as last resort

@@ -1,0 +1,47 @@
+# Bosch Camera — iOS Push Alert Automations (ready to use)
+#
+# Sends an iPhone push notification when motion or audio is detected.
+# Copy to your automations.yaml or create via HA UI.
+#
+# Prerequisites:
+#   1. HA Companion App installed on iPhone
+#   2. Bosch SHC Camera integration installed
+#
+# Replace "notify.mobile_app_YOUR_IPHONE" with your actual device notify service.
+# Find yours in Developer Tools -> Services -> search "notify.mobile_app"
+#
+# Works with FCM push (~2s) or polling (5min) — whichever is active.
+
+- alias: "Bosch Kamera - Bewegung Push"
+  description: "Sends iPhone push on camera motion detection"
+  triggers:
+    - trigger: event
+      event_type: bosch_shc_camera_motion
+  conditions: []
+  actions:
+    - action: notify.mobile_app_YOUR_IPHONE
+      data:
+        title: "{{ trigger.event.data.camera_name }}"
+        message: "Bewegung erkannt um {{ trigger.event.data.timestamp[11:19] }}"
+        data:
+          push:
+            sound: default
+            interruption-level: time-sensitive
+  mode: single
+
+- alias: "Bosch Kamera - Audio-Alarm Push"
+  description: "Sends iPhone push on camera audio alarm"
+  triggers:
+    - trigger: event
+      event_type: bosch_shc_camera_audio_alarm
+  conditions: []
+  actions:
+    - action: notify.mobile_app_YOUR_IPHONE
+      data:
+        title: "{{ trigger.event.data.camera_name }}"
+        message: "Audio-Alarm um {{ trigger.event.data.timestamp[11:19] }}"
+        data:
+          push:
+            sound: default
+            interruption-level: time-sensitive
+  mode: single
