@@ -140,12 +140,19 @@ async def async_start_fcm_push(coordinator) -> None:
         saved_fcm_creds = coordinator._entry.data.get("fcm_credentials")
 
         def _on_creds_updated(creds):
-            """Save FCM credentials to config entry for persistence."""
-            coordinator.hass.config_entries.async_update_entry(
-                coordinator._entry,
-                data={**coordinator._entry.data, "fcm_credentials": creds},
-            )
-            _LOGGER.debug("FCM credentials saved to config entry")
+            """Save FCM credentials to config entry for persistence.
+
+            WHY threadsafe: this callback fires from the FCM client's own
+            thread (Firebase SDK), not from the HA event loop. Calling
+            `async_update_entry` directly from a foreign thread corrupts
+            HA's internal state. `call_soon_threadsafe` hops back onto
+            the loop before scheduling the async task.
+            """
+            def _persist():
+                coordinator.hass.async_create_task(
+                    _async_persist_fcm_creds(coordinator, creds)
+                )
+            coordinator.hass.loop.call_soon_threadsafe(_persist)
 
         def _on_push(notification: dict, persistent_id: str, obj=None) -> None:
             """Called when a push notification arrives from Bosch CBS."""
@@ -245,6 +252,18 @@ async def async_stop_fcm_push(coordinator) -> None:
         _LOGGER.info("FCM push listener stopped")
 
 
+async def _async_persist_fcm_creds(coordinator, creds: dict) -> None:
+    """Write FCM credentials into the config entry (must run in event loop)."""
+    try:
+        coordinator.hass.config_entries.async_update_entry(
+            coordinator._entry,
+            data={**coordinator._entry.data, "fcm_credentials": creds},
+        )
+        _LOGGER.debug("FCM credentials saved to config entry")
+    except Exception as err:
+        _LOGGER.debug("FCM creds persist failed: %s", err)
+
+
 # ── FCM push callback ───────────────────────────────────────────────────────
 
 def _on_fcm_push(coordinator, notification: dict, persistent_id: str, obj=None) -> None:
@@ -253,8 +272,9 @@ def _on_fcm_push(coordinator, notification: dict, persistent_id: str, obj=None) 
     The push is a silent wake-up signal with no event payload.
     We immediately trigger an event fetch + snapshot refresh for all cameras.
     """
-    coordinator._fcm_last_push = time.monotonic()
-    coordinator._fcm_healthy = True
+    with coordinator._fcm_lock:
+        coordinator._fcm_last_push = time.monotonic()
+        coordinator._fcm_healthy = True
     _LOGGER.info(
         "FCM push received (id=%s, from=%s) — fetching events",
         persistent_id, notification.get("from", "?"),
@@ -379,12 +399,18 @@ async def async_handle_fcm_push(coordinator) -> None:
                 else:
                     _LOGGER.info("Alert skipped for %s (%s) — notifications disabled", cam_name, event_type)
 
-                # Trigger snapshot refresh
+                # Trigger snapshot refresh.
+                # WHY tracked: fire-and-forget tasks get GC-collected on
+                # HA shutdown mid-flight, leaving half-written temp files.
+                # Keeping a strong reference + cleanup on done lets
+                # async_unload_entry cancel+await them cleanly.
                 cam_entity = coordinator._camera_entities.get(cam_id)
                 if cam_entity:
-                    coordinator.hass.async_create_task(
+                    task = coordinator.hass.async_create_task(
                         cam_entity._async_trigger_image_refresh(delay=2)
                     )
+                    coordinator._bg_tasks.add(task)
+                    task.add_done_callback(coordinator._bg_tasks.discard)
 
                 # Notify all entity listeners
                 coordinator.async_update_listeners()
@@ -711,10 +737,15 @@ async def async_send_alert(
                 cam_name, ev_id[:8] if ev_id else "?",
                 bool(image_url), bool(found_clip_url),
             )
-            await coordinator.hass.async_add_executor_job(
-                sync_smb_upload, coordinator, smb_data, coordinator.token
-            )
+            await asyncio.wait_for(
+                    coordinator.hass.async_add_executor_job(
+                        sync_smb_upload, coordinator, smb_data, coordinator.token
+                    ),
+                    timeout=30.0,
+                )
             _LOGGER.info("Alert: SMB upload completed for %s", cam_name)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Alert: SMB upload timed out after 30s for %s", cam_name)
         except Exception as err:
             _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
 

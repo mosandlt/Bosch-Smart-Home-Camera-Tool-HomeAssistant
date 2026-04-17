@@ -231,6 +231,18 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         return self._cam_id in self.coordinator._live_connections
 
     @property
+    def available(self) -> bool:
+        """Unavailable when the LOCAL keepalive loop has given up on this cam.
+
+        `is_session_stale` goes True after 3 consecutive renewal failures and
+        resets on the first successful renewal — exposing that here keeps the
+        switch honest instead of showing ON over a frozen stream.
+        """
+        if not super().available:
+            return False
+        return not self.coordinator.is_session_stale(self._cam_id)
+
+    @property
     def icon(self) -> str:
         return "mdi:video-wireless" if self.is_on else "mdi:video-wireless-outline"
 

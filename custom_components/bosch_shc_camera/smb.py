@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import socket
 import time
 from urllib.parse import urlparse
 
@@ -118,7 +119,11 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
         return
 
     try:
-        register_session(server, username=username, password=password)
+        socket.setdefaulttimeout(10)
+        try:
+            register_session(server, username=username, password=password)
+        finally:
+            socket.setdefaulttimeout(None)
     except Exception as err:
         _LOGGER.warning("SMB session to %s failed: %s", server, err)
         return
@@ -253,7 +258,11 @@ def sync_smb_cleanup(coordinator) -> None:
         return
 
     try:
-        register_session(server, username=username, password=password)
+        socket.setdefaulttimeout(10)
+        try:
+            register_session(server, username=username, password=password)
+        finally:
+            socket.setdefaulttimeout(None)
     except Exception as err:
         _LOGGER.warning("SMB cleanup: session to %s failed: %s", server, err)
         return
@@ -314,7 +323,11 @@ def sync_smb_disk_check(coordinator) -> None:
         return
 
     try:
-        register_session(server, username=username, password=password)
+        socket.setdefaulttimeout(10)
+        try:
+            register_session(server, username=username, password=password)
+        finally:
+            socket.setdefaulttimeout(None)
     except Exception as err:
         _LOGGER.warning("SMB disk check: session to %s failed: %s", server, err)
         return

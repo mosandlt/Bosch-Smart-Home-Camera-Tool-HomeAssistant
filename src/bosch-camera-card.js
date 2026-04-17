@@ -175,8 +175,10 @@ class BoschCameraCard extends HTMLElement {
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
-    this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off" }
+    this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
+    this._errorFeedbackTimers = {};  // timers clearing transient error class on toggle buttons
+    this._entityToBtnId     = {};    // map entityId → DOM id of its sw-row/btn (populated in _render)
     this._visibilityHandler = null;  // bound visibilitychange listener
     this._lastEventState    = null;  // last known last_event sensor value — for event detection
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
@@ -312,9 +314,18 @@ class BoschCameraCard extends HTMLElement {
       document.removeEventListener("visibilitychange", this._visibilityHandler);
       this._visibilityHandler = null;
     }
+    // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
+    // these document-level listeners would leak via `this`-closure.
+    if (this._fsClickOut) { document.removeEventListener("click", this._fsClickOut); this._fsClickOut = null; }
+    if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
     if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
+    // Clear any lingering error-feedback timers set by _callServiceWithRollback
+    if (this._errorFeedbackTimers) {
+      Object.values(this._errorFeedbackTimers).forEach(t => clearTimeout(t));
+      this._errorFeedbackTimers = {};
+    }
     this._stopLiveVideo();
   }
 
@@ -661,6 +672,20 @@ class BoschCameraCard extends HTMLElement {
           transition: transform 0.25s cubic-bezier(.4,0,.2,1);
         }
         .sw-row.on .sw-thumb { transform: translateX(18px); }
+
+        /* Pending: request in flight — subtle fade while waiting for HA/Bosch confirm */
+        .sw-row.pending,
+        .btn.pending { opacity: 0.7; }
+        .sw-row.pending .sw-toggle,
+        .btn.pending { animation: pendingPulse 1.2s ease-in-out infinite; }
+        @keyframes pendingPulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(0.75)} }
+        /* Error: 2s red outline + short shake to signal failed service call */
+        .sw-row.error,
+        .btn.error { animation: errorFlash 0.6s ease-in-out 0s 3; box-shadow: 0 0 0 2px rgba(255,69,58,.55); }
+        @keyframes errorFlash {
+          0%,100% { box-shadow: 0 0 0 2px rgba(255,69,58,.55); }
+          50%     { box-shadow: 0 0 0 3px rgba(255,69,58,.15); }
+        }
 
         /* Privacy placeholder — shown when no image + privacy mode is ON */
         .privacy-placeholder {
@@ -1267,10 +1292,10 @@ class BoschCameraCard extends HTMLElement {
       this._toggleAudio()
     );
     this.shadowRoot.getElementById("btn-light").addEventListener("click", () =>
-      this._toggleSwitch(this._entities.light)
+      this._toggleSwitchWithRollback(this._entities.light)
     );
     this.shadowRoot.getElementById("btn-privacy").addEventListener("click", () =>
-      this._toggleSwitch(this._entities.privacy)
+      this._toggleSwitchWithRollback(this._entities.privacy)
     );
     this.shadowRoot.getElementById("btn-notifications").addEventListener("click", () =>
       this._toggleSwitch(this._entities.notifications)
@@ -2334,7 +2359,16 @@ class BoschCameraCard extends HTMLElement {
     if (badge)        badge.className = "stream-badge " + streamBadgeState;
     if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
     // "streaming" label text is updated by _onImageLoaded() with uptime counter
-    if (btnStream)    btnStream.className = "btn btn-stream" + (isStreaming ? " active" : "");
+    if (btnStream) {
+      // Toggle active + pending classes (pending = service call in flight)
+      const streamOpt = this._optimistic[ents.switch];
+      const streamPending = streamOpt === "pending";
+      btnStream.className = "btn btn-stream"
+        + (isStreaming ? " active" : "")
+        + (streamPending ? " pending" : "");
+      // Register DOM-id so _flashEntityError can find this element on failure
+      this._entityToBtnId[ents.switch] = "btn-stream";
+    }
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
 
     // Connection type badge (LAN / Cloud)
@@ -2810,6 +2844,8 @@ class BoschCameraCard extends HTMLElement {
   _updateToggleBtn(id, entityId, entityState) {
     const btn = this.shadowRoot.getElementById(id);
     if (!btn) return;
+    // Remember mapping so _flashEntityError() can find the DOM element
+    if (entityId) this._entityToBtnId[entityId] = id;
     // Hide when entity doesn't exist or is unavailable/unknown
     // (e.g. camera light on a camera that has no physical light)
     const state = entityState?.state;
@@ -2818,9 +2854,15 @@ class BoschCameraCard extends HTMLElement {
       return;
     }
     btn.style.display = "";
-    // Use optimistic state for immediate visual feedback, fall back to HA state
-    const displayState = (entityId in this._optimistic) ? this._optimistic[entityId] : state;
+    // Use optimistic state for immediate visual feedback, fall back to HA state.
+    // "pending" is a transient state during an in-flight service call: keep the
+    // button visually on whatever HA currently reports (no flip yet) but add the
+    // "pending" class for the subtle fade/pulse animation.
+    const optVal = this._optimistic[entityId];
+    const isPending = optVal === "pending";
+    const displayState = (entityId in this._optimistic && !isPending) ? optVal : state;
     btn.classList.toggle("on", displayState === "on");
+    btn.classList.toggle("pending", isPending);
     btn.classList.remove("unavailable");
     btn.disabled = false;
   }
@@ -3192,7 +3234,26 @@ class BoschCameraCard extends HTMLElement {
         setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Noch einen Moment…"); }, 78000),
       ];
     }
-    this._callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch });
+    // Stream toggle: keep instant optimistic flip (don't use "pending" state —
+    // would confuse _isStreaming() and break the snapshot/video-polling decision).
+    // But DO wire in error rollback + red-flash feedback so a failed call visibly
+    // reverts instead of silently timing out after 8s.
+    const prevState = isOn ? "on" : "off";
+    // Register DOM-id so _flashEntityError finds it even before first _update()
+    this._entityToBtnId[this._entities.switch] = "btn-stream";
+    this._hass?.callService("switch", isOn ? "turn_off" : "turn_on", { entity_id: this._entities.switch })
+      .catch((err) => {
+        console.warn("bosch-camera-card: stream toggle failed:", err);
+        this._setOptimistic(this._entities.switch, prevState);
+        // Also cancel any connect-overlay/timers if we were starting the stream
+        if (!isOn) {
+          this._streamConnecting = false;
+          this._waitingForStream = false;
+          if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+          this._setLoadingOverlay(false);
+        }
+        this._flashEntityError(this._entities.switch);
+      });
   }
 
   _toggleAudio() {
@@ -3215,6 +3276,25 @@ class BoschCameraCard extends HTMLElement {
     // Optimistic update — toggle flips instantly without waiting for HA confirmation
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });
+  }
+
+  /**
+   * Like _toggleSwitch but routes through _callServiceWithRollback so the UI
+   * shows a "pending" state during the call and reverts + flashes red on error.
+   * Used for the main user-facing toggles (Privacy, Licht).
+   */
+  _toggleSwitchWithRollback(entityId) {
+    if (!this._hass || !entityId) return;
+    const state = this._hass.states[entityId]?.state;
+    if (!state || state === "unavailable" || state === "unknown") return;
+    const turningOn = state !== "on";
+    const prev = turningOn ? "off" : "on";
+    const target = turningOn ? "on" : "off";
+    this._callServiceWithRollback(
+      entityId, prev, target,
+      "switch", turningOn ? "turn_on" : "turn_off",
+      { entity_id: entityId }
+    );
   }
 
   _onQualityChange(option) {
@@ -3283,6 +3363,49 @@ class BoschCameraCard extends HTMLElement {
     this._hass.callService(domain, service, data).catch((err) =>
       console.warn("bosch-camera-card:", domain, service, err)
     );
+  }
+
+  /**
+   * Service call with optimistic "pending" state + error rollback.
+   *
+   * Flow:
+   *   1. Mark entity as "pending" (visually faded+pulsing, see CSS).
+   *   2. Fire hass.callService.
+   *   3. On success → set optimistic state to targetState (on/off). HA sync in
+   *      _update() then clears it once the real state catches up.
+   *   4. On failure → revert optimistic state to prevState + flash error class
+   *      for ~2s on the DOM element registered in _entityToBtnId.
+   *
+   * This path is used for the main toggles (Privacy, Light, Stream). Other
+   * switches continue to use the original _toggleSwitch → _setOptimistic path
+   * which has been good enough in practice.
+   */
+  _callServiceWithRollback(entityId, prevState, targetState, domain, service, data) {
+    if (!this._hass) return;
+    // Mark pending but remember the target so CSS pulse and UI know what's coming
+    this._setOptimistic(entityId, "pending");
+    this._hass.callService(domain, service, data).then(() => {
+      // Success: flip optimistic to target; _update() will clear once HA confirms
+      this._setOptimistic(entityId, targetState);
+    }).catch((err) => {
+      console.warn("bosch-camera-card:", domain, service, err);
+      // Failure: revert to prev state and show short error feedback
+      this._setOptimistic(entityId, prevState);
+      this._flashEntityError(entityId);
+    });
+  }
+
+  _flashEntityError(entityId) {
+    const domId = this._entityToBtnId[entityId];
+    if (!domId) { this._update(); return; }
+    const el = this.shadowRoot.getElementById(domId);
+    if (!el) return;
+    el.classList.add("error");
+    if (this._errorFeedbackTimers[entityId]) clearTimeout(this._errorFeedbackTimers[entityId]);
+    this._errorFeedbackTimers[entityId] = setTimeout(() => {
+      el.classList.remove("error");
+      delete this._errorFeedbackTimers[entityId];
+    }, 2000);
   }
 
   _formatDatetime(d) {

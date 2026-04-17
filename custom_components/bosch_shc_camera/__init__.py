@@ -24,7 +24,7 @@ import asyncio
 import logging
 import os
 import re as _re_mod
-
+import threading
 import time
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -140,6 +140,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # The generation counter increments on every new stream start,
         # allowing stale renewal loops to detect they belong to an old session.
         self._auto_renew_tasks: dict[str, asyncio.Task] = {}
+        self._renewal_tasks: dict[str, asyncio.Task] = {}
         self._auto_renew_generation: dict[str, int] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict = {}
@@ -201,6 +202,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._fcm_last_push: float = 0.0  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
         self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
+        # Lock serializing cross-thread FCM state writes.
+        # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
+        self._fcm_lock: threading.Lock = threading.Lock()
         # Unread events count cache — keyed by cam_id, populated from GET /unread_events_count
         self._unread_events_cache: dict[str, int] = {}
         # Privacy sound override cache — keyed by cam_id, populated from GET /privacy_sound_override
@@ -238,6 +242,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # two parallel POSTs with the same token → first wins, second gets
         # invalid_grant and permanently breaks the loop).
         self._token_refresh_lock: asyncio.Lock = asyncio.Lock()
+        # TimerHandle for the next scheduled proactive token refresh.
+        # Held so async_unload_entry can cancel it — otherwise a config
+        # reload leaks timers that still fire against a dead coordinator.
+        self._token_refresh_handle = None
+        # Strong references to fire-and-forget background tasks so the GC
+        # does not cancel them mid-flight. Self-removing via done_callback.
+        self._bg_tasks: set[asyncio.Task] = set()
+        # Per-camera flag: set True after 3 consecutive session-renewal
+        # failures (LOCAL auto-renew loop). Flipped back to False after
+        # a successful renewal. Exposed via is_session_stale().
+        self._session_stale: dict[str, bool] = {}
         # Timestamp overlay cache — keyed by cam_id, from GET /timestamp
         self._timestamp_cache: dict[str, bool | None] = {}
         # Status LED cache — keyed by cam_id, from GET /ledlights (Gen2 only)
@@ -352,6 +367,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         return self.data.get(cam_id, {}).get("status", "UNKNOWN") == "ONLINE"
 
+    def is_session_stale(self, cam_id: str) -> bool:
+        """Return True if the LOCAL keepalive loop has given up on this camera.
+
+        Set by `_auto_renew_local_session` after 3 consecutive full-renewal
+        failures; cleared on the first successful renewal. Entities can use
+        this in their `available` property to avoid showing a frozen stream
+        as if it were healthy.
+        """
+        return bool(self._session_stale.get(cam_id, False))
+
     def record_stream_error(self, cam_id: str) -> None:
         """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
         count = self._stream_error_count.get(cam_id, 0) + 1
@@ -369,6 +394,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
         self._stream_error_count[cam_id] = 0
         self._stream_fell_back[cam_id] = False
+
+    def _replace_renewal_task(self, cam_id: str, coro) -> asyncio.Task:
+        """Cancel any existing renewal task for cam_id, then create and track the new one."""
+        old = self._renewal_tasks.get(cam_id)
+        if old and not old.done():
+            old.cancel()
+        task = self.hass.async_create_task(coro)
+        self._renewal_tasks[cam_id] = task
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -635,7 +671,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 "Token expires in %.0fs — proactive refresh scheduled in %.0fs",
                 remaining, refresh_in,
             )
-            self.hass.loop.call_later(
+            # Cancel any previously scheduled handle so reloads/reschedules
+            # don't stack multiple timers that all fire the same refresh.
+            prev = self._token_refresh_handle
+            if prev is not None:
+                try:
+                    prev.cancel()
+                except Exception:
+                    pass
+            self._token_refresh_handle = self.hass.loop.call_later(
                 refresh_in,
                 lambda: self.hass.async_create_task(self._proactive_refresh()),
             )
@@ -720,7 +764,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             self._first_tick_done = True
 
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
-        if self._fcm_healthy:
+        with self._fcm_lock:
+            _fcm_healthy = self._fcm_healthy
+        if _fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
         else:
             event_interval = int(opts.get("interval_events", 60))
@@ -1383,9 +1429,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
             # ── 6. Auto-download new event files ──────────────────────────────
             if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
-                await self.hass.async_add_executor_job(
-                    sync_download, self, data, token, opts["download_path"]
-                )
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(
+                            sync_download, self, data, token, opts["download_path"]
+                        ),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Auto-download timed out after 30s — skipping this tick")
                 # Mark all downloaded events as read
                 dl_event_ids = []
                 for cam_id_dl, cam_data_dl in data.items():
@@ -1413,7 +1465,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 and (time.monotonic() - self._last_smb_cleanup) >= _SMB_CLEANUP_INTERVAL
             ):
                 self._last_smb_cleanup = time.monotonic()
-                await self.hass.async_add_executor_job(sync_smb_cleanup, self)
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(sync_smb_cleanup, self),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("SMB cleanup timed out after 30s")
 
             # ── 9. SMB disk-free check (hourly) ───────────────────────────────
             _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
@@ -1424,7 +1482,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 and (time.monotonic() - self._last_smb_disk_check) >= _SMB_DISK_CHECK_INTERVAL
             ):
                 self._last_smb_disk_check = time.monotonic()
-                await self.hass.async_add_executor_job(sync_smb_disk_check, self)
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(sync_smb_disk_check, self),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("SMB disk check timed out after 30s")
 
             return data
 
@@ -1721,16 +1785,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
                         # ── LOCAL session auto-renewal ───────────────────
                         if type_val == "LOCAL" and local_user and local_pass:
-                            # Cancel any stale renewal from a previous session
-                            old_task = self._auto_renew_tasks.pop(cam_id, None)
-                            if old_task and not old_task.done():
-                                old_task.cancel()
                             gen = self._auto_renew_generation.get(cam_id, 0) + 1
                             self._auto_renew_generation[cam_id] = gen
-                            task = self.hass.async_create_task(
-                                self._auto_renew_local_session(cam_id, gen)
+                            self._replace_renewal_task(
+                                cam_id, self._auto_renew_local_session(cam_id, gen)
                             )
-                            self._auto_renew_tasks[cam_id] = task
                         self.hass.async_create_task(self.async_request_refresh())
                         return result
                     elif resp.status == 401:
@@ -2157,6 +2216,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             cam_id[:8], generation, heartbeat_interval, renewal_interval,
         )
         consecutive_fails = 0
+        renewal_fails = 0  # consecutive full-renewal failures (for session_stale)
         session_start = time.monotonic()
         try:
           while True:
@@ -2186,12 +2246,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     result = await self.try_live_connection(cam_id, is_renewal=True)
                     if result:
                         _LOGGER.info("Session renewed for %s", cam_id[:8])
+                        renewal_fails = 0
+                        if self._session_stale.get(cam_id):
+                            self._session_stale[cam_id] = False
+                            _LOGGER.info("Session recovered for %s — stale flag cleared", cam_id[:8])
                     else:
+                        renewal_fails += 1
                         _LOGGER.warning("Session renewal failed for %s — retrying next cycle", cam_id[:8])
                         session_start = time.monotonic()  # reset to avoid spamming
                 except Exception as exc:
+                    renewal_fails += 1
                     _LOGGER.warning("Session renewal error for %s: %s", cam_id[:8], exc)
                     session_start = time.monotonic()
+                # Mark session stale after 3 consecutive renewal failures so
+                # entities can surface "unavailable" instead of silently
+                # showing a frozen picture.
+                if renewal_fails >= 3 and not self._session_stale.get(cam_id):
+                    self._session_stale[cam_id] = True
+                    _LOGGER.warning(
+                        "Session renewal persistently failing for %s (%d consecutive)",
+                        cam_id[:8], renewal_fails,
+                    )
                 # try_live_connection creates a NEW heartbeat task with new generation,
                 # so this loop will exit at the stale-gen check above.
                 continue
@@ -2627,24 +2702,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     ent_reg.async_update_entity(ent, disabled_by=None)
                     _LOGGER.info("v8.0.2 migration: enabled %s", ent)
 
-    # Auto-setup go2rtc integration for WebRTC streaming (opt-out via options)
+    # Auto-setup go2rtc integration for WebRTC streaming (opt-out via options).
+    # WHY the lock: if two config entries set up in parallel (e.g. after HA
+    # restart with multiple accounts), both check "no go2rtc entry exists"
+    # simultaneously and both fire async_init → duplicate go2rtc entries.
+    # The domain-scoped asyncio.Lock serializes the check-and-create.
+    # Stored on hass.data under a distinct key (not hass.data[DOMAIN]) so
+    # it doesn't pollute the per-entry iteration in service handlers.
     if opts.get("enable_go2rtc", True):
-        go2rtc_entries = hass.config_entries.async_entries("go2rtc")
-        if not go2rtc_entries:
-            try:
-                result = await hass.config_entries.flow.async_init(
-                    "go2rtc",
-                    context={"source": "system"},
-                    data={},
-                )
-                if result.get("type") == "create_entry":
-                    _LOGGER.info("go2rtc integration auto-created for WebRTC streaming support")
-                else:
-                    _LOGGER.debug("go2rtc setup result: %s", result.get("type", "unknown"))
-            except Exception as err:
-                _LOGGER.debug("go2rtc auto-setup skipped: %s", err)
-        else:
-            _LOGGER.debug("go2rtc integration already active (entry: %s)", go2rtc_entries[0].entry_id)
+        go2rtc_lock = hass.data.setdefault(f"{DOMAIN}_go2rtc_init_lock", asyncio.Lock())
+        async with go2rtc_lock:
+            go2rtc_entries = hass.config_entries.async_entries("go2rtc")
+            if not go2rtc_entries:
+                try:
+                    result = await hass.config_entries.flow.async_init(
+                        "go2rtc",
+                        context={"source": "system"},
+                        data={},
+                    )
+                    if result.get("type") == "create_entry":
+                        _LOGGER.info("go2rtc integration auto-created for WebRTC streaming support")
+                    else:
+                        _LOGGER.debug("go2rtc setup result: %s", result.get("type", "unknown"))
+                except Exception as err:
+                    _LOGGER.debug("go2rtc auto-setup skipped: %s", err)
+            else:
+                _LOGGER.debug("go2rtc integration already active (entry: %s)", go2rtc_entries[0].entry_id)
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
@@ -2661,11 +2744,35 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     if coord := edata.get("coordinator"):
         await coord.async_stop_fcm_push()
+        # Cancel scheduled proactive token refresh — otherwise a config
+        # reload leaves a stale TimerHandle that fires against the dead
+        # coordinator and double-triggers refreshes.
+        handle = getattr(coord, "_token_refresh_handle", None)
+        if handle is not None:
+            try:
+                handle.cancel()
+            except Exception:
+                pass
+            coord._token_refresh_handle = None
         # Cancel all auto-renewal tasks
         for task in coord._auto_renew_tasks.values():
             if not task.done():
                 task.cancel()
         coord._auto_renew_tasks.clear()
+        for task in coord._renewal_tasks.values():
+            if not task.done():
+                task.cancel()
+        coord._renewal_tasks.clear()
+        # Cancel tracked fire-and-forget background tasks (e.g. snapshot
+        # refreshes triggered from FCM pushes). Await them to give any
+        # in-flight file writes a chance to finish or abort cleanly.
+        bg = list(coord._bg_tasks)
+        for t in bg:
+            if not t.done():
+                t.cancel()
+        if bg:
+            await asyncio.gather(*bg, return_exceptions=True)
+        coord._bg_tasks.clear()
         # Stop all TLS proxies (closes server sockets, terminates threads).
         stop_all_proxies(coord._tls_proxy_ports)
 
