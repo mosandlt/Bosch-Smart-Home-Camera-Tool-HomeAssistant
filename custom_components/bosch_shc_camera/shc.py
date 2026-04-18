@@ -732,7 +732,7 @@ async def async_cloud_set_pan(
     # Block pan while privacy mode is active (camera shutter closed, motor disabled)
     privacy = coordinator._shc_state_cache.get(cam_id, {}).get("privacy_mode")
     if privacy:
-        _LOGGER.warning("cloud_set_pan: blocked — Privacy Mode is ON for %s", cam_id)
+        _LOGGER.debug("cloud_set_pan: blocked — Privacy Mode is ON for %s", cam_id)
         return False
 
     token = coordinator.token

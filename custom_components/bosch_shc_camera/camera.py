@@ -663,6 +663,9 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                         )
                         return rcp_img
                 fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                if not fresh:
+                    # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
+                    fresh = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
                 if fresh:
                     self._cached_image = fresh
                     self._last_image_fetch = now
@@ -689,11 +692,15 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                         self._last_image_fetch = now
                         return rcp_img
                 fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                if not fresh:
+                    # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
+                    fresh = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
                 if fresh:
                     self._cached_image = fresh
                     self._last_image_fetch = now
                     return fresh
-                # Fetch failed — return stale cache as fallback
+                # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping
+                self._last_image_fetch = now
                 _LOGGER.debug(
                     "%s: fresh fetch failed — returning cached (%ds old)",
                     self._attr_name, int(cache_age),
