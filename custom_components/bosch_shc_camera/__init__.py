@@ -193,6 +193,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Proxy URL cache — keyed by cam_id, value (urls[0], expires_monotonic)
         # Proxy leases last ~60s; cache for 50s to skip PUT /connection on warm refreshes
         self._proxy_url_cache: dict[str, tuple[str, float]] = {}
+        # Per-camera lock serializing async_fetch_live_snapshot calls.
+        # Prevents duplicate PUT /connection when first-load + proactive refresh
+        # overlap, or when a user rapid-triggers snapshots.
+        self._snapshot_fetch_locks: dict[str, asyncio.Lock] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
         # FCM push client — near-instant event detection via Firebase Cloud Messaging
@@ -215,7 +219,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "9.2.1"
+        self._integration_version = "10.2.1"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -382,9 +386,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         count = self._stream_error_count.get(cam_id, 0) + 1
         self._stream_error_count[cam_id] = count
         cfg = self.get_model_config(cam_id)
-        if count >= cfg.max_stream_errors:
+        # Log only on the transition to threshold — not every subsequent tick while still failing
+        if count == cfg.max_stream_errors:
             _LOGGER.warning(
                 "Stream error %d/%d for %s — will fall back to REMOTE on next start",
+                count, cfg.max_stream_errors, cam_id[:8],
+            )
+        elif count > cfg.max_stream_errors:
+            _LOGGER.debug(
+                "Stream error %d/%d for %s (repeat)",
                 count, cfg.max_stream_errors, cam_id[:8],
             )
 
@@ -508,15 +518,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if attempt < 2:
                     _LOGGER.debug("Token refresh attempt %d failed (transient), retrying in 2s...", attempt + 1)
                     await asyncio.sleep(2)
-        except RefreshTokenInvalidError as err:
+        except RefreshTokenInvalidError:
+            # Do not log the exception body — Keycloak error responses can echo
+            # token material back in the payload.
             _LOGGER.error(
-                "Refresh token rejected by Keycloak (invalid_grant) — "
-                "triggering reauth flow. Details: %s", err,
+                "Refresh token rejected by Keycloak (invalid_grant) — triggering reauth flow"
             )
             raise ConfigEntryAuthFailed(
                 "Refresh token invalid — please re-authenticate via the "
                 "Reconfigure button on the integration card."
-            ) from err
+            )
         except AuthServerOutageError as err:
             self._auth_outage_count += 1
             # Exponential back-off: 60s, 120s, 240s, 480s, capped at 600s (10 min)
@@ -1465,13 +1476,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 and (time.monotonic() - self._last_smb_cleanup) >= _SMB_CLEANUP_INTERVAL
             ):
                 self._last_smb_cleanup = time.monotonic()
-                try:
-                    await asyncio.wait_for(
-                        self.hass.async_add_executor_job(sync_smb_cleanup, self),
-                        timeout=30.0,
-                    )
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("SMB cleanup timed out after 30s")
+                # Fire-and-forget: cleanup walks the entire share and can take
+                # minutes on large datasets. Don't block the coordinator tick.
+                # Errors land in the executor future and are logged from smb.py.
+                self.hass.async_create_background_task(
+                    self._run_smb_cleanup_bg(),
+                    "bosch_shc_camera_smb_cleanup",
+                )
 
             # ── 9. SMB disk-free check (hourly) ───────────────────────────────
             _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
@@ -1812,6 +1823,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         _LOGGER.warning("Could not open live connection for %s — all types failed", cam_id)
         return None
 
+    async def _run_smb_cleanup_bg(self) -> None:
+        """Run the SMB retention cleanup in the background without blocking the coordinator tick."""
+        try:
+            await self.hass.async_add_executor_job(sync_smb_cleanup, self)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("SMB cleanup background task error: %s", err)
+
     # ── go2rtc integration ────────────────────────────────────────────────────
     async def async_fetch_live_snapshot(self, cam_id: str) -> bytes | None:
         """Open a temporary REMOTE live connection to fetch a fresh snap.jpg.
@@ -1823,7 +1841,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Proxy URL caching: PUT /connection takes ~1.5s. The resulting proxy lease
         lasts ~60s. We cache urls[0] for 50s and skip PUT /connection on warm
         refreshes, reducing latency from ~3s → ~0.5s per card refresh cycle.
+
+        Per-camera lock: concurrent callers (first-load + proactive refresh,
+        Lovelace double-firing) are serialized so only one PUT /connection
+        runs per camera at a time. The second caller finds the warm cache.
         """
+        lock = self._snapshot_fetch_locks.get(cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._snapshot_fetch_locks[cam_id] = lock
+        async with lock:
+            return await self._async_fetch_live_snapshot_impl(cam_id)
+
+    async def _async_fetch_live_snapshot_impl(self, cam_id: str) -> bytes | None:
         import json as _json
 
         token = self.token

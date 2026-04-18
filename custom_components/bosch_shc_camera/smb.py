@@ -332,9 +332,13 @@ def sync_smb_disk_check(coordinator) -> None:
         _LOGGER.warning("SMB disk check: session to %s failed: %s", server, err)
         return
 
-    # Use smbclient's statvfs to get free space
+    # Use smbclient's statvfs to get free space (not available in all smbclient versions)
     try:
         import smbclient
+        if not hasattr(smbclient, "statvfs"):
+            # smbclient package installed on this HA does not expose statvfs —
+            # the disk-free check is unsupported. Skip silently.
+            return
         vfs = smbclient.statvfs(f"\\\\{server}\\{share}")
         free_mb = (vfs.f_bavail * vfs.f_frsize) // (1024 * 1024)
     except Exception as err:

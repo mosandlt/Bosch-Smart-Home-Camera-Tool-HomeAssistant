@@ -424,6 +424,8 @@ async def async_handle_fcm_push(coordinator) -> None:
             elif newest_id:
                 coordinator._last_event_ids[cam_id] = newest_id
 
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("FCM push event fetch network error for %s: %s", cam_id, err)
         except Exception as err:
             _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
 
