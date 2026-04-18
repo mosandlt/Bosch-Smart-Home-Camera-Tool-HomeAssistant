@@ -47,6 +47,7 @@ def sync_download(coordinator, data: dict, token: str, download_path: str) -> No
 
     session = requests.Session()
     session.headers["Authorization"] = f"Bearer {token}"
+    # Bosch Cloud uses a private CA (Video CA 2A) not in the system trust store.
     session.verify = False
 
     for cam_id, cam_data in data.items():
@@ -130,6 +131,7 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
 
     session = req.Session()
     session.headers["Authorization"] = f"Bearer {token}"
+    # Bosch Cloud uses a private CA (Video CA 2A) not in the system trust store.
     session.verify = False
 
     for cam_id, cam_data in data.items():
