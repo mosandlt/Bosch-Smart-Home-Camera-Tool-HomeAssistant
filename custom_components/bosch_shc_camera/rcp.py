@@ -391,12 +391,21 @@ async def async_update_rcp_data(
     hass = coordinator.hass
 
     # Read LED dimmer (0x0c22) -- T_WORD, num=1 -> integer 0-100
+    # Gen2 firmware occasionally returns 0x0A0A (2570) for the same setting;
+    # format semantics differ per model. Clamp to 0..100 and skip the cache on
+    # out-of-range values so the sensor doesn't surface nonsense.
     try:
         raw = await rcp_read(hass, rcp_base, "0x0c22", session_id, type_="T_WORD", num=1)
         if raw and len(raw) >= 2:
             dimmer_val = struct.unpack(">H", raw[:2])[0]
-            coordinator._rcp_dimmer_cache[cam_id] = int(dimmer_val)
-            _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
+            if 0 <= dimmer_val <= 100:
+                coordinator._rcp_dimmer_cache[cam_id] = int(dimmer_val)
+                _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
+            else:
+                _LOGGER.debug(
+                    "RCP LED dimmer for %s: out-of-range raw=%d — cache skipped",
+                    cam_id, dimmer_val,
+                )
     except Exception as err:
         _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
 
@@ -412,43 +421,76 @@ async def async_update_rcp_data(
         _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
 
     # Read camera clock (0x0a0f) -- 8 bytes -> compute offset vs server time
+    # RCP clock format: year(2B big-endian) month(1B) day(1B) hour(1B) min(1B) sec(1B) weekday(1B)
+    # Some firmwares (observed on Gen2) return a different layout with fields
+    # that fall outside datetime ranges. Validate before constructing cam_dt so
+    # parse failures skip silently instead of raising.
     try:
         raw = await rcp_read(hass, rcp_base, "0x0a0f", session_id, type_="P_OCTET")
         if raw and len(raw) >= 8:
-            # RCP clock format: year(2B big-endian) month(1B) day(1B) hour(1B) min(1B) sec(1B) weekday(1B)
             year, month, day, hour, minute, second, _ = struct.unpack(
                 ">HBBBBBB", raw[:8]
             )
-            cam_dt = _dt.datetime(
-                year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc
-            )
-            server_dt = _dt.datetime.now(_dt.timezone.utc)
-            offset = (cam_dt - server_dt).total_seconds()
-            coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
-            _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
+            if (
+                1970 <= year <= 2100
+                and 1 <= month <= 12
+                and 1 <= day <= 31
+                and 0 <= hour <= 23
+                and 0 <= minute <= 59
+                and 0 <= second <= 59
+            ):
+                cam_dt = _dt.datetime(
+                    year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc
+                )
+                server_dt = _dt.datetime.now(_dt.timezone.utc)
+                offset = (cam_dt - server_dt).total_seconds()
+                coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
+                _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
+            else:
+                _LOGGER.debug(
+                    "RCP clock for %s: unexpected layout "
+                    "(Y=%d M=%d D=%d h=%d m=%d s=%d) — cache skipped",
+                    cam_id, year, month, day, hour, minute, second,
+                )
     except Exception as err:
         _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
 
     # Read LAN IP via RCP (0x0a36) -- 4 bytes IPv4 or ASCII string
+    # Gen1 returns raw bytes; Gen2 wraps the response in a nested XML document
+    # whose hex-decoded payload starts with "<rcp>". Reject both empty and
+    # XML-wrapped values so the cache isn't polluted.
     try:
         raw = await rcp_read(hass, rcp_base, "0x0a36", session_id, type_="P_OCTET")
         if raw:
             if len(raw) == 4:
                 ip_str = ".".join(str(b) for b in raw)
             else:
-                ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-            coordinator._rcp_lan_ip_cache[cam_id] = ip_str
-            _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
+                ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+            if ip_str and ip_str != "0.0.0.0" and not ip_str.startswith("<"):
+                coordinator._rcp_lan_ip_cache[cam_id] = ip_str
+                _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
+            else:
+                _LOGGER.debug(
+                    "RCP LAN IP for %s: unusable payload (%r) — cache skipped",
+                    cam_id, ip_str[:40],
+                )
     except Exception as err:
         _LOGGER.debug("RCP LAN IP read error for %s: %s", cam_id, err)
 
     # Read product name via RCP (0x0aea) -- null-terminated ASCII
+    # Same Gen2 XML-wrapper caveat as LAN IP above.
     try:
         raw = await rcp_read(hass, rcp_base, "0x0aea", session_id, type_="P_OCTET")
         if raw:
-            name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-            coordinator._rcp_product_name_cache[cam_id] = name_str
-            _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
+            name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+            if name_str and not name_str.startswith("<"):
+                coordinator._rcp_product_name_cache[cam_id] = name_str
+                _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
+            else:
+                _LOGGER.debug(
+                    "RCP product name for %s: unusable payload (%r) — cache skipped",
+                    cam_id, name_str[:40],
+                )
     except Exception as err:
         _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
 

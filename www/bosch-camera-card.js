@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.8.7";
+const CARD_VERSION = "2.8.8";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -982,18 +982,18 @@ class BoschCameraCard extends HTMLElement {
       this._setLoadingOverlay(false);
       return;
     }
-    this._callService("bosch_shc_camera", "trigger_snapshot", {});
     const token = this._hass?.states[this._entities.camera]?.attributes?.access_token || "";
     const dispW = Math.round(this.offsetWidth || 640);
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
     const startPoll = prevBytes => {
+      this._callService("bosch_shc_camera", "trigger_snapshot", {});
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(() => this._pollSnapshotImage(prevBytes, startTime), 500);
     };
     fetch(currUrl).then(r => r.ok ? r.blob() : null).then(blob => startPoll(blob ? blob.size : 0)).catch(() => startPoll(0));
   }
   _pollSnapshotImage(prevBytes, startTime) {
-    const TIMEOUT = 15e3;
+    const TIMEOUT = 6e3;
     const INTERVAL = 1e3;
     const elapsed = Date.now() - startTime;
     if (!this._hass) {

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.7";
+const CARD_VERSION = "2.8.8";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2190,16 +2190,18 @@ class BoschCameraCard extends HTMLElement {
       return;
     }
 
-    // Trigger backend image refresh
-    this._callService("bosch_shc_camera", "trigger_snapshot", {});
-
-    // Capture current image byte count, then poll until it changes (new image ready)
-    // REMOTE takes ~3-5s; LOCAL Digest auth takes ~6-15s
+    // Capture current image byte count BEFORE firing the service — the service
+    // refreshes all cameras on the coordinator, so another card's earlier click
+    // may already have refreshed this camera's bytes. Fetching prevBytes first
+    // avoids baselining against an already-fresh image (which would make every
+    // subsequent poll see no byte change and spin until the 15 s timeout).
     const token   = this._hass?.states[this._entities.camera]?.attributes?.access_token || "";
     const dispW   = Math.round(this.offsetWidth || 640);
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
 
     const startPoll = (prevBytes) => {
+      // Fire backend refresh AFTER prevBytes capture — see above.
+      this._callService("bosch_shc_camera", "trigger_snapshot", {});
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
@@ -2207,7 +2209,7 @@ class BoschCameraCard extends HTMLElement {
       );
     };
 
-    // Get current byte count (best-effort), then start polling
+    // Get current byte count (best-effort), then fire service + start polling
     fetch(currUrl)
       .then(r => r.ok ? r.blob() : null)
       .then(blob => startPoll(blob ? blob.size : 0))
@@ -2215,7 +2217,11 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _pollSnapshotImage(prevBytes, startTime) {
-    const TIMEOUT  = 15000;
+    // 6 s total: REMOTE fetch completes in ~3 s, LOCAL Digest in ~4 s; the
+    // previous 15 s value was only needed when byte-comparison accidentally
+    // baselined against an already-fresh image (fixed above). Shorter timeout
+    // means the spinner resolves faster when a change isn't detected.
+    const TIMEOUT  = 6000;
     const INTERVAL = 1000;
     const elapsed  = Date.now() - startTime;
 
