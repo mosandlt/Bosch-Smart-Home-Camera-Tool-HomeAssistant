@@ -461,7 +461,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v2.8.7** — includes Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.8.9** — hls.js pinned to 1.6.16 (SRI lockup fix), Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -513,12 +513,13 @@ data:
 - **Diagnose** — WiFi signal %, firmware version, ambient light %, movement/audio events today
 - **Zeitpläne & Zonen** — schedule rules list with AN/AUS toggle per rule + delete button, motion zone overlay toggle, motion zone count (RCP)
 
-### Reliability (v1.9.4)
+### Reliability
 
-- **Consistent 2 s snapshot intervals** — backend `frame_interval` is 1 s (shorter than the 2 s poll), so every card request always gets a fresh frame. Eliminates the 1 s / 3 s jitter from v1.9.3 and earlier.
-- **HLS auto-recovery** — if the live stream drops (e.g. Bosch proxy hash expiry after ~60 s), hls.js errors are handled: soft errors recover automatically, fatal errors trigger a full reconnect after 2 s.
-- **Session renewal** — when the proxy hash expires, the backend automatically opens a new connection and the stream continues uninterrupted.
-- **"Connecting" badge** (v1.9.5) — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays.
+- **Consistent snapshot refresh** — backend frame interval is shorter than the card's poll interval, so every card request always returns a fresh frame (no jitter).
+- **HLS auto-recovery** — hls.js soft errors recover automatically; fatal errors trigger a full reconnect after 2 s. Buffer-stall detection seeks to the live edge on the first two stalls and does a full reconnect on the third (`bosch-camera-card: 3 buffer stalls, reconnecting HLS`).
+- **hls.js CDN load hardening** (v2.8.9) — the card loads hls.js from jsdelivr with a pinned version + subresource-integrity hash (`hls.js@1.6.16` + matching `sha384`). The previous floating `@1` range broke silently whenever jsdelivr shipped a new patch release; updates now require an explicit version + hash bump.
+- **Session renewal** — REMOTE proxy hashes expire after ~60 s; the backend opens a new connection before expiry and hands the card a fresh URL via `Stream.update_source()`. LOCAL streams survive the Gen2 Outdoor firmware's ~65 s RTSP TCP reset via a transparent FFmpeg reconnect on the same TLS proxy port with the same Digest credentials (~2 s gap, HLS output continues).
+- **"Connecting" badge** — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays. Safety timeout hides the overlay after 120 s if the video never produces a frame, keeping the snapshot visible underneath.
 - **Stream uptime counter** (v1.9.5) — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
 - **Frame Δt in debug line** (v1.9.5) — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
 - **Snap error retry** (v1.9.5) — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
