@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.8.8";
+const CARD_VERSION = "2.8.9";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -669,8 +669,8 @@ class BoschCameraCard extends HTMLElement {
     if (window.Hls) return Promise.resolve(window.Hls);
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
-      s.integrity = "sha384-iZBI1/lW9u8FcBjxuQ8nPTsU7TXhZNtzkV8H3gQHSTgz+VYQoKWqGlBHqhO84alJ";
+      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.6.16/dist/hls.min.js";
+      s.integrity = "sha384-5E8B0pTlZZJMabWpC0fyYf6OUpe15jJij34BqBAh4NXoHAlLNOjCPRrwtOXOQFAn";
       s.crossOrigin = "anonymous";
       s.onload = () => resolve(window.Hls);
       s.onerror = () => reject(new Error("hls.js load failed"));

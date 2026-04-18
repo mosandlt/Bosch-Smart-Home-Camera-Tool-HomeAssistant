@@ -109,7 +109,12 @@ MODELS["CAMERA_EYES"] = MODELS["OUTDOOR"]
 # ── Gen2: Eyes Außenkamera II ────────────────────────────────────────────
 # API hardwareVersion: "HOME_Eyes_Outdoor" (confirmed by user DrNiKa, FW 9.40.25)
 # App product type: "CAMERA_OUTDOOR_GEN2" (from Bosch product catalog)
-# Timing values are initial estimates — will be tuned once we have test hardware.
+# FW 9.40.25 enforces a hard 60-second LOCAL session cap — the camera resets
+# the RTSP TCP connection ~63s after PUT /connection regardless of the URL's
+# maxSessionDuration parameter. Proactive renewal must fire before the cut so
+# a fresh session is pre-warmed and Stream.update_source() can swap URLs
+# before the old session dies. 50s gives ~13s of headroom (renewal ~23s for
+# Gen2 Outdoor with min_total_wait=35, pre_warm uses 2/3 of that on renewal).
 MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     display_name="Eyes Außenkamera II",
     generation=2,
@@ -119,9 +124,20 @@ MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     post_warm_buffer=3,
     describe_timeout=8,
     min_total_wait=35,
-    renewal_interval=3500,
+    # Both keepalive intervals disabled: on Gen2 Outdoor FW 9.40.25 every
+    # PUT /connection LOCAL (whether heartbeat or renewal) rotates the
+    # ephemeral Digest credentials on the camera, which invalidates the live
+    # RTSP session bound to the old creds. FFmpeg then sees either
+    # "Operation timed out finding first packet" (heartbeat) or
+    # "Connection reset by peer" + 401 on reconnect (renewal). FFmpeg already
+    # sends RTSP GET_PARAMETER every ~15s which refreshes the camera-side
+    # RTSP session timeout without cred rotation — that is the ONLY keepalive
+    # that doesn't kill the stream. The loop still runs with a long 3600 s
+    # tick so the emergency-renewal path (3 consecutive heartbeat failures)
+    # stays wired up in case of a true network outage.
+    renewal_interval=3600,
     max_session_duration=3600,
-    heartbeat_interval=10,
+    heartbeat_interval=3600,
     snapshot_warmup=5,
 )
 MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]

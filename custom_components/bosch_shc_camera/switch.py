@@ -302,10 +302,16 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             )
             # Schedule health check — if FFmpeg hasn't connected after 60s,
             # record an error and retry (potentially with REMOTE fallback).
+            # Track the task on the coordinator so async_unload_entry cancels
+            # it during integration reload; otherwise a stale check from a
+            # previous session can fire against a fresh coordinator and start
+            # a second renewal loop alongside the user-triggered one.
             if conn_type == "LOCAL":
-                self.hass.async_create_task(
+                hc_task = self.hass.async_create_task(
                     self._stream_health_check(self._cam_id, 60)
                 )
+                self.coordinator._bg_tasks.add(hc_task)
+                hc_task.add_done_callback(self.coordinator._bg_tasks.discard)
         else:
             _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
             self.coordinator.record_stream_error(self._cam_id)

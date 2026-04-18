@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.8";
+const CARD_VERSION = "2.8.9";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1849,8 +1849,13 @@ class BoschCameraCard extends HTMLElement {
     if (window.Hls) return Promise.resolve(window.Hls);
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
-      s.integrity = "sha384-iZBI1/lW9u8FcBjxuQ8nPTsU7TXhZNtzkV8H3gQHSTgz+VYQoKWqGlBHqhO84alJ";
+      // Pinned to an exact version so the SRI hash below stays valid.
+      // The previous floating "@1" range broke whenever jsdelivr shipped a
+      // new hls.js@1.x.y — the body hash drifted and the browser blocked the
+      // script, collapsing the card with "hls.js load failed". Bump both the
+      // version and the integrity together when updating.
+      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.6.16/dist/hls.min.js";
+      s.integrity = "sha384-5E8B0pTlZZJMabWpC0fyYf6OUpe15jJij34BqBAh4NXoHAlLNOjCPRrwtOXOQFAn";
       s.crossOrigin = "anonymous";
       s.onload  = () => resolve(window.Hls);
       s.onerror = () => reject(new Error("hls.js load failed"));
