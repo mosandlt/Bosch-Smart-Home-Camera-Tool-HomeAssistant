@@ -9,6 +9,6 @@
   "iot_class":         "cloud_push",
   "config_flow":       true,
   "integration_type":  "hub",
-  "version":           "10.2.2",
+  "version":           "10.2.3",
   "loggers":           ["bosch_shc_camera"]
 }
