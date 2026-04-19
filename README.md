@@ -629,6 +629,34 @@ cards:
     title: Kamera
 ```
 
+### Overview card (all cameras, auto-discovered)
+
+Since **v10.3.0** there is a second card type — `bosch-camera-overview-card` — that discovers every Bosch camera on the HA instance (`attributes.brand === "Bosch"`) and renders one tile per camera in a responsive grid. Sort order is **Live → Privat → Offline** (privacy state is read from `switch.<cam>_privacy_mode`), and each tile gets a colored outline (green / orange / grey) marking its tier.
+
+```yaml
+# Minimal — auto-discovers all Bosch cameras, responsive grid
+type: custom:bosch-camera-overview-card
+
+# With options
+type: custom:bosch-camera-overview-card
+title: Kameras
+online_offline_view: true     # false = hide offline tier
+columns: 2                    # "auto" | 1 | 2 | 3 | 4   (default "auto")
+min_width: 380px              # cell min-width for "auto" mode (default 360px)
+# Per-camera overrides — merged into each child card's setConfig
+overrides:
+  camera.bosch_terrasse:
+    automations:
+      - automation.alarmanlage
+  camera.bosch_garten:
+    refresh_interval_streaming: 3
+    title: Eingang (Gen1)
+# exclude: [camera.bosch_test]          # skip these
+# include: [camera.bosch_terrasse, ...] # override auto-discovery with explicit list
+```
+
+On viewports ≤ 640 px the grid always falls back to a single column, regardless of `columns`, so the cards stay legible on phones. For a full-width dashboard without sections-view clamping, place the card in a `panel: true` view.
+
 ---
 
 ## Requirements
@@ -724,6 +752,7 @@ Everything renders automatically when the integration detects a Gen2 Indoor II.
 
 | Version | Changes |
 |---------|---------|
+| **v10.3.0** | **New `bosch-camera-overview-card` — single wrapper that auto-discovers every Bosch camera and lays them out in a responsive grid.** One card entry in YAML replaces hand-rolled per-camera sections: the wrapper queries `hass.states` for entities with `attributes.brand === "Bosch"`, sorts them into a three-tier order — **Live** (online + privacy off) → **Privat** (online + privacy on, detected via `switch.<cam>_privacy_mode`) → **Offline** — and instantiates one `bosch-camera-card` per camera behind the scenes. A colored outline on each tile marks the tier (green / orange / grey) so the grouping stays obvious even when every camera is packed into a dense 2×2 grid without section dividers. Layout is configurable via `columns: auto \| 2 \| 3 \| 4` (auto = `repeat(auto-fill, minmax(min_width, 1fr))`, default `min_width: 360px`); at viewports ≤ 640 px the grid always collapses to a single column so the cards stay usable on phones regardless of `columns`. `online_offline_view: false` hides the offline tier entirely (dashboard shows only reachable cameras). Per-camera config is preserved via an `overrides: { "camera.bosch_xxx": { automations: [...], refresh_interval_streaming: 3, title: "..." } }` map — anything inside is merged into the child card's `setConfig`. The wrapper also supports `include: [entity_id...]` (override auto-discovery with an explicit list) and `exclude: [entity_id...]`. Card version bumped to **2.9.0**. No integration backend changes. |
 | **v10.2.4** | **FCM push: dedupe duplicate alerts for the same event ID.** Bosch occasionally sends two FCM pushes for the same MOVEMENT event, ~10 s apart — once at detection start, once when the clip is finalized. The two pushes race: both handlers fetch the event list, both see the new `newest_id`, both see an older `prev_id` (neither has committed yet), and both fire the full 3-step alert chain (text + snapshot + video) plus the SMB upload. Users received two Signal notifications for one movement, with two MP4 clips. New `_alert_sent_ids` cache on the coordinator (keyed by event ID → monotonic timestamp, 60 s TTL, max 32 entries) blocks the second dispatch. The polling-tick alert path (in `async_update_data`) uses the same cache so the two paths can't double up either. |
 | **v10.2.3** | **Gen2 Outdoor LOCAL stream stability + hls.js SRI lockup fix (card v2.8.9).** **(1) Card v2.8.9 — hls.js SRI pin.** The card loaded hls.js from `cdn.jsdelivr.net/npm/hls.js@1/...` with a pinned subresource-integrity hash. jsdelivr serves the latest `@1.x.y` under that floating range, so every new hls.js patch release broke the hash and Chrome blocked the script with `"hls.js load failed"` — the card then sat on its retry loop forever while the Lovelace card showed the HLS spinner. The regression landed silently whenever jsdelivr bumped hls.js@1 (observed ~a week ago). Pinned to `hls.js@1.6.16` with the matching sha384; future bumps require an explicit version + hash update. **(2) Gen2 Outdoor LOCAL keepalive without PUT /connection.** `HOME_Eyes_Outdoor` FW 9.40.25 rotates the ephemeral Digest credentials on *every* `PUT /connection LOCAL` and invalidates the live RTSP session bound to the old creds. The integration's own heartbeat (`heartbeat_interval=10`) was therefore actively killing its own stream after ~10–17s with `"Operation timed out finding first packet"` (heartbeat) or `"Connection reset by peer"` + 401 (renewal at 50s). Setting both `heartbeat_interval` and `renewal_interval` to 3600 s effectively removes the integration-side PUT during an active stream; FFmpeg's RTSP `GET_PARAMETER` every ~15 s keeps the camera-side session alive without cred rotation. The camera still drops the RTSP TCP at ~65 s, but FFmpeg reconnects transparently on the same TLS proxy port with the same creds (camera issues a new nonce, same Digest auth flow, ~2 s gap) so the HLS output survives. **(3) `_stream_health_check` task registration.** Health-check tasks scheduled from `switch.async_turn_on` were created via a bare `hass.async_create_task()` and survived an integration reload, then fired against a fresh coordinator and started a second renewal loop alongside the user-triggered one (observed `gen=3` + `gen=1` keepalives running in parallel). Now tracked in `coordinator._bg_tasks` so `async_unload_entry` cancels them during reload. |
 | **v10.2.2** | **Gen2 RCP slow-tier robustness + snapshot-button race fix (card v2.8.8).** **(1) LED dimmer range guard.** `rcp.py` 0x0c22 `T_WORD` read: Gen2 firmware returns values outside the documented 0–100 range (observed raw=2570); the coordinator used to cache the garbage value and surface it on the dimmer sensor. Now out-of-range payloads are rejected and the cache is skipped. **(2) Clock parse validation.** `rcp.py` 0x0a0f: the documented `>HBBBBBB` layout doesn't match every firmware; some Gen2 responses decode to Month=60, Day=114, etc. and raised `ValueError` inside the cache loop. New explicit range check on every field (year 1970–2100, month 1–12, day 1–31, hour/min/sec) before the `datetime(...)` call — unexpected layouts now log once and skip the cache instead of raising. **(3) LAN IP + product-name XML-wrapper filter.** `rcp.py` 0x0a36/0x0aea: Gen2 wraps the response in a nested XML document whose hex-decoded payload starts with `<rcp>`. The previous cache logic ingested the XML tag as the IP/name value. New check rejects payloads that start with `<`, are empty, or equal `0.0.0.0`. **(4) SMB `session.verify = False` documentation.** Added a one-line comment at both call sites in `smb.py` explaining the private-CA rationale — removes a security-review red flag. **(5) Card v2.8.8 — snapshot-button race fix.** The snapshot poll loop baselined *prevBytes* AFTER firing the `trigger_snapshot` service; when two cards on the same dashboard shared a camera, an earlier click had already refreshed the image and the new click's baseline saw the fresh bytes — every poll detected "no change" and spun until the 15 s timeout. *prevBytes* is now captured first, then the service fires. Timeout also reduced 15 s → 6 s. |
