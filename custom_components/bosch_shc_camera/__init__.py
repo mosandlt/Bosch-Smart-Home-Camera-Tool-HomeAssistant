@@ -199,6 +199,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._snapshot_fetch_locks: dict[str, asyncio.Lock] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
+        # Alert-sent cache keyed by event_id → monotonic timestamp. Bosch can
+        # send two FCM pushes ~10 s apart for the same MOVEMENT event (once at
+        # detection start, again when the clip is finalized), and concurrent
+        # push handlers race on `_last_event_ids` before either commits. This
+        # cache blocks the second alert dispatch when the ID was already
+        # alerted within 60 s. Pruned to the 32 most recent entries to bound
+        # memory.
+        self._alert_sent_ids: dict[str, float] = {}
         # FCM push client — near-instant event detection via Firebase Cloud Messaging
         self._fcm_client = None        # FcmPushClient instance (or None if disabled)
         self._fcm_token: str = ""      # FCM registration token
@@ -1031,6 +1039,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             except Exception:
                                 pass
                     elif newest_id and newest_id != prev_id:
+                        # Per-event-ID dedup shared with fcm.async_handle_fcm_push.
+                        # Guards against a polling tick firing an alert that the
+                        # FCM handler already dispatched for the same event ID.
+                        _now_mono = time.monotonic()
+                        if self._alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0:
+                            _LOGGER.debug(
+                                "Polling dedup: skipping duplicate alert for %s id=%s",
+                                cam_id, newest_id,
+                            )
+                            self._last_event_ids[cam_id] = newest_id
+                            continue
+                        self._alert_sent_ids[newest_id] = _now_mono
                         self._last_event_ids[cam_id] = newest_id
                         _LOGGER.debug(
                             "New event detected for %s (id=%s) — triggering snapshot refresh",

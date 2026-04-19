@@ -310,7 +310,26 @@ async def async_handle_fcm_push(coordinator) -> None:
             newest_id = events[0].get("id", "")
             prev_id   = coordinator._last_event_ids.get(cam_id)
 
+            # Per-event-ID dedup: concurrent FCM handlers (Bosch sometimes
+            # sends two pushes ~10 s apart for the same event) otherwise both
+            # pass the prev_id check and fire two alert chains.
+            import time as _time
+            _now = _time.monotonic()
+            _sent = coordinator._alert_sent_ids
+            if newest_id and _sent.get(newest_id, 0.0) > _now - 60.0:
+                _LOGGER.debug(
+                    "FCM push dedup: skipping duplicate alert for %s id=%s (already sent %.1fs ago)",
+                    cam_id, newest_id[:8], _now - _sent[newest_id],
+                )
+                continue
+            # Evict old entries when cache grows past 32 keys
+            if len(_sent) > 32:
+                for _k in [k for k, v in _sent.items() if v < _now - 120.0]:
+                    _sent.pop(_k, None)
+
             if prev_id is not None and newest_id and newest_id != prev_id:
+                # Record alert dispatch ASAP so a concurrent handler sees it
+                _sent[newest_id] = _now
                 # Update last event ID FIRST to prevent polling from
                 # detecting the same event and sending duplicate alerts
                 coordinator._last_event_ids[cam_id] = newest_id
