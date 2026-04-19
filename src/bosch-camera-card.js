@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.8.9";
+const CARD_VERSION = "2.9.0";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -3435,5 +3435,277 @@ window.customCards.push({
   type:        "bosch-camera-card",
   name:        "Bosch Camera Card",
   description: "Bosch Smart Home cameras with streaming state, loading indicator and controls",
+  preview:     false,
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bosch Camera Overview Card — single wrapper that auto-discovers all Bosch
+// cameras via attributes.brand === "Bosch" and renders one <bosch-camera-card>
+// per camera in a responsive CSS grid. Online cameras first, offline after.
+// Narrow viewports collapse to a single column; wide viewports fit multiple.
+//
+// YAML (minimal — this is the whole config):
+//   type: custom:bosch-camera-overview-card
+//   online_offline_view: true     # show offline cameras too (default true)
+//   min_width: "360px"            # optional — grid cell min width
+//   title: "Meine Kameras"        # optional — header above the grid
+//   exclude: []                   # optional — entity_ids to skip
+//   include: []                   # optional — override auto-discovery
+// ─────────────────────────────────────────────────────────────────────────────
+const OVERVIEW_VERSION = "1.0.0";
+
+class BoschCameraOverviewCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._cards     = new Map();   // entity_id -> <bosch-camera-card>
+    this._lastSig   = "";          // discovery signature, avoids needless re-sort
+    this._config    = null;
+    this._hass      = null;
+    this._rendered  = false;
+  }
+
+  setConfig(config) {
+    this._config = {
+      online_offline_view: config.online_offline_view !== false,
+      title:     config.title     || "",
+      min_width: config.min_width || "360px",
+      gap:       config.gap       || "12px",
+      columns:   config.columns   ?? "auto",  // "auto" | 1 | 2 | 3 | 4
+      exclude:   Array.isArray(config.exclude) ? config.exclude : [],
+      include:   Array.isArray(config.include) ? config.include : [],
+      compact:   !!config.compact,
+      overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
+      card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
+    };
+    this._rendered = false;
+    this._lastSig  = "";
+    this._cards.clear();
+    if (this.shadowRoot) this.shadowRoot.innerHTML = "";
+    if (this._hass) this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+  get hass() { return this._hass; }
+
+  _renderShell() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        .bco-wrap { display: block; }
+        .bco-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 0 4px 8px; font-size: 14px; font-weight: 500;
+          color: var(--primary-text-color);
+        }
+        .bco-count {
+          font-size: 12px; font-weight: 400;
+          color: var(--secondary-text-color);
+        }
+        .bco-grid {
+          display: grid;
+          gap: ${this._config.gap};
+          grid-template-columns: ${
+            this._config.columns === "auto" || !this._config.columns
+              ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))`
+              : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`
+          };
+        }
+        @media (max-width: 640px) {
+          .bco-grid { grid-template-columns: 1fr !important; }
+        }
+        .bco-cell {
+          min-width: 0;
+          position: relative;
+          border-radius: 12px;
+          transition: box-shadow 0.2s ease;
+        }
+        .bco-cell[data-tier="0"] { box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.55); }
+        .bco-cell[data-tier="1"] { box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.55); }
+        .bco-cell[data-tier="2"] { box-shadow: 0 0 0 2px rgba(120, 120, 120, 0.35); opacity: 0.92; }
+        .bco-cell bosch-camera-card { display: block; min-width: 0; }
+        .bco-section {
+          grid-column: 1 / -1;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--secondary-text-color);
+          padding: 8px 4px 2px;
+          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          margin-top: 4px;
+        }
+        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }
+        .bco-empty {
+          grid-column: 1 / -1;
+          padding: 24px 12px;
+          text-align: center;
+          color: var(--secondary-text-color);
+          font-size: 14px;
+        }
+        bosch-camera-card { display: block; }
+        @media (max-width: 480px) {
+          .bco-grid { gap: 8px; }
+        }
+      </style>
+      <div class="bco-wrap">
+        ${this._config.title ? `
+          <div class="bco-header">
+            <span>${this._escape(this._config.title)}</span>
+            <span class="bco-count" id="bco-count"></span>
+          </div>` : ""}
+        <div class="bco-grid" id="bco-grid"></div>
+      </div>
+    `;
+    this._grid = this.shadowRoot.getElementById("bco-grid");
+    this._countEl = this.shadowRoot.getElementById("bco-count");
+    this._rendered = true;
+  }
+
+  _escape(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  _discover() {
+    if (!this._hass) return [];
+    const states = this._hass.states || {};
+    const explicit = this._config.include.length > 0;
+    const list = [];
+
+    const candidates = explicit
+      ? this._config.include
+      : Object.keys(states).filter((eid) => eid.startsWith("camera."));
+
+    for (const eid of candidates) {
+      if (this._config.exclude.includes(eid)) continue;
+      const s = states[eid];
+      if (!s) continue;
+      const a = s.attributes || {};
+      if (!explicit && a.brand !== "Bosch") continue;
+      const status = String(a.status || "").toUpperCase();
+      const online = status === "ONLINE";
+      const base   = eid.replace(/^camera\./, "");
+      const privState = states[`switch.${base}_privacy_mode`];
+      const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
+      // tier: 0 = online active (privacy off), 1 = online but privacy on, 2 = offline
+      const tier = !online ? 2 : (privacyOn ? 1 : 0);
+      list.push({
+        entity_id: eid,
+        name:   a.friendly_name || eid,
+        online,
+        privacyOn,
+        tier,
+        status: status || "UNKNOWN",
+        model:  a.model_name || "",
+      });
+    }
+
+    list.sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      return a.name.localeCompare(b.name, "de");
+    });
+    return list;
+  }
+
+  _update() {
+    if (!this._hass || !this._config) return;
+    if (!this._rendered) this._renderShell();
+
+    let cams = this._discover();
+    if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);
+
+    const sig = cams.map((c) => `${c.entity_id}:${c.tier}`).join("|");
+    const needsReorder = sig !== this._lastSig;
+    this._lastSig = sig;
+
+    // prune stale inner cards
+    const keep = new Set(cams.map((c) => c.entity_id));
+    for (const [eid, el] of [...this._cards.entries()]) {
+      if (!keep.has(eid)) {
+        el.remove();
+        this._cards.delete(eid);
+      }
+    }
+
+    // re-sort / insert
+    if (needsReorder) {
+      this._grid.innerHTML = "";
+      if (cams.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "bco-empty";
+        empty.textContent = "Keine Bosch-Kameras gefunden.";
+        this._grid.appendChild(empty);
+      } else {
+        // Cameras are already sorted by tier (0=live → 1=privat → 2=offline).
+        // No full-width section dividers: they'd collapse the grid to 1 column
+        // whenever a tier has an odd count. The per-card tier badge makes the
+        // group visually obvious without breaking density.
+        for (const c of cams) {
+
+          let cell = this._cards.get(c.entity_id);
+          if (!cell) {
+            cell = document.createElement("div");
+            cell.className = "bco-cell";
+            const card = document.createElement("bosch-camera-card");
+            const override = this._config.overrides[c.entity_id] || {};
+            try {
+              card.setConfig({
+                ...this._config.card_defaults,
+                camera_entity: c.entity_id,
+                title:         c.name.replace(/^Bosch\s+/i, ""),
+                ...override,
+                camera_entity: c.entity_id,
+              });
+            } catch (e) {
+              console.error(`bosch-camera-overview-card: setConfig failed for ${c.entity_id}`, e);
+              continue;
+            }
+            cell.appendChild(card);
+            cell._innerCard = card;
+            this._cards.set(c.entity_id, cell);
+          }
+          cell.dataset.tier = String(c.tier);
+          this._grid.appendChild(cell);
+        }
+      }
+    }
+
+    // forward hass to every live inner card
+    for (const cell of this._cards.values()) {
+      const inner = cell._innerCard || cell.querySelector?.("bosch-camera-card");
+      if (inner) inner.hass = this._hass;
+    }
+
+    // update count in header
+    if (this._countEl) {
+      const live = cams.filter((c) => c.tier === 0).length;
+      const priv = cams.filter((c) => c.tier === 1).length;
+      const off  = cams.filter((c) => c.tier === 2).length;
+      const parts = [];
+      if (live) parts.push(`${live} live`);
+      if (priv) parts.push(`${priv} privat`);
+      if (off)  parts.push(`${off} offline`);
+      this._countEl.textContent = parts.join(" · ");
+    }
+  }
+
+  static getStubConfig() {
+    return { online_offline_view: true, title: "Bosch Kameras" };
+  }
+  getCardSize() { return Math.max(4, this._cards ? this._cards.size * 3 : 4); }
+}
+
+customElements.define("bosch-camera-overview-card", BoschCameraOverviewCard);
+
+window.customCards.push({
+  type:        "bosch-camera-overview-card",
+  name:        "Bosch Camera Overview",
+  description: "Auto-discovers all Bosch Smart Home cameras and renders them in a responsive grid (online first, offline after).",
   preview:     false,
 });
