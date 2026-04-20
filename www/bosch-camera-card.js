@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.9.0";
+const CARD_VERSION = "2.9.1";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -586,7 +586,7 @@ class BoschCameraCard extends HTMLElement {
       const now = (new Date).toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
       const nowMs = Date.now();
-      const dt = !isCache && this._lastFrameTime ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
+      const dt = !isCache && this._lastFrameTime ? ` Δ${((nowMs - this._lastFrameTime) / 1e3).toFixed(1)}s` : "";
       if (!isCache) this._lastFrameTime = nowMs;
       dbg.textContent = `Card v${CARD_VERSION} | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }

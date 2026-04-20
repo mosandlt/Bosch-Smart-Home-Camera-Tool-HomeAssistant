@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.9.0";
+const CARD_VERSION = "2.9.1";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1734,7 +1734,11 @@ class BoschCameraCard extends HTMLElement {
       const now = new Date().toLocaleTimeString("de-DE");
       const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
       const nowMs = Date.now();
-      const dt = (!isCache && this._lastFrameTime) ? ` Δ${nowMs - this._lastFrameTime}ms` : "";
+      // Frame delta in seconds (1 decimal) so the debug row stays readable
+      // at a glance — e.g. "Δ2.0s" instead of "Δ2003ms".
+      const dt = (!isCache && this._lastFrameTime)
+        ? ` Δ${((nowMs - this._lastFrameTime) / 1000).toFixed(1)}s`
+        : "";
       if (!isCache) this._lastFrameTime = nowMs;
       dbg.textContent = `Card v${CARD_VERSION} | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
     }
