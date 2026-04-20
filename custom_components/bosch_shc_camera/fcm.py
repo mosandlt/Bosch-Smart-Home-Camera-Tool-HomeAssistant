@@ -61,9 +61,8 @@ async def fetch_firebase_config(hass: HomeAssistant) -> dict:
     project_id = "bosch-smart-cameras"
     app_id = f"1:{FCM_SENDER_ID}:android:9e5b6b58e4c70075"
     import base64
-    # OSS Google API key does NOT have Firebase/FCM permissions —
-    # continue using the app-embedded Firebase key for push notifications.
-    _k = base64.b64decode("QUl6YVN5QS1WOGEzR3hsZ1A0NTRzbzY3QzFJaDBQakpDd3pFMEFJ").decode()
+    # Official OSS key from Bosch (Sebastian Raff, 2026-04-20) — Firebase/FCM permissions confirmed.
+    _k = base64.b64decode("QUl6YVN5Q0toaGZ4ZlRzMUc3V3Z6VERBaU8wQWlzN0VIMjVEYk9z").decode()
     return {
         "project_id": project_id,
         "app_id": app_id,
