@@ -83,9 +83,16 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
 
-        # Note: TCP interleaved transport is forced by the TLS proxy's RTSP
-        # SETUP rewrite (see _start_tls_proxy), not by stream_options here.
-        # HA's propcache.cached_property ignores instance __dict__ overrides.
+        # Force FFmpeg to use TCP interleaved transport for RTSP SETUP.
+        # HA 2026.4 ships FFmpeg Lavf 62.3.100, which rejects the UDP→TCP
+        # transport rewrite the TLS proxy used to do (the response transport
+        # didn't match the request transport) with "Invalid data found when
+        # processing input" — the fix is to have FFmpeg request TCP up-front
+        # so the camera's TCP response matches. `Camera.__init__` sets
+        # `self.stream_options = {}` unconditionally, so this must be
+        # assigned *after* the super init. Read by HA's stream component at
+        # `create_stream(options=self.stream_options)`.
+        self.stream_options = {"rtsp_transport": "tcp"}
 
         self._cam_id = cam_id
         self._entry  = entry
