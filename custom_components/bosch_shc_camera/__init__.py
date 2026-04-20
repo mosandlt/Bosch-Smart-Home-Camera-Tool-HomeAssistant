@@ -69,6 +69,7 @@ from . import shc as shc_mod
 from .rcp import async_update_rcp_data, get_cached_rcp_session
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -196,6 +197,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Auto-renewal tasks and generation counters per camera.
         # The generation counter increments on every new stream start,
         # allowing stale renewal loops to detect they belong to an old session.
+        # Legacy task dict — kept for backwards-compat with any external code
+        # that inspects it, but never populated now (use _renewal_tasks).
         self._auto_renew_tasks: dict[str, asyncio.Task] = {}
         self._renewal_tasks: dict[str, asyncio.Task] = {}
         self._auto_renew_generation: dict[str, int] = {}
@@ -2950,6 +2953,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
+    # Cancel our long-running background tasks on HA shutdown. Without this
+    # `async_unload_entry` does not run on HA stop (it only runs on config
+    # entry unload/reload), so `_auto_renew_local_session` would still be
+    # pending at HA's "final writes" shutdown stage and HA emits the
+    # "was still running after final writes shutdown stage" warning plus a
+    # 30 s close-event timeout. `async_listen_once` auto-unregisters after
+    # firing, so there's no stale handler after a restart.
+    async def _on_ha_stop(_event) -> None:
+        await _async_cancel_coordinator_tasks(coordinator)
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_ha_stop)
+    )
+
     # Start FCM push listener (runs in background, non-blocking)
     if opts.get("enable_fcm_push", False):
         hass.async_create_task(coordinator.async_start_fcm_push())
@@ -2957,48 +2974,59 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> None:
+    """Shared teardown for both config-entry unload and HA stop.
+
+    Called from `async_unload_entry` (integration reload / removal) and from
+    the `EVENT_HOMEASSISTANT_STOP` listener registered in `async_setup_entry`.
+    Without the stop listener, `_auto_renew_local_session` would still be
+    running at HA's "final writes" shutdown stage and trigger the
+    "was still running after final writes shutdown stage" warning — because
+    `async_unload_entry` is not invoked on full HA shutdown, only on entry
+    unload/reload.
+    """
+    await coord.async_stop_fcm_push()
+    # Cancel scheduled proactive token refresh — otherwise a reload leaves
+    # a stale TimerHandle that fires against the dead coordinator.
+    handle = getattr(coord, "_token_refresh_handle", None)
+    if handle is not None:
+        try:
+            handle.cancel()
+        except Exception:
+            pass
+        coord._token_refresh_handle = None
+    # Cancel all LOCAL session auto-renewal tasks. The task dicts also
+    # register in _bg_tasks (via _replace_renewal_task), so the gather
+    # below actually waits for cancellation to propagate.
+    for task in coord._renewal_tasks.values():
+        if not task.done():
+            task.cancel()
+    coord._renewal_tasks.clear()
+    # Cancel tracked fire-and-forget background tasks (snapshot refreshes
+    # from FCM pushes, renewal tasks registered above, go2rtc registration,
+    # etc.). Await them so cancellation actually propagates before HA
+    # enters its own final-writes shutdown stage.
+    bg = list(coord._bg_tasks)
+    for t in bg:
+        if not t.done():
+            t.cancel()
+    if bg:
+        await asyncio.gather(*bg, return_exceptions=True)
+    coord._bg_tasks.clear()
+    # Stop all TLS proxies (closes server sockets, terminates threads).
+    stop_all_proxies(coord._tls_proxy_ports)
+    # Remove the stream-worker log listener so the handler doesn't outlive
+    # the coordinator and keep a reference to a dead object.
+    listener = getattr(coord, "_stream_log_listener", None)
+    if listener is not None:
+        logging.getLogger("homeassistant.components.stream").removeHandler(listener)
+        coord._stream_log_listener = None
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # Stop FCM push listener before unloading
     edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     if coord := edata.get("coordinator"):
-        await coord.async_stop_fcm_push()
-        # Cancel scheduled proactive token refresh — otherwise a config
-        # reload leaves a stale TimerHandle that fires against the dead
-        # coordinator and double-triggers refreshes.
-        handle = getattr(coord, "_token_refresh_handle", None)
-        if handle is not None:
-            try:
-                handle.cancel()
-            except Exception:
-                pass
-            coord._token_refresh_handle = None
-        # Cancel all auto-renewal tasks
-        for task in coord._auto_renew_tasks.values():
-            if not task.done():
-                task.cancel()
-        coord._auto_renew_tasks.clear()
-        for task in coord._renewal_tasks.values():
-            if not task.done():
-                task.cancel()
-        coord._renewal_tasks.clear()
-        # Cancel tracked fire-and-forget background tasks (e.g. snapshot
-        # refreshes triggered from FCM pushes). Await them to give any
-        # in-flight file writes a chance to finish or abort cleanly.
-        bg = list(coord._bg_tasks)
-        for t in bg:
-            if not t.done():
-                t.cancel()
-        if bg:
-            await asyncio.gather(*bg, return_exceptions=True)
-        coord._bg_tasks.clear()
-        # Stop all TLS proxies (closes server sockets, terminates threads).
-        stop_all_proxies(coord._tls_proxy_ports)
-        # Remove the stream-worker log listener so the handler doesn't
-        # outlive the coordinator and keep a reference to a dead object.
-        listener = getattr(coord, "_stream_log_listener", None)
-        if listener is not None:
-            logging.getLogger("homeassistant.components.stream").removeHandler(listener)
-            coord._stream_log_listener = None
+        await _async_cancel_coordinator_tasks(coord)
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
     if unloaded:
