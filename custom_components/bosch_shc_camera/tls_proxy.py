@@ -294,7 +294,7 @@ async def pre_warm_rtsp(
     proxy_port: int, user: str, password: str, cam_host: str,
     max_attempts: int = 5, retry_wait: int = 3, post_success_wait: int = 3,
     describe_timeout: int = 5,
-) -> None:
+) -> bool:
     """Pre-warm camera's H.264 encoder via authenticated RTSP DESCRIBE.
 
     After PUT /connection LOCAL returns credentials, the camera needs a moment
@@ -308,6 +308,12 @@ async def pre_warm_rtsp(
 
     Retries with configurable attempts and delay. Timing is model-specific:
     CAMERA_360 (indoor) is faster, CAMERA_EYES (outdoor) needs more retries.
+
+    Returns True on success (got 200 OK to DESCRIBE), False on hard failure
+    (all attempts exhausted or camera unreachable). The caller uses this to
+    decide whether to fall back to REMOTE: if the camera's LAN IP isn't
+    reachable from HA (firewall, wrong subnet, different VLAN), every retry
+    times out and we should not pin the user on a dead LOCAL URL.
     """
     for attempt in range(1, max_attempts + 1):
         try:
@@ -340,7 +346,7 @@ async def pre_warm_rtsp(
                 if attempt < max_attempts:
                     await asyncio.sleep(retry_wait)
                     continue
-                return
+                return False
             nonce, realm = nonce_m.group(1), realm_m.group(1)
 
             auth = _digest_auth(user, password, "DESCRIBE", uri, realm, nonce)
@@ -355,7 +361,8 @@ async def pre_warm_rtsp(
             resp2 = await asyncio.wait_for(reader.read(8192), timeout=describe_timeout)
             resp2_str = resp2.decode("utf-8", errors="replace")
 
-            if "200 OK" in resp2_str:
+            got_ok = "200 OK" in resp2_str
+            if got_ok:
                 _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port)
             else:
                 _LOGGER.warning(
@@ -373,7 +380,7 @@ async def pre_warm_rtsp(
             # PUT /connection credential set. Without this delay, FFmpeg
             # may connect before the pre-warm's TLS session is torn down.
             await asyncio.sleep(post_success_wait)
-            return  # success or got a response — done
+            return got_ok
         except Exception as exc:
             _LOGGER.debug(
                 "Pre-warm RTSP failed on port %d (attempt %d/%d): %s",
@@ -381,3 +388,4 @@ async def pre_warm_rtsp(
             )
             if attempt < max_attempts:
                 await asyncio.sleep(retry_wait)
+    return False

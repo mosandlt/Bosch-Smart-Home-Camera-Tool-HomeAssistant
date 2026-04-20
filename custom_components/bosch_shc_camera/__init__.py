@@ -1767,7 +1767,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     cfg.post_warm_buffer, cfg.min_total_wait,
                                 )
                                 await asyncio.sleep(cfg.pre_warm_delay)
-                                await pre_warm_rtsp(
+                                prewarm_ok = await pre_warm_rtsp(
                                     proxy_port_val, local_user, local_pass,
                                     cam_addr.split(":")[0],
                                     max_attempts=cfg.pre_warm_retries,
@@ -1775,6 +1775,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     post_success_wait=cfg.post_warm_buffer,
                                     describe_timeout=cfg.describe_timeout,
                                 )
+                            else:
+                                prewarm_ok = False
+                            # If pre-warm failed AND auto mode has REMOTE as a
+                            # later candidate, abandon this LOCAL attempt and
+                            # fall through to the next candidate. Without this
+                            # the integration would pin the user on a dead
+                            # LOCAL URL (camera LAN unreachable, firewalled
+                            # subnet, different VLAN, etc.) and HA's stream
+                            # worker would cycle yellow→blue→yellow forever.
+                            # In "local" mode there's nothing to fall back to,
+                            # so keep the LOCAL URL so the user can see the
+                            # actual failure mode.
+                            if not prewarm_ok and "REMOTE" in candidates and type_val == "LOCAL":
+                                _LOGGER.warning(
+                                    "LOCAL pre-warm failed for %s — camera LAN unreachable? "
+                                    "Falling back to REMOTE.",
+                                    cam_id[:8],
+                                )
+                                self._stream_warming.discard(cam_id)
+                                self._live_connections.pop(cam_id, None)
+                                await self._stop_tls_proxy(cam_id)
+                                self._stream_fell_back[cam_id] = True
+                                continue  # try next candidate (REMOTE)
                             # Ensure minimum total time from PUT /connection.
                             # Renewals use 2/3 of this (camera encoder already warm).
                             min_wait = (cfg.min_total_wait * 2 // 3) if is_renewal else cfg.min_total_wait

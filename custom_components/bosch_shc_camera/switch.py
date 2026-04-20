@@ -300,15 +300,18 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 "Live stream active for %s (%s) — %s",
                 self._cam_title, conn_type, result.get("rtspsUrl", ""),
             )
-            # Schedule health check — if FFmpeg hasn't connected after 60s,
-            # record an error and retry (potentially with REMOTE fallback).
+            # Schedule health check — if the LOCAL stream isn't actually
+            # producing HLS segments after ~60s and still not after ~120s,
+            # record errors and restart. After enough errors the next
+            # try_live_connection() falls through to REMOTE automatically
+            # via the max_stream_errors gate.
             # Track the task on the coordinator so async_unload_entry cancels
             # it during integration reload; otherwise a stale check from a
             # previous session can fire against a fresh coordinator and start
             # a second renewal loop alongside the user-triggered one.
             if conn_type == "LOCAL":
                 hc_task = self.hass.async_create_task(
-                    self._stream_health_check(self._cam_id, 60)
+                    self._stream_health_watchdog(self._cam_id)
                 )
                 self.coordinator._bg_tasks.add(hc_task)
                 hc_task.add_done_callback(self.coordinator._bg_tasks.discard)
@@ -317,39 +320,85 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             self.coordinator.record_stream_error(self._cam_id)
         self.async_write_ha_state()
 
-    async def _stream_health_check(self, cam_id: str, delay: int) -> None:
-        """Check if the LOCAL stream is actually producing video after delay seconds.
-        If not, record error and restart with REMOTE fallback."""
+    async def _stream_health_watchdog(self, cam_id: str) -> None:
+        """Watchdog for a LOCAL stream: verify HA's stream component is
+        actually producing HLS output.
+
+        Runs two checks (60s, 120s after the live URL was exposed). At each
+        tick:
+          * stop early if the stream was turned off or already switched to
+            REMOTE — nothing to watch.
+          * ask HA's `Stream` object whether it's `available` — that flag
+            flips True only when the FFmpeg worker has produced its first
+            segment. A Stream object that exists but whose `available` is
+            False means FFmpeg started and then died, which is exactly the
+            failure mode reported in issue #6 (yellow → brief blue → yellow
+            cycle).
+
+        On a healthy tick the watchdog clears the coordinator error counter
+        and exits. On a failing tick it records a stream error, tears the
+        LOCAL session down, and calls try_live_connection() again — which
+        will go directly to REMOTE once `max_stream_errors` is reached.
+        Two failed ticks in a row therefore escalate to Cloud within ~2 min
+        without any hard-coded time gate.
+        """
         import asyncio
-        await asyncio.sleep(delay)
-        # Stream might have been turned off in the meantime
-        if cam_id not in self.coordinator._live_connections:
-            return
-        live = self.coordinator._live_connections.get(cam_id, {})
-        if live.get("_connection_type") != "LOCAL":
-            return
-        # Check if FFmpeg is actually streaming
-        cam_entity = self.coordinator._camera_entities.get(cam_id)
-        if cam_entity and hasattr(cam_entity, "stream") and cam_entity.stream:
-            # Stream object exists — FFmpeg is running
-            self.coordinator.record_stream_success(cam_id)
-            return
-        # No stream object after delay — FFmpeg never connected
-        _LOGGER.warning(
-            "Stream health check: %s has no active FFmpeg stream after %ds — recording error and retrying",
-            cam_id[:8], delay,
-        )
-        self.coordinator.record_stream_error(cam_id)
-        # Stop and restart — will use REMOTE if error threshold reached
-        self.coordinator._live_connections.pop(cam_id, None)
-        await self.coordinator._stop_tls_proxy(cam_id)
-        result = await self.coordinator.try_live_connection(cam_id)
-        if result:
-            _LOGGER.info(
-                "Stream health check: %s restarted as %s",
-                cam_id[:8], result.get("_connection_type", "?"),
-            )
-        self.async_write_ha_state()
+
+        def _is_local_active() -> bool:
+            live = self.coordinator._live_connections.get(cam_id, {})
+            return bool(live) and live.get("_connection_type") == "LOCAL"
+
+        def _is_stream_healthy() -> bool:
+            cam_entity = self.coordinator._camera_entities.get(cam_id)
+            if not cam_entity or not getattr(cam_entity, "stream", None):
+                return False
+            # Stream.available is the authoritative signal — True only while
+            # the worker has produced output recently. A half-dead stream
+            # (object present, FFmpeg crashed) has available=False.
+            return bool(getattr(cam_entity.stream, "available", False))
+
+        for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
+            await asyncio.sleep(delay)
+            if not _is_local_active():
+                return
+            if _is_stream_healthy():
+                self.coordinator.record_stream_success(cam_id)
+                return
+            # On the second consecutive failure (~2 min with no healthy
+            # output), escalate: saturate the error counter so the next
+            # try_live_connection() is forced to REMOTE regardless of the
+            # per-model threshold. Single failure still follows the normal
+            # gradual-escalation path via record_stream_error().
+            is_final = idx == 1
+            if is_final:
+                cfg = self.coordinator.get_model_config(cam_id)
+                self.coordinator._stream_error_count[cam_id] = cfg.max_stream_errors
+                _LOGGER.warning(
+                    "Stream health watchdog: %s LOCAL stream still not healthy "
+                    "after ~2 min — forcing REMOTE fallback",
+                    cam_id[:8],
+                )
+            else:
+                self.coordinator.record_stream_error(cam_id)
+                _LOGGER.warning(
+                    "Stream health watchdog: %s LOCAL stream not healthy at %ds — "
+                    "recording error and restarting",
+                    cam_id[:8], delay,
+                )
+            self.coordinator._live_connections.pop(cam_id, None)
+            await self.coordinator._stop_tls_proxy(cam_id)
+            result = await self.coordinator.try_live_connection(cam_id)
+            if result:
+                _LOGGER.info(
+                    "Stream health watchdog: %s restarted as %s",
+                    cam_id[:8], result.get("_connection_type", "?"),
+                )
+                # If we fell back to REMOTE, stop watching — REMOTE has no
+                # pre-warm dependency and no LOCAL-specific failure modes.
+                if result.get("_connection_type") != "LOCAL":
+                    self.async_write_ha_state()
+                    return
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Clear the live session and stop the TLS proxy."""
