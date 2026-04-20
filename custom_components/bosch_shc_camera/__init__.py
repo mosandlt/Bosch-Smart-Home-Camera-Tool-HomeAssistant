@@ -77,6 +77,63 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 _LOGGER = logging.getLogger(__name__)
 
 
+class _StreamWorkerErrorListener(logging.Handler):
+    """Intercept `Error from stream worker` log records from HA's stream
+    component and route each one to the coordinator's stream-error handler.
+
+    HA's stream component runs an auto-restart loop on worker crashes
+    (`stream.__init__.Stream._run_worker`): worker fails → `_set_state(False)`
+    (yellow in the card) → backoff wait → `_set_state(True)` (briefly blue) →
+    retry. This produces a continuous yellow→blue→yellow cycle that our own
+    polling watchdog misses when its 60 s tick happens to land during a brief
+    "available" window. Instead of polling, we listen to HA's own error log:
+    every "Error from stream worker" on a logger named
+    `homeassistant.components.stream.stream.camera.<entity_id>` increments the
+    coordinator's per-camera counter, and once the threshold is reached the
+    coordinator forces REMOTE on the next `try_live_connection` — escaping
+    the cycle deterministically on N consecutive stream-worker errors rather
+    than hoping the 60 s tick catches a failing state.
+    """
+
+    def __init__(self, coordinator: "BoschCameraCoordinator") -> None:
+        super().__init__(logging.ERROR)
+        self._coordinator = coordinator
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if record.levelno < logging.ERROR:
+                return
+            # Only interested in HA's stream worker errors. Other errors on
+            # the same parent logger (e.g. RecorderBuildError, HLS output
+            # failures) aren't our concern.
+            msg = record.getMessage()
+            if "Error from stream worker" not in msg:
+                return
+            # Logger name shape:
+            # homeassistant.components.stream.stream.camera.bosch_<slug>
+            name = record.name
+            marker = ".stream.camera."
+            if marker not in name:
+                return
+            entity_id = "camera." + name.rsplit(marker, 1)[1]
+            # Resolve cam_id from entity_id via the coordinator's entity map.
+            # `emit` runs in the logging thread — defer the async work.
+            cam_id = None
+            for cid, entity in self._coordinator._camera_entities.items():
+                if getattr(entity, "entity_id", None) == entity_id:
+                    cam_id = cid
+                    break
+            if not cam_id:
+                return
+            loop = self._coordinator.hass.loop
+            loop.call_soon_threadsafe(
+                self._coordinator._schedule_stream_worker_error, cam_id, msg
+            )
+        except Exception:
+            # Never let the log handler crash the event loop or the logger.
+            pass
+
+
 def _redact_creds(d: dict) -> dict:
     """Return a copy of a dict with the `password` field redacted for safe logging.
 
@@ -412,6 +469,74 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
         self._stream_error_count[cam_id] = 0
         self._stream_fell_back[cam_id] = False
+
+    def _schedule_stream_worker_error(self, cam_id: str, msg: str) -> None:
+        """Thread-safe entry point from the log listener. Coalesces identical
+        worker-error bursts and dispatches the async handler."""
+        # Coalesce: skip if an unhandled dispatch for this cam is already
+        # in flight. Prevents a flood of identical restart attempts when
+        # HA's auto-restart loop fires 5-6 times per minute.
+        pending = getattr(self, "_stream_worker_dispatch_pending", None)
+        if pending is None:
+            self._stream_worker_dispatch_pending = pending = set()
+        if cam_id in pending:
+            return
+        pending.add(cam_id)
+        self.hass.async_create_task(
+            self._handle_stream_worker_error(cam_id, msg)
+        )
+
+    async def _handle_stream_worker_error(self, cam_id: str, msg: str) -> None:
+        """React to an HA stream-worker error for one camera.
+
+        The primary failure mode this targets is the cycle reported in
+        issue #6: the stream briefly becomes available (~2 s), FFmpeg fails,
+        HA auto-restarts after a backoff, briefly becomes available again —
+        forever. Each worker crash logs "Error from stream worker" exactly
+        once, so our counter increments once per cycle.
+
+        After `max_stream_errors` cycles we escalate: if the active connection
+        is LOCAL we force a REMOTE restart (matches the watchdog's escalation
+        path). If the active connection is already REMOTE there's no fallback
+        left, so we just keep counting and let HA's internal backoff keep
+        retrying — the error entries in the HA log are the diagnostic trail
+        for any future debugging.
+        """
+        pending = getattr(self, "_stream_worker_dispatch_pending", None)
+        try:
+            self.record_stream_error(cam_id)
+            cfg = self.get_model_config(cam_id)
+            if self._stream_error_count.get(cam_id, 0) < cfg.max_stream_errors:
+                return  # below threshold — let HA's auto-restart keep trying
+            live = self._live_connections.get(cam_id, {})
+            conn_type = live.get("_connection_type")
+            if conn_type != "LOCAL":
+                # Already on REMOTE (or no live session) — nothing to escalate
+                # to. Counter stays saturated so a future LOCAL attempt would
+                # skip straight to REMOTE.
+                _LOGGER.warning(
+                    "Stream worker errors still occurring for %s on %s — "
+                    "HA backoff continues, no further fallback available",
+                    cam_id[:8], conn_type or "(no session)",
+                )
+                return
+            _LOGGER.warning(
+                "Stream worker errors exceed threshold for %s on LOCAL — "
+                "tearing down and retrying (REMOTE will be selected)",
+                cam_id[:8],
+            )
+            self._live_connections.pop(cam_id, None)
+            await self._stop_tls_proxy(cam_id)
+            self._stream_fell_back[cam_id] = True
+            result = await self.try_live_connection(cam_id)
+            if result:
+                _LOGGER.info(
+                    "Stream worker error recovery: %s restarted as %s",
+                    cam_id[:8], result.get("_connection_type", "?"),
+                )
+        finally:
+            if pending is not None:
+                pending.discard(cam_id)
 
     def _replace_renewal_task(self, cam_id: str, coro) -> asyncio.Task:
         """Cancel any existing renewal task for cam_id, then create and track the new one."""
@@ -2761,6 +2886,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
+    # Listen on HA's stream component logger for worker-error events. This
+    # catches the auto-restart cycle from Stream._run_worker() — which our
+    # own polling watchdog can miss when its tick lands during a brief
+    # "available" window. See _StreamWorkerErrorListener for the full
+    # reasoning. Only installs once per process regardless of reloads.
+    stream_logger = logging.getLogger("homeassistant.components.stream")
+    if not any(isinstance(h, _StreamWorkerErrorListener) for h in stream_logger.handlers):
+        listener = _StreamWorkerErrorListener(coordinator)
+        stream_logger.addHandler(listener)
+        coordinator._stream_log_listener = listener
+    else:
+        # Rebind the existing listener to the current coordinator so a
+        # config reload doesn't leave it pointing at the old coordinator.
+        existing = next(
+            h for h in stream_logger.handlers
+            if isinstance(h, _StreamWorkerErrorListener)
+        )
+        existing._coordinator = coordinator
+        coordinator._stream_log_listener = existing
+
     # v8.0.2 migration: auto-enable front light / wallwasher / intensity entities
     # that were initially created with disabled_by=integration in earlier builds.
     from homeassistant.helpers import entity_registry as er
@@ -2848,6 +2993,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coord._bg_tasks.clear()
         # Stop all TLS proxies (closes server sockets, terminates threads).
         stop_all_proxies(coord._tls_proxy_ports)
+        # Remove the stream-worker log listener so the handler doesn't
+        # outlive the coordinator and keep a reference to a dead object.
+        listener = getattr(coord, "_stream_log_listener", None)
+        if listener is not None:
+            logging.getLogger("homeassistant.components.stream").removeHandler(listener)
+            coord._stream_log_listener = None
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
     if unloaded:
