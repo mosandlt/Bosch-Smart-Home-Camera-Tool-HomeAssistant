@@ -1601,11 +1601,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 # Skip RCP data fetch if a LOCAL stream is active — the RCP fetch
                 # opens a REMOTE PUT /connection which would overwrite the LOCAL
                 # session and kill the go2rtc stream.
+                # Skip when Privacy is ON — the cloud proxy rejects RCP session
+                # handshakes (invalid session 0x00000000) while privacy blocks the
+                # camera's RCP endpoint. Avoids noisy debug logs every 5 min.
                 local_stream_active = (
                     cam_id_key in self._live_connections
                     and self._live_connections[cam_id_key].get("_connection_type") == "LOCAL"
                 )
-                if is_online and do_slow and not local_stream_active:
+                privacy_on = (cam_raw.get("privacyMode", "").upper() == "ON")
+                if is_online and do_slow and privacy_on:
+                    _LOGGER.debug("RCP slow-tier skipped for %s (privacy ON)", cam_id_key)
+                if is_online and do_slow and not local_stream_active and not privacy_on:
                     try:
                         rcp_connector = aiohttp.TCPConnector(ssl=False)
                         rcp_headers   = {
