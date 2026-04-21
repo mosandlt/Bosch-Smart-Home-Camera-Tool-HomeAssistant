@@ -130,8 +130,10 @@ class _StreamWorkerErrorListener(logging.Handler):
             loop.call_soon_threadsafe(
                 self._coordinator._schedule_stream_worker_error, cam_id, msg
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — log handler must never raise
             # Never let the log handler crash the event loop or the logger.
+            # Intentionally broad: this runs inside logging.emit and any
+            # exception here would be routed back to logging's own error path.
             pass
 
 
@@ -155,6 +157,8 @@ from .const import (  # noqa: E402
     LIVE_TYPE_CANDIDATES,
     LIVE_SESSION_TTL,
     DEFAULT_OPTIONS,
+    TIMEOUT_SNAP,
+    TIMEOUT_PUT_CONNECTION,
 )
 
 
@@ -257,6 +261,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Prevents duplicate PUT /connection when first-load + proactive refresh
         # overlap, or when a user rapid-triggers snapshots.
         self._snapshot_fetch_locks: dict[str, asyncio.Lock] = {}
+        # Per-camera lock serializing try_live_connection(). Initialised here
+        # (not lazily) so _get_stream_lock stays a plain dict lookup.
+        self._stream_locks: dict[str, asyncio.Lock] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
         # Alert-sent cache keyed by event_id → monotonic timestamp. Bosch can
@@ -287,7 +294,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "10.2.1"
+        self._integration_version = "10.3.9"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -473,6 +480,56 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._stream_error_count[cam_id] = 0
         self._stream_fell_back[cam_id] = False
 
+    async def _tear_down_live_stream(self, cam_id: str) -> None:
+        """Stop an active LOCAL/REMOTE live stream cleanly.
+
+        Shared teardown for:
+          * `BoschLiveStreamSwitch.async_turn_off` (user pressed stop).
+          * `BoschPrivacyModeSwitch.async_turn_on` (camera shutter closes, any
+            streaming session must also end — the TLS proxy's camera-side
+            socket is dead anyway once privacy engages).
+          * The stream-worker-error listener and health watchdog (when they
+            force a REMOTE fallback).
+
+        Steps:
+          1. Cancel the LOCAL keepalive task (tracked in `_renewal_tasks`;
+             the legacy `_auto_renew_tasks` dict is never populated).
+          2. Clear the per-cam session state (`_live_connections`,
+             `_live_opened_at`).
+          3. Stop the TLS proxy server socket — closing TCP is enough for
+             the camera to detect disconnect and drop its RTSP session
+             (LED off). Do NOT send PUT /connection here; that starts a
+             NEW session and keeps the camera streaming.
+          4. Unregister from go2rtc so the shared RTSP→WebRTC endpoint
+             stops serving a dead URL.
+          5. Stop HA's `Stream` object on the camera entity. Without this
+             the stream_worker keeps its cached URL and auto-restarts
+             against the (now-dead) TLS proxy forever — that's what
+             produced the yellow→blue→yellow cycle reported in #6 when
+             Privacy was flipped while a stream was running, and what our
+             own `_StreamWorkerErrorListener` would then try to "fix" by
+             falling back to REMOTE — which also fails since the camera
+             returns HTTP 443 sh:camera.in.privacy.mode.
+        """
+        task = self._renewal_tasks.pop(cam_id, None)
+        if task and not task.done():
+            task.cancel()
+        self._live_connections.pop(cam_id, None)
+        self._live_opened_at.pop(cam_id, None)
+        self._stream_error_count.pop(cam_id, None)
+        self._stream_fell_back.pop(cam_id, None)
+        await self._stop_tls_proxy(cam_id)
+        await self._unregister_go2rtc_stream(cam_id)
+        cam_entity = self._camera_entities.get(cam_id)
+        if cam_entity is not None:
+            stream = getattr(cam_entity, "stream", None)
+            if stream is not None:
+                try:
+                    await stream.stop()
+                except Exception as exc:
+                    _LOGGER.debug("camera.stream.stop() for %s failed: %s", cam_id[:8], exc)
+                cam_entity.stream = None
+
     def _schedule_stream_worker_error(self, cam_id: str, msg: str) -> None:
         """Thread-safe entry point from the log listener. Coalesces identical
         worker-error bursts and dispatches the async handler."""
@@ -586,7 +643,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
             payload = _json.loads(_b64.urlsafe_b64decode(payload_b64))
             return (payload.get("exp", 0) - _time.time()) >= min_remaining
-        except Exception:
+        except (ValueError, TypeError):
+            # JWT payload was not base64-decodable or not JSON — treat as expired.
             return False
 
     async def _ensure_valid_token(self) -> str:
@@ -744,8 +802,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             "persistent_notification", "dismiss",
                             {"notification_id": "bosch_auth_server_outage"},
                         )
-                    except Exception:
-                        pass
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as err:
+                        _LOGGER.debug("Failed to dismiss auth-outage notification: %s", err)
             return self._refreshed_token
         self._token_fail_count += 1
         _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
@@ -824,8 +884,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if prev is not None:
                 try:
                     prev.cancel()
-                except Exception:
-                    pass
+                except (AttributeError, RuntimeError) as err:
+                    _LOGGER.debug("Could not cancel prior token-refresh handle: %s", err)
             self._token_refresh_handle = self.hass.loop.call_later(
                 refresh_in,
                 lambda: self.hass.async_create_task(self._proactive_refresh()),
@@ -969,8 +1029,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if ff_resp.status == 200:
                                 self._feature_flags = await ff_resp.json()
                                 _LOGGER.debug("Feature flags: %s", self._feature_flags)
-                except Exception:
-                    pass
+                except asyncio.CancelledError:
+                    raise
+                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug("Feature flags fetch failed: %s", err)
 
             # ── Protocol version check (once at startup) ──────────────────
             if not self._protocol_checked:
@@ -1164,8 +1226,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             )
                             try:
                                 await self.async_mark_events_read(unread_ids)
-                            except Exception:
-                                pass
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as err:
+                                _LOGGER.debug("Mark-read (startup) failed for %s: %s", cam_id, err)
                     elif newest_id and newest_id != prev_id:
                         # Per-event-ID dedup shared with fcm.async_handle_fcm_push.
                         # Guards against a polling tick firing an alert that the
@@ -1227,8 +1291,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         )
                         try:
                             await self.async_mark_events_read([newest_id])
-                        except Exception:
-                            pass
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as err:
+                            _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
                     elif newest_id:
                         self._last_event_ids[cam_id] = newest_id
 
@@ -1538,42 +1604,39 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if is_online and do_slow and not local_stream_active:
                     try:
                         rcp_connector = aiohttp.TCPConnector(ssl=False)
-                        rcp_session   = aiohttp.ClientSession(connector=rcp_connector)
                         rcp_headers   = {
                             "Authorization": f"Bearer {token}",
                             "Content-Type":  "application/json",
                             "Accept":        "application/json",
                         }
-                        try:
-                            async with asyncio.timeout(10):
-                                async with rcp_session.put(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
-                                    json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id_key)[0]},
-                                    headers=rcp_headers,
-                                ) as conn_resp:
-                                    if conn_resp.status in (200, 201):
-                                        import json as _json
-                                        conn_data = _json.loads(await conn_resp.text())
-                                        urls = conn_data.get("urls", [])
-                                        if urls:
-                                            # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
-                                            parts = urls[0].split("/", 1)
-                                            if len(parts) == 2:
-                                                proxy_host = parts[0]  # "proxy-NN:42090"
-                                                proxy_hash = parts[1]  # "{hash}"
-                                                await self._async_update_rcp_data(
-                                                    cam_id_key, proxy_host, proxy_hash
-                                                )
-                                    else:
-                                        _LOGGER.debug(
-                                            "RCP proxy connection HTTP %d for %s",
-                                            conn_resp.status, cam_id_key,
-                                        )
-                        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                            _LOGGER.debug("RCP proxy connect error for %s: %s", cam_id_key, err)
-                        finally:
-                            await rcp_session.close()
-                            await rcp_connector.close()
+                        async with aiohttp.ClientSession(connector=rcp_connector) as rcp_session:
+                            try:
+                                async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
+                                    async with rcp_session.put(
+                                        f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
+                                        json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id_key)[0]},
+                                        headers=rcp_headers,
+                                    ) as conn_resp:
+                                        if conn_resp.status in (200, 201):
+                                            import json as _json
+                                            conn_data = _json.loads(await conn_resp.text())
+                                            urls = conn_data.get("urls", [])
+                                            if urls:
+                                                # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
+                                                parts = urls[0].split("/", 1)
+                                                if len(parts) == 2:
+                                                    proxy_host = parts[0]  # "proxy-NN:42090"
+                                                    proxy_hash = parts[1]  # "{hash}"
+                                                    await self._async_update_rcp_data(
+                                                        cam_id_key, proxy_host, proxy_hash
+                                                    )
+                                        else:
+                                            _LOGGER.debug(
+                                                "RCP proxy connection HTTP %d for %s",
+                                                conn_resp.status, cam_id_key,
+                                            )
+                            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                                _LOGGER.debug("RCP proxy connect error for %s: %s", cam_id_key, err)
                     except Exception as err:
                         _LOGGER.debug("RCP update skipped for %s: %s", cam_id_key, err)
 
@@ -1607,8 +1670,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 if dl_event_ids:
                     try:
                         await self.async_mark_events_read(dl_event_ids)
-                    except Exception:
-                        pass
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as err:
+                        _LOGGER.debug("Mark-read (auto-download) failed: %s", err)
 
             # ── 7. SMB/NAS upload — triggered by FCM push only (not coordinator) ──
             # Removed from coordinator tick: the full event scan took ~90s on
@@ -1664,12 +1729,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     # _stream_warming: set of cam_ids currently in warm-up phase (blocks privacy toggles)
 
     def _get_stream_lock(self, cam_id: str) -> asyncio.Lock:
-        """Get or create per-camera stream setup lock."""
-        if not hasattr(self, "_stream_locks"):
-            self._stream_locks: dict[str, asyncio.Lock] = {}
-        if cam_id not in self._stream_locks:
-            self._stream_locks[cam_id] = asyncio.Lock()
-        return self._stream_locks[cam_id]
+        """Get or create per-camera stream setup lock.
+
+        Safe under asyncio: check-then-insert has no `await` between the
+        two steps, so concurrent coroutines cannot interleave here.
+        """
+        lock = self._stream_locks.get(cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._stream_locks[cam_id] = lock
+        return lock
 
     def clear_stream_warming(self, cam_id: str) -> None:
         """Force-clear the stream-warming flag for a camera.
@@ -1727,6 +1796,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         # Use a dedicated session with SSL verification disabled.
         # Bosch Cloud API uses a private CA (Video CA 2A).
+        # NOTE: explicit try/finally around session.close() (rather than
+        # `async with aiohttp.ClientSession(...)`) is deliberate here —
+        # this method spans ~270 lines of stream-setup logic and the extra
+        # indent level is a readability liability. ClientSession's default
+        # connector_owner=True makes session.close() also close the connector,
+        # so the finally block below is leak-free.
         connector = aiohttp.TCPConnector(ssl=False)
         session   = aiohttp.ClientSession(connector=connector)
 
@@ -1783,7 +1858,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     inst = 2
                 try:
                     # Timeout covers only the HTTP call — pre-warm runs after.
-                    async with asyncio.timeout(10):
+                    async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                         resp = await session.put(
                             url,
                             json={"type": type_val, "highQualityVideo": hq},
@@ -1956,7 +2031,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                         "Stream.update_source() for %s → %s",
                                         cam_id[:8], rtsps_url[:60],
                                     )
-                                except Exception:
+                                except Exception as err:  # noqa: BLE001 — HA stream internals vary by version
+                                    _LOGGER.debug(
+                                        "Stream.update_source() failed for %s — forcing stream rebuild: %s",
+                                        cam_id[:8], err,
+                                    )
                                     cam_entity.stream = None
                             else:
                                 cam_entity.stream = None
@@ -2032,132 +2111,130 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
-        headers   = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
-        }
-        conn_url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+        async with aiohttp.ClientSession(connector=connector) as session:
+            headers   = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+            }
+            conn_url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
-        async def _get_proxy_url_entry() -> str | None:
-            """Return a valid urls[0] string, using cache when possible."""
-            now = time.monotonic()
-            cached = self._proxy_url_cache.get(cam_id)
-            if cached:
-                url_entry, expires_at = cached
-                if now < expires_at:
-                    _LOGGER.debug(
-                        "fetch_live_snapshot: proxy cache HIT for %s (%.0fs remaining)",
-                        cam_id, expires_at - now,
-                    )
-                    return url_entry
-                del self._proxy_url_cache[cam_id]
-
-            # Cache miss — call PUT /connection
-            async with asyncio.timeout(10):
-                async with session.put(
-                    conn_url,
-                    json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
-                    headers=headers,
-                ) as resp:
-                    if resp.status not in (200, 201):
+            async def _get_proxy_url_entry() -> str | None:
+                """Return a valid urls[0] string, using cache when possible."""
+                now = time.monotonic()
+                cached = self._proxy_url_cache.get(cam_id)
+                if cached:
+                    url_entry, expires_at = cached
+                    if now < expires_at:
                         _LOGGER.debug(
-                            "fetch_live_snapshot: PUT /connection → HTTP %d for %s",
-                            resp.status, cam_id,
+                            "fetch_live_snapshot: proxy cache HIT for %s (%.0fs remaining)",
+                            cam_id, expires_at - now,
                         )
-                        return None
-                    result = _json.loads(await resp.text())
-                    urls = result.get("urls", [])
-                    if not urls:
-                        return None
-                    self._proxy_url_cache[cam_id] = (urls[0], now + 50.0)  # 50s TTL
-                    _LOGGER.debug(
-                        "fetch_live_snapshot: proxy cache MISS for %s — PUT /connection done",
-                        cam_id,
-                    )
-                    return urls[0]
+                        return url_entry
+                    del self._proxy_url_cache[cam_id]
 
-        try:
-            url_entry = await _get_proxy_url_entry()
-            if not url_entry:
-                return None
-
-            # ── RCP 0x099e: 320×180 JPEG (faster and lower bandwidth than snap.jpg) ──
-            # 0x0a88 READ confirms the camera's snapshot resolution is 320×180.
-            # 0x099e returns a JPEG at that resolution via the proxy RCP endpoint.
-            # Falls back to snap.jpg below if RCP session or read fails.
-            parts = url_entry.split("/", 1)
-            if len(parts) == 2:
-                proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
-                rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
-                try:
-                    session_id = await self._get_cached_rcp_session(proxy_host_rcp, proxy_hash_rcp)
-                    if session_id:
-                        raw = await self._rcp_read(rcp_base, "0x099e", session_id)
-                        if raw and raw[:2] == b"\xff\xd8":
+                # Cache miss — call PUT /connection
+                async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
+                    async with session.put(
+                        conn_url,
+                        json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
+                        headers=headers,
+                    ) as resp:
+                        if resp.status not in (200, 201):
                             _LOGGER.debug(
-                                "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
-                                len(raw), cam_id,
-                            )
-                            return raw
-                        _LOGGER.debug(
-                            "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
-                            cam_id,
-                        )
-                except Exception as _rcp_err:  # noqa: BLE001
-                    _LOGGER.debug(
-                        "fetch_live_snapshot: RCP error for %s: %s — using snap.jpg",
-                        cam_id, _rcp_err,
-                    )
-
-            proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
-            async with asyncio.timeout(10):
-                async with session.get(proxy_url) as snap_resp:
-                    ct = snap_resp.headers.get("Content-Type", "")
-                    if snap_resp.status == 404:
-                        # Proxy URL expired — invalidate cache and retry once with a fresh lease
-                        _LOGGER.debug(
-                            "fetch_live_snapshot: snap.jpg 404 for %s — proxy URL expired, retrying",
-                            cam_id,
-                        )
-                        self._proxy_url_cache.pop(cam_id, None)
-                        url_entry2 = await _get_proxy_url_entry()
-                        if not url_entry2:
-                            return None
-                        proxy_url2 = f"https://{url_entry2}/snap.jpg?JpegSize=1206"
-                        async with asyncio.timeout(10):
-                            async with session.get(proxy_url2) as snap_resp2:
-                                ct2 = snap_resp2.headers.get("Content-Type", "")
-                                if snap_resp2.status == 200 and "image" in ct2:
-                                    data = await snap_resp2.read()
-                                    if data:
-                                        return data
-                        return None
-                    if snap_resp.status == 200 and "image" in ct:
-                        data = await snap_resp.read()
-                        # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON
-                        if not data:
-                            _LOGGER.debug(
-                                "fetch_live_snapshot: %s → empty response (privacy mode ON?)",
-                                cam_id,
+                                "fetch_live_snapshot: PUT /connection → HTTP %d for %s",
+                                resp.status, cam_id,
                             )
                             return None
+                        result = _json.loads(await resp.text())
+                        urls = result.get("urls", [])
+                        if not urls:
+                            return None
+                        self._proxy_url_cache[cam_id] = (urls[0], now + 50.0)  # 50s TTL
                         _LOGGER.debug(
-                            "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
+                            "fetch_live_snapshot: proxy cache MISS for %s — PUT /connection done",
+                            cam_id,
                         )
-                        return data
-                    _LOGGER.debug(
-                        "fetch_live_snapshot: snap.jpg → HTTP %d for %s",
-                        snap_resp.status, cam_id,
-                    )
+                        return urls[0]
+
+            try:
+                url_entry = await _get_proxy_url_entry()
+                if not url_entry:
                     return None
 
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
-            return None
-        finally:
-            await session.close()
+                # ── RCP 0x099e: 320×180 JPEG (faster and lower bandwidth than snap.jpg) ──
+                # 0x0a88 READ confirms the camera's snapshot resolution is 320×180.
+                # 0x099e returns a JPEG at that resolution via the proxy RCP endpoint.
+                # Falls back to snap.jpg below if RCP session or read fails.
+                parts = url_entry.split("/", 1)
+                if len(parts) == 2:
+                    proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
+                    rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
+                    try:
+                        session_id = await self._get_cached_rcp_session(proxy_host_rcp, proxy_hash_rcp)
+                        if session_id:
+                            raw = await self._rcp_read(rcp_base, "0x099e", session_id)
+                            if raw and raw[:2] == b"\xff\xd8":
+                                _LOGGER.debug(
+                                    "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
+                                    len(raw), cam_id,
+                                )
+                                return raw
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
+                                cam_id,
+                            )
+                    except Exception as _rcp_err:  # noqa: BLE001
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: RCP error for %s: %s — using snap.jpg",
+                            cam_id, _rcp_err,
+                        )
+
+                proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
+                async with asyncio.timeout(TIMEOUT_SNAP):
+                    async with session.get(proxy_url) as snap_resp:
+                        ct = snap_resp.headers.get("Content-Type", "")
+                        if snap_resp.status == 404:
+                            # Proxy URL expired — invalidate cache and retry once with a fresh lease
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: snap.jpg 404 for %s — proxy URL expired, retrying",
+                                cam_id,
+                            )
+                            self._proxy_url_cache.pop(cam_id, None)
+                            url_entry2 = await _get_proxy_url_entry()
+                            if not url_entry2:
+                                return None
+                            proxy_url2 = f"https://{url_entry2}/snap.jpg?JpegSize=1206"
+                            async with asyncio.timeout(TIMEOUT_SNAP):
+                                async with session.get(proxy_url2) as snap_resp2:
+                                    ct2 = snap_resp2.headers.get("Content-Type", "")
+                                    if snap_resp2.status == 200 and "image" in ct2:
+                                        data = await snap_resp2.read()
+                                        if data:
+                                            return data
+                            return None
+                        if snap_resp.status == 200 and "image" in ct:
+                            data = await snap_resp.read()
+                            # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON
+                            if not data:
+                                _LOGGER.debug(
+                                    "fetch_live_snapshot: %s → empty response (privacy mode ON?)",
+                                    cam_id,
+                                )
+                                return None
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
+                            )
+                            return data
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: snap.jpg → HTTP %d for %s",
+                            snap_resp.status, cam_id,
+                        )
+                        return None
+
+            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
+                return None
 
     async def async_fetch_fresh_event_snapshot(self, cam_id: str) -> bytes | None:
         """Fetch fresh events from Bosch API and return the latest event JPEG.
@@ -2232,7 +2309,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
         headers   = {
             "Authorization": f"Bearer {token}",
             "Content-Type":  "application/json",
@@ -2242,23 +2318,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         result = None
         try:
-            async with asyncio.timeout(15):
-                async with session.put(
-                    url, json={"type": "LOCAL", "highQualityVideo": self.get_quality_params(cam_id)[0]}, headers=headers
-                ) as resp:
-                    if resp.status not in (200, 201):
-                        _LOGGER.debug(
-                            "fetch_live_snapshot_local: PUT LOCAL → HTTP %d for %s",
-                            resp.status, cam_id,
-                        )
-                        return None
-                    import json as _json
-                    result = _json.loads(await resp.text())
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with asyncio.timeout(15):
+                    async with session.put(
+                        url, json={"type": "LOCAL", "highQualityVideo": self.get_quality_params(cam_id)[0]}, headers=headers
+                    ) as resp:
+                        if resp.status not in (200, 201):
+                            _LOGGER.debug(
+                                "fetch_live_snapshot_local: PUT LOCAL → HTTP %d for %s",
+                                resp.status, cam_id,
+                            )
+                            return None
+                        import json as _json
+                        result = _json.loads(await resp.text())
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("fetch_live_snapshot_local: PUT error for %s: %s", cam_id, err)
             return None
-        finally:
-            await session.close()
 
         user     = result.get("user")
         password = result.get("password")
@@ -2336,8 +2411,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # Try Unix socket first
                         try:
                             connector = aiohttp.UnixConnector(path=sock_path)
-                        except Exception:
-                            pass
+                        except (OSError, RuntimeError) as err:
+                            _LOGGER.debug("go2rtc Unix socket connector unavailable: %s", err)
                     async with aiohttp.ClientSession(connector=connector) as s:
                         resp = await s.put(
                             url if not connector else "http://localhost/api/streams",
@@ -2482,7 +2557,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     connector_owner=True,
                 ) as session:
                     url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
-                    async with asyncio.timeout(10):
+                    async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                         async with session.put(
                             url,
                             json={"type": "LOCAL"},
@@ -2528,7 +2603,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except asyncio.CancelledError:
           _LOGGER.debug("Keepalive cancelled for %s (gen=%d)", cam_id[:8], generation)
         finally:
-          self._auto_renew_tasks.pop(cam_id, None)
+          self._renewal_tasks.pop(cam_id, None)
           _LOGGER.debug("Keepalive loop ended for %s (gen=%d)", cam_id[:8], generation)
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
@@ -2582,6 +2657,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         _fcm_write_file(path, data)
 
     # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
+    def _invalidate_rcp_session(self, proxy_hash: str) -> None:
+        """Drop a cached RCP session so the next call reopens the handshake.
+
+        Call this when a downstream RCP read returns HTTP 401 (auth dropped),
+        HTTP 403 (session expired), or RCP error 0x0c0d (session closed).
+        Without invalidation the cache would keep serving the dead ID for
+        its full 5-min TTL — readers would see None until the entry expired.
+        """
+        if self._rcp_session_cache.pop(proxy_hash, None) is not None:
+            _LOGGER.debug("RCP session cache invalidated for %s", proxy_hash[:8])
+
     async def _get_cached_rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
         """Return a cached RCP session ID, opening a new one if missing or expired.
 
@@ -2670,6 +2756,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         finally:
             await connector.close()
 
+    @staticmethod
+    def _proxy_hash_from_rcp_base(rcp_base: str) -> str | None:
+        """Extract proxy_hash from `https://host:port/{hash}/rcp.xml`."""
+        parts = rcp_base.rstrip("/").split("/")
+        if len(parts) >= 2 and parts[-1] == "rcp.xml":
+            return parts[-2]
+        return None
+
     async def _rcp_read(
         self,
         rcp_base: str,
@@ -2682,6 +2776,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         Uses the HA shared session to avoid creating a new
         connector+session per RCP command (prevents socket exhaustion).
+        Invalidates the session cache on HTTP 401/403 or RCP <err>0x0c0d</err>
+        (session closed) — the dead ID would otherwise block reads until TTL.
         """
         params: dict = {
             "command":   command,
@@ -2700,8 +2796,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(
                             "_rcp_read: command=%s HTTP %d", command, resp.status
                         )
+                        if resp.status in (401, 403):
+                            proxy_hash = self._proxy_hash_from_rcp_base(rcp_base)
+                            if proxy_hash:
+                                self._invalidate_rcp_session(proxy_hash)
                         return None
-                    return await resp.read()
+                    raw = await resp.read()
+                    # RCP session-closed response: <err>0x0c0d</err>. Drop the
+                    # cached session so the next read reopens the handshake.
+                    if b"0x0c0d" in raw and b"<err>" in raw:
+                        proxy_hash = self._proxy_hash_from_rcp_base(rcp_base)
+                        if proxy_hash:
+                            self._invalidate_rcp_session(proxy_hash)
+                        return None
+                    return raw
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("_rcp_read: command=%s error: %s", command, err)
             return None
@@ -2797,7 +2905,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         try:
                             token = await self._ensure_valid_token()
                             headers["Authorization"] = f"Bearer {token}"
-                        except Exception:
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as err:
+                            _LOGGER.debug("async_put_camera token refresh failed: %s", err)
                             return False
                         async with asyncio.timeout(10):
                             async with session.put(url, headers=headers, json=payload) as resp2:
@@ -2992,8 +3103,8 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     if handle is not None:
         try:
             handle.cancel()
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError) as err:
+            _LOGGER.debug("Cancel of token-refresh handle raised: %s", err)
         coord._token_refresh_handle = None
     # Cancel all LOCAL session auto-renewal tasks. The task dicts also
     # register in _bg_tasks (via _replace_renewal_task), so the gather

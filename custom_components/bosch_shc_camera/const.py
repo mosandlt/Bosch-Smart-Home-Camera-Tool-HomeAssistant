@@ -11,6 +11,14 @@ ALL_PLATFORMS = [
 LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 
+# ── Network timeouts (seconds) ────────────────────────────────────────────────
+# Centralised so snap + PUT /connection paths stay consistent across the
+# integration and match the Python CLI (bosch_camera.py). Other endpoints
+# still use inline literals — only the hot paths below were previously
+# inconsistent (CLI 5/15s vs. integration 10s).
+TIMEOUT_SNAP = 10             # GET on signed image / imageUrl
+TIMEOUT_PUT_CONNECTION = 10   # PUT /v11/video_inputs/{id}/connection
+
 DEFAULT_OPTIONS = {
     "scan_interval":      60,
     "interval_status":   300,

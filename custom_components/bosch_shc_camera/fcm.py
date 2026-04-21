@@ -178,14 +178,16 @@ async def async_start_fcm_push(coordinator) -> None:
         # Start listening for pushes
         try:
             await coordinator._fcm_client.start()
-            coordinator._fcm_running = True
-            coordinator._fcm_healthy = True
-            coordinator._fcm_push_mode = mode
+            with coordinator._fcm_lock:
+                coordinator._fcm_running = True
+                coordinator._fcm_healthy = True
+                coordinator._fcm_push_mode = mode
             _LOGGER.info("FCM push listener started (mode=%s) — near-instant event detection active", mode)
             return True
         except Exception as err:
             _LOGGER.warning("FCM push listener failed to start (mode=%s): %s", mode, err)
-            coordinator._fcm_client = None
+            with coordinator._fcm_lock:
+                coordinator._fcm_client = None
             return False
 
     if push_mode == "polling":
@@ -242,12 +244,21 @@ async def register_fcm_with_bosch(coordinator) -> bool:
 
 async def async_stop_fcm_push(coordinator) -> None:
     """Stop the FCM push listener."""
-    if coordinator._fcm_client and coordinator._fcm_running:
+    with coordinator._fcm_lock:
+        client = coordinator._fcm_client
+        running = coordinator._fcm_running
+    if client and running:
         try:
-            await coordinator._fcm_client.stop()
-        except Exception:
-            pass
-        coordinator._fcm_running = False
+            await client.stop()
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            _LOGGER.debug("FCM stop raised: %s", err)
+        with coordinator._fcm_lock:
+            coordinator._fcm_running = False
+            coordinator._fcm_healthy = False
+            coordinator._fcm_client = None
+            coordinator._fcm_push_mode = "unknown"
         _LOGGER.info("FCM push listener stopped")
 
 
@@ -272,6 +283,11 @@ def _on_fcm_push(coordinator, notification: dict, persistent_id: str, obj=None) 
     We immediately trigger an event fetch + snapshot refresh for all cameras.
     """
     with coordinator._fcm_lock:
+        # Drop pushes that arrive after async_stop_fcm_push cleared the client —
+        # a trailing push would otherwise reschedule async_handle_fcm_push on a
+        # loop that already considers FCM down.
+        if not coordinator._fcm_running:
+            return
         coordinator._fcm_last_push = time.monotonic()
         coordinator._fcm_healthy = True
     _LOGGER.info(

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.9.1";
+const CARD_VERSION = "2.10.2";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -205,12 +205,18 @@ class BoschCameraCard extends HTMLElement {
       title:                      config.title || null,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
       show_motion_zones:         config.show_motion_zones ?? false,
+      // Minimal layout: image + info-row + [Snapshot, Live Stream, ⋮, Vollbild] +
+      // Privacy toggle. Everything else (audio/light/notifications, accordions,
+      // automations, pan controls) is hidden by default and revealed when the
+      // user clicks the ⋮ overflow button. Opt-in via YAML `minimal: true`.
+      minimal:                    config.minimal === true,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
     this._storageKey = `bosch_cam_${config.camera_entity}`;
 
     const base = config.camera_entity.replace(/^camera\./, "");
+    this._base = base;
     this._entities = {
       camera:       config.camera_entity,
       switch:       config.switch_entity        || `switch.${base}_live_stream`,
@@ -258,8 +264,9 @@ class BoschCameraCard extends HTMLElement {
       ambientLight:  config.ambient_light_entity || `switch.${base}_dauerlicht`,
       intrusionDetection: config.intrusion_entity || `switch.${base}_einbrucherkennung`,
       motionSensitivity: config.motion_sensitivity_entity || `number.${base}_bewegungslicht_empfindlichkeit`,
-      // Automations (configurable per card — array of entity IDs)
+      // Automations — manual array or auto-discover from device
       automations: config.automations || [],
+      _autoDiscoverAutomations: !config.automations || config.automations.length === 0,
       topLedLight:   config.top_led_light_entity || `light.${base}_oberes_licht`,
       bottomLedLight: config.bottom_led_light_entity || `light.${base}_unteres_licht`,
       frontLightEntity: config.front_light_color_entity || `light.${base}_frontlicht`,
@@ -279,6 +286,10 @@ class BoschCameraCard extends HTMLElement {
     };
 
     this._showMotionZones = this._config.show_motion_zones;
+    // Apply layout flag on the custom-element host so CSS `:host(.minimal)`
+    // selectors can hide/show the advanced control rows.
+    this.classList.toggle("minimal", this._config.minimal);
+    this.classList.remove("overflow-open");  // always collapsed on config (re)load
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
@@ -290,6 +301,12 @@ class BoschCameraCard extends HTMLElement {
   set hass(hass) {
     const firstHass = !this._hass;
     this._hass = hass;
+    if (this._entities._autoDiscoverAutomations && hass) {
+      if (!this._autoDiscoveryDone) {
+        this._autoDiscoveryDone = true;
+        this._discoverAutomationsViaWs(hass);
+      }
+    }
     this._update();
     // _render() calls _scheduleImageLoad(0) before _hass is assigned (HA sets hass
     // AFTER setConfig), so the first image load silently returns early.
@@ -615,7 +632,7 @@ class BoschCameraCard extends HTMLElement {
         }
 
         /* Buttons */
-        .btn-row { display: flex; gap: 8px; padding: 0 12px 12px; }
+        .btn-row { display: flex; gap: 8px; padding: 8px 12px 12px; }
         .btn {
           flex: 1; display: flex; align-items: center; justify-content: center;
           gap: 6px; padding: 9px 10px; border-radius: 10px; border: none;
@@ -630,6 +647,34 @@ class BoschCameraCard extends HTMLElement {
         .btn-stream    { background: rgba(10,132,255,.18); color: #0a84ff; }
         .btn-stream.active { background: rgba(255,69,58,.18); color: #ff453a; }
         .btn-fullscreen { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; }
+        .btn-privacy-inline { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }
+        .btn-privacy-inline.on { background: rgba(255,69,58,.18); color: #ff453a; }
+        :host(.minimal) .btn-privacy-inline { display: inline-flex; }
+        :host(.minimal) .switch-rows > .privacy-row { display: none; }
+        .btn-overflow { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }
+        :host(.minimal) .btn-overflow { display: inline-flex; }
+        :host(.minimal.overflow-open) .btn-overflow { background: rgba(10,132,255,.18); color: #0a84ff; }
+
+        /* Minimal layout: hide everything non-essential until user taps ⋮.
+         * Visible baseline: image, btn-row (Snapshot/Stream/⋮/Vollbild),
+         * Privacy toggle. The overflow-open class (toggled by the ⋮ button) re-
+         * reveals the hidden sections as a single flat panel — no separate popup
+         * needed, just a progressive disclosure of existing controls. */
+        :host(.minimal) .info-row { display: none; }
+        :host(.minimal) .switch-rows { display: none; }
+        :host(.minimal) .btn-row { padding-bottom: 8px; }
+        :host(.minimal) .accordion,
+        :host(.minimal) .pan-row,
+        :host(.minimal) .pan-slider-row,
+        :host(.minimal) .automation-row { display: none; }
+        :host(.minimal.overflow-open) .info-row { display: flex; }
+        :host(.minimal.overflow-open) .switch-rows { display: flex; padding: 0 12px 12px; }
+        :host(.minimal.overflow-open) .switch-rows > .sw-row { display: flex; }
+        :host(.minimal.overflow-open) .accordion,
+        :host(.minimal.overflow-open) .pan-row,
+        :host(.minimal.overflow-open) .pan-slider-row,
+        :host(.minimal.overflow-open) .automation-row { display: block; }
+        :host(.minimal.overflow-open) .pan-row { display: flex; }
         .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
         .btn-spinner {
           width: 14px; height: 14px;
@@ -791,7 +836,8 @@ class BoschCameraCard extends HTMLElement {
             <div class="status-dot unknown" id="status-dot"></div>
             <span class="title" id="title">Bosch Camera</span>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
+          <span id="debug-line" style="font-size:9px;color:#999;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right;padding:0 8px">v${CARD_VERSION}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             <div class="push-badge poll" id="push-badge">
               <div class="pdot"></div>
               <span id="push-label">poll</span>
@@ -845,32 +891,45 @@ class BoschCameraCard extends HTMLElement {
             <span class="info-value" id="info-status">—</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Letztes Event</span>
-            <span class="info-value" id="info-last-event">—</span>
+            <span class="info-label">Verbindung</span>
+            <span class="info-value" id="info-connection">—</span>
           </div>
           <div class="info-item" style="text-align:right">
-            <span class="info-label">Heute</span>
-            <span class="info-value" id="info-events-today">—</span>
+            <span class="info-label">Reaktion</span>
+            <span class="info-value" id="info-buffering">—</span>
           </div>
         </div>
 
         <div class="btn-row">
-            <button class="btn btn-snapshot" id="btn-snapshot">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="btn btn-snapshot" id="btn-snapshot" aria-label="Snapshot aufnehmen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
                 <circle cx="12" cy="13" r="4"/>
               </svg>
               <span id="btn-snapshot-label">Snapshot</span>
             </button>
-            <button class="btn btn-stream" id="btn-stream">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="btn btn-privacy-inline" id="btn-privacy-inline" title="Privat-Modus" aria-label="Privat-Modus umschalten" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+            </button>
+            <button class="btn btn-stream" id="btn-stream" aria-label="Live-Stream starten oder stoppen" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <polygon points="23 7 16 12 23 17 23 7"/>
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
               </svg>
               <span id="btn-stream-label">Live Stream</span>
             </button>
-            <button class="btn btn-fullscreen" id="btn-fullscreen" title="Vollbild">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="btn btn-overflow" id="btn-overflow" title="Weitere Optionen" aria-label="Weitere Optionen" aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="5" r="2"/>
+                <circle cx="12" cy="12" r="2"/>
+                <circle cx="12" cy="19" r="2"/>
+              </svg>
+            </button>
+            <button class="btn btn-fullscreen" id="btn-fullscreen" title="Vollbild" aria-label="Vollbild-Ansicht">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
               </svg>
             </button>
@@ -957,30 +1016,30 @@ class BoschCameraCard extends HTMLElement {
 
           <div class="pan-section" id="pan-section" style="display:none">
             <div class="pan-row">
-              <button class="pan-btn" id="pan-full-left"  title="Ganz links">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <button class="pan-btn" id="pan-full-left"  title="Ganz links" aria-label="Kamera ganz nach links schwenken">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="11 18 5 12 11 6"/><polyline points="18 18 12 12 18 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-left"       title="Links">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <button class="pan-btn" id="pan-left"       title="Links" aria-label="Kamera nach links schwenken">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="15 18 9 12 15 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-center"     title="Mitte">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button class="pan-btn" id="pan-center"     title="Mitte" aria-label="Kamera zentrieren">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                   <circle cx="12" cy="12" r="3"/>
                   <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
                   <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-right"      title="Rechts">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <button class="pan-btn" id="pan-right"      title="Rechts" aria-label="Kamera nach rechts schwenken">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="9 18 15 12 9 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-full-right" title="Ganz rechts">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <button class="pan-btn" id="pan-full-right" title="Ganz rechts" aria-label="Kamera ganz nach rechts schwenken">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="13 18 19 12 13 6"/><polyline points="6 18 12 12 6 6"/>
                 </svg>
               </button>
@@ -1262,7 +1321,6 @@ class BoschCameraCard extends HTMLElement {
             </div>
           </div>
 
-          <div id="debug-line" style="font-size:10px;color:#666;text-align:right;padding:2px 12px 4px;opacity:0.7">Card v${CARD_VERSION}</div>
       </ha-card>
     `;
 
@@ -1285,6 +1343,15 @@ class BoschCameraCard extends HTMLElement {
     );
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
+    );
+    // Overflow ⋮ toggles the `.overflow-open` class on the host. CSS does the
+    // rest — no separate popup element, just progressive disclosure of the
+    // already-rendered control rows/accordions.
+    this.shadowRoot.getElementById("btn-overflow").addEventListener("click", () => {
+      this.classList.toggle("overflow-open");
+    });
+    this.shadowRoot.getElementById("btn-privacy-inline").addEventListener("click", () =>
+      this._toggleSwitchWithRollback(this._entities.privacy)
     );
 
     // Toggle buttons
@@ -1453,7 +1520,7 @@ class BoschCameraCard extends HTMLElement {
     // Automation toggles — dynamically generated from config.automations array
     const autoContainer = this.shadowRoot.getElementById("automations-container");
     if (autoContainer && this._entities.automations?.length) {
-      autoContainer.innerHTML = '<div style="border-top:1px solid rgba(255,255,255,.1);margin:6px 0 2px;padding-top:4px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px">Automationen</div>';
+      autoContainer.innerHTML = "";
       this._entities.automations.forEach((eid, i) => {
         const row = document.createElement("div");
         row.className = "sw-row";
@@ -2341,6 +2408,22 @@ class BoschCameraCard extends HTMLElement {
     if (statusDot) statusDot.className = "status-dot " + ({ ONLINE: "online", OFFLINE: "offline" }[statusState] || "unknown");
     if (infoStatus) infoStatus.textContent = statusState;
 
+    // Info row: connection type (LAN/Cloud) + buffering time (API reaction).
+    // connection_type and buffering_time_ms are attributes of camera.bosch_<cam>
+    // (set from the Bosch cloud's PUT /connection response — LOCAL=500ms,
+    // REMOTE=1000ms typically). While stream is idle both rows show "—".
+    const camAttrs = hass.states[ents.camera]?.attributes || {};
+    const camConnType = camAttrs.connection_type || "";
+    const bufMs      = camAttrs.buffering_time_ms;
+    const infoConn   = this.shadowRoot.getElementById("info-connection");
+    const infoBuf    = this.shadowRoot.getElementById("info-buffering");
+    if (infoConn) {
+      infoConn.textContent = camConnType === "LOCAL" ? "LAN" : camConnType === "REMOTE" ? "Cloud" : "—";
+    }
+    if (infoBuf) {
+      infoBuf.textContent = (typeof bufMs === "number" && bufMs > 0) ? `${bufMs} ms` : "—";
+    }
+
     // Offline overlay
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
     const isOffline = statusState === "OFFLINE";
@@ -2459,8 +2542,10 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Last event — detect new events and refresh snapshot immediately
+    // Last-event text: now only shown as overlay on the camera image
+    // (info-row slots repurposed to Status/Verbindung/Reaktion). The event-
+    // driven snapshot refresh below still uses lastEventState.
     const lastEventState = hass.states[ents.last_event];
-    const infoLastEvent  = this.shadowRoot.getElementById("info-last-event");
     const lastEventOverlay = this.shadowRoot.getElementById("last-event-overlay");
     const curEventVal = lastEventState?.state;
     if (curEventVal && curEventVal !== "unavailable" && curEventVal !== "unknown"
@@ -2481,21 +2566,26 @@ class BoschCameraCard extends HTMLElement {
       const a = hass.states[ents.camera]?.attributes?.last_event;
       if (a) lastEventStr = a.slice(0, 16).replace("T", " ");
     }
-    if (infoLastEvent)    infoLastEvent.textContent = lastEventStr;
     if (lastEventOverlay) lastEventOverlay.textContent = lastEventStr !== "—" ? `Letztes: ${lastEventStr}` : "";
 
-    // Events today
+    // Events today — overlay only now (info-row no longer carries it)
     const evTodayState = hass.states[ents.events_today];
-    const infoEvToday  = this.shadowRoot.getElementById("info-events-today");
     const evOverlay    = this.shadowRoot.getElementById("events-overlay");
     const evCount      = evTodayState?.state ?? "—";
-    if (infoEvToday) infoEvToday.textContent = evCount !== "—" ? `${evCount} Events` : "—";
     if (evOverlay)   evOverlay.textContent   = evCount !== "—" ? `${evCount} Events heute` : "";
 
     // Toggle buttons — Ton / Licht / Privat / Benachrichtigungen / Gegensprech.
     this._updateToggleBtn("btn-audio",         ents.audio,         hass.states[ents.audio]);
     this._updateToggleBtn("btn-light",         ents.light,         hass.states[ents.light]);
     this._updateToggleBtn("btn-privacy",       ents.privacy,       hass.states[ents.privacy]);
+    const privInline = this.shadowRoot.getElementById("btn-privacy-inline");
+    if (privInline) {
+      const ps = hass.states[ents.privacy]?.state;
+      const optVal = this._optimistic[ents.privacy];
+      const isPending = optVal === "pending";
+      const ds = (ents.privacy in this._optimistic && !isPending) ? optVal : ps;
+      privInline.classList.toggle("on", ds === "on");
+    }
     this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
     this._updateToggleBtn("btn-intercom",      ents.intercom,      hass.states[ents.intercom]);
 
@@ -2854,6 +2944,72 @@ class BoschCameraCard extends HTMLElement {
       const dbgLine = this.shadowRoot.getElementById("debug-line");
       if (dbgLine) dbgLine.style.display = "none";
     }
+  }
+
+  async _discoverAutomationsViaWs(hass) {
+    try {
+      const reg = await hass.callWS({
+        type: "config/entity_registry/get",
+        entity_id: this._entities.camera,
+      });
+      const deviceId = reg?.device_id;
+      if (!deviceId) return;
+      const result = await hass.callWS({
+        type: "search/related",
+        item_type: "device",
+        item_id: deviceId,
+      });
+      const autoIds = (result.automation || [])
+        .filter(eid => hass.states[eid])
+        .sort();
+      if (autoIds.length) {
+        this._entities.automations = autoIds;
+        this._rebuildAutomationRows();
+      }
+    } catch (e) {
+      const prefix = `automation.${this._base}_`;
+      const fallback = Object.keys(hass.states)
+        .filter(eid => eid.startsWith(prefix))
+        .sort();
+      if (fallback.length) {
+        this._entities.automations = fallback;
+        this._rebuildAutomationRows();
+      }
+    }
+  }
+
+  _rebuildAutomationRows() {
+    const autoContainer = this.shadowRoot?.getElementById("automations-container");
+    const accAutomations = this.shadowRoot?.getElementById("acc-automations");
+    if (!autoContainer) return;
+    const autos = this._entities.automations || [];
+    autoContainer.innerHTML = "";
+    if (!autos.length) {
+      if (accAutomations) accAutomations.style.display = "none";
+      return;
+    }
+    if (accAutomations) accAutomations.style.display = "";
+    autoContainer.innerHTML = "";
+    autos.forEach((eid, i) => {
+      const row = document.createElement("div");
+      row.className = "sw-row";
+      row.id = `btn-auto-${i}`;
+      row.style.padding = "4px 0";
+      row.style.cursor = "pointer";
+      row.innerHTML = `<div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg><span class="auto-label">${eid.split(".").pop().replace(/_/g, " ")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>`;
+      row.addEventListener("click", () => {
+        if (!this._hass) return;
+        const st = this._hass.states[eid]?.state;
+        this._callService("automation", st === "on" ? "turn_off" : "turn_on", {entity_id: eid});
+      });
+      const state = this._hass?.states[eid];
+      if (state) {
+        row.classList.toggle("on", state.state === "on");
+        const label = row.querySelector(".auto-label");
+        if (label) label.textContent = state.attributes?.friendly_name || eid.split(".").pop().replace(/_/g, " ");
+      }
+      autoContainer.appendChild(row);
+    });
   }
 
   _updateToggleBtn(id, entityId, entityState) {
@@ -3480,9 +3636,18 @@ class BoschCameraOverviewCard extends HTMLElement {
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
       include:   Array.isArray(config.include) ? config.include : [],
       compact:   !!config.compact,
+      // Top-level `minimal: true` applies the compact child-card layout to
+      // every discovered camera. Per-camera overrides can still opt in/out
+      // individually via `overrides.<entity>.minimal`. Folded into
+      // card_defaults so the child-card setConfig receives it via the
+      // same merge path as any other default.
+      minimal:   config.minimal === true,
       overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
       card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
     };
+    if (this._config.minimal) {
+      this._config.card_defaults = { ...this._config.card_defaults, minimal: true };
+    }
     this._rendered = false;
     this._lastSig  = "";
     this._cards.clear();
@@ -3500,7 +3665,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        .bco-wrap { display: block; }
+        .bco-wrap { display: block; padding: 4px; overflow: visible; }
         .bco-header {
           display: flex; align-items: center; justify-content: space-between;
           padding: 0 4px 8px; font-size: 14px; font-weight: 500;
@@ -3525,12 +3690,14 @@ class BoschCameraOverviewCard extends HTMLElement {
         .bco-cell {
           min-width: 0;
           position: relative;
-          border-radius: 12px;
-          transition: box-shadow 0.2s ease;
+          border-radius: 14px;
+          border: 2px solid transparent;
+          overflow: hidden;
+          transition: border-color 0.2s ease;
         }
-        .bco-cell[data-tier="0"] { box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.55); }
-        .bco-cell[data-tier="1"] { box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.55); }
-        .bco-cell[data-tier="2"] { box-shadow: 0 0 0 2px rgba(120, 120, 120, 0.35); opacity: 0.92; }
+        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }
+        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }
+        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }
         .bco-cell bosch-camera-card { display: block; min-width: 0; }
         .bco-section {
           grid-column: 1 / -1;

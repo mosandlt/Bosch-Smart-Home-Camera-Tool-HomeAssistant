@@ -33,6 +33,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url
+from .const import TIMEOUT_SNAP
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,8 +72,15 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     • Image is refreshed on startup, on stream stop, and every 30 minutes
     """
 
-    # Set as class attribute so no parent __init__ can reset it
-    _attr_supported_features = CameraEntityFeature.STREAM
+    # 1×1 black JPEG — prevents HTTP 500 when no cached image available
+    _PLACEHOLDER_JPEG = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?\x00T\xdf\xb2\x80\x01\xff\xd9'
+
+    @property
+    def supported_features(self) -> CameraEntityFeature:
+        """Advertise STREAM only when a live session is active."""
+        if self.coordinator._live_connections.get(self._cam_id):
+            return CameraEntityFeature.STREAM
+        return CameraEntityFeature(0)
 
     def __init__(
         self,
@@ -96,7 +104,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
         self._cam_id = cam_id
         self._entry  = entry
-        self._cached_image: bytes | None = None
+        self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
         self._last_image_fetch: float = 0.0      # monotonic timestamp of last fetch
 
@@ -533,12 +541,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                                 proxy_url,
                                 auth=req.auth.HTTPDigestAuth(local_user, local_pass),
                                 verify=False,
-                                timeout=10,
+                                timeout=TIMEOUT_SNAP,
                             )
                             if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
                                 return r.content
-                        except Exception:
-                            pass
+                        except req.RequestException as err:
+                            _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         return None
                     try:
                         async with asyncio.timeout(12):
@@ -740,12 +748,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                             snap_url,
                             auth=req.auth.HTTPDigestAuth(local_user, local_pass),
                             verify=False,
-                            timeout=10,
+                            timeout=TIMEOUT_SNAP,
                         )
                         if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
                             return r.content
-                    except Exception:
-                        pass
+                    except req.RequestException as err:
+                        _LOGGER.debug("LOCAL outage snap failed: %s", err)
                     return None
                 try:
                     async with asyncio.timeout(12):
@@ -807,4 +815,4 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                 _LOGGER.debug("%s: event snapshot error: %s", self._attr_name, err)
 
         # Return last cached image if all methods failed
-        return self._cached_image
+        return self._cached_image or self._PLACEHOLDER_JPEG
