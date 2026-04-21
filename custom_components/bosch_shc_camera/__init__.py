@@ -248,6 +248,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._rcp_tls_cert_cache: dict[str, dict] = {}             # TLS cert info from 0x0b91
         self._rcp_network_services_cache: dict[str, list[str]] = {} # network services from 0x0c62
         self._rcp_iva_catalog_cache: dict[str, list[dict]] = {}    # IVA analytics from 0x0b60
+        # Commands that consistently return error=0x90 (not supported via proxy).
+        # Key: cam_id, value: set of command hex strings. After 3 consecutive
+        # failures the command is skipped for the rest of the session.
+        self._rcp_cmd_failures: dict[str, dict[str, int]] = {}  # cam_id → {cmd → fail_count}
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
@@ -294,7 +298,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "10.3.9"
+        self._integration_version = "10.3.8"
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -2418,12 +2422,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             url if not connector else "http://localhost/api/streams",
                             params={"src": go2rtc_src, "name": stream_name},
                         )
-                        _LOGGER.info(
-                            "go2rtc stream '%s' registered → HTTP %d via %s",
+                        if resp.status in (200, 201, 204):
+                            _LOGGER.info(
+                                "go2rtc stream '%s' registered via %s",
+                                stream_name, "unix socket" if connector else url,
+                            )
+                            return  # success
+                        _LOGGER.debug(
+                            "go2rtc stream '%s' → HTTP %d via %s (go2rtc not running?)",
                             stream_name, resp.status,
                             "unix socket" if connector else url,
                         )
-                        return  # success
+                        continue
             except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
                 continue
 
