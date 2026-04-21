@@ -1968,6 +1968,32 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if not hasattr(self, "_stream_warming"):
                                 self._stream_warming = set()
                             self._stream_warming.add(cam_id)
+                            # On renewal: stop HA's existing Stream now — the
+                            # PUT above just rotated creds and the TLS proxy
+                            # just switched ports, so FFmpeg's cached URL is
+                            # dead. Without stopping it here, FFmpeg keeps
+                            # retrying that URL during the pre-warm wait (up
+                            # to min_total_wait seconds), racks up
+                            # max_stream_errors, and trips the worker-error
+                            # listener into a REMOTE fallback before we ever
+                            # get to update_source() with the new URL.
+                            if is_renewal:
+                                cam_ent = self._camera_entities.get(cam_id)
+                                if cam_ent is not None:
+                                    stale = getattr(cam_ent, "stream", None)
+                                    if stale is not None:
+                                        try:
+                                            await stale.stop()
+                                        except Exception as _exc:  # noqa: BLE001
+                                            _LOGGER.debug(
+                                                "Renewal: stale Stream.stop() for %s failed: %s",
+                                                cam_id[:8], _exc,
+                                            )
+                                        cam_ent.stream = None
+                                        _LOGGER.debug(
+                                            "Renewal: invalidated stale Stream for %s before pre-warm",
+                                            cam_id[:8],
+                                        )
                             cfg = self.get_model_config(cam_id)
                             hw = self._hw_version.get(cam_id, "?")
                             put_time = time.monotonic()
@@ -3196,9 +3222,10 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_open_live_connection(call: ServiceCall) -> None:
         """Try to open a live proxy connection for a specific camera."""
         cam_id = call.data.get("camera_id", "")
+        is_renewal = bool(call.data.get("renewal", False))
         for edata in hass.data.get(DOMAIN, {}).values():
             if coord := edata.get("coordinator"):
-                result = await coord.try_live_connection(cam_id)
+                result = await coord.try_live_connection(cam_id, is_renewal=is_renewal)
                 if result:
                     _LOGGER.info("Live connection established: %s", _redact_creds(result))
 
