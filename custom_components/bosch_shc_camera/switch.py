@@ -405,22 +405,13 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         import time
         self._last_stream_off = time.monotonic()
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
-        # Cancel auto-renewal FIRST so it doesn't race with the cleanup
-        renew_task = self.coordinator._auto_renew_tasks.pop(self._cam_id, None)
-        if renew_task and not renew_task.done():
-            renew_task.cancel()
-        self.coordinator._live_connections.pop(self._cam_id, None)
-        self.coordinator._live_opened_at.pop(self._cam_id, None)
-        # Stop TLS proxy — closing the TCP connection is enough for the
-        # camera to detect disconnect and stop streaming (LED off).
-        # Do NOT call PUT /connection here — that creates a NEW session
-        # and keeps the camera streaming (blue LED stays on).
-        # The Bosch app also just closes TCP, no TEARDOWN or API call.
-        await self.coordinator._stop_tls_proxy(self._cam_id)
-        # Update state immediately so the UI reflects OFF without waiting for
-        # the go2rtc unregister (up to 3s) + coordinator refresh.
+        # Shared teardown: cancels renewal task, pops _live_connections,
+        # stops TLS proxy + go2rtc, stops HA's camera.stream so
+        # stream_worker can't auto-restart against the dead proxy.
+        await self.coordinator._tear_down_live_stream(self._cam_id)
+        # Update state immediately so the UI reflects OFF without waiting
+        # for the coordinator refresh that follows.
         self.async_write_ha_state()
-        await self.coordinator._unregister_go2rtc_stream(self._cam_id)
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
@@ -655,17 +646,20 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         """Enable privacy mode — camera turns off / shutter closes.
 
         Also stops any active live stream since the camera can't stream
-        while privacy mode is active (shutter closed).
+        while privacy mode is active (shutter closed). Uses the coordinator's
+        shared stream-teardown so the renewal task is cancelled, HA's
+        camera.stream is stopped, and the stream_worker doesn't enter its
+        auto-restart loop against the now-dead TLS proxy — which was the
+        side-effect noticed by Thomas: flipping Privacy ON while streaming
+        made the stream switch look still-on, renewal task kept firing,
+        and the stream_worker-error listener would uselessly try a REMOTE
+        fallback against a camera that's returning HTTP 443 privacy-gated.
         """
         if not await self._check_cooldown():
             return
-        # Stop live stream if active — camera can't stream with shutter closed
         if self._cam_id in self.coordinator._live_connections:
             _LOGGER.info("Privacy ON for %s — stopping active live stream", self._cam_title)
-            self.coordinator._live_connections.pop(self._cam_id, None)
-            self.coordinator._live_opened_at.pop(self._cam_id, None)
-            await self.coordinator._stop_tls_proxy(self._cam_id)
-            await self.coordinator._unregister_go2rtc_stream(self._cam_id)
+            await self.coordinator._tear_down_live_stream(self._cam_id)
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
 
     async def async_turn_off(self, **kwargs) -> None:

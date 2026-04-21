@@ -287,6 +287,7 @@ async def rcp_read(
     sessionid: str,
     type_: str = "P_OCTET",
     num: int = 0,
+    session_cache: RcpSessionCache | None = None,
 ) -> bytes | None:
     """READ an RCP command and return the payload bytes, or None on failure.
 
@@ -297,6 +298,10 @@ async def rcp_read(
 
     This function extracts the hex payload and returns it as bytes.
     Uses the HA shared session (verify_ssl=False for cloud proxy — non-standard certs).
+
+    If session_cache is provided, the cached session for the URL's proxy_hash
+    is invalidated on HTTP 401/403 or RCP <err>0x0c0d</err> (session closed)
+    so the next call opens a fresh handshake instead of reusing a dead ID.
     """
     params: dict[str, str] = {
         "command": command,
@@ -307,6 +312,15 @@ async def rcp_read(
     if num:
         params["num"] = str(num)
 
+    def _drop_cached_session() -> None:
+        if session_cache is None:
+            return
+        parts = rcp_base.rstrip("/").split("/")
+        if len(parts) >= 2 and parts[-1] == "rcp.xml":
+            proxy_hash = parts[-2]
+            if session_cache.pop(proxy_hash, None) is not None:
+                _LOGGER.debug("RCP session cache invalidated for %s", proxy_hash[:8])
+
     session = async_get_clientsession(hass, verify_ssl=False)
     try:
         async with asyncio.timeout(8):
@@ -315,6 +329,8 @@ async def rcp_read(
                     _LOGGER.debug(
                         "rcp_read: command=%s HTTP %d", command, resp.status
                     )
+                    if resp.status in (401, 403):
+                        _drop_cached_session()
                     return None
                 raw = await resp.read()
                 # RCP returns XML: <rcp ...><payload>HEX</payload></rcp>
@@ -324,10 +340,14 @@ async def rcp_read(
                 # Check for error response
                 err_m = _re.search(rb"<err>(\S+)</err>", raw, _re.IGNORECASE)
                 if err_m:
+                    err_code = err_m.group(1).decode("ascii", errors="replace")
                     _LOGGER.debug(
-                        "rcp_read: command=%s error=%s", command,
-                        err_m.group(1).decode("ascii", errors="replace"),
+                        "rcp_read: command=%s error=%s", command, err_code,
                     )
+                    # 0x0c0d = session closed → drop the cached ID so the next
+                    # call reopens the handshake instead of replaying a dead one.
+                    if err_code.lower() == "0x0c0d":
+                        _drop_cached_session()
                     return None
 
                 # Extract hex payload from XML — Bosch uses <str> or <payload> tag
@@ -389,29 +409,59 @@ async def async_update_rcp_data(
 
     rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
     hass = coordinator.hass
+    # Alias that forwards session_cache so any 401/403/0x0c0d response
+    # drops the cached session ID and forces a fresh handshake next call.
+    async def _read(command: str, type_: str = "P_OCTET", num: int = 0) -> bytes | None:
+        return await rcp_read(
+            hass, rcp_base, command, session_id,
+            type_=type_, num=num,
+            session_cache=coordinator._rcp_session_cache,
+        )
+
+    # Per-camera failure counter — commands that consistently return error=0x90
+    # (not supported via cloud proxy) are skipped after 3 consecutive failures.
+    _failures = getattr(coordinator, "_rcp_cmd_failures", {}).setdefault(cam_id, {})
+
+    def _skip(cmd: str) -> bool:
+        return _failures.get(cmd, 0) >= 3
+
+    def _mark_fail(cmd: str) -> None:
+        _failures[cmd] = _failures.get(cmd, 0) + 1
+        if _failures[cmd] == 3:
+            _LOGGER.debug(
+                "RCP command %s: 3 consecutive failures for %s — skipping for this session",
+                cmd, cam_id[:8],
+            )
+
+    def _mark_ok(cmd: str) -> None:
+        _failures.pop(cmd, None)
 
     # Read LED dimmer (0x0c22) -- T_WORD, num=1 -> integer 0-100
-    # Gen2 firmware occasionally returns 0x0A0A (2570) for the same setting;
-    # format semantics differ per model. Clamp to 0..100 and skip the cache on
-    # out-of-range values so the sensor doesn't surface nonsense.
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0c22", session_id, type_="T_WORD", num=1)
-        if raw and len(raw) >= 2:
-            dimmer_val = struct.unpack(">H", raw[:2])[0]
-            if 0 <= dimmer_val <= 100:
-                coordinator._rcp_dimmer_cache[cam_id] = int(dimmer_val)
-                _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
-            else:
-                _LOGGER.debug(
-                    "RCP LED dimmer for %s: out-of-range raw=%d — cache skipped",
-                    cam_id, dimmer_val,
-                )
-    except Exception as err:
-        _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
+    # Gen2 returns 0x0A0A (2570) — different format/range, not 0-100. After 3
+    # consecutive out-of-range reads the command is skipped for this session.
+    if not _skip("0x0c22"):
+        try:
+            raw = await _read("0x0c22", type_="T_WORD", num=1)
+            if raw and len(raw) >= 2:
+                dimmer_val = struct.unpack(">H", raw[:2])[0]
+                if 0 <= dimmer_val <= 100:
+                    coordinator._rcp_dimmer_cache[cam_id] = int(dimmer_val)
+                    _LOGGER.debug("RCP LED dimmer for %s: %d%%", cam_id, dimmer_val)
+                    _mark_ok("0x0c22")
+                else:
+                    _mark_fail("0x0c22")
+                    _LOGGER.debug(
+                        "RCP LED dimmer for %s: out-of-range raw=%d — cache skipped",
+                        cam_id, dimmer_val,
+                    )
+            elif raw is None:
+                _mark_fail("0x0c22")
+        except Exception as err:
+            _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
 
     # Read privacy mask (0x0d00) -- P_OCTET 4B -> byte[1]=1 means ON
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0d00", session_id, type_="P_OCTET")
+        raw = await _read("0x0d00", type_="P_OCTET")
         if raw and len(raw) >= 2:
             coordinator._rcp_privacy_cache[cam_id] = int(raw[1])
             _LOGGER.debug(
@@ -425,78 +475,93 @@ async def async_update_rcp_data(
     # Some firmwares (observed on Gen2) return a different layout with fields
     # that fall outside datetime ranges. Validate before constructing cam_dt so
     # parse failures skip silently instead of raising.
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0a0f", session_id, type_="P_OCTET")
-        if raw and len(raw) >= 8:
-            year, month, day, hour, minute, second, _ = struct.unpack(
-                ">HBBBBBB", raw[:8]
-            )
-            if (
-                1970 <= year <= 2100
-                and 1 <= month <= 12
-                and 1 <= day <= 31
-                and 0 <= hour <= 23
-                and 0 <= minute <= 59
-                and 0 <= second <= 59
-            ):
-                cam_dt = _dt.datetime(
-                    year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc
+    if not _skip("0x0a0f"):
+        try:
+            raw = await _read("0x0a0f", type_="P_OCTET")
+            if raw and len(raw) >= 8:
+                year, month, day, hour, minute, second, _ = struct.unpack(
+                    ">HBBBBBB", raw[:8]
                 )
-                server_dt = _dt.datetime.now(_dt.timezone.utc)
-                offset = (cam_dt - server_dt).total_seconds()
-                coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
-                _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
-            else:
-                _LOGGER.debug(
-                    "RCP clock for %s: unexpected layout "
-                    "(Y=%d M=%d D=%d h=%d m=%d s=%d) — cache skipped",
-                    cam_id, year, month, day, hour, minute, second,
-                )
-    except Exception as err:
-        _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
+                if (
+                    1970 <= year <= 2100
+                    and 1 <= month <= 12
+                    and 1 <= day <= 31
+                    and 0 <= hour <= 23
+                    and 0 <= minute <= 59
+                    and 0 <= second <= 59
+                ):
+                    cam_dt = _dt.datetime(
+                        year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc
+                    )
+                    server_dt = _dt.datetime.now(_dt.timezone.utc)
+                    offset = (cam_dt - server_dt).total_seconds()
+                    coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
+                    _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
+                    _mark_ok("0x0a0f")
+                else:
+                    _mark_fail("0x0a0f")
+                    _LOGGER.debug(
+                        "RCP clock for %s: unexpected layout "
+                        "(Y=%d M=%d D=%d h=%d m=%d s=%d) — cache skipped",
+                        cam_id, year, month, day, hour, minute, second,
+                    )
+            elif raw is None:
+                _mark_fail("0x0a0f")
+        except Exception as err:
+            _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
 
     # Read LAN IP via RCP (0x0a36) -- 4 bytes IPv4 or ASCII string
     # Gen1 returns raw bytes; Gen2 wraps the response in a nested XML document
     # whose hex-decoded payload starts with "<rcp>". Reject both empty and
     # XML-wrapped values so the cache isn't polluted.
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0a36", session_id, type_="P_OCTET")
-        if raw:
-            if len(raw) == 4:
-                ip_str = ".".join(str(b) for b in raw)
-            else:
-                ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
-            if ip_str and ip_str != "0.0.0.0" and not ip_str.startswith("<"):
-                coordinator._rcp_lan_ip_cache[cam_id] = ip_str
-                _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
-            else:
-                _LOGGER.debug(
-                    "RCP LAN IP for %s: unusable payload (%r) — cache skipped",
-                    cam_id, ip_str[:40],
-                )
-    except Exception as err:
-        _LOGGER.debug("RCP LAN IP read error for %s: %s", cam_id, err)
+    if not _skip("0x0a36"):
+        try:
+            raw = await _read("0x0a36", type_="P_OCTET")
+            if raw:
+                if len(raw) == 4:
+                    ip_str = ".".join(str(b) for b in raw)
+                else:
+                    ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+                if ip_str and ip_str != "0.0.0.0" and not ip_str.startswith("<"):
+                    coordinator._rcp_lan_ip_cache[cam_id] = ip_str
+                    _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
+                    _mark_ok("0x0a36")
+                else:
+                    _mark_fail("0x0a36")
+                    _LOGGER.debug(
+                        "RCP LAN IP for %s: unusable payload (%r) — cache skipped",
+                        cam_id, ip_str[:40],
+                    )
+            elif raw is None:
+                _mark_fail("0x0a36")
+        except Exception as err:
+            _LOGGER.debug("RCP LAN IP read error for %s: %s", cam_id, err)
 
     # Read product name via RCP (0x0aea) -- null-terminated ASCII
     # Same Gen2 XML-wrapper caveat as LAN IP above.
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0aea", session_id, type_="P_OCTET")
-        if raw:
-            name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
-            if name_str and not name_str.startswith("<"):
-                coordinator._rcp_product_name_cache[cam_id] = name_str
-                _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
-            else:
-                _LOGGER.debug(
-                    "RCP product name for %s: unusable payload (%r) — cache skipped",
-                    cam_id, name_str[:40],
-                )
-    except Exception as err:
-        _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
+    if not _skip("0x0aea"):
+        try:
+            raw = await _read("0x0aea", type_="P_OCTET")
+            if raw:
+                name_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+                if name_str and not name_str.startswith("<"):
+                    coordinator._rcp_product_name_cache[cam_id] = name_str
+                    _LOGGER.debug("RCP product name for %s: %s", cam_id, name_str)
+                    _mark_ok("0x0aea")
+                else:
+                    _mark_fail("0x0aea")
+                    _LOGGER.debug(
+                        "RCP product name for %s: unusable payload (%r) — cache skipped",
+                        cam_id, name_str[:40],
+                    )
+            elif raw is None:
+                _mark_fail("0x0aea")
+        except Exception as err:
+            _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
 
     # Read bitrate ladder (0x0c81) -- series of big-endian uint32 kbps values
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0c81", session_id, type_="P_OCTET")
+        raw = await _read("0x0c81", type_="P_OCTET")
         if raw and len(raw) >= 4:
             n = len(raw) // 4
             ladder = [struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
@@ -511,7 +576,7 @@ async def async_update_rcp_data(
     # Contains all alarm types the camera firmware supports (virtual 0-15,
     # flame, smoke, glass break, audio, storage, etc.)
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0c38", session_id, type_="P_OCTET")
+        raw = await _read("0x0c38", type_="P_OCTET")
         if raw and len(raw) > 10:
             alarms = _parse_alarm_catalog(raw)
             coordinator._rcp_alarm_catalog_cache[cam_id] = alarms
@@ -520,18 +585,22 @@ async def async_update_rcp_data(
         _LOGGER.debug("RCP alarm catalog read error for %s: %s", cam_id, err)
 
     # Read motion detection zones (0x0c00) -- 5 zones × 28 bytes
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0c00", session_id, type_="P_OCTET")
-        if raw and len(raw) >= 28:
-            zones = _parse_motion_zones(raw)
-            coordinator._rcp_motion_zones_cache[cam_id] = zones
-            _LOGGER.debug("RCP motion zones for %s: %d zones", cam_id, len(zones))
-    except Exception as err:
-        _LOGGER.debug("RCP motion zones read error for %s: %s", cam_id, err)
+    if not _skip("0x0c00"):
+        try:
+            raw = await _read("0x0c00", type_="P_OCTET")
+            if raw and len(raw) >= 28:
+                zones = _parse_motion_zones(raw)
+                coordinator._rcp_motion_zones_cache[cam_id] = zones
+                _LOGGER.debug("RCP motion zones for %s: %d zones", cam_id, len(zones))
+                _mark_ok("0x0c00")
+            elif raw is None:
+                _mark_fail("0x0c00")
+        except Exception as err:
+            _LOGGER.debug("RCP motion zones read error for %s: %s", cam_id, err)
 
     # Read motion zone coordinates (0x0c0a) -- int32 normalized ±1.0 as ×2^31
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0c0a", session_id, type_="P_OCTET")
+        raw = await _read("0x0c0a", type_="P_OCTET")
         if raw and len(raw) >= 16:
             coords = _parse_motion_coords(raw)
             coordinator._rcp_motion_coords_cache[cam_id] = coords
@@ -540,18 +609,22 @@ async def async_update_rcp_data(
         _LOGGER.debug("RCP motion coords read error for %s: %s", cam_id, err)
 
     # Read TLS certificate (0x0b91) -- DER X.509, ~455 bytes
-    try:
-        raw = await rcp_read(hass, rcp_base, "0x0b91", session_id, type_="P_OCTET")
-        if raw and len(raw) > 50:
-            cert_info = _parse_tls_cert(raw)
-            coordinator._rcp_tls_cert_cache[cam_id] = cert_info
-            _LOGGER.debug("RCP TLS cert for %s: %s", cam_id, cert_info)
-    except Exception as err:
-        _LOGGER.debug("RCP TLS cert read error for %s: %s", cam_id, err)
+    if not _skip("0x0b91"):
+        try:
+            raw = await _read("0x0b91", type_="P_OCTET")
+            if raw and len(raw) > 50:
+                cert_info = _parse_tls_cert(raw)
+                coordinator._rcp_tls_cert_cache[cam_id] = cert_info
+                _LOGGER.debug("RCP TLS cert for %s: %s", cam_id, cert_info)
+                _mark_ok("0x0b91")
+            elif raw is None:
+                _mark_fail("0x0b91")
+        except Exception as err:
+            _LOGGER.debug("RCP TLS cert read error for %s: %s", cam_id, err)
 
     # Read network services (0x0c62) -- TLV list, ~469 bytes
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0c62", session_id, type_="P_OCTET")
+        raw = await _read("0x0c62", type_="P_OCTET")
         if raw and len(raw) > 10:
             services = _parse_network_services(raw)
             coordinator._rcp_network_services_cache[cam_id] = services
@@ -561,7 +634,7 @@ async def async_update_rcp_data(
 
     # Read IVA analytics catalog (0x0b60) -- 65 entries × 6B
     try:
-        raw = await rcp_read(hass, rcp_base, "0x0b60", session_id, type_="P_OCTET")
+        raw = await _read("0x0b60", type_="P_OCTET")
         if raw and len(raw) >= 6:
             analytics = _parse_iva_catalog(raw)
             coordinator._rcp_iva_catalog_cache[cam_id] = analytics
