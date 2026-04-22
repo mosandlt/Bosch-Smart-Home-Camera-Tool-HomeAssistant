@@ -283,11 +283,13 @@ def _schedule_privacy_off_snapshot(
     - **Outdoor cameras** (no physical shutter, instant-on): 0.5s — just enough
       for the cloud API to propagate the privacy-off state so /snap.jpg returns
       a fresh frame instead of the privacy placeholder.
-    - **Indoor cameras** (physical motor-driven shutter + lens cover): 4.0s —
+    - **Indoor cameras** (physical motor-driven shutter + lens cover): 5.0s —
       Gen1 360 motor-drives the lens upward, Gen2 Indoor II tilts the head.
-      Snap.jpg will return the privacy placeholder until the shutter fully
-      opens AND the encoder produces a valid frame. 4s matches the measured
-      shutter-open time from capture traces.
+      Snap.jpg returns the privacy placeholder until the shutter fully opens
+      AND the encoder produces a valid frame. User-observed: 4s occasionally
+      returned a placeholder frame for Gen2 Indoor II that bytes-matched the
+      next poll, stalling the card spinner on the old image; 5s covers the
+      slowest observed shutter-open + encoder-ready cycle.
     """
     cam = coordinator._camera_entities.get(cam_id)
     if not cam:
@@ -299,7 +301,7 @@ def _schedule_privacy_off_snapshot(
         or "indoor" in hw_lower
         or "360" in hw_lower
     )
-    delay = 4.0 if is_indoor else 0.5
+    delay = 5.0 if is_indoor else 0.5
     _LOGGER.debug(
         "Privacy-OFF snapshot trigger for %s (hw=%s, delay=%.1fs)",
         cam_id[:8], hw, delay,
