@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.2";
+const CARD_VERSION = "2.10.3";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -173,6 +173,7 @@ class BoschCameraCard extends HTMLElement {
     this._snapshotPollTimer = null; // polling timer during snapshot refresh
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
+    this._lbmUnlocked       = false; // low_bandwidth: true once user explicitly taps ▶
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
@@ -210,6 +211,9 @@ class BoschCameraCard extends HTMLElement {
       // automations, pan controls) is hidden by default and revealed when the
       // user clicks the ⋮ overflow button. Opt-in via YAML `minimal: true`.
       minimal:                    config.minimal === true,
+      // When true: HLS video never auto-starts on page load. User must tap ▶ explicitly.
+      // Saves mobile data when opening the HA dashboard — only the snapshot is loaded.
+      low_bandwidth:              config.low_bandwidth === true,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -551,6 +555,23 @@ class BoschCameraCard extends HTMLElement {
           fill: rgba(0, 0, 0, 0.5); stroke: rgba(0, 0, 0, 0.8); stroke-width: 1.5;
         }
 
+        /* Low-bandwidth tap-to-watch overlay — shown instead of auto-starting HLS */
+        .lbm-overlay {
+          position: absolute; inset: 0; z-index: 10;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(0,0,0,.55); gap: 10px; cursor: pointer;
+          opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        .lbm-overlay.visible { opacity: 1; pointer-events: auto; }
+        .lbm-play-circle {
+          width: 56px; height: 56px; border-radius: 50%;
+          background: rgba(255,255,255,.15); border: 2px solid rgba(255,255,255,.45);
+          display: flex; align-items: center; justify-content: center;
+        }
+        .lbm-play-circle svg { fill: white; width: 26px; height: 26px; margin-left: 4px; }
+        .lbm-label { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.9); }
+        .lbm-sub   { font-size: 11px; color: rgba(255,255,255,.5); }
+
         /* Loading overlay — must be above both cam-img and cam-video */
         .loading-overlay {
           position: absolute; inset: 0; z-index: 10;
@@ -856,6 +877,13 @@ class BoschCameraCard extends HTMLElement {
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
+          </div>
+          <div class="lbm-overlay" id="lbm-overlay">
+            <div class="lbm-play-circle">
+              <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+            </div>
+            <span class="lbm-label">Live anzeigen</span>
+            <span class="lbm-sub">Tippen zum Starten</span>
           </div>
           <div class="offline-overlay" id="offline-overlay">
             <svg viewBox="0 0 24 24">
@@ -1340,6 +1368,9 @@ class BoschCameraCard extends HTMLElement {
     );
     this.shadowRoot.getElementById("btn-stream").addEventListener("click", () =>
       this._toggleStream()
+    );
+    this.shadowRoot.getElementById("lbm-overlay").addEventListener("click", () =>
+      this._lbmUnlock()
     );
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
@@ -2520,13 +2551,21 @@ class BoschCameraCard extends HTMLElement {
     // to avoid "does not support play stream" errors from premature WS calls.
     // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
     // Also re-triggers if card got stuck (e.g. WS failed during page load).
+    // low_bandwidth: skip auto-start — show tap-to-watch overlay instead.
     if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
-      this._waitingForStream = true;
-      this._setLoadingOverlay(true, "Stream wird gestartet…");
-      this._waitForStreamReady();
+      if (this.config.low_bandwidth && !this._lbmUnlocked) {
+        this._setLbmOverlay(true);
+      } else {
+        this._setLbmOverlay(false);
+        this._waitingForStream = true;
+        this._setLoadingOverlay(true, "Stream wird gestartet…");
+        this._waitForStreamReady();
+      }
     }
     if (!shouldVideo) {
       this._waitingForStream = false;
+      this._lbmUnlocked = false;
+      this._setLbmOverlay(false);
     }
     // Stop video when stream turns OFF
     if (!shouldVideo && this._liveVideoActive) {
@@ -3375,6 +3414,22 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
+  _setLbmOverlay(visible) {
+    const el = this.shadowRoot?.getElementById("lbm-overlay");
+    if (el) el.classList.toggle("visible", visible);
+  }
+
+  // User tapped the ▶ overlay — unlock HLS and start immediately.
+  _lbmUnlock() {
+    this._lbmUnlocked = true;
+    this._setLbmOverlay(false);
+    if (this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      this._waitForStreamReady();
+    }
+  }
+
   _toggleStream() {
     const isOn = this._isStreaming();
     // Optimistic update — badge and button update instantly
@@ -3385,6 +3440,9 @@ class BoschCameraCard extends HTMLElement {
       this._waitingForStream = false;
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
     } else if (!this._streamConnecting) {
+      // Explicit user action → unlock HLS in low_bandwidth mode
+      this._lbmUnlocked = true;
+      this._setLbmOverlay(false);
       // Starting stream → show loading overlay with progressive status updates
       // Timeline: PUT /connection ~2s, TLS proxy ~0.5s, pre-warm ~3s,
       // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s, first frame ~25-35s total.
