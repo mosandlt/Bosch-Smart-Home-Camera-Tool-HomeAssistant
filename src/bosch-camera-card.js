@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.3";
+const CARD_VERSION = "2.10.4";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2553,7 +2553,7 @@ class BoschCameraCard extends HTMLElement {
     // Also re-triggers if card got stuck (e.g. WS failed during page load).
     // low_bandwidth: skip auto-start — show tap-to-watch overlay instead.
     if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
-      if (this.config.low_bandwidth && !this._lbmUnlocked) {
+      if (this._config?.low_bandwidth && !this._lbmUnlocked) {
         this._setLbmOverlay(true);
       } else {
         this._setLbmOverlay(false);
@@ -3693,18 +3693,22 @@ class BoschCameraOverviewCard extends HTMLElement {
       columns:   config.columns   ?? "auto",  // "auto" | 1 | 2 | 3 | 4
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
       include:   Array.isArray(config.include) ? config.include : [],
-      compact:   !!config.compact,
+      compact:       !!config.compact,
       // Top-level `minimal: true` applies the compact child-card layout to
       // every discovered camera. Per-camera overrides can still opt in/out
       // individually via `overrides.<entity>.minimal`. Folded into
       // card_defaults so the child-card setConfig receives it via the
       // same merge path as any other default.
-      minimal:   config.minimal === true,
+      minimal:       config.minimal === true,
+      low_bandwidth: config.low_bandwidth === true,
       overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
       card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
     };
     if (this._config.minimal) {
       this._config.card_defaults = { ...this._config.card_defaults, minimal: true };
+    }
+    if (this._config.low_bandwidth) {
+      this._config.card_defaults = { ...this._config.card_defaults, low_bandwidth: true };
     }
     this._rendered = false;
     this._lastSig  = "";

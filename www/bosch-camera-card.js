@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.3";
+const CARD_VERSION = "2.10.4";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1197,7 +1197,7 @@ class BoschCameraCard extends HTMLElement {
     }
     this._lastStreaming = isStreaming;
     if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
-      if (this.config.low_bandwidth && !this._lbmUnlocked) {
+      if (this._config?.low_bandwidth && !this._lbmUnlocked) {
         this._setLbmOverlay(true);
       } else {
         this._setLbmOverlay(false);
@@ -2197,6 +2197,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       include: Array.isArray(config.include) ? config.include : [],
       compact: !!config.compact,
       minimal: config.minimal === true,
+      low_bandwidth: config.low_bandwidth === true,
       overrides: config.overrides && typeof config.overrides === "object" ? config.overrides : {},
       card_defaults: config.card_defaults && typeof config.card_defaults === "object" ? config.card_defaults : {}
     };
@@ -2204,6 +2205,12 @@ class BoschCameraOverviewCard extends HTMLElement {
       this._config.card_defaults = {
         ...this._config.card_defaults,
         minimal: true
+      };
+    }
+    if (this._config.low_bandwidth) {
+      this._config.card_defaults = {
+        ...this._config.card_defaults,
+        low_bandwidth: true
       };
     }
     this._rendered = false;
