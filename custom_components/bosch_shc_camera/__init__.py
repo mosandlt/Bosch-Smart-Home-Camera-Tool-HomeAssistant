@@ -414,6 +414,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # After max_stream_errors, auto-fallback from LOCAL → REMOTE.
         self._stream_error_count: dict[str, int] = {}
         self._stream_fell_back: dict[str, bool] = {}  # True = currently using REMOTE fallback
+        # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
+        # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
+        self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
         # Pre-create SSL context for TLS proxy (blocking call — must not run in event loop)
         import ssl
         # SSL context created lazily on first use (ssl.create_default_context
@@ -914,10 +917,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     async def _async_local_tcp_ping(self, cam_id: str, timeout: float = 1.5) -> bool:
         """Quick TCP connect to camera port 443 on LAN — returns True if reachable.
 
-        Uses cached LAN IP from RCP (0x0a36) or known network config.
+        Tries _rcp_lan_ip_cache first, falls back to _local_creds_cache.
+        Result is written to _lan_tcp_reachable for stream pre-check reuse.
         Much faster than cloud /commissioned check (~5ms vs ~200ms).
         """
-        cam_ip = self._rcp_lan_ip_cache.get(cam_id)
+        cam_ip = self._get_cam_lan_ip(cam_id)
         if not cam_ip:
             return False  # no known LAN IP — can't ping locally
         try:
@@ -927,9 +931,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             )
             writer.close()
             await writer.wait_closed()
-            return True
+            result = True
         except (OSError, asyncio.TimeoutError):
-            return False
+            result = False
+        self._lan_tcp_reachable[cam_id] = (result, time.monotonic())
+        return result
+
+    def _get_cam_lan_ip(self, cam_id: str) -> str | None:
+        """Return the best known LAN IP for a camera, or None if not yet discovered."""
+        ip = self._rcp_lan_ip_cache.get(cam_id)
+        if ip:
+            return ip
+        creds = self._local_creds_cache.get(cam_id)
+        return creds.get("host") if creds else None
 
     def _should_check_status(self, cam_id: str, now: float, interval_status: int) -> bool:
         """Determine if this camera needs a status check this tick.
@@ -1854,6 +1868,38 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     self._stream_fell_back[cam_id] = False
             else:
                 candidates = ["REMOTE"]
+
+            # ── TCP pre-check: skip LOCAL if camera is LAN-unreachable ──────
+            # When AUTO mode has both LOCAL and REMOTE as candidates and we
+            # know the camera's LAN IP, a 1.5s TCP ping decides immediately —
+            # saving 45–100s of pre-warm timeout for cameras on a different
+            # network/VLAN or that are powered off. Result is cached 60s so
+            # repeated stream starts don't each trigger a fresh ping.
+            if "LOCAL" in candidates and "REMOTE" in candidates:
+                lan_ip = self._get_cam_lan_ip(cam_id)
+                if lan_ip:
+                    _TCP_TTL = 60.0
+                    cached_tcp = self._lan_tcp_reachable.get(cam_id)
+                    now_tcp = time.monotonic()
+                    if cached_tcp and (now_tcp - cached_tcp[1]) < _TCP_TTL:
+                        tcp_ok = cached_tcp[0]
+                        _LOGGER.debug(
+                            "TCP pre-check cache HIT for %s (%s): %s",
+                            cam_id[:8], lan_ip, "reachable" if tcp_ok else "unreachable",
+                        )
+                    else:
+                        tcp_ok = await self._async_local_tcp_ping(cam_id)
+                        _LOGGER.debug(
+                            "TCP pre-check for %s (%s): %s",
+                            cam_id[:8], lan_ip, "reachable" if tcp_ok else "unreachable",
+                        )
+                    if not tcp_ok:
+                        _LOGGER.info(
+                            "TCP pre-check: %s LAN unreachable — skipping LOCAL, using REMOTE",
+                            cam_id[:8],
+                        )
+                        candidates = ["REMOTE"]
+                        self._stream_fell_back[cam_id] = True
 
             for type_val in candidates:
                 # Reset quality params for each candidate — LOCAL override
