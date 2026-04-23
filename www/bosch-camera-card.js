@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.2";
+const CARD_VERSION = "2.10.5";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {

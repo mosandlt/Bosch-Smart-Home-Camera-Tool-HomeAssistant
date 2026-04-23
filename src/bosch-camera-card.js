@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.2";
+const CARD_VERSION = "2.10.5";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
