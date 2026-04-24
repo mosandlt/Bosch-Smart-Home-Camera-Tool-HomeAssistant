@@ -3086,6 +3086,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         cache_headers=False,
     )
     _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-card.js?v={CARD_VERSION}")
+    _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-autoplay-fix.js?v={CARD_VERSION}")
 
     return True
 
