@@ -2473,8 +2473,38 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         2. Port 11984 (HA 2024+ internal)
         3. Port 1984 (legacy / standalone go2rtc)
         """
-        stream_name = f"bosch_shc_cam_{cam_id.lower()}"
+        # HA's bundled go2rtc provider (homeassistant/components/go2rtc/__init__.py
+        # line ~380) registers streams lazily under `camera.entity_id` when a
+        # WebRTC offer or snapshot request arrives. To have our pre-registration
+        # actually benefit HA's WebRTC / snapshot paths, we must use the same
+        # name — otherwise we create a parallel stream go2rtc knows about but
+        # HA never looks at. Falls back to the legacy internal name when the
+        # camera entity hasn't been added yet (first registration race).
+        cam_entity = self._camera_entities.get(cam_id)
+        if cam_entity is not None and cam_entity.entity_id:
+            stream_name = cam_entity.entity_id
+        else:
+            stream_name = f"bosch_shc_cam_{cam_id.lower()}"
         go2rtc_src = rtsps_url
+
+        # Beta: rtspx:// scheme skips TLS verify in go2rtc. Bosch Cloud's RTSPS
+        # proxy returns a cert for *.residential.connect.boschsecurity.com but
+        # serves session URLs on proxy-NN.live.cbs.boschsecurity.com hosts —
+        # go2rtc's native Go RTSP client refuses the mismatch. Without rtspx://
+        # the registration succeeds but the first consumer request 500s with
+        # "tls: failed to verify certificate", HA never consumes from go2rtc,
+        # and we lose the keyframe cache / WebRTC path. Gated behind a Beta
+        # option while we gather real-world data.
+        # See: https://github.com/AlexxIT/go2rtc/blob/master/internal/rtsp/README.md
+        if (
+            get_options(self._entry).get("experimental_go2rtc_rtspx", False)
+            and go2rtc_src.startswith("rtsps://")
+        ):
+            go2rtc_src = "rtspx://" + go2rtc_src[len("rtsps://"):]
+            _LOGGER.debug(
+                "go2rtc: rewriting rtsps→rtspx for %s (experimental_go2rtc_rtspx)",
+                cam_id[:8],
+            )
 
         # Try multiple go2rtc API endpoints
         endpoints = [
@@ -2496,20 +2526,54 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         except (OSError, RuntimeError) as err:
                             _LOGGER.debug("go2rtc Unix socket connector unavailable: %s", err)
                     async with aiohttp.ClientSession(connector=connector) as s:
+                        put_url = url if not connector else "http://localhost/api/streams"
                         resp = await s.put(
-                            url if not connector else "http://localhost/api/streams",
+                            put_url,
                             params={"src": go2rtc_src, "name": stream_name},
                         )
-                        if resp.status in (200, 201, 204):
-                            _LOGGER.info(
-                                "go2rtc stream '%s' registered via %s",
-                                stream_name, "unix socket" if connector else url,
+                        body = await resp.text()
+                        # go2rtc bundled with HA writes the stream to its in-memory
+                        # registry via URL query params, THEN tries to persist to
+                        # /config/go2rtc.yaml. The YAML-persist step fails on HA
+                        # (minimal go2rtc.yaml not meant for writes) and returns
+                        # HTTP 400 with body `yaml: ... did not find expected key`
+                        # — but the in-memory stream is registered. Verified live
+                        # (go2rtc 1.9.12) + documented at
+                        # https://github.com/AlexxIT/go2rtc/issues/1386.
+                        is_yaml_persist_warning = (
+                            resp.status == 400 and body.startswith("yaml:")
+                        )
+                        if resp.status in (200, 201, 204) or is_yaml_persist_warning:
+                            # Verify by probing /api/streams?src=<name> — returns
+                            # producers/consumers JSON when registered, 404 when
+                            # not. This catches any silent mis-registration.
+                            verified = False
+                            try:
+                                check_url = put_url + f"?src={stream_name}"
+                                async with s.get(check_url) as check_resp:
+                                    if check_resp.status == 200:
+                                        verified = True
+                            except (asyncio.TimeoutError, aiohttp.ClientError):
+                                pass
+                            if verified:
+                                _LOGGER.info(
+                                    "go2rtc stream '%s' registered via %s (HTTP %d%s)",
+                                    stream_name,
+                                    "unix socket" if connector else url,
+                                    resp.status,
+                                    ", yaml-persist warn ignored" if is_yaml_persist_warning else "",
+                                )
+                                return  # success
+                            _LOGGER.debug(
+                                "go2rtc PUT returned %d via %s but verify GET missed '%s' — trying next endpoint",
+                                resp.status, "unix socket" if connector else url, stream_name,
                             )
-                            return  # success
+                            continue
                         _LOGGER.debug(
-                            "go2rtc stream '%s' → HTTP %d via %s (go2rtc not running?)",
+                            "go2rtc stream '%s' → HTTP %d via %s (body: %s)",
                             stream_name, resp.status,
                             "unix socket" if connector else url,
+                            body[:80],
                         )
                         continue
             except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
@@ -2518,8 +2582,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("go2rtc API not reachable on any endpoint — using TLS proxy + HLS")
 
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
-        """Remove the camera stream from go2rtc when the live session ends."""
-        stream_name = f"bosch_shc_cam_{cam_id.lower()}"
+        """Remove the camera stream from go2rtc when the live session ends.
+
+        Name must match _register_go2rtc_stream — prefer camera.entity_id
+        (HA's bundled go2rtc provider uses this) and fall back to the legacy
+        internal name when the entity is unavailable.
+        """
+        cam_entity = self._camera_entities.get(cam_id)
+        if cam_entity is not None and cam_entity.entity_id:
+            stream_name = cam_entity.entity_id
+        else:
+            stream_name = f"bosch_shc_cam_{cam_id.lower()}"
         try:
             async with asyncio.timeout(3):
                 async with aiohttp.ClientSession() as s:

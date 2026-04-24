@@ -63,4 +63,12 @@ DEFAULT_OPTIONS = {
     "smb_disk_warn_mb": 5120,
     "debug_logging": False,
     "enable_go2rtc": True,
+    # Beta: route Bosch Cloud (REMOTE) RTSPS through go2rtc with rtspx:// scheme
+    # to skip TLS verify. Bosch Cloud returns a cert for
+    # *.residential.connect.boschsecurity.com but serves session URLs on hosts
+    # like proxy-NN.live.cbs.boschsecurity.com — go2rtc's native RTSP client
+    # refuses these. Without this flag, go2rtc registration silently fails
+    # and HA falls back to direct FFmpeg (TLS-default-lax), bypassing go2rtc's
+    # keyframe cache and WebRTC path. Default OFF until validated with users.
+    "experimental_go2rtc_rtspx": False,
 }
