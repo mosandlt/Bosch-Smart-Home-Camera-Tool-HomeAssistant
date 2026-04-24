@@ -60,7 +60,7 @@
           "smb_retention_days":      "Retention period (days, 0 = keep forever)",
           "smb_disk_warn_mb":        "Low disk warning threshold (MB, 0 = disabled)",
           "enable_go2rtc":           "go2rtc WebRTC (low-latency streaming ~2s)",
-          "experimental_go2rtc_rtspx": "Beta: lower cloud stream lag (go2rtc rtspx://)",
+          "experimental_go2rtc_rtspx": "Route Bosch Cloud via go2rtc (rtspx:// — skip TLS verify)",
           "force_relogin":           "Force new browser login"
         },
         "data_description": {
@@ -99,7 +99,7 @@
           "smb_retention_days":      "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
           "smb_disk_warn_mb":        "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
           "enable_go2rtc":           "Automatically set up go2rtc for WebRTC streaming (~2s latency instead of ~12s HLS). Enabled by default. Disable if you don't want go2rtc or have your own streaming setup.",
-          "experimental_go2rtc_rtspx": "Beta — only for cloud (REMOTE) streaming. Registers the Bosch cloud RTSPS URL in go2rtc with the rtspx:// scheme (skip TLS verify), working around a Bosch cloud cert hostname mismatch that otherwise silently breaks go2rtc ingest. With this flag the integration can route cloud streams through go2rtc's keyframe cache / WebRTC path (shorter initial delay). Default OFF — enable to help us test, disable if you see any stream issues.",
+          "experimental_go2rtc_rtspx": "Only affects Cloud (REMOTE) streams. Registers the Bosch cloud RTSPS URL in go2rtc with the rtspx:// scheme (skip TLS verify), working around a Bosch cert hostname mismatch that otherwise silently breaks go2rtc ingest. Enables go2rtc's WebRTC and snapshot paths for cloud streams. Default ON since v10.3.22 — disable only if you observe cloud stream regressions.",
           "force_relogin":           "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare)."
         }
       },

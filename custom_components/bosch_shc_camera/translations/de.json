@@ -80,7 +80,7 @@
           "smb_file_pattern": "Dateiname-Muster",
           "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)",
           "smb_disk_warn_mb": "Speicherwarnung unter (MB, 0 = deaktiviert)",
-          "experimental_go2rtc_rtspx": "Beta: geringerer Cloud-Stream-Lag (go2rtc rtspx://)",
+          "experimental_go2rtc_rtspx": "Bosch Cloud via go2rtc leiten (rtspx:// — TLS-Verifikation überspringen)",
           "force_relogin": "Neu anmelden (Browser-Login)",
           "migrate_to_oss_client": "Zu neuem OAuth-Client wechseln (oss_residential_app)"
         },
@@ -121,7 +121,7 @@
           "smb_file_pattern": "Dateiname-Muster (ohne Endung). Variablen: [camera], [date], [time], [type], [id], [year], [month], [day]. Standard: [camera]_[date]_[time]_[type]_[id]",
           "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich.",
           "smb_disk_warn_mb": "Alert senden wenn der freie Speicher auf dem NAS unter diesen Schwellwert fällt (in MB). 0 = deaktiviert. Standard: 5120 MB (5 GB). Nutzt konfigurierten Notify-Dienst, Fallback auf HA-Benachrichtigung.",
-          "experimental_go2rtc_rtspx": "Beta — betrifft nur Cloud-Streams (REMOTE). Registriert die Bosch-Cloud-RTSPS-URL in go2rtc mit dem Schema rtspx:// (TLS-Verifikation überspringen), umgeht so ein Bosch-Cloud-Zertifikatsproblem, das sonst das go2rtc-Ingest stillschweigend brechen lässt. Mit diesem Flag kann die Integration Cloud-Streams über den Keyframe-Cache / WebRTC-Pfad von go2rtc leiten (kürzere Startverzögerung). Standard AUS — zum Testen aktivieren, bei Stream-Problemen wieder ausschalten.",
+          "experimental_go2rtc_rtspx": "Betrifft nur Cloud (REMOTE)-Streams. Registriert die Bosch-Cloud-RTSPS-URL in go2rtc mit rtspx:// (TLS-Verifikation überspringen), umgeht so ein Bosch-Zertifikats-Hostname-Problem, das sonst das go2rtc-Ingest stillschweigend brechen lässt. Ermöglicht go2rtc-WebRTC und Snapshot-Pfade für Cloud-Streams. Standard AN seit v10.3.22 — nur ausschalten falls Cloud-Stream-Regressionen auftreten.",
           "force_relogin": "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten).",
           "migrate_to_oss_client": "Wechsle vom alten `residential_app`-Client zum dedizierten `oss_residential_app`-Client, den Bosch für Open-Source-Integrationen bereitstellt. Beim Aktivieren wird der Reauth-Flow gestartet — du musst dich einmalig über die Bosch SingleKey ID anmelden. Alle Entitäten, Automationen und Optionen bleiben erhalten."
         }

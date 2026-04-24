@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.6";
+const CARD_VERSION = "2.10.7";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -573,6 +573,11 @@ class BoschCameraCard extends HTMLElement {
         .loading-text {
           font-size: 13px; color: rgba(255,255,255,.75); font-weight: 500;
         }
+        .loading-hint {
+          font-size: 11px; color: rgba(255,255,255,.5); font-weight: 400;
+          margin-top: 4px; display: block; text-align: center; max-width: 220px;
+        }
+        .loading-hint:empty { display: none; }
 
         /* Offline overlay — shown when status sensor is OFFLINE */
         .offline-overlay {
@@ -856,6 +861,7 @@ class BoschCameraCard extends HTMLElement {
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
+            <span class="loading-hint" id="loading-hint"></span>
           </div>
           <div class="offline-overlay" id="offline-overlay">
             <svg viewBox="0 0 24 24">
@@ -1841,6 +1847,7 @@ class BoschCameraCard extends HTMLElement {
   _setLoadingOverlay(visible, text = "Bild wird geladen…") {
     const overlay  = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
+    const hintEl   = this.shadowRoot.getElementById("loading-hint");
     const img      = this.shadowRoot.getElementById("cam-img");
     this._loadingOverlay = visible;
     if (overlay) {
@@ -1849,6 +1856,18 @@ class BoschCameraCard extends HTMLElement {
       overlay.classList.toggle("refreshing", visible && this._imageLoaded);
     }
     if (loadText) loadText.textContent = text;
+    // Secondary hint: during stream start, reassure user the current wait is normal
+    // by showing expected total time based on connection type (read live from HA state).
+    if (hintEl) {
+      if (visible && (this._streamConnecting || this._startingLiveVideo || this._waitingForStream)) {
+        const ct = this._hass?.states?.[this._entities?.switch]?.attributes?.connection_type;
+        if (ct === "REMOTE")       hintEl.textContent = "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil";
+        else if (ct === "LOCAL")   hintEl.textContent = "LAN-Stream — ca. 25–35 s bis erstes Bild";
+        else                        hintEl.textContent = "Verbindung zur Kamera wird aufgebaut…";
+      } else {
+        hintEl.textContent = "";
+      }
+    }
     // Only hide image on first load when there's nothing to show yet
     if (img) img.classList.toggle("hidden", visible && !this._imageLoaded);
 

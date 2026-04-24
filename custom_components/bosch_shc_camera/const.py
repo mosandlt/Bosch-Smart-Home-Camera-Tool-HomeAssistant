@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "2.10.6"
+CARD_VERSION = "2.10.7"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -63,12 +63,13 @@ DEFAULT_OPTIONS = {
     "smb_disk_warn_mb": 5120,
     "debug_logging": False,
     "enable_go2rtc": True,
-    # Beta: route Bosch Cloud (REMOTE) RTSPS through go2rtc with rtspx:// scheme
+    # Route Bosch Cloud (REMOTE) RTSPS through go2rtc with rtspx:// scheme
     # to skip TLS verify. Bosch Cloud returns a cert for
     # *.residential.connect.boschsecurity.com but serves session URLs on hosts
     # like proxy-NN.live.cbs.boschsecurity.com — go2rtc's native RTSP client
-    # refuses these. Without this flag, go2rtc registration silently fails
-    # and HA falls back to direct FFmpeg (TLS-default-lax), bypassing go2rtc's
-    # keyframe cache and WebRTC path. Default OFF until validated with users.
-    "experimental_go2rtc_rtspx": False,
+    # refuses these. Without this option, go2rtc registration silently fails
+    # and HA falls back to direct FFmpeg, bypassing go2rtc's keyframe cache
+    # and WebRTC path. Default ON from v10.3.22 (Beta-tested on Gen2 Outdoor II
+    # in v10.3.21, no regressions observed). Kept as option for escape hatch.
+    "experimental_go2rtc_rtspx": True,
 }
