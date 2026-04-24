@@ -3,3 +3,6 @@ __pycache__/
 *.backup
 .DS_Store
 original-screenshot.png
+node_modules/
+package.json
+package-lock.json
