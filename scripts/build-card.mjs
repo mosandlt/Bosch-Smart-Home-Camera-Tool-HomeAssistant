@@ -9,7 +9,7 @@
 // Requires: npm install terser (or run via npx)
 
 import { minify } from "terser";
-import { readFileSync, writeFileSync } from "fs";
+import { copyFileSync, readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 
@@ -58,6 +58,14 @@ const card = await stripFile(
   BANNER,
 );
 console.log(`bosch-camera-card.js:          ${card.srcBytes} -> ${card.outBytes} bytes`);
+
+// Mirror into integration www/ — HACS ships this alongside the integration,
+// and __init__.py registers it via add_extra_js_url (no manual resource needed).
+copyFileSync(
+  resolve(repoRoot, "www/bosch-camera-card.js"),
+  resolve(repoRoot, "custom_components/bosch_shc_camera/www/bosch-camera-card.js"),
+);
+console.log("Mirrored to custom_components/bosch_shc_camera/www/");
 
 // Autoplay fix: strip in place (no src/ version — it's small and doesn't
 // need the same build workflow, but we still strip comments for consistency)

@@ -3066,6 +3066,27 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # the config entry is in setup_retry (e.g. token expired).
     # Without this, the Lovelace card shows "action not found" errors.
     _register_services(hass)
+
+    # Register the Lovelace card JS so users don't need to add/update the
+    # resource URL manually. HA serves www/ with max-age=31 days, so we use
+    # register_static_path with cache_headers=False (no-store) + ?v= in the
+    # URL to bust any proxy/CDN cache on version bumps.
+    from pathlib import Path as _Path
+    from homeassistant.components.frontend import add_extra_js_url as _add_extra_js_url
+    from .const import CARD_VERSION
+    _www = _Path(__file__).parent / "www"
+    hass.http.register_static_path(
+        f"/{DOMAIN}/bosch-camera-card.js",
+        str(_www / "bosch-camera-card.js"),
+        cache_headers=False,
+    )
+    hass.http.register_static_path(
+        f"/{DOMAIN}/bosch-camera-autoplay-fix.js",
+        str(_www / "bosch-camera-autoplay-fix.js"),
+        cache_headers=False,
+    )
+    _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-card.js?v={CARD_VERSION}")
+
     return True
 
 
