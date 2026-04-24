@@ -3068,23 +3068,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     _register_services(hass)
 
     # Register the Lovelace card JS so users don't need to add/update the
-    # resource URL manually. HA serves www/ with max-age=31 days, so we use
-    # register_static_path with cache_headers=False (no-store) + ?v= in the
-    # URL to bust any proxy/CDN cache on version bumps.
+    # resource URL manually. cache_headers=False → no-store, bypassing HA's
+    # 31-day max-age. ?v= in the URL busts any upstream proxy/CDN cache.
     from pathlib import Path as _Path
     from homeassistant.components.frontend import add_extra_js_url as _add_extra_js_url
+    from homeassistant.components.http import StaticPathConfig as _StaticPathConfig
     from .const import CARD_VERSION
     _www = _Path(__file__).parent / "www"
-    hass.http.register_static_path(
-        f"/{DOMAIN}/bosch-camera-card.js",
-        str(_www / "bosch-camera-card.js"),
-        cache_headers=False,
-    )
-    hass.http.register_static_path(
-        f"/{DOMAIN}/bosch-camera-autoplay-fix.js",
-        str(_www / "bosch-camera-autoplay-fix.js"),
-        cache_headers=False,
-    )
+    await hass.http.async_register_static_paths([
+        _StaticPathConfig(f"/{DOMAIN}/bosch-camera-card.js", str(_www / "bosch-camera-card.js"), False),
+        _StaticPathConfig(f"/{DOMAIN}/bosch-camera-autoplay-fix.js", str(_www / "bosch-camera-autoplay-fix.js"), False),
+    ])
     _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-card.js?v={CARD_VERSION}")
     _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-autoplay-fix.js?v={CARD_VERSION}")
 
