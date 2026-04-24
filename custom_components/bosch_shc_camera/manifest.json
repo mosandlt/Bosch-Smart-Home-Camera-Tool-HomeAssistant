@@ -3,12 +3,13 @@
   "name":              "Bosch Smart Home Camera",
   "documentation":     "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant",
   "issue_tracker":     "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues",
-  "dependencies":      ["frontend", "my"],
+  "dependencies":      ["my"],
   "codeowners":        ["@mosandlt"],
   "requirements":      ["requests>=2.28.0", "firebase-messaging>=0.4.0", "smbprotocol>=1.10.0"],
   "iot_class":         "cloud_push",
   "config_flow":       true,
   "integration_type":  "hub",
-  "version":           "10.3.17",
+  "homeassistant":     "2024.1.0",
+  "version":           "10.3.18",
   "loggers":           ["bosch_shc_camera"]
 }
