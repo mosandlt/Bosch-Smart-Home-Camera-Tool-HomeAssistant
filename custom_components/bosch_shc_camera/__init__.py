@@ -3067,20 +3067,71 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Without this, the Lovelace card shows "action not found" errors.
     _register_services(hass)
 
-    # Register the Lovelace card JS so users don't need to add/update the
-    # resource URL manually. cache_headers=False → no-store, bypassing HA's
-    # 31-day max-age. ?v= in the URL busts any upstream proxy/CDN cache.
+    # Serve the bundled card JS files via HA's static path handler.
+    # cache_headers=False → no-store so browsers always revalidate.
     from pathlib import Path as _Path
-    from homeassistant.components.frontend import add_extra_js_url as _add_extra_js_url
     from homeassistant.components.http import StaticPathConfig as _StaticPathConfig
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
     from .const import CARD_VERSION
     _www = _Path(__file__).parent / "www"
     await hass.http.async_register_static_paths([
         _StaticPathConfig(f"/{DOMAIN}/bosch-camera-card.js", str(_www / "bosch-camera-card.js"), False),
         _StaticPathConfig(f"/{DOMAIN}/bosch-camera-autoplay-fix.js", str(_www / "bosch-camera-autoplay-fix.js"), False),
     ])
-    _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-card.js?v={CARD_VERSION}")
-    _add_extra_js_url(hass, f"/{DOMAIN}/bosch-camera-autoplay-fix.js?v={CARD_VERSION}")
+
+    async def _register_lovelace_resources() -> None:
+        """Write card URLs into Lovelace resource storage (appears in UI)."""
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            _LOGGER.warning("%s: Lovelace not available — card not auto-registered", DOMAIN)
+            return
+        resources = lovelace.resources
+        await resources.async_load()
+
+        # Remove legacy /local/ entries left over from pre-v10.3.19 installs.
+        # Having both old and new entries causes the card to load twice, which
+        # triggers a "custom element already defined" error and the older cached
+        # version wins.
+        _legacy_prefixes = ("/local/bosch-camera-card", "/local/bosch-camera-autoplay-fix")
+        for item in list(resources.async_items()):
+            if item.get("url", "").startswith(_legacy_prefixes):
+                await resources.async_delete_item(item["id"])
+                _LOGGER.debug("%s: Removed legacy Lovelace resource: %s", DOMAIN, item["url"])
+
+        for card_path in (
+            f"/{DOMAIN}/bosch-camera-card.js",
+            f"/{DOMAIN}/bosch-camera-autoplay-fix.js",
+        ):
+            versioned = f"{card_path}?v={CARD_VERSION}"
+            existing_id = None
+            already_current = False
+            for item in resources.async_items():
+                item_url = item.get("url", "")
+                if item_url.startswith(card_path):
+                    already_current = (item_url == versioned)
+                    existing_id = item["id"]
+                    break
+            if already_current:
+                _LOGGER.debug("%s: Lovelace resource already current: %s", DOMAIN, versioned)
+                continue
+            if existing_id:
+                await resources.async_update_item(existing_id, {"res_type": "module", "url": versioned})
+                _LOGGER.debug("%s: Updated Lovelace resource: %s", DOMAIN, versioned)
+            else:
+                await resources.async_create_item({"res_type": "module", "url": versioned})
+                _LOGGER.debug("%s: Registered Lovelace resource: %s", DOMAIN, versioned)
+
+    if hass.is_running:
+        # Integration reloaded while HA is already up
+        await _register_lovelace_resources()
+    else:
+        from homeassistant.core import callback as _callback
+
+        @_callback
+        def _on_ha_started(_event) -> None:
+            hass.async_create_task(_register_lovelace_resources())
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_ha_started)
 
     return True
 
