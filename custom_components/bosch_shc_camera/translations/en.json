@@ -18,7 +18,7 @@
           "redirect_url": "Redirect URL"
         },
         "data_description": {
-          "redirect_url": "The full URL from the browser address bar after login (starts with https://www.bosch.com/boschcam?code=...)"
+          "redirect_url": "The full URL from the browser address bar after login (contains the authorization code)"
         }
       },
       "reauth_confirm": {
@@ -143,7 +143,7 @@
           "redirect_url": "Redirect URL"
         },
         "data_description": {
-          "redirect_url": "Full URL from browser address bar (starts with https://www.bosch.com/boschcam?code=...)"
+          "redirect_url": "Full URL from browser address bar after login (contains the authorization code)"
         }
       }
     },

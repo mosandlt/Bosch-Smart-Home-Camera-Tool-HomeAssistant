@@ -780,6 +780,7 @@ Everything renders automatically when the integration detects a Gen2 Indoor II.
 
 | Version | Changes |
 |---------|---------|
+| **v10.3.20** | **CI compliance:** Add `.github/workflows/validate.yml` (HACS action + Hassfest) running on push/PR/daily. `manifest.json` cleanup — drop invalid `homeassistant` key (belongs in `hacs.json`), add `http` to `dependencies` (used but undeclared), sort keys per Hassfest rule (domain, name, then alphabetical). Remove bare URLs from `data_description` fields in `strings.json` + `translations/en.json` (Hassfest disallows URLs there). No user-visible changes. |
 | **v10.3.19** | **Fix: Lovelace card auto-registration rewritten to use the correct HA API.** Uses `hass.data["lovelace"].resources` to write card URLs directly into Lovelace resource storage — visible in Settings → Dashboards → Resources, updates automatically on version bump, no manual steps for users. Legacy `/local/bosch-camera-card.js` entries from older installs are automatically removed to prevent double-loading. |
 | **v10.3.18** | **Fix: person/audio notification switches and binary sensors use featureSupport.sound from API (not hardcoded model). All cameras get person switch (cloud AI). manifest.json: remove invalid `frontend` dependency, add `homeassistant: 2024.1.0` min version.** |
 | **v10.3.17** | **Fix: also auto-register `bosch-camera-autoplay-fix.js` via `add_extra_js_url`. Add `node_modules/`, `package.json`, `package-lock.json` to `.gitignore`.** Both card scripts now load automatically — no Lovelace resource entries needed at all. |
