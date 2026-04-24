@@ -96,6 +96,13 @@ async def async_start_fcm_push(coordinator) -> None:
         _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
         return
 
+    # FcmPushClientConfig landed in firebase-messaging 0.4; guard defensively
+    # so older installs still start (without the hardening).
+    try:
+        from firebase_messaging import FcmPushClientConfig
+    except ImportError:  # pragma: no cover — 0.4+ ships this symbol
+        FcmPushClientConfig = None
+
     # Determine push mode
     push_mode = coordinator.options.get("fcm_push_mode", "auto")
 
@@ -157,12 +164,24 @@ async def async_start_fcm_push(coordinator) -> None:
             """Called when a push notification arrives from Bosch CBS."""
             _on_fcm_push(coordinator, notification, persistent_id, obj)
 
-        coordinator._fcm_client = FcmPushClient(
-            callback=_on_push,
-            fcm_config=fcm_config,
-            credentials=saved_fcm_creds,
-            credentials_updated_callback=_on_creds_updated,
-        )
+        # v10.3.22: harden against firebase-messaging#33. Default config aborts
+        # the listener after 3 sequential CONNECTION errors (e.g. WAN blip) and
+        # never reconnects — the client goes silent, our sensor keeps reporting
+        # "fcm_push" while no pushes arrive. Passing None disables the abort;
+        # library handles normal reconnect. Coordinator-tick watchdog below
+        # (__init__.py) flips _fcm_healthy=False if no push in 1h, so the
+        # dashboard sensor still shows the degraded state.
+        fcm_kwargs = {
+            "callback": _on_push,
+            "fcm_config": fcm_config,
+            "credentials": saved_fcm_creds,
+            "credentials_updated_callback": _on_creds_updated,
+        }
+        if FcmPushClientConfig is not None:
+            fcm_kwargs["config"] = FcmPushClientConfig(
+                abort_on_sequential_error_count=None,
+            )
+        coordinator._fcm_client = FcmPushClient(**fcm_kwargs)
 
         try:
             coordinator._fcm_token = await coordinator._fcm_client.checkin_or_register()

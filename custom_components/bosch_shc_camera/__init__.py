@@ -989,7 +989,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             self._first_tick_done = True
 
         do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
+        # v10.3.22: FCM silent-death watchdog. firebase-messaging#33 describes
+        # how the listener can terminate after WAN blips (disabled via
+        # abort_on_sequential_error_count=None in fcm.py, but library-level
+        # _terminate() paths still exist on unhandled exceptions). We use the
+        # library's own FcmPushClient.is_started() as the authoritative liveness
+        # signal — it returns False once run_state leaves STARTED. Flipping
+        # _fcm_healthy=False makes the existing BoschFcmPushStatusSensor switch
+        # from "fcm_push" to "polling" — silent death becomes visible without a
+        # new entity. Uses a is_started check rather than "no push in 1h" so
+        # we don't misfire when the cameras are simply idle overnight.
         with self._fcm_lock:
+            fcm_dead = False
+            if opts.get("enable_fcm_push", False) and self._fcm_running and self._fcm_healthy:
+                try:
+                    fcm_dead = self._fcm_client is not None and not self._fcm_client.is_started()
+                except Exception:  # noqa: BLE001 — library API may vary across versions
+                    fcm_dead = False
+            if fcm_dead:
+                self._fcm_healthy = False
+                _LOGGER.warning(
+                    "FCM push watchdog: FcmPushClient.is_started()=False — "
+                    "listener terminated, flagging unhealthy (polling tempo resumes)"
+                )
             _fcm_healthy = self._fcm_healthy
         if _fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
