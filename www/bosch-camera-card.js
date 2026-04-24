@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.5";
+const CARD_VERSION = "2.10.6";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -819,9 +819,7 @@ class BoschCameraCard extends HTMLElement {
               this._stallCount = 0;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => {
-                  if (this._isStreaming()) this._startLiveVideo();
-                }, 1e3);
+                setTimeout(() => this._reconnectAfterStreamDrop(), 1e3);
               }
             }
             return;
@@ -835,9 +833,7 @@ class BoschCameraCard extends HTMLElement {
             console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
             this._stopLiveVideo();
             if (this._isStreaming()) {
-              setTimeout(() => {
-                if (this._isStreaming()) this._startLiveVideo();
-              }, 2e3);
+              setTimeout(() => this._reconnectAfterStreamDrop(), 2e3);
             }
           }
         });
@@ -858,7 +854,16 @@ class BoschCameraCard extends HTMLElement {
       activateVideo();
     } catch (e) {
       if (attempt < 5) {
-        setTimeout(() => this._startLiveVideo(attempt + 1), 1500);
+        setTimeout(() => {
+          const cam = this._hass?.states[this._entities.camera];
+          if (cam?.state === "streaming") {
+            this._startLiveVideo(attempt + 1);
+          } else if (this._isStreaming() && !this._waitingForStream) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+            this._waitForStreamReady();
+          }
+        }, 1500);
       } else {
         console.warn("bosch-camera-card: stream not available (attempt " + attempt + "), retrying in 10s", e);
         this._liveVideoActive = false;
@@ -927,6 +932,17 @@ class BoschCameraCard extends HTMLElement {
         resolve();
       };
     });
+  }
+  _reconnectAfterStreamDrop() {
+    if (!this._isStreaming()) return;
+    const cam = this._hass?.states[this._entities.camera];
+    if (cam?.state === "streaming") {
+      this._startLiveVideo();
+    } else if (!this._waitingForStream) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+      this._waitForStreamReady();
+    }
   }
   _stopLiveVideo() {
     if (this._hls) {

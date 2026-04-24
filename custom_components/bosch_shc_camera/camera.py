@@ -90,17 +90,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     ) -> None:
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
-
-        # Force FFmpeg to use TCP interleaved transport for RTSP SETUP.
-        # HA 2026.4 ships FFmpeg Lavf 62.3.100, which rejects the UDP→TCP
-        # transport rewrite the TLS proxy used to do (the response transport
-        # didn't match the request transport) with "Invalid data found when
-        # processing input" — the fix is to have FFmpeg request TCP up-front
-        # so the camera's TCP response matches. `Camera.__init__` sets
-        # `self.stream_options = {}` unconditionally, so this must be
-        # assigned *after* the super init. Read by HA's stream component at
-        # `create_stream(options=self.stream_options)`.
-        self.stream_options = {"rtsp_transport": "tcp"}
+        # stream_options is set dynamically in stream_source() based on connection
+        # type (LOCAL needs rtsp_transport=tcp; REMOTE uses FFmpeg default).
 
         self._cam_id = cam_id
         self._entry  = entry
@@ -393,6 +384,13 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         url = live.get("rtspsUrl") or live.get("rtspUrl") or None
         if not url:
             return None
+        # LOCAL streams go through our TLS proxy (plain TCP → TLS). HA 2026.4 /
+        # FFmpeg Lavf 62 rejects the UDP→TCP transport rewrite the proxy used to
+        # do, so we force TCP interleaved on SETUP. REMOTE streams go directly to
+        # the Bosch cloud proxy via rtsps:// and must use the FFmpeg default
+        # (UDP) — forcing TCP on REMOTE breaks Gen1 Eyes Outdoor cloud streams.
+        is_local = live.get("_connection_type") == "LOCAL"
+        self.stream_options = {"rtsp_transport": "tcp"} if is_local else {}
         # Strip audio param if audio switch is OFF (default)
         if not self.coordinator._audio_enabled.get(self._cam_id, True):
             url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")

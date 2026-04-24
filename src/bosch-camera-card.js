@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.5";
+const CARD_VERSION = "2.10.6";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2097,7 +2097,7 @@ class BoschCameraCard extends HTMLElement {
               this._stallCount = 0;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 1000);
+                setTimeout(() => this._reconnectAfterStreamDrop(), 1000);
               }
             }
             return;
@@ -2111,7 +2111,7 @@ class BoschCameraCard extends HTMLElement {
             console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
             this._stopLiveVideo();
             if (this._isStreaming()) {
-              setTimeout(() => { if (this._isStreaming()) this._startLiveVideo(); }, 2000);
+              setTimeout(() => this._reconnectAfterStreamDrop(), 2000);
             }
           }
         });
@@ -2135,8 +2135,21 @@ class BoschCameraCard extends HTMLElement {
 
     } catch (e) {
       if (attempt < 5) {
-        // Quick retries for transient errors (WS not ready yet)
-        setTimeout(() => this._startLiveVideo(attempt + 1), 1500);
+        // Re-check camera state before retrying: if the backend connection died,
+        // the camera entity goes to "idle" (supported_features loses STREAM) and
+        // calling camera/stream WS immediately produces "does not support play
+        // stream service" errors. Use _waitForStreamReady() instead so we wait
+        // until the backend re-establishes the connection.
+        setTimeout(() => {
+          const cam = this._hass?.states[this._entities.camera];
+          if (cam?.state === "streaming") {
+            this._startLiveVideo(attempt + 1);
+          } else if (this._isStreaming() && !this._waitingForStream) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+            this._waitForStreamReady();
+          }
+        }, 1500);
       } else {
         // After 5 attempts, back off but DON'T give up permanently.
         // Schedule a retry in 10s — the stream may still be starting.
@@ -2212,6 +2225,23 @@ class BoschCameraCard extends HTMLElement {
         resolve();
       };
     });
+  }
+
+  _reconnectAfterStreamDrop() {
+    // Called after HLS stall/fatal error to restart the stream. Re-checks
+    // camera state first: if the backend connection dropped, the camera entity
+    // goes to "idle" (CameraEntityFeature.STREAM is cleared), and calling
+    // camera/stream WS immediately produces "does not support play stream
+    // service" errors. Use _waitForStreamReady() to wait for the backend.
+    if (!this._isStreaming()) return;
+    const cam = this._hass?.states[this._entities.camera];
+    if (cam?.state === "streaming") {
+      this._startLiveVideo();
+    } else if (!this._waitingForStream) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+      this._waitForStreamReady();
+    }
   }
 
   _stopLiveVideo() {
