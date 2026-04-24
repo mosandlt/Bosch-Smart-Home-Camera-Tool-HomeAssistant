@@ -10,6 +10,6 @@
   "config_flow":       true,
   "integration_type":  "hub",
   "homeassistant":     "2024.1.0",
-  "version":           "10.3.18",
+  "version":           "10.3.19",
   "loggers":           ["bosch_shc_camera"]
 }
