@@ -46,17 +46,14 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensor entities for each camera."""
     coordinator: BoschCameraCoordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    from .models import get_model_config
     entities = []
     for cam_id in coordinator.data:
-        hw = coordinator.data[cam_id].get("info", {}).get("hardwareVersion", "")
-        cfg = get_model_config(hw)
-        has_mic = hw not in ("CAMERA_EYES", "OUTDOOR")
+        cam_info = coordinator.data[cam_id].get("info", {})
+        has_sound = cam_info.get("featureSupport", {}).get("sound", False)
         entities.append(BoschMotionBinarySensor(coordinator, cam_id, config_entry))
-        if has_mic:
+        entities.append(BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry))
+        if has_sound:
             entities.append(BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry))
-        if cfg.generation >= 2:
-            entities.append(BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 

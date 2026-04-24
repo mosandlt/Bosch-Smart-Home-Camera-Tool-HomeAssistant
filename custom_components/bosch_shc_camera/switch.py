@@ -198,17 +198,12 @@ async def async_setup_entry(
             entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry))
-        # Notification type toggles — gated by hardware capability:
-        # - person: Gen2 only (cloud AI detection not available on Gen1)
-        # - audio: cameras with microphone (Gen1 Indoor + all Gen2; Gen1 Outdoor has no mic)
-        # - movement/trouble/cameraAlarm/troubleEmail: all cameras
-        _is_gen2_notif = get_model_config(hw_version).generation >= 2
-        _has_mic = hw_version not in ("CAMERA_EYES", "OUTDOOR")
-        for ntype in ("movement", "trouble", "cameraAlarm", "troubleEmail"):
+        # Notification type toggles — person is cloud AI (all cameras);
+        # audio gated on featureSupport.sound (API-reported, not hardcoded by model).
+        has_sound = cam_info.get("featureSupport", {}).get("sound", False)
+        for ntype in ("movement", "person", "trouble", "cameraAlarm", "troubleEmail"):
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
-        if _is_gen2_notif:
-            entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "person"))
-        if _has_mic:
+        if has_sound:
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio"))
         # Gen2 Indoor II — alarm system (integrated 75 dB siren) + audio alarm (glass/smoke/CO)
         if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
