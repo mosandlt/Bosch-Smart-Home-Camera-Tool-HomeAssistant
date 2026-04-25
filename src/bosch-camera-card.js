@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.7";
+const CARD_VERSION = "2.10.8";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -1845,6 +1845,14 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _setLoadingOverlay(visible, text = "Bild wird geladen…") {
+    // Suppress flicker during stream startup: if a connecting/waiting state is
+    // active, snapshot-load callbacks must not hide the overlay (the spinner
+    // would reappear a moment later when stream-startup advances to its next
+    // step), and external paths must not overwrite the progressive timeline
+    // text from _toggleStream — let that timeline own the messaging.
+    const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+    if (!visible && streamStarting) return;
+    if (visible && streamStarting && this._streamConnecting && text === "Bild wird geladen…") return;
     const overlay  = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
     const hintEl   = this.shadowRoot.getElementById("loading-hint");

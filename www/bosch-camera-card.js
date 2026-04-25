@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.7";
+const CARD_VERSION = "2.10.8";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -624,6 +624,9 @@ class BoschCameraCard extends HTMLElement {
     this._setLoadingOverlay(false);
   }
   _setLoadingOverlay(visible, text = "Bild wird geladen…") {
+    const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+    if (!visible && streamStarting) return;
+    if (visible && streamStarting && this._streamConnecting && text === "Bild wird geladen…") return;
     const overlay = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
     const hintEl = this.shadowRoot.getElementById("loading-hint");
