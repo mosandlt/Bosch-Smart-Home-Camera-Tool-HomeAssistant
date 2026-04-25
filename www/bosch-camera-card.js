@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.9";
+const CARD_VERSION = "2.10.10";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -770,7 +770,13 @@ class BoschCameraCard extends HTMLElement {
         await this._startWebRTC(video, activateVideo);
         return;
       } catch (webrtcErr) {
-        console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr?.message || webrtcErr);
+        const m = String(webrtcErr?.message || webrtcErr);
+        const expectedRace = m.includes("does not support WebRTC") || m.includes("frontend_stream_types");
+        if (expectedRace) {
+          console.debug("bosch-camera-card: WebRTC race miss, falling back to HLS:", m);
+        } else {
+          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", m);
+        }
         if (this._webrtcPc) {
           try {
             this._webrtcPc.close();
