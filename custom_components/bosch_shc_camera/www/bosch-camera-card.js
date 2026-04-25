@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.8";
+const CARD_VERSION = "2.10.9";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -766,20 +766,25 @@ class BoschCameraCard extends HTMLElement {
       }, 5e3);
     };
     try {
-      const caps = await this._hass.callWS({
-        type: "camera/capabilities",
-        entity_id: this._entities.camera
-      });
-      const types = caps?.frontend_stream_types || [];
-      if (types.includes("web_rtc")) {
-        try {
-          await this._startWebRTC(video, activateVideo);
-          return;
-        } catch (webrtcErr) {
-          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr);
+      try {
+        await this._startWebRTC(video, activateVideo);
+        return;
+      } catch (webrtcErr) {
+        console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr?.message || webrtcErr);
+        if (this._webrtcPc) {
+          try {
+            this._webrtcPc.close();
+          } catch {}
+          this._webrtcPc = null;
+        }
+        if (this._webrtcUnsub) {
+          try {
+            this._webrtcUnsub();
+          } catch {}
+          this._webrtcUnsub = null;
         }
       }
-    } catch (capsErr) {}
+    } catch (outer) {}
     try {
       const result = await this._hass.callWS({
         type: "camera/stream",
