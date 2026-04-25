@@ -383,7 +383,6 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "enable_intercom",
                       "enable_smb_upload",
                       "enable_go2rtc",
-                      "experimental_go2rtc_rtspx",
                       "debug_logging"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
@@ -570,10 +569,6 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     "enable_go2rtc",
                     default=bool(opts.get("enable_go2rtc", True)),
-                ): bool,
-                vol.Optional(
-                    "experimental_go2rtc_rtspx",
-                    default=bool(opts.get("experimental_go2rtc_rtspx", False)),
                 ): bool,
                 vol.Optional(
                     "debug_logging",

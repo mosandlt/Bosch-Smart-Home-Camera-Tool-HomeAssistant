@@ -640,18 +640,24 @@ async def async_cloud_set_light_component(
         elif component == "intensity":
             intensity = value
 
-        body = {
-            "frontLightOn": front,
-            "wallwasherOn": wall,
-            "frontLightIntensity": intensity,
-        }
+        # Bosch API constraint (verified live 2026-04-25): the lighting_override
+        # endpoint rejects frontLightIntensity if frontLightOn is False with HTTP 400
+        # `frontIlluminatorIntensity must not be set if frontLightOn is false`. Omit
+        # the intensity field when the front light is being turned off.
+        body = {"frontLightOn": front, "wallwasherOn": wall}
+        if front:
+            body["frontLightIntensity"] = intensity
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
         try:
             async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
+                    body_text = await resp.text()
                     ok = resp.status in (200, 201, 204)
                     if not ok:
-                        _LOGGER.warning("cloud_set_light_component: HTTP %d for %s", resp.status, cam_id)
+                        _LOGGER.warning(
+                            "cloud_set_light_component: HTTP %d for %s — body sent=%s, response=%s",
+                            resp.status, cam_id, body, body_text[:200],
+                        )
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_light_component error for %s: %s", cam_id, err)
 
