@@ -1,20 +1,5 @@
 # Bosch Smart Home Camera — Home Assistant Integration
 
-> ## ⚠️ MAJOR CHANGE: Auth provider changed (since v8.0.5)
->
-> **Bosch switched to a new OAuth client (`oss_residential_app`) starting with v8.0.5.** Existing installations must **re-authenticate once** to migrate from the legacy `residential_app` client.
->
-> **Easiest path (v9.1.5+ — in-place migration, no data loss):**
-> 1. Update to v9.1.5 or later via HACS
-> 2. *Settings → Devices & Services → Bosch Smart Home Camera → Configure*
-> 3. If you're still on the legacy client, a **"Migrate to new OAuth client (oss_residential_app)"** checkbox appears at the bottom — enable it and submit
-> 4. Click the **Reconfigure** banner that appears on the integration card → browser opens Bosch SingleKey ID login → log in
-> 5. Done! All your entities, automations, options, FCM config, and SMB settings are preserved.
->
-> **Also supported — if your refresh token already expired:** Home Assistant will automatically show a **Reconfigure** banner on the integration card as soon as Keycloak rejects the stored token (v9.1.4+). Clicking it runs the same auto-login flow. No manual action required.
->
-> **Legacy manual fallback** (still works): *Configure → "Re-login" → open the URL in your browser → log in at Bosch → the 404 page at `bosch.com/boschcam` is expected! → copy the **full URL** from the address bar (contains `?code=...`) and paste it into HA.*
-
 Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Includes a custom **Lovelace card** with live streaming, controls, and event info.
 
 **Supported models:** Eyes Außenkamera (Gen1), Eyes Außenkamera II (Gen2), 360 Innenkamera (Gen1), Eyes Innenkamera II (Gen2) — model-specific timing and configuration is automatic.
@@ -165,6 +150,97 @@ title: Garten
 ```
 
 > **Upgrading from pre-v10.3.19?** The integration auto-removes any old `/local/bosch-camera-card.js` resource entry from Lovelace, but the physical file in `/config/www/` is intentionally left in place (an integration should not modify user files in `/config/www/`). You can delete it manually if you want: `rm /config/www/bosch-camera-card.js` (SSH addon) — it's harmless either way, the integration loads its own bundled copy.
+
+---
+
+## Architecture
+
+### Components
+
+```mermaid
+graph LR
+    subgraph User["User"]
+        B["Browser / HA Companion"]
+    end
+    subgraph HA["Home Assistant"]
+        Card["bosch-camera-card<br/>(Lovelace)"]
+        Int["bosch_shc_camera<br/>(integration)"]
+        Stream["stream component<br/>+ FFmpeg"]
+        G2["bundled go2rtc 1.9.x"]
+        TLS["TLS proxy<br/>(per camera)"]
+    end
+    subgraph LAN["Local Network"]
+        Cam["Bosch Camera<br/>RTSPS :443"]
+    end
+    subgraph Cloud["Bosch Cloud"]
+        OAuth["SingleKey ID OAuth"]
+        API["residential.cbs.<br/>boschsecurity.com"]
+        CRP["RTSPS Proxy<br/>proxy-NN.live..."]
+    end
+
+    B --> Card
+    Card -->|"WS: camera/stream<br/>or webrtc/offer"| Int
+    Card -->|"HLS m3u8"| Stream
+    Card -->|"WebRTC SDP"| G2
+    Int -->|"OAuth"| OAuth
+    Int -->|"REST: video_inputs,<br/>connection, lighting…"| API
+    Int -->|"spawn"| TLS
+    TLS -->|"RTSPS<br/>(plain TCP→TLS bridge)"| Cam
+    Stream -->|"rtsp://127.0.0.1<br/>(LOCAL)"| TLS
+    Stream -.->|"rtsps://<br/>(REMOTE direct)"| CRP
+    G2 -->|"rtsp://<br/>(LOCAL)"| TLS
+    G2 -.->|"rtspx://<br/>(REMOTE, skip TLS)"| CRP
+```
+
+### Live stream activation (LOCAL — primary path)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Card
+    participant I as Integration
+    participant API as Bosch Cloud API
+    participant T as TLS proxy
+    participant Cam as Camera (LAN)
+    participant G as bundled go2rtc
+
+    C->>I: switch.turn_on<br/>(live_stream)
+    I->>API: PUT /v11/video_inputs/{id}/connection<br/>{type:"LOCAL"}
+    API-->>I: {rtspsUrl, digest creds,<br/>maxSessionDuration:60}
+    I->>T: start (rtsp://127.0.0.1:N → rtsps://cam:443)
+    I->>T: DESCRIBE (pre-warm w/ Digest)
+    T->>Cam: RTSPS DESCRIBE
+    Cam-->>T: 200 OK + SDP
+    T-->>I: pre-warm OK (>=35s settle)
+    I->>G: PUT /api/streams<br/>name=camera.entity_id<br/>src=rtsp://127.0.0.1:N/…
+    G-->>I: registered
+    I-->>C: switch state=on<br/>cam state=streaming<br/>frontend_stream_types=[hls, web_rtc]
+
+    Note over C,G: Card now plays — HLS or WebRTC
+
+    alt HLS path (default + iOS-Safari fallback)
+        C->>I: WS camera/stream
+        I->>Stream: stream_source()
+        Stream->>T: FFmpeg DESCRIBE/SETUP/PLAY
+        T->>Cam: RTSPS stream
+        Cam-->>T: H.264 + AAC RTP
+        T-->>Stream: TS segments
+        Stream-->>C: m3u8 + .ts
+    else WebRTC path (low latency)
+        C->>G: WS camera/webrtc/offer
+        G->>T: rtsp:// consume
+        T->>Cam: RTSPS stream
+        Cam-->>T: H.264 + AAC RTP
+        T-->>G: RTP
+        G-->>C: SDP answer + ICE candidates
+    end
+```
+
+### REMOTE / Cloud differences
+
+* **`/connection {type:"REMOTE"}`** returns `rtsps://proxy-NN.live.cbs.boschsecurity.com:42090/<hash>` — the Bosch cloud proxy serves the camera over the public internet. No local TLS proxy is involved.
+* **HLS** uses `rtsps://` directly — FFmpeg connects to the cloud proxy, accepts the cert chain (FFmpeg trusts the system root, the hostname mismatch on `proxy-NN…` doesn't matter for FFmpeg).
+* **WebRTC** can't use `rtsps://` because go2rtc's Go RTSP client refuses the cert/hostname mismatch (`tls: failed to verify certificate`). The integration rewrites to `rtspx://` (go2rtc's documented "skip TLS verify" scheme) for the go2rtc producer registration only — HLS path keeps `rtsps://`.
 
 ---
 
@@ -781,7 +857,7 @@ Everything renders automatically when the integration detects a Gen2 Indoor II.
 
 | Version | Changes |
 |---------|---------|
-| **v10.3.23** | Two changes. **1) Fix: Gen1 Outdoor independent front-light / wallwasher control.** The Bosch Cloud `lighting_override` endpoint rejects any request that includes `frontIlluminatorIntensity` while `frontLightOn` is `false`, with HTTP 400 `frontIlluminatorIntensity must not be set if frontLightOn is false`. Our integration always sent the intensity field, so toggling **front-light off** while **wallwasher on** was silently rejected — UI showed `front=on` indefinitely until the user also turned off the wallwasher. Diagnosed live on Gen1 Outdoor (Eyes Außenkamera) on 2026-04-25 by capturing the API response body. Fix: omit `frontLightIntensity` from the PUT body when `frontLightOn` is `false`. Both directions now work independently — front-on/wall-off, front-off/wall-on, both-on, both-off all pass. Verified via 30 s observation: `after front OFF: front=off wall=on` (was `front=on wall=on` before). No behavior change on Gen2 (different endpoint structure). **2) `experimental_go2rtc_rtspx` flag removed — rtspx:// is now the unconditional default for Bosch Cloud RTSPS routing through go2rtc.** The flag was Beta in v10.3.21, default ON in v10.3.22, and after a week of testing on Gen2 Outdoor II + Gen1 Outdoor with no regressions, it graduates to permanent behavior. The option no longer appears in the integration UI. The rewrite (`rtsps://…boschsecurity.com/…` → `rtspx://…`) is required to skip TLS verification for the Bosch cert/hostname mismatch — without it go2rtc rejects the producer with `tls: failed to verify certificate`. Existing config entries with the option set are silently ignored on load. |
+| **v10.3.23** | Three changes. **1) Fix: Gen1 Outdoor independent front-light / wallwasher control.** The Bosch Cloud `lighting_override` endpoint rejects any request that includes `frontIlluminatorIntensity` while `frontLightOn` is `false`, with HTTP 400 `frontIlluminatorIntensity must not be set if frontLightOn is false`. Our integration always sent the intensity field, so toggling **front-light off** while **wallwasher on** was silently rejected — UI showed `front=on` indefinitely until the user also turned off the wallwasher. Diagnosed live on Gen1 Outdoor (Eyes Außenkamera) on 2026-04-25 by capturing the API response body. Fix: omit `frontLightIntensity` from the PUT body when `frontLightOn` is `false`. Both directions now work independently — front-on/wall-off, front-off/wall-on, both-on, both-off all pass. Verified via 30 s observation: `after front OFF: front=off wall=on` (was `front=on wall=on` before). No behavior change on Gen2 (different endpoint structure). **2) `experimental_go2rtc_rtspx` flag removed — rtspx:// is now the unconditional default for Bosch Cloud RTSPS routing through go2rtc.** The flag was Beta in v10.3.21, default ON in v10.3.22, and after a week of testing on Gen2 Outdoor II + Gen1 Outdoor with no regressions, it graduates to permanent behavior. The option no longer appears in the integration UI. The rewrite (`rtsps://…boschsecurity.com/…` → `rtspx://…`) is required to skip TLS verification for the Bosch cert/hostname mismatch — without it go2rtc rejects the producer with `tls: failed to verify certificate`. Existing config entries with the option set are silently ignored on load. **3) README cleanup: stale OAuth migration banner removed (now ~17 months old since v8.0.5; users on the legacy client see the auto-Reconfigure flow), added an `Architecture` section with two Mermaid diagrams (component overview + LOCAL stream activation sequence + REMOTE differences) so new users can grasp the LOCAL/REMOTE/HLS/WebRTC/TLS-proxy/go2rtc topology without reading the source.** |
 | **v10.3.22** | Four bundled changes. **1) FCM push listener hardening** — the `firebase-messaging` library defaults to shutting its listener down after 3 sequential connection errors (e.g. a brief WAN blip) and does not self-restart, leaving the integration silently in "subscribed but no pushes arriving" state until the next HA restart. v10.3.22 passes `FcmPushClientConfig(abort_on_sequential_error_count=None)` so the library keeps reconnecting, and adds a watchdog in the coordinator tick that calls `FcmPushClient.is_started()` — if the listener terminates for any reason, `sensor.bosch_camera_event_detection` flips from `fcm_push` to `polling`, making silent death visible on the dashboard. Guarded by `ImportError` for older `firebase-messaging` installs. Ref: [sdb9696/firebase-messaging#33](https://github.com/sdb9696/firebase-messaging/issues/33). **2) `experimental_go2rtc_rtspx` now ON by default** (was Beta-OFF in v10.3.21). After a week of testing on Gen2 Eyes Outdoor II with no regressions, the Cloud-RTSPS → go2rtc rtspx:// path becomes the new default. Option stays available as an opt-out escape hatch; label + description updated to drop Beta wording. **3) Card v2.10.7 — loading overlay sub-hint.** The card now shows a secondary hint line under the progressive status message during stream startup: "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil" for REMOTE, "LAN-Stream — ca. 25–35 s bis erstes Bild" for LOCAL. Addresses user feedback that the ~30–45 s HLS initial-buffer-fill phase on Cloud streams feels broken without context — the hint sets realistic expectations. The actual stream startup time is unchanged (physics of HLS segment generation + Bosch cloud proxy first-frame latency). **4) README:** Step 3 rewritten to reflect that the Lovelace resource is auto-registered since v10.3.19 — no manual "Add resource" step needed. Added a one-line note that the old `www/bosch-camera-card.js` file in `/config/www/` is intentionally left in place on upgrade (the integration doesn't modify user files) and can be deleted manually if desired. |
 | **v10.3.21** | **Beta: route Bosch Cloud streams through go2rtc via the `rtspx://` scheme.** New Options toggle *"Beta: lower cloud stream lag (go2rtc rtspx://)"* (default OFF). **Scope:** only affects WebRTC and snapshot playback paths — HA's HLS path continues via FFmpeg-direct and is unaffected. Root cause: the Bosch cloud RTSPS proxy serves session URLs on hosts like `proxy-NN.live.cbs.boschsecurity.com` but its certificate only covers `*.residential.connect.boschsecurity.com`. When the integration registers the stream in go2rtc with `rtsps://`, go2rtc's Go RTSP client rejects the cert mismatch (`tls: failed to verify certificate`) — the registration succeeds but any WebRTC/snapshot consumer request 500s and HA silently falls back to built-in behavior. With this flag ON, the integration registers with `rtspx://` (go2rtc's documented scheme for skipping TLS verification, originally added for Ubiquiti UniFi), and the stream name is aligned with `camera.entity_id` so HA's bundled go2rtc provider (`homeassistant/components/go2rtc/`) picks up our pre-registration on WebRTC/snapshot requests. LOCAL (LAN) streams are unaffected — they go through the integration's own TLS proxy and use plain `rtsp://127.0.0.1:…`. Additional fix in the same release: `_register_go2rtc_stream` now accepts HTTP 400 with a `yaml:` body as soft-success (bundled go2rtc returns that when its in-memory stream registration succeeds but YAML persistence to `/config/go2rtc.yaml` fails — verified via `GET /api/streams?src=<name>`). Sources: [go2rtc `rtspx://` — RTSP README](https://github.com/AlexxIT/go2rtc/blob/master/internal/rtsp/README.md), [go2rtc `pkg/tcp/dial.go` — `InsecureSkipVerify` for `rtspx`](https://github.com/AlexxIT/go2rtc/blob/master/pkg/tcp/dial.go), [go2rtc #343 — insecure HTTPS client request](https://github.com/AlexxIT/go2rtc/issues/343), [go2rtc #1386 — 400 on successful POST /api/streams](https://github.com/AlexxIT/go2rtc/issues/1386). |
 | **v10.3.20** | **CI compliance:** Add `.github/workflows/validate.yml` (HACS action + Hassfest) running on push/PR/daily. `manifest.json` cleanup — drop invalid `homeassistant` key (belongs in `hacs.json`), add `http` to `dependencies` (used but undeclared), sort keys per Hassfest rule (domain, name, then alphabetical). Remove bare URLs from `data_description` fields in `strings.json` + `translations/en.json` (Hassfest disallows URLs there). No user-visible changes. |
