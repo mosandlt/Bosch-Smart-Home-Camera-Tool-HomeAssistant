@@ -2189,6 +2189,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # ── Register with go2rtc (AFTER pre-warm) ────────
                         if rtsps_url:
                             await self._register_go2rtc_stream(cam_id, rtsps_url)
+                            # Synchronously push provider discovery on the cam
+                            # entity NOW so `frontend_stream_types` includes
+                            # WEB_RTC by the time the next state-write fires.
+                            # Otherwise HA's auto-refresh runs async ~100 ms-4 s
+                            # later and the card's `camera/webrtc/offer`
+                            # races against it — the card sends the offer
+                            # before the provider was wired, HA's
+                            # `require_webrtc_support` decorator rejects with
+                            # `Camera does not support WebRTC,
+                            # frontend_stream_types={HLS}`, card falls to HLS
+                            # for the whole session. Explicit refresh here
+                            # eliminates the race.
+                            cam_ent = self._camera_entities.get(cam_id)
+                            if cam_ent is not None:
+                                try:
+                                    await cam_ent.async_refresh_providers()
+                                except Exception as err:  # noqa: BLE001
+                                    _LOGGER.debug(
+                                        "post-register refresh_providers failed for %s: %s",
+                                        cam_id[:8], err,
+                                    )
 
                         # ── LOCAL session auto-renewal ───────────────────
                         if type_val == "LOCAL" and local_user and local_pass:

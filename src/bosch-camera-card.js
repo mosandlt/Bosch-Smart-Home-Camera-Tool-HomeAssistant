@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.9";
+const CARD_VERSION = "2.10.10";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2053,7 +2053,23 @@ class BoschCameraCard extends HTMLElement {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
       } catch (webrtcErr) {
-        console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr?.message || webrtcErr);
+        // The most common WebRTC rejection is "Camera does not support
+        // WebRTC, frontend_stream_types={HLS}" which happens during the
+        // ~3 s race window between stream-feature-flip and HA's auto-fired
+        // async_refresh_providers wiring up the WebRTC provider. Log this
+        // expected case at debug level only — HLS fallback handles it
+        // transparently and the card's stream-retry loop tries WebRTC again
+        // a few seconds later when caps have propagated. Real WebRTC
+        // failures (timeout, ICE fail, transport error) still surface as
+        // warnings so they're visible during diagnosis.
+        const m = String(webrtcErr?.message || webrtcErr);
+        const expectedRace = m.includes("does not support WebRTC")
+                          || m.includes("frontend_stream_types");
+        if (expectedRace) {
+          console.debug("bosch-camera-card: WebRTC race miss, falling back to HLS:", m);
+        } else {
+          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", m);
+        }
         if (this._webrtcPc) { try { this._webrtcPc.close(); } catch {}; this._webrtcPc = null; }
         if (this._webrtcUnsub) { try { this._webrtcUnsub(); } catch {}; this._webrtcUnsub = null; }
       }
