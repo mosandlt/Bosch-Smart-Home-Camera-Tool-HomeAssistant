@@ -2003,25 +2003,60 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         else:
                             # REMOTE response: {"urls": ["proxy-NN:42090/{hash}"]}
                             urls = result.get("urls", [])
+                            cloud_rtsps_url = None
                             if urls:
                                 proxy_host_path = urls[0]
                                 result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg?JpegSize=1206"
                                 rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
-                                result["rtspsUrl"] = (
+                                cloud_rtsps_url = (
                                     f"rtsps://{rtsps_host_path}/rtsp_tunnel"
                                     f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                 )
-                                result["rtspUrl"] = result["rtspsUrl"]
                             elif result.get("hash"):
                                 h  = result["hash"]
                                 ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
                                 pp = result.get("proxyPort", 42090)
                                 result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
-                                result["rtspsUrl"] = (
+                                cloud_rtsps_url = (
                                     f"rtsps://{ph}:443/{h}/rtsp_tunnel"
                                     f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                 )
-                                result["rtspUrl"] = result["rtspsUrl"]
+                            if cloud_rtsps_url:
+                                # Run a Python TLS proxy for REMOTE too, symmetric to LOCAL.
+                                # Bosch Cloud serves session URLs on hosts like
+                                # proxy-NN.live.cbs.boschsecurity.com but the cert SAN list
+                                # only covers *.residential.connect.boschsecurity.com —
+                                # go2rtc's Go RTSP client refuses with `tls: failed to
+                                # verify certificate`. The proxy terminates TLS in Python
+                                # (verify_mode=CERT_NONE, check_hostname=False) and re-
+                                # exports as plain RTSP on 127.0.0.1:N — both FFmpeg (HLS
+                                # path) and go2rtc (WebRTC path) consume without scheme
+                                # tricks. Falls back to direct rtsps:// if proxy startup
+                                # fails (HLS still works that way; WebRTC still cert-
+                                # blocked, identical to v10.3.24 behavior).
+                                try:
+                                    from urllib.parse import urlparse as _up
+                                    parsed = _up(cloud_rtsps_url)
+                                    pq = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+                                    proxy_port = await self._start_tls_proxy(
+                                        cam_id, parsed.hostname, parsed.port or 443,
+                                    )
+                                    local_rtsp_url = f"rtsp://127.0.0.1:{proxy_port}{pq}"
+                                    result["rtspsUrl"] = local_rtsp_url
+                                    result["rtspUrl"] = local_rtsp_url
+                                    result["_remote_origin_url"] = cloud_rtsps_url
+                                    _LOGGER.debug(
+                                        "REMOTE TLS proxy %s: %s → %s",
+                                        cam_id[:8], parsed.hostname, local_rtsp_url[:80],
+                                    )
+                                except Exception as err:  # noqa: BLE001
+                                    _LOGGER.warning(
+                                        "REMOTE TLS proxy start failed for %s — falling back "
+                                        "to direct rtsps:// (HLS works, WebRTC will cert-fail): %s",
+                                        cam_id[:8], err,
+                                    )
+                                    result["rtspsUrl"] = cloud_rtsps_url
+                                    result["rtspUrl"] = cloud_rtsps_url
                         self._live_connections[cam_id] = result
                         self._live_opened_at[cam_id]   = time.monotonic()
 
