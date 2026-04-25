@@ -2156,6 +2156,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 cam_id, self._auto_renew_local_session(cam_id, gen)
                             )
                         self.hass.async_create_task(self.async_request_refresh())
+                        self.hass.async_create_task(self._check_and_recover_webrtc(cam_id))
                         return result
                     elif resp.status == 401:
                         _LOGGER.warning(
@@ -2479,6 +2480,69 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         return await self.hass.async_add_executor_job(_fetch_digest)
+
+    async def _check_and_recover_webrtc(self, cam_id: str) -> None:
+        """Watchdog for HA's bundled go2rtc WebRTCProvider stale-schemes bug.
+
+        HA's `WebRTCProvider.initialize()` runs once at config-entry-load and
+        caches `_supported_schemes` from `/api/schemes`. The bundled go2rtc
+        binary can be respawned by HA's watchdog (server.py) when it crashes
+        or its API stops responding — but the Python provider instance keeps
+        running with whatever schemes it had at boot. If `initialize()` ever
+        returned an empty set (race during boot), the camera entity is stuck
+        advertising only HLS forever, even though go2rtc itself is fine.
+
+        Symptom: `camera.camera_capabilities.frontend_stream_types == {HLS}`
+        instead of `{HLS, WEB_RTC}` while a stream is active. WebRTC offers
+        from the card get rejected with `webrtc_offer_failed: Camera does not
+        support WebRTC`.
+
+        Recovery: reload the bundled go2rtc config entry — `async_setup_entry`
+        re-runs `provider.initialize()` and refreshes `_supported_schemes`.
+
+        Throttled to once per hour per integration entry to avoid reload-spam
+        if go2rtc is genuinely broken (e.g. binary won't start). Skipped when
+        a recent reload already happened.
+        """
+        await asyncio.sleep(4)  # let async_refresh_providers settle first
+        cam_entity = self._camera_entities.get(cam_id)
+        if cam_entity is None:
+            return
+        from homeassistant.components.camera import CameraEntityFeature, StreamType
+        if CameraEntityFeature.STREAM not in cam_entity.supported_features:
+            return  # stream_source not yet ready, nothing to check
+        try:
+            caps = cam_entity.camera_capabilities
+            if StreamType.WEB_RTC in caps.frontend_stream_types:
+                return  # all good
+        except Exception as err:  # noqa: BLE001 — defensive
+            _LOGGER.debug("webrtc-watchdog: capabilities probe failed: %s", err)
+            return
+        now = time.monotonic()
+        if not hasattr(self, "_last_go2rtc_reload"):
+            self._last_go2rtc_reload = 0.0
+        if now - self._last_go2rtc_reload < 3600:
+            return  # already reloaded recently — don't spam
+        from homeassistant.config_entries import ConfigEntryState
+        go2rtc_entries = [
+            e for e in self.hass.config_entries.async_entries("go2rtc")
+            if e.state == ConfigEntryState.LOADED
+        ]
+        if not go2rtc_entries:
+            _LOGGER.debug("webrtc-watchdog: no loaded go2rtc entry to reload")
+            return
+        self._last_go2rtc_reload = now
+        for entry in go2rtc_entries:
+            _LOGGER.warning(
+                "webrtc-watchdog: WebRTC capability missing for %s while stream is active — "
+                "reloading bundled go2rtc entry %s to refresh stale _supported_schemes "
+                "(HA Core bug; reload runs WebRTCProvider.initialize() again)",
+                cam_id[:8], entry.entry_id,
+            )
+            try:
+                await self.hass.config_entries.async_reload(entry.entry_id)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("webrtc-watchdog: go2rtc reload failed: %s", err)
 
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
         """Register the Bosch RTSP stream in go2rtc for WebRTC support.
