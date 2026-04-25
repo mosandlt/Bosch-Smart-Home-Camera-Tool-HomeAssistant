@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues",
   "loggers": ["bosch_shc_camera"],
   "requirements": ["requests>=2.28.0", "firebase-messaging>=0.4.0", "smbprotocol>=1.10.0"],
-  "version": "10.3.23"
+  "version": "10.3.24"
 }
