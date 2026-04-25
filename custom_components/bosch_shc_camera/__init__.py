@@ -1830,6 +1830,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if lock.locked() and not is_renewal:
             _LOGGER.warning("try_live_connection: already in progress for %s — skipping", cam_id[:8])
             return None
+        # Pre-emptive: if go2rtc's `_supported_schemes` is stale (HA Core bug),
+        # the post-stream watchdog reload would race against the card's caps
+        # query and the card chooses HLS forever. Reload BEFORE pre-warm so by
+        # the time HA's `async_refresh_providers` runs (on STREAM-feature flip)
+        # the schemes are fresh. Throttled to once per hour.
+        if not is_renewal:
+            await self._ensure_go2rtc_schemes_fresh()
         async with lock:
             return await self._try_live_connection_inner(cam_id, is_renewal)
 
@@ -2539,7 +2546,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if go2rtc is genuinely broken (e.g. binary won't start). Skipped when
         a recent reload already happened.
         """
-        await asyncio.sleep(4)  # let async_refresh_providers settle first
+        await asyncio.sleep(2)  # let async_refresh_providers settle first
         cam_entity = self._camera_entities.get(cam_id)
         if cam_entity is None:
             return
@@ -2553,6 +2560,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         except Exception as err:  # noqa: BLE001 — defensive
             _LOGGER.debug("webrtc-watchdog: capabilities probe failed: %s", err)
             return
+        # First-line recovery: direct-refresh `_supported_schemes` on the
+        # existing provider + push refresh_providers to all streaming cams.
+        # This is much cheaper than reloading the whole config entry and
+        # usually does the job (the schemes are already populated, the cams
+        # just need to re-query the providers).
+        try:
+            self._last_schemes_refresh = 0.0  # force refresh past the 600s throttle
+            await self._ensure_go2rtc_schemes_fresh()
+            cam_entity._invalidate_camera_capabilities_cache()  # noqa: SLF001
+            caps2 = cam_entity.camera_capabilities
+            if StreamType.WEB_RTC in caps2.frontend_stream_types:
+                _LOGGER.info(
+                    "webrtc-watchdog: WEB_RTC restored for %s via direct schemes-refresh",
+                    cam_id[:8],
+                )
+                return
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("webrtc-watchdog: direct refresh failed: %s", err)
         now = time.monotonic()
         if not hasattr(self, "_last_go2rtc_reload"):
             self._last_go2rtc_reload = 0.0
@@ -2578,6 +2603,85 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 await self.hass.config_entries.async_reload(entry.entry_id)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("webrtc-watchdog: go2rtc reload failed: %s", err)
+        # After reload, the cam entity's `_webrtc_provider` is still None — HA
+        # only auto-refreshes on `supported_features & STREAM` flips, but our
+        # stream is already up. Push the refresh manually so the next
+        # `camera/capabilities` query returns the fresh `[web_rtc, hls]`.
+        for cam_ent in list(self._camera_entities.values()):
+            try:
+                if CameraEntityFeature.STREAM in cam_ent.supported_features:
+                    await cam_ent.async_refresh_providers()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug(
+                    "webrtc-watchdog: async_refresh_providers failed for %s: %s",
+                    getattr(cam_ent, "entity_id", "?"), err,
+                )
+
+    async def _ensure_go2rtc_schemes_fresh(self) -> None:
+        """Pre-emptive: re-fetch `_supported_schemes` directly on the existing
+        WebRTCProvider instance(s) so the very first stream activation finds
+        the right scheme set. Avoids the race where the card asks for
+        capabilities before the post-stream watchdog had a chance to fire.
+
+        Direct-refresh (private-API hack) instead of full config-entry reload,
+        because reload was found to not actually populate the schemes set in
+        time before camera state writes happen — the bundled go2rtc binary
+        may not yet be answering `/api/schemes` when the new provider's
+        `initialize()` runs during reload, so the fresh provider also caches
+        an empty set. Calling `provider._rest_client.schemes.list()` directly
+        on the existing instance bypasses the reload churn and pulls the
+        current scheme list now that go2rtc is ready.
+        """
+        if not hasattr(self, "_last_schemes_refresh"):
+            self._last_schemes_refresh = 0.0
+        now = time.monotonic()
+        if now - self._last_schemes_refresh < 600:
+            return
+        try:
+            from homeassistant.components.camera.webrtc import DATA_WEBRTC_PROVIDERS
+        except ImportError:
+            return
+        providers = self.hass.data.get(DATA_WEBRTC_PROVIDERS, set())
+        if not providers:
+            return
+        self._last_schemes_refresh = now
+        refreshed = False
+        for provider in providers:
+            if not hasattr(provider, "_rest_client") or not hasattr(provider, "_supported_schemes"):
+                continue  # not the bundled go2rtc provider
+            try:
+                fresh = await provider._rest_client.schemes.list()  # noqa: SLF001
+                if fresh:
+                    old_count = len(provider._supported_schemes)  # noqa: SLF001
+                    provider._supported_schemes = fresh  # noqa: SLF001
+                    refreshed = True
+                    _LOGGER.info(
+                        "webrtc-watchdog: refreshed go2rtc provider _supported_schemes "
+                        "(was %d schemes, now %d)", old_count, len(fresh),
+                    )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("webrtc-watchdog: scheme-refresh failed: %s", err)
+        # Push the now-fresh provider to every camera entity that has STREAM
+        # in supported_features. Without this, cams that ran async_refresh_providers
+        # against a stale scheme set keep `_webrtc_provider = None` cached, and
+        # the next `camera/capabilities` query advertises only HLS — even though
+        # the provider's schemes are now fresh. The auto-fire only triggers on
+        # `supported_features & STREAM` flips, but our streams may already be up.
+        if refreshed:
+            from homeassistant.components.camera import CameraEntityFeature
+            for cam_ent in list(self._camera_entities.values()):
+                try:
+                    if CameraEntityFeature.STREAM in cam_ent.supported_features:
+                        await cam_ent.async_refresh_providers()
+                        _LOGGER.debug(
+                            "webrtc-watchdog: refreshed providers on %s",
+                            getattr(cam_ent, "entity_id", "?"),
+                        )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "webrtc-watchdog: cam refresh-providers failed for %s: %s",
+                        getattr(cam_ent, "entity_id", "?"), err,
+                    )
 
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
         """Register the Bosch RTSP stream in go2rtc for WebRTC support.

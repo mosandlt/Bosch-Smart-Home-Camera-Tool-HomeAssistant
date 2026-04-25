@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.8";
+const CARD_VERSION = "2.10.9";
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -2036,27 +2036,28 @@ class BoschCameraCard extends HTMLElement {
       }, 5000);
     };
 
-    // ── WebRTC (try first if go2rtc is available) ─────────────────────
-    // go2rtc provides WebRTC (~2s latency vs ~12s HLS) when stream is active.
-    // Falls back to HLS if WebRTC is not available or fails.
+    // ── WebRTC (always attempt; HLS is the fallback) ──────────────────
+    // go2rtc provides WebRTC (~2s latency vs ~12s HLS). Don't gate on the
+    // `camera/capabilities` query: HA's `cam._webrtc_provider` is set by
+    // `async_refresh_providers` which races with stream-state-flip and
+    // typically takes ~4s after switch goes ON to reflect WEB_RTC in the
+    // capability list. The card's caps query at stream-start often hits
+    // that race window and sees only `["hls"]` — which would lock us into
+    // HLS for the whole session. Instead, just send the offer; if HA hasn't
+    // wired the provider yet (or the cam genuinely doesn't support WebRTC),
+    // the offer rejects fast (`webrtc_offer_failed: Camera does not support
+    // WebRTC` from `require_webrtc_support` decorator), the catch block
+    // takes over within ~100 ms, and HLS startup is unaffected.
     try {
-      const caps = await this._hass.callWS({
-        type: "camera/capabilities",
-        entity_id: this._entities.camera,
-      });
-      const types = caps?.frontend_stream_types || [];
-      if (types.includes("web_rtc")) {
-        try {
-          await this._startWebRTC(video, activateVideo);
-          return; // WebRTC started successfully
-        } catch (webrtcErr) {
-          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr);
-          // Fall through to HLS
-        }
+      try {
+        await this._startWebRTC(video, activateVideo);
+        return; // WebRTC up
+      } catch (webrtcErr) {
+        console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", webrtcErr?.message || webrtcErr);
+        if (this._webrtcPc) { try { this._webrtcPc.close(); } catch {}; this._webrtcPc = null; }
+        if (this._webrtcUnsub) { try { this._webrtcUnsub(); } catch {}; this._webrtcUnsub = null; }
       }
-    } catch (capsErr) {
-      // Capabilities check failed — try HLS directly
-    }
+    } catch (outer) { /* paranoia */ }
 
     // ── HLS via camera/stream (fallback) ────────────────────────────────
     try {
