@@ -2509,24 +2509,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             stream_name = f"bosch_shc_cam_{cam_id.lower()}"
         go2rtc_src = rtsps_url
 
-        # Beta: rtspx:// scheme skips TLS verify in go2rtc. Bosch Cloud's RTSPS
-        # proxy returns a cert for *.residential.connect.boschsecurity.com but
-        # serves session URLs on proxy-NN.live.cbs.boschsecurity.com hosts —
-        # go2rtc's native Go RTSP client refuses the mismatch. Without rtspx://
-        # the registration succeeds but the first consumer request 500s with
-        # "tls: failed to verify certificate", HA never consumes from go2rtc,
-        # and we lose the keyframe cache / WebRTC path. Gated behind a Beta
-        # option while we gather real-world data.
+        # The rtspx:// scheme skips TLS verification in go2rtc. Bosch Cloud's
+        # RTSPS proxy returns a cert for *.residential.connect.boschsecurity.com
+        # but serves session URLs on proxy-NN.live.cbs.boschsecurity.com hosts —
+        # go2rtc's native Go RTSP client refuses the mismatch with `tls: failed
+        # to verify certificate`. Without the rewrite, registration succeeds but
+        # the first consumer request 500s and HA never consumes from go2rtc.
+        # Default behavior since v10.3.23 (was Beta-gated v10.3.21–v10.3.22).
         # See: https://github.com/AlexxIT/go2rtc/blob/master/internal/rtsp/README.md
-        if (
-            get_options(self._entry).get("experimental_go2rtc_rtspx", False)
-            and go2rtc_src.startswith("rtsps://")
-        ):
+        if go2rtc_src.startswith("rtsps://"):
             go2rtc_src = "rtspx://" + go2rtc_src[len("rtsps://"):]
-            _LOGGER.debug(
-                "go2rtc: rewriting rtsps→rtspx for %s (experimental_go2rtc_rtspx)",
-                cam_id[:8],
-            )
 
         # Try multiple go2rtc API endpoints
         endpoints = [

@@ -81,7 +81,6 @@
           "smb_retention_days": "Retention period (days, 0 = keep forever)",
           "smb_disk_warn_mb": "Low disk warning threshold (MB, 0 = disabled)",
           "debug_logging": "Debug logging (verbose TLS proxy & stream logs)",
-          "experimental_go2rtc_rtspx": "Route Bosch Cloud via go2rtc (rtspx:// — skip TLS verify)",
           "force_relogin": "Force new browser login",
           "migrate_to_oss_client": "Migrate to new OAuth client (oss_residential_app)"
         },
@@ -123,7 +122,6 @@
           "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
           "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
           "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use.",
-          "experimental_go2rtc_rtspx": "Only affects Cloud (REMOTE) streams. Registers the Bosch cloud RTSPS URL in go2rtc with the rtspx:// scheme (skip TLS verify), working around a Bosch cert hostname mismatch that otherwise silently breaks go2rtc ingest. Enables go2rtc's WebRTC and snapshot paths for cloud streams. Default ON since v10.3.22 — disable only if you observe cloud stream regressions.",
           "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
           "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
         }
