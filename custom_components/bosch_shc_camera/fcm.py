@@ -611,28 +611,38 @@ async def async_send_alert(
         _LOGGER.warning("Alert step 1 failed: %s", err)
         return
 
-    # -- Step 2: Snapshot image (after 5s) ---------------------------------
-    # If image_url is empty (event just created), re-fetch events to get it
+    # -- Step 2: Snapshot image (after 3s, retries up to ~25s) ------------
+    # The FCM push sometimes arrives before Bosch's event API has the imageUrl
+    # populated. Single re-fetch at 5s missed slow-cloud events (observed
+    # 2026-04-26: text alert sent, snapshot silently skipped, JPG only
+    # appeared 90s later via the SMB upload path). Retry at +3 / +10 / +25 s
+    # cumulative — covers steady-state cloud and warm-up cases without
+    # delaying the common path noticeably.
     if not image_url:
-        await asyncio.sleep(5)
-        try:
-            events_url = f"{CLOUD_API}/v11/events?videoInputId=&limit=5"
-            # Find cam_id from cam_name in coordinator data
-            for cid, cdata in coordinator.data.items():
-                if cdata.get("info", {}).get("title", "") == cam_name:
-                    events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
-                    break
-            async with asyncio.timeout(10):
-                async with session.get(events_url, headers=headers) as r:
-                    if r.status == 200:
-                        fresh_events = await r.json()
-                        if fresh_events:
-                            image_url = fresh_events[0].get("imageUrl", "")
-                            clip_url = fresh_events[0].get("videoClipUrl", "") or clip_url
-                            clip_status = fresh_events[0].get("videoClipUploadStatus", "") or clip_status
-                            _LOGGER.debug("Alert: re-fetched image_url=%s", image_url[:60] if image_url else "empty")
-        except Exception as err:
-            _LOGGER.debug("Alert: re-fetch events failed: %s", err)
+        events_url = f"{CLOUD_API}/v11/events?videoInputId=&limit=5"
+        for cid, cdata in coordinator.data.items():
+            if cdata.get("info", {}).get("title", "") == cam_name:
+                events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
+                break
+        for attempt, delay in enumerate((3, 7, 15), start=1):
+            await asyncio.sleep(delay)
+            try:
+                async with asyncio.timeout(10):
+                    async with session.get(events_url, headers=headers) as r:
+                        if r.status == 200:
+                            fresh_events = await r.json()
+                            if fresh_events:
+                                image_url = fresh_events[0].get("imageUrl", "")
+                                clip_url = fresh_events[0].get("videoClipUrl", "") or clip_url
+                                clip_status = fresh_events[0].get("videoClipUploadStatus", "") or clip_status
+            except Exception as err:
+                _LOGGER.debug("Alert: re-fetch attempt %d failed: %s", attempt, err)
+                continue
+            if image_url:
+                _LOGGER.debug("Alert: re-fetched image_url on attempt %d", attempt)
+                break
+        if not image_url:
+            _LOGGER.debug("Alert: image_url still empty after 3 retries — skipping step 2")
 
     if image_url:
         if not _is_safe_bosch_url(image_url):
