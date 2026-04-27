@@ -1861,6 +1861,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Returns the enriched response dict, or None on failure.
         Serialized per camera via asyncio.Lock to prevent concurrent setup.
         """
+        # Privacy guard — fail-open if cache not yet populated at boot
+        if bool(self._shc_state_cache.get(cam_id, {}).get("privacy_mode")):
+            _LOGGER.info(
+                "try_live_connection: privacy mode active for %s — stream blocked", cam_id[:8]
+            )
+            return None
         lock = self._get_stream_lock(cam_id)
         if lock.locked() and not is_renewal:
             _LOGGER.warning("try_live_connection: already in progress for %s — skipping", cam_id[:8])
@@ -2025,7 +2031,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     }
                                 except Exception as _e:
                                     _LOGGER.debug("LOCAL creds cache skip for %s: %s", cam_id[:8], _e)
-                                result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
+                                _snap_url = img_scheme.replace("{url}", cam_addr)
+                                if "JpegSize=" not in _snap_url:
+                                    _snap_url += ("&" if "?" in _snap_url else "?") + "JpegSize=1206"
+                                result["proxyUrl"] = _snap_url
                                 cam_host, cam_port = cam_addr.split(":")
                                 proxy_port = await self._start_tls_proxy(
                                     cam_id, cam_host, int(cam_port),

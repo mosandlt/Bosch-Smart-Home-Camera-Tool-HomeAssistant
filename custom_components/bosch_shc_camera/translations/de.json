@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Bosch Smart Home Camera — Anmeldung (Schritt 1 von 2)",
-        "description": "**So melden Sie sich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **404-Seite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **Absenden** klicken",
+        "description": "**So meldest du dich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **404-Seite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **Absenden** klicken",
         "data": {
           "login_url": "Bosch Login URL"
         },
@@ -81,7 +81,8 @@
           "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)",
           "smb_disk_warn_mb": "Speicherwarnung unter (MB, 0 = deaktiviert)",
           "force_relogin": "Neu anmelden (Browser-Login)",
-          "migrate_to_oss_client": "Zu neuem OAuth-Client wechseln (oss_residential_app)"
+          "migrate_to_oss_client": "Zu neuem OAuth-Client wechseln (oss_residential_app)",
+          "debug_logging": "Debug-Protokollierung (detaillierte TLS-Proxy- und Stream-Logs)"
         },
         "data_description": {
           "scan_interval": "Wie oft die Integration Daten von der Bosch Cloud abruft. Niedriger = schneller, mehr API-Aufrufe. Standard: 60",
@@ -100,7 +101,7 @@
           "alert_notify_information": "Dienste für Stufe 1 — sofortige Text-Benachrichtigung. Leer = Standard-Fallback. z.B.: notify.signal_messenger, notify.mobile_app_xxx.",
           "alert_notify_screenshot": "Dienste für Stufe 2 — Snapshot-Bild. Leer = Schritt wird übersprungen (kein Fallback). Mobile Apps (mobile_app_xxx) erhalten das Bild direkt in der Benachrichtigung; andere als Dateianhang.",
           "alert_notify_video": "Dienste für Stufe 3 — Videoclip. Leer = Schritt wird übersprungen (kein Fallback).",
-          "alert_save_snapshots": "Event-Bilder und Videos in /www/bosch_alerts/ behalten. Wenn AUS, werden Dateien innerhalb von Sekunden nach dem Senden gelöscht.",
+          "alert_save_snapshots": "Event-Bilder und Videos in /media/bosch_alerts/ behalten. Wenn AUS, werden Dateien innerhalb von Sekunden nach dem Senden gelöscht.",
           "alert_delete_after_send": "Lokale Dateien löschen nachdem der Benachrichtigungsdienst sie empfangen hat. Gilt nur wenn 'Lokal speichern' AUS ist.",
           "high_quality_video": "Standard-Videoqualität für Live-Streams auf 30 Mbps setzen (statt Auto ~7.5 Mbps). Kann zur Laufzeit mit dem 'Video Quality'-Entity überschrieben werden.",
           "stream_connection_type": "Standard-Verbindungstyp für Live-Streams.\n• **auto** (empfohlen): Erst lokales Netzwerk (LAN) versuchen, bei Fehler automatisch auf Bosch Cloud-Proxy wechseln.\n• **local**: Nur direktes LAN — kein Internet nötig. Schnelleres RTSP, aber langsamere Snapshots (~6–10 s). Verbindung wird alle 50 s automatisch erneuert.\n• **remote**: Immer über Bosch Cloud-Proxy. Snapshots schneller (~0.4–1.9 s). Standard-Fallback wenn LAN nicht erreichbar.\nDer 'Stream Modus'-Select-Entity überschreibt diese Einstellung zur Laufzeit ohne Neustart.",

@@ -2367,7 +2367,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _pollSnapshotImage(prevBytes, startTime) {
-    // 6 s total: REMOTE fetch completes in ~3 s, LOCAL Digest in ~4 s; the
+    // 6 s total: REMOTE fetch completes in ~3 s, LOCAL snap.jpg in ~1.4 s; the
     // previous 15 s value was only needed when byte-comparison accidentally
     // baselined against an already-fresh image (fixed above). Shorter timeout
     // means the spinner resolves faster when a change isn't detected.
