@@ -1799,19 +1799,54 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     def is_stream_warming(self, cam_id: str) -> bool:
         """True if this camera is currently in the warm-up phase.
 
-        Auto-clears stale flags: if the cam_id is in `_stream_warming` but
-        NOT in `_live_connections`, the previous warm-up must have completed
-        or errored out without resetting the flag. In that case we drop the
-        flag and return False — otherwise a stream failure leaves privacy
-        toggles permanently blocked until HA restart. Fix 2026-04-11.
+        Auto-clears stale flags in three scenarios:
+          1. cam_id in `_stream_warming` but NOT in `_live_connections` — the
+             previous warm-up errored out without resetting the flag (fix
+             2026-04-11).
+          2. cam_id in `_stream_warming` AND `_live_connections[cam_id]` has
+             a non-empty `rtspsUrl` — pre-warm actually completed, the flag
+             just wasn't discarded (race in `_try_live_connection_inner` exit
+             paths). Observed 2026-04-27 on Gen1 Outdoor + Gen1 Indoor cams
+             during simultaneous 4-camera toggle: state stuck at
+             `warming_up` with `live_rtsps=null` for >7 min while keepalive
+             was already running (gen=2, 480s into session).
+          3. cam_id in `_stream_warming` for >300 s — hard timeout. Pre-warm
+             worst case is ~120 s (CAMERA_EYES outdoor 8 retries × 15 s).
+             Anything longer is stuck — clear and let the next toggle reset
+             cleanly rather than blocking privacy/snapshot UI forever.
         """
+        import time as _time
         if not hasattr(self, "_stream_warming"):
             self._stream_warming: set[str] = set()
+        if not hasattr(self, "_stream_warming_started"):
+            self._stream_warming_started: dict[str, float] = {}
         if cam_id not in self._stream_warming:
             return False
+        # Scenario 1: warming flag without _live_connections entry
         if cam_id not in self._live_connections:
-            _LOGGER.debug("Clearing stale stream-warming flag for %s", cam_id[:8])
+            _LOGGER.debug("Clearing stale stream-warming flag for %s (no live conn)", cam_id[:8])
             self._stream_warming.discard(cam_id)
+            self._stream_warming_started.pop(cam_id, None)
+            return False
+        live = self._live_connections.get(cam_id, {})
+        # Scenario 2: warming flag but pre-warm actually finished (URL set)
+        if live.get("rtspsUrl") or live.get("rtspUrl"):
+            _LOGGER.debug(
+                "Clearing stale stream-warming flag for %s (rtspsUrl already set — race)",
+                cam_id[:8],
+            )
+            self._stream_warming.discard(cam_id)
+            self._stream_warming_started.pop(cam_id, None)
+            return False
+        # Scenario 3: warming for >300 s — hard timeout
+        started = self._stream_warming_started.get(cam_id, 0)
+        if started and (_time.monotonic() - started) > 300:
+            _LOGGER.warning(
+                "Clearing stuck stream-warming flag for %s (warming for %.0fs)",
+                cam_id[:8], _time.monotonic() - started,
+            )
+            self._stream_warming.discard(cam_id)
+            self._stream_warming_started.pop(cam_id, None)
             return False
         return True
 
@@ -2077,7 +2112,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         if type_val == "LOCAL" and local_user and local_pass:
                             if not hasattr(self, "_stream_warming"):
                                 self._stream_warming = set()
+                            if not hasattr(self, "_stream_warming_started"):
+                                self._stream_warming_started = {}
                             self._stream_warming.add(cam_id)
+                            self._stream_warming_started[cam_id] = time.monotonic()
                             # Stop HA's existing Stream now — the PUT above
                             # just rotated creds and the TLS proxy just
                             # switched ports, so FFmpeg's cached URL is dead.

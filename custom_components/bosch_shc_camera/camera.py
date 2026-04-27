@@ -487,6 +487,33 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
+        """Public entrypoint — wraps the implementation so that any uncaught
+        exception still returns a valid (placeholder) JPEG instead of letting
+        HA's camera proxy serve a textual `500: Internal Server Error` body
+        (26 bytes of plain text in place of an image).
+
+        Observed 2026-04-27 on Gen1 cams during the pre-warm transition: while
+        `_live_connections[cam_id]` had a partial entry but no proxyUrl yet,
+        an unhandled exception path in `_async_camera_image_impl` propagated up
+        and HA returned 500. Lovelace's `<img>` element rendered the literal
+        text bytes as a brown error frame on every camera card sharing the
+        same broken endpoint, making it look like cross-camera bleed.
+        """
+        try:
+            result = await self._async_camera_image_impl(width, height)
+            return result if result else self._PLACEHOLDER_JPEG
+        except asyncio.CancelledError:
+            raise  # let cancellation propagate cleanly
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug(
+                "%s: async_camera_image failed (%s) — serving placeholder",
+                self._attr_name, err,
+            )
+            return self._cached_image or self._PLACEHOLDER_JPEG
+
+    async def _async_camera_image_impl(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
         """
         Return the best available JPEG snapshot, tried in order:
 
@@ -547,7 +574,16 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                             _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         return None
                     try:
-                        async with asyncio.timeout(12):
+                        # Tightened from 12 s to 6 s: HA's CameraImageView wraps
+                        # async_camera_image() with CAMERA_IMAGE_TIMEOUT (10 s);
+                        # 12 s + 10 s aiohttp fallback below = >22 s, well over
+                        # HA's outer timeout. HA cancels mid-flight → image=None
+                        # → HomeAssistantError → 26-byte "500: Internal Server
+                        # Error" body rendered as a brown placeholder on the
+                        # camera card. 6 s is enough for a healthy LAN Digest
+                        # round-trip; if it fails, return cached/placeholder
+                        # immediately rather than racing HA's outer timeout.
+                        async with asyncio.timeout(6):
                             data = await self.hass.async_add_executor_job(_fetch_local_snap)
                         if data:
                             self._cached_image = data
@@ -559,6 +595,12 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                             return self._cached_image
                     except asyncio.TimeoutError:
                         pass
+                    # LOCAL conn: skip the aiohttp fallback below. The proxy_url
+                    # for LOCAL is `https://<lan-ip>:443/snap.jpg` which requires
+                    # the Digest auth we just tried — aiohttp without auth would
+                    # 401 in another ~10 s burning HA's outer budget. Go straight
+                    # to cached image / placeholder via the final return.
+                    return self._cached_image or self._PLACEHOLDER_JPEG
             try:
                 async with asyncio.timeout(10):
                     async with session.get(proxy_url) as resp:
