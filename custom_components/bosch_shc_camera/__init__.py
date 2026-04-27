@@ -2340,7 +2340,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # falls back to its cached frame or _PLACEHOLDER_JPEG. Detected via the
         # cached `privacy_mode` boolean populated in the same /v11/video_inputs
         # response (line 1386) — no extra request needed.
-        priv_cache = self._camera_status_extra.get(cam_id, {})
+        # getattr() guard: the cache dict isn't allocated until the first
+        # successful coordinator tick (cf. v10.4.3 hotfix v10.4.4 — without
+        # the guard the call raised AttributeError and broke ALL snapshot
+        # refreshes during the boot/integration-load window).
+        priv_cache = getattr(self, "_camera_status_extra", {}).get(cam_id, {})
         if priv_cache.get("privacy_mode") is True:
             return None
 
@@ -2544,7 +2548,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Same privacy short-circuit as the REMOTE fetch (line 2335) — the LAN
         # snap.jpg also returns 0 bytes when privacy mode is ON, no point
         # opening a fresh PUT /connection LOCAL just to get an empty body.
-        priv_cache = self._camera_status_extra.get(cam_id, {})
+        # getattr() guard same as REMOTE path — see hotfix note in v10.4.4.
+        priv_cache = getattr(self, "_camera_status_extra", {}).get(cam_id, {})
         if priv_cache.get("privacy_mode") is True:
             return None
 
