@@ -124,22 +124,15 @@ def rcp_read_remote_sync(
         return None
 
 
-# ── Field-specific helpers ──────────────────────────────────────────────────
-
-def parse_privacy_state(payload: bytes | None) -> bool | None:
-    """Decode 0x0d00 P_OCTET (4 bytes). byte[1]==1 means privacy ENABLED.
-
-    Verified 2026-04-27 vs known privacy-on state (Terrasse Gen2, FW 9.40.25).
-    """
-    if not isinstance(payload, (bytes, bytearray)) or len(payload) < 2:
-        return None
-    return payload[1] == 1
-
-
-def parse_led_dimmer_percent(value: int | None) -> int | None:
-    """Decode 0x0c22 T_WORD — already a 0–100 int from the parser. Clamp & validate."""
-    if not isinstance(value, int):
-        return None
-    if 0 <= value <= 100:
-        return value
-    return None
+# ── Field-specific helpers — RETIRED ────────────────────────────────────────
+# Earlier versions exported parse_privacy_state(0x0d00) and
+# parse_led_dimmer_percent(0x0c22) here. Both were removed in v10.4.9 after
+# A/B testing proved the byte mappings did NOT match the user-facing
+# privacy-mode toggle (0x0d00 byte[1] stayed 1 even with the mode OFF).
+# rcp_findings.txt's "PRIVACY MASK" label was taken to mean "privacy mode";
+# it doesn't. Don't add field-specific helpers here again without:
+#   1. Toggling the user-facing setting both ways
+#   2. Re-reading the RCP value after each toggle
+#   3. Confirming the RCP value actually changes
+# The generic rcp_read_local_sync / rcp_read_remote_sync helpers remain
+# correct and are kept for future verified uses.
