@@ -351,21 +351,41 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             live = self.coordinator._live_connections.get(cam_id, {})
             return bool(live) and live.get("_connection_type") == "LOCAL"
 
-        def _is_stream_healthy() -> bool:
+        def _stream_health_state() -> str:
+            # Three-state classifier so we don't conflate "no consumer yet"
+            # with "stream object exists but is unhealthy". Returns:
+            #   "no_consumer" — cam_entity.stream is None (frontend never
+            #     asked for HLS, FFmpeg never started). Restarting the LOCAL
+            #     session does NOT help here; nobody is reading bytes.
+            #   "healthy"     — Stream.available is True (worker producing).
+            #   "unhealthy"   — Stream object exists but available is False
+            #     (FFmpeg started and died, or never produced first segment).
             cam_entity = self.coordinator._camera_entities.get(cam_id)
-            if not cam_entity or not getattr(cam_entity, "stream", None):
-                return False
-            # Stream.available is the authoritative signal — True only while
-            # the worker has produced output recently. A half-dead stream
-            # (object present, FFmpeg crashed) has available=False.
-            return bool(getattr(cam_entity.stream, "available", False))
+            if not cam_entity:
+                return "no_consumer"
+            stream = getattr(cam_entity, "stream", None)
+            if stream is None:
+                return "no_consumer"
+            return "healthy" if bool(getattr(stream, "available", False)) else "unhealthy"
 
         for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
             await asyncio.sleep(delay)
             if not _is_local_active():
                 return
-            if _is_stream_healthy():
+            state = _stream_health_state()
+            if state == "healthy":
                 self.coordinator.record_stream_success(cam_id)
+                return
+            if state == "no_consumer":
+                # No HLS consumer asked for the stream — FFmpeg never started,
+                # so there's nothing to restart. Leaving the LOCAL session up
+                # so a future consumer (browser tab opens) gets it instantly.
+                _LOGGER.debug(
+                    "Stream health watchdog: %s LOCAL session up but no HLS "
+                    "consumer connected — skipping health check (frontend "
+                    "card may be unmounted)",
+                    cam_id[:8],
+                )
                 return
             # On the second consecutive failure (~2 min with no healthy
             # output), escalate: saturate the error counter so the next
