@@ -37,6 +37,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -235,13 +236,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        """Unavailable when the LOCAL keepalive loop has given up on this cam.
-
-        `is_session_stale` goes True after 3 consecutive renewal failures and
-        resets on the first successful renewal — exposing that here keeps the
-        switch honest instead of showing ON over a frozen stream.
-        """
+        """Unavailable while privacy mode is active or the LOCAL keepalive loop has stalled."""
         if not super().available:
+            return False
+        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
             return False
         return not self.coordinator.is_session_stale(self._cam_id)
 
@@ -266,25 +264,11 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         """Open a new live proxy connection."""
         import time
         # Block stream start if privacy mode is active (camera shutter is closed)
-        privacy_state = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
-        if privacy_state and str(privacy_state).upper() in ("ON", "TRUE", "1"):
-            _LOGGER.warning(
-                "Stream ON for %s blocked — privacy mode is active (shutter closed). "
+        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
+            raise ServiceValidationError(
+                f"Cannot start stream for {self._cam_title} — privacy mode is active. "
                 "Turn off privacy mode first.",
-                self._cam_title,
             )
-            # Fire persistent notification so user sees the error in the UI
-            await self.hass.services.async_call(
-                "persistent_notification", "create",
-                {
-                    "title": f"Stream blockiert — {self._cam_title}",
-                    "message": f"Der Live-Stream für {self._cam_title} kann nicht gestartet werden, "
-                               f"da der Privacy-Modus aktiv ist (Blende geschlossen). "
-                               f"Bitte zuerst den Privacy-Modus deaktivieren.",
-                    "notification_id": f"bosch_stream_blocked_{self._cam_id[:8]}",
-                },
-            )
-            return
         last_off = getattr(self, "_last_stream_off", 0)
         elapsed = time.monotonic() - last_off
         if last_off > 0 and elapsed < self._STREAM_COOLDOWN:
@@ -478,6 +462,11 @@ class BoschAudioSwitch(_BoschSwitchBase):
 
     async def _apply_audio_change(self) -> None:
         """Re-open the live connection if active so the audio change takes effect."""
+        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
+            _LOGGER.warning(
+                "Audio change for %s skipped — privacy mode is active", self._cam_title
+            )
+            return
         if self._cam_id in self.coordinator._live_connections:
             _LOGGER.info(
                 "Re-opening live connection for %s to apply audio change", self._cam_title

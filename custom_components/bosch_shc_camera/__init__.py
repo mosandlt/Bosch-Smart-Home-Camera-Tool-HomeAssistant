@@ -1861,6 +1861,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Returns the enriched response dict, or None on failure.
         Serialized per camera via asyncio.Lock to prevent concurrent setup.
         """
+        # Privacy guard — fail-open if cache not yet populated at boot
+        if bool(self._shc_state_cache.get(cam_id, {}).get("privacy_mode")):
+            _LOGGER.info(
+                "try_live_connection: privacy mode active for %s — stream blocked", cam_id[:8]
+            )
+            return None
         lock = self._get_stream_lock(cam_id)
         if lock.locked() and not is_renewal:
             _LOGGER.warning("try_live_connection: already in progress for %s — skipping", cam_id[:8])
