@@ -193,6 +193,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
         self._live_connections: dict[str, dict] = {}
         self._live_opened_at:   dict[str, float] = {}   # timestamp when session was opened
+        # Local-RCP+ state cache: per-cam {"privacy_mode": bool, "led_dimmer": int, "fetched_at": float, "source": "local"|"remote"}
+        # Refreshed opportunistically after each successful PUT /connection.
+        # Used as a refinement source for SHC-cache values when SHC is offline /
+        # not configured. Persists past session-end (last-known is better than nothing).
+        self._rcp_state_cache: dict[str, dict] = {}
         # In-memory stream type override — changed by BoschStreamModeSwitch without reload.
         # None = use options setting; "local" / "auto" / "remote" = override.
         self._stream_type_override: str | None = None
@@ -2283,6 +2288,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             )
                         self.hass.async_create_task(self.async_request_refresh())
                         self.hass.async_create_task(self._check_and_recover_webrtc(cam_id))
+                        # Opportunistic RCP+ state pull: refresh privacy + LED-dimmer
+                        # via lokales / Cloud-Proxy RCP+ on the freshly opened session.
+                        # No-op silently on failure; fallback paths (SHC + cloud
+                        # /v11/video_inputs) keep their primacy.
+                        self.hass.async_create_task(self._refresh_rcp_state(cam_id))
                         return result
                     elif resp.status == 401:
                         _LOGGER.warning(
@@ -2629,6 +2639,99 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             return None
 
         return await self.hass.async_add_executor_job(_fetch_digest)
+
+    # ── Local / Cloud-Proxy RCP+ READ helpers ────────────────────────────────
+    async def _rcp_read_active(self, cam_id: str, command: str, type_: str):
+        """Read an RCP+ field via the currently active stream session.
+
+        Dispatches LOCAL (digest auth + cam IP) vs REMOTE (basic-empty + proxy
+        hash) based on `_live_connections[cam_id]._connection_type`. Returns the
+        parsed value (int / bytes / str depending on `type_`) or None when no
+        session is active or the read fails. Never raises.
+
+        Designed for opportunistic reads — never triggers a fresh PUT /connection
+        (would cred-rotate on Gen2 Outdoor and break the running stream).
+        """
+        live = self._live_connections.get(cam_id, {})
+        if not live:
+            return None
+        conn_type = live.get("_connection_type")
+        if conn_type == "LOCAL":
+            user = live.get("_local_user")
+            pwd = live.get("_local_password")
+            urls = live.get("urls", [])
+            if not user or not pwd or not urls:
+                return None
+            host = urls[0]  # "192.168.x.x:443"
+            from .local_rcp import rcp_read_local_sync
+            return await self.hass.async_add_executor_job(
+                rcp_read_local_sync, host, user, pwd, command, type_
+            )
+        if conn_type == "REMOTE":
+            urls = live.get("urls", [])
+            if not urls:
+                return None
+            # Cloud-Proxy URL form: "proxy-XX.live.cbs.boschsecurity.com:42090/{hash}"
+            proxy_with_hash = urls[0]
+            from .local_rcp import rcp_read_remote_sync
+            return await self.hass.async_add_executor_job(
+                rcp_read_remote_sync, proxy_with_hash, command, type_
+            )
+        return None
+
+    async def _refresh_rcp_state(self, cam_id: str) -> None:
+        """Pull privacy_mode (0x0d00) + LED dimmer (0x0c22) via RCP+ and cache.
+
+        Hooked from `_try_live_connection_inner` after a successful stream start
+        (LOCAL post-warmup or REMOTE post-PUT). Never raises. SHC remains the
+        primary truth-source — this only refines `_shc_state_cache` entries that
+        are still None (SHC unreachable / unconfigured).
+        """
+        from .local_rcp import parse_privacy_state, parse_led_dimmer_percent
+
+        live = self._live_connections.get(cam_id, {})
+        source = live.get("_connection_type", "?").lower()
+        cache = self._rcp_state_cache.setdefault(cam_id, {})
+
+        # Privacy state: 0x0d00 P_OCTET → 4 bytes, byte[1]==1 means ENABLED.
+        priv_payload = await self._rcp_read_active(cam_id, "0x0d00", "P_OCTET")
+        priv = parse_privacy_state(priv_payload)
+        if priv is not None:
+            cache["privacy_mode"] = priv
+            shc_entry = self._shc_state_cache.setdefault(cam_id, {
+                "camera_light": None, "privacy_mode": None,
+            })
+            if shc_entry.get("privacy_mode") is None:
+                shc_entry["privacy_mode"] = priv
+                _LOGGER.debug(
+                    "rcp refresh: %s privacy_mode=%s (filled SHC-cache via %s RCP)",
+                    cam_id[:8], priv, source,
+                )
+            else:
+                _LOGGER.debug(
+                    "rcp refresh: %s privacy_mode=%s (SHC has %s, RCP cached only)",
+                    cam_id[:8], priv, shc_entry.get("privacy_mode"),
+                )
+
+        # LED dimmer: 0x0c22 T_WORD → 0–100.
+        led_raw = await self._rcp_read_active(cam_id, "0x0c22", "T_WORD")
+        led = parse_led_dimmer_percent(led_raw)
+        if led is not None:
+            cache["led_dimmer"] = led
+            _LOGGER.debug("rcp refresh: %s led_dimmer=%d%% via %s RCP", cam_id[:8], led, source)
+
+        if cache:
+            cache["source"] = source
+            cache["fetched_at"] = time.monotonic()
+            # Push the new attribute values to HA state so the REST API,
+            # the Lovelace card, and any automations see the fresh data
+            # without waiting for the next coordinator tick.
+            cam_entity = self._camera_entities.get(cam_id)
+            if cam_entity is not None:
+                try:
+                    cam_entity.async_write_ha_state()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("rcp refresh: %s state-write skipped (%s)", cam_id[:8], err)
 
     async def _check_and_recover_webrtc(self, cam_id: str) -> None:
         """Watchdog for HA's bundled go2rtc WebRTCProvider stale-schemes bug.
