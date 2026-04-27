@@ -369,21 +369,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         attrs["live_buffer_mode"] = get_options(self._entry).get(
             "live_buffer_mode", "balanced"
         )
-        # Local-RCP+ derived state — refreshed opportunistically after each
-        # successful PUT /connection. Used as fallback for SHC-driven values
-        # (privacy_mode, camera_light/dimmer) when SHC is unreachable. Survives
-        # past stream-end; "rcp_state_age" tells consumers if the value is
-        # stale (in seconds since last successful read).
-        rcp_cache = getattr(self.coordinator, "_rcp_state_cache", {}).get(
-            self._cam_id, {}
-        )
-        if "privacy_mode" in rcp_cache:
-            attrs["rcp_privacy_mode"] = rcp_cache["privacy_mode"]
-        if "led_dimmer" in rcp_cache:
-            attrs["rcp_led_dimmer"] = rcp_cache["led_dimmer"]
-        if "fetched_at" in rcp_cache:
-            attrs["rcp_state_age"] = round(time.monotonic() - rcp_cache["fetched_at"])
-            attrs["rcp_state_source"] = rcp_cache.get("source", "?")
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
