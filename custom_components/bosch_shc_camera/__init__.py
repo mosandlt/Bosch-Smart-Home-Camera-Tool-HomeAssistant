@@ -1389,6 +1389,34 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 )
                 if privacy_str and not privacy_locked:
                     cache["privacy_mode"] = (privacy_str.upper() == "ON")
+                # ── RCP override of Cloud-Coordinator privacy_mode ────────
+                # Bosch Cloud /v11/video_inputs.privacyMode has been observed
+                # to misreport `OFF` while the camera is physically in privacy
+                # (Gen2 Outdoor, FW 9.40.25, 2026-04-27). RCP+ reads directly
+                # from the camera hardware and is authoritative when it has
+                # a fresh value. Override Cloud only when:
+                #   * RCP cache exists and is fresh (<120 s old)
+                #   * RCP and Cloud disagree
+                #   * No user-write lock currently active
+                rcp_entry = self._rcp_state_cache.get(cam_id_key, {})
+                rcp_priv = rcp_entry.get("privacy_mode")
+                rcp_age = (
+                    time.monotonic() - rcp_entry["fetched_at"]
+                    if "fetched_at" in rcp_entry else None
+                )
+                if (
+                    rcp_priv is not None
+                    and rcp_age is not None and rcp_age < 120
+                    and not privacy_locked
+                    and cache.get("privacy_mode") != rcp_priv
+                ):
+                    _LOGGER.info(
+                        "privacy_mode mismatch %s: cloud=%r, RCP=%r (age %.0fs) — "
+                        "trusting RCP (Bosch cloud /v11/video_inputs.privacyMode "
+                        "occasionally lies for ONLINE cams in privacy)",
+                        cam_id_key[:8], cache.get("privacy_mode"), rcp_priv, rcp_age,
+                    )
+                    cache["privacy_mode"] = rcp_priv
                 cache["has_light"] = has_light
                 # Use cloud featureStatus for light state; SHC supplements if available.
                 # Skip overwrite if a write happened within _WRITE_LOCK_SECS — the cloud
@@ -2701,16 +2729,41 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             shc_entry = self._shc_state_cache.setdefault(cam_id, {
                 "camera_light": None, "privacy_mode": None,
             })
-            if shc_entry.get("privacy_mode") is None:
+            shc_priv = shc_entry.get("privacy_mode")
+            # Override SHC cache with RCP value when:
+            #   * SHC cache is None (unconfigured / unfilled), OR
+            #   * SHC and RCP disagree AND no write-lock is active
+            #     (Bosch cloud /v11/video_inputs.privacyMode has been observed
+            #      to misreport `OFF` for ONLINE cams in privacy — Gen2 Outdoor
+            #      FW 9.40.25, 2026-04-27. RCP reads camera hardware directly.)
+            privacy_locked = (
+                cam_id in self._privacy_set_at
+                and (time.monotonic() - self._privacy_set_at[cam_id]) < self._WRITE_LOCK_SECS
+            )
+            if shc_priv is None:
                 shc_entry["privacy_mode"] = priv
                 _LOGGER.debug(
                     "rcp refresh: %s privacy_mode=%s (filled SHC-cache via %s RCP)",
                     cam_id[:8], priv, source,
                 )
+            elif shc_priv != priv and not privacy_locked:
+                _LOGGER.info(
+                    "rcp refresh: %s privacy_mode mismatch — SHC=%s, RCP=%s — "
+                    "trusting RCP (camera hardware is authoritative; cloud can lag/lie)",
+                    cam_id[:8], shc_priv, priv,
+                )
+                shc_entry["privacy_mode"] = priv
+                # Push the corrected state to all entities that read the cache
+                # (privacy switch, light gates, etc.) so the user sees the truth
+                # immediately, without waiting for the next coordinator tick.
+                try:
+                    self.async_update_listeners()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("rcp refresh: %s listener update skipped (%s)", cam_id[:8], err)
             else:
                 _LOGGER.debug(
-                    "rcp refresh: %s privacy_mode=%s (SHC has %s, RCP cached only)",
-                    cam_id[:8], priv, shc_entry.get("privacy_mode"),
+                    "rcp refresh: %s privacy_mode=%s (SHC agrees, RCP cached only)",
+                    cam_id[:8], priv,
                 )
 
         # LED dimmer: 0x0c22 T_WORD → 0–100.
