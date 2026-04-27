@@ -2331,6 +2331,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         token = self.token
         if not token:
             return None
+        # Privacy short-circuit: when privacy mode is ON, the camera returns
+        # snap.jpg with HTTP 200 and 0 bytes (camera blocks live frames while
+        # the shutter / privacy mask is engaged). Skip the network call entirely
+        # rather than burning a PUT /connection + snap.jpg round-trip every
+        # coordinator tick (~5–8 calls per minute across 4 cameras) just to
+        # log "empty response (privacy mode ON?)" each time. The camera entity
+        # falls back to its cached frame or _PLACEHOLDER_JPEG. Detected via the
+        # cached `privacy_mode` boolean populated in the same /v11/video_inputs
+        # response (line 1386) — no extra request needed.
+        priv_cache = self._camera_status_extra.get(cam_id, {})
+        if priv_cache.get("privacy_mode") is True:
+            return None
 
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as session:
@@ -2528,6 +2540,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         token = self.token
         if not token:
+            return None
+        # Same privacy short-circuit as the REMOTE fetch (line 2335) — the LAN
+        # snap.jpg also returns 0 bytes when privacy mode is ON, no point
+        # opening a fresh PUT /connection LOCAL just to get an empty body.
+        priv_cache = self._camera_status_extra.get(cam_id, {})
+        if priv_cache.get("privacy_mode") is True:
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
