@@ -148,7 +148,19 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.10";
+const CARD_VERSION = "2.10.11";
+
+// HLS player buffer profiles. Selected via the integration option
+// "live_buffer_mode" and exposed on camera entity attributes. Mapped to
+// hls.js parameters here. HA emits 2 s HLS segments by default, so:
+//   liveSyncDurationCount * 2 ≈ steady-state lag behind live edge.
+//   maxBufferLength MUST stay below HA's 30 s OUTPUT_IDLE_TIMEOUT, otherwise
+//   hls.js stops fetching and FFmpeg gets killed.
+const BOSCH_BUFFER_PROFILES = {
+  latency:  { liveSyncDurationCount: 2, liveMaxLatencyDurationCount:  4, maxBufferLength:  8, maxMaxBufferLength: 14, lowLatencyMode: true  },
+  balanced: { liveSyncDurationCount: 4, liveMaxLatencyDurationCount:  8, maxBufferLength: 14, maxMaxBufferLength: 22, lowLatencyMode: false },
+  stable:   { liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 12, maxBufferLength: 22, maxMaxBufferLength: 28, lowLatencyMode: false },
+};
 
 class BoschCameraCard extends HTMLElement {
   constructor() {
@@ -900,7 +912,7 @@ class BoschCameraCard extends HTMLElement {
             <span class="info-label">Verbindung</span>
             <span class="info-value" id="info-connection">—</span>
           </div>
-          <div class="info-item" style="text-align:right">
+          <div class="info-item" style="text-align:right" title="Bosch-API Reaktionszeit (LOCAL=500 ms, REMOTE=1000 ms). Nicht der Player-Puffer — den stellt 'Puffer-Verhalten' in den Integrations-Einstellungen ein.">
             <span class="info-label">Reaktion</span>
             <span class="info-value" id="info-buffering">—</span>
           </div>
@@ -2107,16 +2119,17 @@ class BoschCameraCard extends HTMLElement {
       const Hls = await this._loadHlsJs();
       if (Hls.isSupported()) {
         if (this._hls) { this._hls.destroy(); this._hls = null; }
+        // Apply the buffer profile selected via integration options.
+        // CRITICAL: maxBufferLength MUST stay < HA's OUTPUT_IDLE_TIMEOUT (30s).
+        // If hls.js buffers ≥30s, it stops requesting segments → HA thinks
+        // nobody is watching → kills FFmpeg → video freezes on last frame.
+        const camAttrsForBuf = this._hass?.states?.[this._entities.camera]?.attributes || {};
+        const bufModeKey = camAttrsForBuf.live_buffer_mode || "balanced";
+        const bufProfile = BOSCH_BUFFER_PROFILES[bufModeKey] || BOSCH_BUFFER_PROFILES.balanced;
+        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile);
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
-          // CRITICAL: maxBufferLength MUST be < HA's OUTPUT_IDLE_TIMEOUT (30s).
-          // If hls.js buffers ≥30s, it stops requesting segments → HA thinks
-          // nobody is watching → kills FFmpeg → video freezes on last frame.
-          liveSyncDurationCount: 3,     // stay 3 segments behind live edge
-          liveMaxLatencyDurationCount: 6, // max 6 segments behind before seeking to live
-          maxBufferLength: 10,          // buffer up to 10s (MUST be < 30s HA idle timeout!)
-          maxMaxBufferLength: 20,       // absolute max buffer 20s
+          ...bufProfile,
           // Aggressive recovery: reload manifest on stall
           manifestLoadingMaxRetry: 10,
           levelLoadingMaxRetry: 10,

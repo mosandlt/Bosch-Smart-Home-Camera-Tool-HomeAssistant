@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "2.10.10"
+CARD_VERSION = "2.10.11"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -39,6 +39,11 @@ DEFAULT_OPTIONS = {
     "shc_key_path":  "",
     "high_quality_video": False,
     "stream_connection_type": "auto",
+    # HLS player buffer profile applied by the Lovelace card (hls.js).
+    # "latency"  → small buffer, ~4-6s lag, may stutter on Wi-Fi jitter
+    # "balanced" → default, ~8-10s lag, robust against typical Wi-Fi hiccups
+    # "stable"   → large buffer, ~12-15s lag, no stutter even on weak links
+    "live_buffer_mode": "balanced",
     "enable_binary_sensors": True,
     "enable_fcm_push": False,
     "alert_notify_service": "",

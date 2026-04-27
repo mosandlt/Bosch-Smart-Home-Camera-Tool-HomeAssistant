@@ -479,6 +479,17 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )),
                 vol.Optional(
+                    "live_buffer_mode",
+                    default=str(opts.get("live_buffer_mode", "balanced")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="latency",  label="Latenz (geringe Verzögerung, kann ruckeln)"),
+                        SelectOptionDict(value="balanced", label="Ausgewogen (Standard)"),
+                        SelectOptionDict(value="stable",   label="Stabil (kein Ruckeln, mehr Verzögerung)"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
+                vol.Optional(
                     "enable_binary_sensors",
                     default=bool(opts.get("enable_binary_sensors", True)),
                 ): bool,

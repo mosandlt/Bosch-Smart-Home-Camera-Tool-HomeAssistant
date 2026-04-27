@@ -357,11 +357,18 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         if rtsps_url:
             attrs["stream_url"] = rtsps_url
         # bufferingTime from PUT /connection (LOCAL=500ms, REMOTE=1000ms)
+        # — Bosch-server-side hint, NOT the player buffer. Display only.
         live_conn = self.coordinator._live_connections.get(self._cam_id, {})
         bt = live_conn.get("_bufferingTime")
         if bt is not None:
             attrs["buffering_time_ms"] = bt
             attrs["connection_type"] = live_conn.get("_connection_type", "REMOTE")
+        # Player-side buffer profile — read by the Lovelace card to configure
+        # hls.js. Mode → (liveSyncDurationCount, liveMaxLatencyDurationCount,
+        # maxBufferLength, lowLatencyMode) is mapped client-side.
+        attrs["live_buffer_mode"] = get_options(self._entry).get(
+            "live_buffer_mode", "balanced"
+        )
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
