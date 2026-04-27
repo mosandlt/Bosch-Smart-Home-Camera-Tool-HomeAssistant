@@ -2078,32 +2078,48 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if not hasattr(self, "_stream_warming"):
                                 self._stream_warming = set()
                             self._stream_warming.add(cam_id)
-                            # On renewal: stop HA's existing Stream now — the
-                            # PUT above just rotated creds and the TLS proxy
-                            # just switched ports, so FFmpeg's cached URL is
-                            # dead. Without stopping it here, FFmpeg keeps
-                            # retrying that URL during the pre-warm wait (up
-                            # to min_total_wait seconds), racks up
+                            # Stop HA's existing Stream now — the PUT above
+                            # just rotated creds and the TLS proxy just
+                            # switched ports, so FFmpeg's cached URL is dead.
+                            # Without stopping here, FFmpeg keeps retrying
+                            # the stale URL during the pre-warm wait (up to
+                            # min_total_wait seconds), racks up
                             # max_stream_errors, and trips the worker-error
                             # listener into a REMOTE fallback before we ever
-                            # get to update_source() with the new URL.
-                            if is_renewal:
-                                cam_ent = self._camera_entities.get(cam_id)
-                                if cam_ent is not None:
-                                    stale = getattr(cam_ent, "stream", None)
-                                    if stale is not None:
-                                        try:
-                                            await stale.stop()
-                                        except Exception as _exc:  # noqa: BLE001
-                                            _LOGGER.debug(
-                                                "Renewal: stale Stream.stop() for %s failed: %s",
-                                                cam_id[:8], _exc,
-                                            )
-                                        cam_ent.stream = None
+                            # call update_source() with the new URL.
+                            #
+                            # Applies to BOTH renewals AND fresh user-toggles.
+                            # On a fresh toggle, a stale Stream object can
+                            # still be present if a previous session was torn
+                            # down at the URL level but HA's internal Stream
+                            # cache held on to the worker. Reusing that worker
+                            # via update_source() risks serving a *different
+                            # camera's* cached buffer to this entity (observed
+                            # 2026-04-27: two camera cards on one dashboard
+                            # showed the same video for whichever camera was
+                            # toggled last — Stream-Object Reuse-Race). Always
+                            # forcing a fresh Stream eliminates that class of
+                            # bugs at the cost of one extra FFmpeg cold-start
+                            # per stream-on (negligible — the pre-warm already
+                            # dominates the activation time).
+                            cam_ent = self._camera_entities.get(cam_id)
+                            if cam_ent is not None:
+                                stale = getattr(cam_ent, "stream", None)
+                                if stale is not None:
+                                    try:
+                                        await stale.stop()
+                                    except Exception as _exc:  # noqa: BLE001
                                         _LOGGER.debug(
-                                            "Renewal: invalidated stale Stream for %s before pre-warm",
-                                            cam_id[:8],
+                                            "%s: stale Stream.stop() for %s failed: %s",
+                                            "Renewal" if is_renewal else "Fresh toggle",
+                                            cam_id[:8], _exc,
                                         )
+                                    cam_ent.stream = None
+                                    _LOGGER.debug(
+                                        "%s: invalidated stale Stream for %s before pre-warm",
+                                        "Renewal" if is_renewal else "Fresh toggle",
+                                        cam_id[:8],
+                                    )
                             cfg = self.get_model_config(cam_id)
                             hw = self._hw_version.get(cam_id, "?")
                             put_time = time.monotonic()
