@@ -553,9 +553,11 @@ async def async_send_alert(
 
     opts = coordinator.options
 
-    # Per-type service routing: information/screenshot/video each fall back to alert_notify_service
+    # Per-type service routing: information/screenshot/video each fall back to alert_notify_service.
+    # TROUBLE events use "system" — check that before bailing on missing information services.
+    _is_trouble = event_type in ("TROUBLE_CONNECT", "TROUBLE_DISCONNECT")
     info_svcs = get_alert_services(coordinator, "information")
-    if not info_svcs:
+    if not info_svcs and not _is_trouble:
         return  # Nothing to send if no information services configured
 
     save_snapshots = opts.get("alert_save_snapshots", False)
@@ -604,12 +606,18 @@ async def async_send_alert(
                 _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)
 
     # -- Step 1: Instant text alert ----------------------------------------
+    # TROUBLE_CONNECT/DISCONNECT are connectivity events — route to "system",
+    # not "information", and skip snapshot/clip steps (no media for these).
+    _step1_key = "system" if _is_trouble else "information"
     try:
-        await _notify_type("information", f"{type_icon} {cam_name}: {type_label} ({ts_short})")
-        _LOGGER.debug("Alert step 1 (text) sent to %d services", len(info_svcs))
+        await _notify_type(_step1_key, f"{type_icon} {cam_name}: {type_label} ({ts_short})")
+        _LOGGER.debug("Alert step 1 (text) sent via %s", _step1_key)
     except Exception as err:
         _LOGGER.warning("Alert step 1 failed: %s", err)
         return
+
+    if _is_trouble:
+        return  # No snapshot/clip for connectivity events
 
     # -- Step 2: Snapshot image (after 3s, retries up to ~25s) ------------
     # The FCM push sometimes arrives before Bosch's event API has the imageUrl

@@ -2025,7 +2025,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     }
                                 except Exception as _e:
                                     _LOGGER.debug("LOCAL creds cache skip for %s: %s", cam_id[:8], _e)
-                                result["proxyUrl"] = img_scheme.replace("{url}", cam_addr)
+                                _snap_url = img_scheme.replace("{url}", cam_addr)
+                                if "JpegSize=" not in _snap_url:
+                                    _snap_url += ("&" if "?" in _snap_url else "?") + "JpegSize=1206"
+                                result["proxyUrl"] = _snap_url
                                 cam_host, cam_port = cam_addr.split(":")
                                 proxy_port = await self._start_tls_proxy(
                                     cam_id, cam_host, int(cam_port),
