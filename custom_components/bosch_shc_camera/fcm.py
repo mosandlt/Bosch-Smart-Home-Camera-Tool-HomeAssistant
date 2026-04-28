@@ -44,6 +44,62 @@ _LOGGER = logging.getLogger(__name__)
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
+
+class _FCMNoiseFilter(logging.Filter):
+    """Tame the firebase_messaging FCM client log noise during WAN outages.
+
+    When the WAN drops (router reboot, ISP blip), `firebase_messaging`'s
+    `_listen` loop crashes on `await reader.readexactly(1)` and re-enters
+    itself recursively while retrying — every ERROR log line carries a
+    ~3000-frame stack trace. With a 30 s reconnect cadence that produces
+    ~200 log lines/s, 12 k+ lines/min, and an HA CPU spike from ~30 % to
+    ~85 % until WAN comes back. Library has no way to suppress the trace
+    (issue sdb9696/firebase-messaging#33 covers the abort-on-error angle
+    but not the recursive trace).
+
+    Filter strategy:
+      1. Strip `exc_info` from the record so the formatter doesn't dump
+         the recursive stack — the plain message is enough to know the
+         FCM connection failed.
+      2. De-duplicate: at most one pass-through per 60 s window so the
+         log has a heartbeat marker without flooding.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._last_passed = 0.0  # monotonic ts of last record we let through
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Only target the noisy "Unexpected exception during read" record;
+        # other firebase_messaging logs (INFO start/stop, registration) pass
+        # through untouched so we keep diagnostic visibility.
+        msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
+        if "Unexpected exception during read" not in msg:
+            return True
+        # Drop the multi-thousand-line traceback unconditionally — the
+        # message itself is the diagnostic, the trace is library-internal
+        # recursion that doesn't help triage.
+        record.exc_info = None
+        record.exc_text = None
+        # Then de-dupe: 1 line per 60 s.
+        now = time.monotonic()
+        if (now - self._last_passed) < 60.0:
+            return False
+        self._last_passed = now
+        return True
+
+
+def _install_fcm_noise_filter() -> None:
+    """Install the noise filter on the firebase_messaging logger once.
+
+    Idempotent: re-running attaches no duplicate filters.
+    """
+    fcm_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+    for f in fcm_logger.filters:
+        if isinstance(f, _FCMNoiseFilter):
+            return
+    fcm_logger.addFilter(_FCMNoiseFilter())
+
 # Firebase Cloud Messaging — push notifications from Bosch CBS
 FCM_SENDER_ID = "404630424405"
 FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
@@ -208,6 +264,10 @@ async def async_start_fcm_push(coordinator) -> None:
             with coordinator._fcm_lock:
                 coordinator._fcm_client = None
             return False
+
+    # Install once before any FCM client is created so the very first WAN
+    # outage doesn't spam 12 k+ recursive-traceback lines at us.
+    _install_fcm_noise_filter()
 
     if push_mode == "polling":
         _LOGGER.info("FCM push mode set to 'polling' — using standard API polling only")

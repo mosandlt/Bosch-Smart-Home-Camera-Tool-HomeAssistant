@@ -419,6 +419,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # After max_stream_errors, auto-fallback from LOCAL → REMOTE.
         self._stream_error_count: dict[str, int] = {}
         self._stream_fell_back: dict[str, bool] = {}  # True = currently using REMOTE fallback
+        # LOCAL session-cred rescue counter. When the HLS consumer goes idle
+        # the camera quietly invalidates the per-session digest creds; a later
+        # reconnect on the same TLS proxy gets HTTP 401. Re-issuing PUT
+        # /connection LOCAL produces fresh creds and keeps us on LAN — falling
+        # back to REMOTE in that case is a regression. Counter is bumped on
+        # each rescue attempt and reset by record_stream_success(); a non-zero
+        # value blocks further rescue attempts in the same failure burst so we
+        # can't get stuck in a re-issue loop if the LAN is genuinely broken.
+        # Rescues older than _LOCAL_RESCUE_TTL_SEC are treated as "different
+        # failure burst" and time-decayed back to 0 — the watchdog's
+        # record_stream_success() never fires when no HLS consumer is
+        # connected, so without time decay the counter would stick at 1 after
+        # the first rescue and the next 401 burst (typically 8–14 min later)
+        # would skip straight to REMOTE.
+        self._local_rescue_attempts: dict[str, int] = {}
+        self._local_rescue_at: dict[str, float] = {}  # cam_id → monotonic ts of last rescue
         # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
         # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
         self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
@@ -468,6 +484,92 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         """
         return bool(self._session_stale.get(cam_id, False))
 
+    def _refresh_local_creds_from_heartbeat(
+        self, cam_id: str, resp_text: str, generation: int, elapsed: float,
+    ) -> None:
+        """Cache fresh LOCAL creds from a heartbeat PUT response and rebuild
+        the cached rtspsUrl so the next stream-worker restart picks them up.
+
+        Bosch's PUT /v11/video_inputs/{id}/connection LOCAL returns a fresh
+        digest user/password pair on every call; the previous pair stops
+        accepting NEW RTSP connects within ~60 s (the maxSessionDuration
+        default Bosch announces). The active RTSP connection survives, but
+        without this refresh a reconnect after idle would fail with HTTP 401
+        and trip the LOCAL→REMOTE fallback. Capture analysis in
+        captures/api-findings.md §1 shows the iOS app handles this by
+        firing PUT at ~5 Hz during live view; we settle for one PUT per
+        heartbeat_interval (30 s on Indoor) which is more than enough.
+
+        The handler is best-effort: any parse / state error is swallowed,
+        the heartbeat keeps running, and the reactive 401 rescue in
+        _handle_stream_worker_error remains as a safety net.
+        """
+        try:
+            import json as _json
+            from urllib.parse import quote as _q
+            rj = _json.loads(resp_text or "{}")
+            new_user = rj.get("user")
+            new_pass = rj.get("password")
+            if not (new_user and new_pass):
+                return  # response without creds — nothing to refresh
+            live = self._live_connections.get(cam_id)
+            if not live or live.get("_connection_type") != "LOCAL":
+                return  # session torn down or already on REMOTE
+            old_user = live.get("_local_user")
+            old_pass = live.get("_local_password")
+            if old_user == new_user and old_pass == new_pass:
+                return  # creds unchanged (rare but possible — skip noisy update)
+            proxy_port = self._tls_proxy_ports.get(cam_id)
+            if not proxy_port:
+                return  # TLS proxy not running — nothing to point the URL at
+            old_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
+            inst_val = 1
+            qs = old_url.split("?", 1)[-1] if "?" in old_url else ""
+            for tok in qs.split("&"):
+                if tok.startswith("inst="):
+                    try:
+                        inst_val = int(tok.split("=", 1)[1])
+                    except ValueError:
+                        pass
+                    break
+            audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+            mcfg = self.get_model_config(cam_id)
+            new_url = (
+                f"rtsp://{_q(new_user, safe='')}:{_q(new_pass, safe='')}@"
+                f"127.0.0.1:{proxy_port}/rtsp_tunnel?inst={inst_val}"
+                f"{audio_param}&fmtp=1&maxSessionDuration={mcfg.max_session_duration}"
+            )
+            live["_local_user"] = new_user
+            live["_local_password"] = new_pass
+            live["rtspsUrl"] = new_url
+            live["rtspUrl"] = new_url
+            cache = self._local_creds_cache.get(cam_id, {})
+            cache.update({
+                "user": new_user,
+                "password": new_pass,
+                "ts": time.monotonic(),
+            })
+            self._local_creds_cache[cam_id] = cache
+            cam_entity = self._camera_entities.get(cam_id)
+            stream = getattr(cam_entity, "stream", None) if cam_entity else None
+            if stream is not None:
+                try:
+                    stream.update_source(new_url)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Heartbeat: Stream.update_source for %s failed (will heal at next worker restart): %s",
+                        cam_id[:8], err,
+                    )
+            if self.debug:
+                _LOGGER.debug(
+                    "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
+                    cam_id[:8], generation, elapsed, new_user,
+                )
+        except Exception as err:  # noqa: BLE001 — never crash the heartbeat loop
+            _LOGGER.debug(
+                "Heartbeat cred-refresh skipped for %s: %s", cam_id[:8], err,
+            )
+
     def record_stream_error(self, cam_id: str) -> None:
         """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
         count = self._stream_error_count.get(cam_id, 0) + 1
@@ -491,6 +593,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
         self._stream_error_count[cam_id] = 0
         self._stream_fell_back[cam_id] = False
+        self._local_rescue_attempts.pop(cam_id, None)
+        self._local_rescue_at.pop(cam_id, None)
 
     async def _tear_down_live_stream(self, cam_id: str) -> None:
         """Stop an active LOCAL/REMOTE live stream cleanly.
@@ -530,6 +634,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._live_opened_at.pop(cam_id, None)
         self._stream_error_count.pop(cam_id, None)
         self._stream_fell_back.pop(cam_id, None)
+        self._local_rescue_attempts.pop(cam_id, None)
+        self._local_rescue_at.pop(cam_id, None)
         await self._stop_tls_proxy(cam_id)
         await self._unregister_go2rtc_stream(cam_id)
         cam_entity = self._camera_entities.get(cam_id)
@@ -582,6 +688,59 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 return  # below threshold — let HA's auto-restart keep trying
             live = self._live_connections.get(cam_id, {})
             conn_type = live.get("_connection_type")
+
+            # ── LOCAL rescue: HTTP 401 means Bosch rotated session creds ──
+            # When the HLS consumer disconnects (browser tab closed) and HA
+            # later reconnects, the camera has silently invalidated the
+            # per-session digest creds and answers 401. The fix is not to
+            # fall back to REMOTE — the LAN is fine — but to issue a fresh
+            # PUT /connection LOCAL and use the new creds. We allow this
+            # rescue once per failure burst (reset on stream success); if the
+            # rescue itself fails or the next session also gets 401, the
+            # counter blocks a second attempt and the normal REMOTE fallback
+            # below takes over — preventing a re-issue loop on real LAN faults.
+            is_auth_error = (
+                "401" in msg or "Unauthorized" in msg or "authorization failed" in msg
+            )
+            # Time-decay the rescue counter: rescues older than 5 min belong
+            # to a previous failure burst. Without this the counter sticks at
+            # 1 (record_stream_success never fires when no HLS consumer is
+            # connected) and the next legitimate 401 burst — typically 8–14
+            # min later when Bosch rotates again — skips straight to REMOTE.
+            _LOCAL_RESCUE_TTL_SEC = 300
+            now_mono = time.monotonic()
+            last_rescue = self._local_rescue_at.get(cam_id, 0)
+            if last_rescue and (now_mono - last_rescue) > _LOCAL_RESCUE_TTL_SEC:
+                self._local_rescue_attempts.pop(cam_id, None)
+                self._local_rescue_at.pop(cam_id, None)
+            if (
+                conn_type == "LOCAL"
+                and is_auth_error
+                and self._local_rescue_attempts.get(cam_id, 0) < 1
+            ):
+                self._local_rescue_attempts[cam_id] = (
+                    self._local_rescue_attempts.get(cam_id, 0) + 1
+                )
+                self._local_rescue_at[cam_id] = now_mono
+                _LOGGER.warning(
+                    "Stream worker auth-failed for %s on LOCAL — Bosch session "
+                    "creds rotated; re-issuing fresh LOCAL session (LAN preserved)",
+                    cam_id[:8],
+                )
+                # Reset error counter so try_live_connection picks LOCAL again
+                # (it filters LOCAL out once the counter is saturated).
+                self._stream_error_count[cam_id] = 0
+                self._stream_fell_back.pop(cam_id, None)
+                self._live_connections.pop(cam_id, None)
+                await self._stop_tls_proxy(cam_id)
+                result = await self.try_live_connection(cam_id)
+                if result:
+                    _LOGGER.info(
+                        "LOCAL rescue: %s restarted as %s",
+                        cam_id[:8], result.get("_connection_type", "?"),
+                    )
+                return  # whatever try_live_connection produced is the new state
+
             if conn_type != "LOCAL":
                 # Already on REMOTE (or no live session) — nothing to escalate
                 # to. Counter stays saturated so a future LOCAL attempt would
@@ -3111,6 +3270,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 continue
 
             # ── Lightweight cloud heartbeat ───────────────────────────
+            # Bosch rotates the per-session digest creds on EVERY successful
+            # PUT /connection LOCAL (verified across all captures, see
+            # captures/api-findings.md §1). The original creds remain valid
+            # for the active RTSP connection as long as FFmpeg keeps the
+            # session alive — but a reconnect after RTSP idle (HLS consumer
+            # disconnect) gets HTTP 401 because the ~14-min-old creds were
+            # rotated out long ago by 28+ subsequent heartbeats.
+            #
+            # We parse the response, cache the new creds in the live-session
+            # state, rebuild the rtspsUrl with fresh creds, and call
+            # Stream.update_source(). HA's stream component changes the
+            # source for the next worker restart only — the running worker
+            # is not disturbed, so there is no glitch in the live view. When
+            # the worker eventually restarts (idle reconnect, crash) it
+            # picks up the fresh URL automatically and avoids the 401.
             try:
                 token = self.token
                 if not token:
@@ -3123,19 +3297,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                         async with session.put(
                             url,
-                            json={"type": "LOCAL"},
+                            json={"type": "LOCAL", "highQualityVideo": True},
                             headers={
                                 "Authorization": f"Bearer {token}",
                                 "Content-Type": "application/json",
                             },
                         ) as resp:
+                            resp_text = await resp.text() if resp.status in (200, 201) else ""
                             if resp.status in (200, 201):
                                 consecutive_fails = 0
-                                if self.debug:
-                                    _LOGGER.debug(
-                                        "Heartbeat OK for %s (gen=%d, %.0fs into session)",
-                                        cam_id[:8], generation, elapsed,
-                                    )
+                                self._refresh_local_creds_from_heartbeat(
+                                    cam_id, resp_text, generation, elapsed,
+                                )
                             else:
                                 consecutive_fails += 1
                                 _LOGGER.warning(
