@@ -18,6 +18,7 @@ import logging
 import re
 import select as _select
 import socket
+import time
 import ssl
 import threading
 
@@ -55,6 +56,21 @@ def start_tls_proxy(
     srv.settimeout(None)
     _proxy_servers[cam_id] = srv
 
+    # Burst-failure circuit breaker: when the camera goes physically offline
+    # (Privacy hardware button, power cut, WiFi drop) HA's stream worker keeps
+    # opening new client connections every few seconds, and each one triggers
+    # an upstream connect attempt that times out / returns Errno 113. Without
+    # a cap we log dozens of "failed to connect" warnings and burn CPU on
+    # 10 s connect timeouts. After _MAX_BURST consecutive failures within
+    # _BURST_WINDOW seconds we close the server socket — coordinator will
+    # detect the situation (privacy_mode flag, OFFLINE status) and either
+    # tear down the live session entirely or restart the proxy via
+    # try_live_connection() once the camera is reachable again.
+    _MAX_BURST = 5
+    _BURST_WINDOW = 30.0
+    fail_count = [0]
+    first_fail_at = [0.0]
+
     def _proxy_thread() -> None:
         while True:
             try:
@@ -81,12 +97,35 @@ def start_tls_proxy(
                     cam_id[:8], cam_host, cam_port,
                     tls.version(), tls.cipher()[0] if tls.cipher() else "?",
                 )
+                # Reset failure burst — a successful connect proves the
+                # camera is reachable again.
+                fail_count[0] = 0
+                first_fail_at[0] = 0.0
             except Exception as exc:
+                now = time.monotonic()
+                if fail_count[0] == 0:
+                    first_fail_at[0] = now
+                fail_count[0] += 1
                 _LOGGER.warning(
                     "TLS proxy %s: failed to connect to %s:%d — %s",
                     cam_id[:8], cam_host, cam_port, exc,
                 )
                 client.close()
+                if (
+                    fail_count[0] >= _MAX_BURST
+                    and (now - first_fail_at[0]) <= _BURST_WINDOW
+                ):
+                    _LOGGER.warning(
+                        "TLS proxy %s: %d consecutive connect failures in %.0fs — "
+                        "closing server socket (camera unreachable). "
+                        "Coordinator will rebuild the session when the camera is back.",
+                        cam_id[:8], fail_count[0], now - first_fail_at[0],
+                    )
+                    try:
+                        srv.close()
+                    except Exception:
+                        pass
+                    break
                 continue
 
             # TCP keep-alive on client socket too (FFmpeg side)
