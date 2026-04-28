@@ -112,20 +112,26 @@ For more help with camera setup, see:
 
 [![Open HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mosandlt&repository=Bosch-Smart-Home-Camera-Tool-HomeAssistant&category=integration)
 
-1. Click the button above, or in HACS: **Integrations → + Explore → search "Bosch Smart Home Camera"**
-2. Download the integration
-3. Restart Home Assistant
-4. Continue with **Setup** below
+1. Click the button above (it opens HACS pre-filled with this repo), or in HACS go to **Integrations → ⋮ → Custom repositories** and add `mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant` as type `Integration`.
+2. Click **Download** on the Bosch Smart Home Camera entry.
+3. Restart Home Assistant.
+4. Continue with [Setup](#setup) below.
+
+> **HACS Default listing.** A PR adding this integration to the HACS Default index is pending ([`hacs/default#7247`](https://github.com/hacs/default/pull/7247)). Once merged, the "Custom repositories" step disappears — the integration appears directly under HACS → Integrations → + Explore.
 
 ### Manual Installation
 
-1. Copy `custom_components/bosch_shc_camera/` to your HA config directory:
+If you don't use HACS, copy the integration folder into your HA config:
+
+1. Download the latest release tarball from [Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/latest) (or `git clone` this repo).
+2. Copy `custom_components/bosch_shc_camera/` into your HA config directory so the final path is:
    ```
    /config/custom_components/bosch_shc_camera/
    ```
-2. Copy `bosch-camera-card.js` to `/config/www/bosch-camera-card.js`
-3. Restart Home Assistant
-4. Continue with **Setup** below
+3. Restart Home Assistant.
+4. Continue with [Setup](#setup) below.
+
+> **Lovelace card** is auto-registered since **v10.3.19** — the integration serves it from its own bundled `www/` folder. No need to copy `bosch-camera-card.js` to `/config/www/` separately. If you have an old copy from a pre-v10.3.19 install, you can leave it (harmless) or delete it manually: `rm /config/www/bosch-camera-card.js`.
 
 ---
 
@@ -146,33 +152,59 @@ For more help with camera setup, see:
 
 ### Step 2 — Configure Settings
 
-Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**
+Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. Every setting has a description in the UI; the table below groups them by topic so you can decide which sections to fill in.
 
-All settings have descriptions in the UI. Key options:
+#### Event detection
 
 | Setting | Description | Default |
 |---|---|---|
-| **FCM Push** | Near-instant (~2s) event detection via Firebase Cloud Messaging | OFF |
-| **FCM Push Mode** | `Auto` (iOS → Android → polling), `iOS`, `Android`, or `Polling` | Auto |
-| **Alert services (default)** | Fallback notify services; per-step overrides available (text/screenshot/video/system) | empty (disabled) |
-| **Save alert snapshots** | Keep event images/videos locally in `/media/bosch_alerts/` | OFF |
-| **Event check interval** | How often to poll for events (FCM Push makes this a fallback only) | 300s (5 min) |
-| **SMB Upload** | Upload event snapshots + video clips to SMB/CIFS share | OFF |
-| **SMB Server** | IP/hostname of SMB share (e.g. `192.168.1.1`) | empty |
-| **SMB Share** | Share name (e.g. `cameras`) | empty |
-| **SMB Username** | SMB authentication username | empty |
-| **SMB Password** | SMB authentication password | empty |
-| **SMB Base Path** | Base path on the share (e.g. `bosch_cameras`) | empty |
-| **SMB Folder Pattern** | Subfolder pattern: `{year}/{month}` | `{year}/{month}` |
-| **SMB File Pattern** | File naming: `{camera}_{date}_{time}_{type}_{id}` | `{camera}_{date}_{time}_{type}_{id}` |
-| **Audio default ON** | Audio switch starts ON (stream with sound) or OFF (muted) | ON |
-| **Binary sensors** | Motion / Audio alarm binary sensors (ON for 30s after event) | ON |
+| **FCM Push** | Near-instant (~2 s) event detection via Firebase Cloud Messaging. With FCM enabled the polling interval is automatically tightened to 60 s as a backup. | OFF |
+| **FCM Push Mode** | `Auto` (iOS → Android → polling), `iOS`, `Android`, or `Polling`. `Auto` falls back automatically if iOS registration fails. | Auto |
+| **Event check interval** | Polling fallback interval (seconds). Used only when FCM Push is OFF or as a backup. | 300 (5 min) |
 
-### Step 3 — Add the Lovelace Card
+#### Alerts (per-step routing)
 
-Since **v10.3.19** the card is auto-registered — no manual Lovelace resource entry needed. Just add it to a dashboard:
+| Setting | Description | Default |
+|---|---|---|
+| **Alert services — default fallback** | Notify services used when a per-step service isn't set. Comma-separated list (e.g. `notify.signal_messenger, notify.mobile_app_xxx`). | empty (alerts disabled) |
+| **Step 1 — text notification** | Notify services for the instant text alert. Falls back to default. | (default) |
+| **Step 2 — snapshot image** | Notify services for the JPG attachment ~3-5 s after the event. | (default) |
+| **Step 3 — video clip** | Notify services for the MP4 attachment 30-90 s after the event. | (default) |
+| **System alerts** | Notify services for token-expiry / disk-warning system messages. | (default) |
+| **Save alert snapshots** | Keep downloaded event images / videos in `/media/bosch_alerts/` after sending. If OFF, files are deleted within seconds. | OFF |
+
+#### SMB / NAS upload
+
+| Setting | Description | Default |
+|---|---|---|
+| **SMB Upload** | Upload event snapshots + video clips to a SMB/CIFS share (FRITZ!Box NAS, Synology, …). | OFF |
+| **SMB Server** | IP or hostname of the share (e.g. `192.168.1.1`). | empty |
+| **SMB Share** | Share name (e.g. `FRITZ.NAS`, `cameras`). | empty |
+| **SMB Username** / **SMB Password** | SMB authentication credentials. | empty |
+| **SMB Base Path** | Base folder on the share (e.g. `Bosch-Kameras`). | empty |
+| **SMB Folder Pattern** | Subfolder pattern with `{year}` / `{month}` / `{day}`. | `{year}/{month}` |
+| **SMB File Pattern** | File-naming pattern with `{camera}` / `{date}` / `{time}` / `{type}` / `{id}`. | `{camera}_{date}_{time}_{type}_{id}` |
+| **Retention period (days)** | Auto-delete files older than N days. `0` = keep forever. | 180 |
+| **Low disk warning (MB)** | Notify when free space on the share drops below this. | 500 |
+
+#### Stream + UI
+
+| Setting | Description | Default |
+|---|---|---|
+| **Stream connection type** | `Auto` (try LOCAL → fall back to REMOTE), `Local` (LAN only), `Remote` (cloud only). Can also be changed at runtime via the per-camera **Stream Modus** select entity. | Auto |
+| **HLS player buffer profile** (`live_buffer_mode`) | Three hls.js buffer presets that trade latency for smoothness: **Latency** (~4-6 s), **Balanced** (~8-10 s, default), **Stable** (~12-15 s). See [HLS Buffer Tuning](#hls-buffer-tuning). | Balanced |
+| **Audio default ON** | Whether the per-camera audio switch starts ON (stream with sound) or OFF (muted). | ON |
+| **Binary sensors** | Expose Motion / Audio / Person alarm binary sensors (ON for 30 s after each event). | ON |
+| **Debug logging** | Enable verbose logs (TLS-proxy RTSP exchanges, pre-warm timing, FCM payloads). Off by default to keep the log file readable. | OFF |
+
+### Step 3 — Add a Lovelace Card
+
+Both cards are auto-registered since **v10.3.19** — no manual Lovelace resource entry needed. Pick one of the two cards based on whether you want **one camera per card** or **all cameras in a grid**:
+
+#### One camera (`bosch-camera-card`)
 
 1. Edit dashboard → **+ Add card → Custom: Bosch Camera Card**
+2. Pick the camera entity in the visual editor, or paste:
 
 ```yaml
 type: custom:bosch-camera-card
@@ -180,7 +212,22 @@ camera_entity: camera.bosch_garten
 title: Garten
 ```
 
-> **Upgrading from pre-v10.3.19?** The integration auto-removes any old `/local/bosch-camera-card.js` resource entry from Lovelace, but the physical file in `/config/www/` is intentionally left in place (an integration should not modify user files in `/config/www/`). You can delete it manually if you want: `rm /config/www/bosch-camera-card.js` (SSH addon) — it's harmless either way, the integration loads its own bundled copy.
+See the [single-camera card reference](#bosch-camera-card--single-camera) for all options.
+
+#### All cameras at once (`bosch-camera-overview-card`)
+
+1. Edit dashboard → **+ Add card → Custom: Bosch Camera Overview Card**
+2. The minimal config has zero options — every Bosch camera is auto-discovered:
+
+```yaml
+type: custom:bosch-camera-overview-card
+title: Kameras
+use_bosch_sort: true
+```
+
+See the [overview card reference](#bosch-camera-overview-card--multi-camera-grid) for the grid layout, sort options, and per-camera overrides.
+
+> **Upgrading from pre-v10.3.19?** The integration auto-removes any stale `/local/bosch-camera-card.js` resource entry from Lovelace storage. The physical file in `/config/www/` is intentionally left in place (an integration must not modify user files there) and is harmless either way — the integration loads its own bundled copy.
 
 ---
 
