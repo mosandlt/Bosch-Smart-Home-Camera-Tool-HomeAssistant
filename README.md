@@ -32,6 +32,31 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 
 ---
 
+## Contents
+
+- [Supported Cameras](#supported-cameras)
+- [Disclaimer](#disclaimer)
+- [Prerequisites — Setting Up a New Camera](#prerequisites--setting-up-a-new-camera)
+- [Installation](#installation)
+- [Setup](#setup)
+- [Architecture](#architecture)
+- [Features](#features)
+  - [Entities](#entities)
+  - [Built-in 3-Step Alert System](#built-in-3-step-alert-system)
+  - [FCM Push vs Polling](#fcm-push-vs-polling)
+  - [SMB/NAS Upload](#smbnas-upload)
+  - [Developer Tools — Services](#developer-tools--services)
+- [Lovelace Cards](#lovelace-cards)
+  - [`bosch-camera-card` — single camera](#bosch-camera-card--single-camera)
+  - [`bosch-camera-overview-card` — multi-camera grid](#bosch-camera-overview-card--multi-camera-grid)
+- [Requirements](#requirements)
+- [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
+- [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
+- [Related Projects](#related-projects)
+- [License](#license)
+
+---
+
 ## Supported Cameras
 
 All four current Bosch Smart Home cameras are supported. Click any camera name for the official product page.
@@ -724,23 +749,46 @@ cards:
 
 ### `bosch-camera-overview-card` — multi-camera grid
 
-Since **v10.3.0** there is a second card type — `bosch-camera-overview-card` — that discovers every Bosch camera on the HA instance (`attributes.brand === "Bosch"`) and renders one tile per camera in a responsive grid. Sort order is **Live → Privat → Offline** (privacy state is read from `switch.<cam>_privacy_mode`), and each tile gets a colored outline (green / orange / grey) marking its tier.
+Introduced in v10.3.0. Auto-discovers every Bosch camera on the HA instance (`attributes.brand === "Bosch"`) and renders a responsive tile grid — no manual entity-list maintenance needed when you add or remove a camera. Each tile is itself a full `bosch-camera-card`, so all single-camera features (live HLS / WebRTC, snapshot, privacy/audio/light switches, etc.) work inside the grid.
 
-Since **v10.4.10** the overview card can also follow the Bosch-app camera order. Set `use_bosch_sort: true` and inside each tier the cards are arranged by the float `priority` returned from `GET /v11/video_inputs` — the same order you see when re-sorting cameras in the Bosch app (which calls `PUT /v11/video_inputs/order`). Every Bosch camera entity exposes the value as `bosch_priority` in its attributes, so you can also use it from templates / sensors. Default is `false`, which keeps the prior alphabetic ordering.
+#### What the overview shows
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Kameras                                                4/4  │
+│  ┌─────────────────────┐  ┌─────────────────────┐            │
+│  │ ● Terrasse          │  │ ● Innenbereich      │  ← green   │
+│  │ [live tile]         │  │ [live tile]         │  outline   │
+│  └─────────────────────┘  └─────────────────────┘            │
+│  ┌─────────────────────┐  ┌─────────────────────┐            │
+│  │ 🔒 Eingang          │  │ ○ Garten            │  ← orange  │
+│  │ [privacy on]        │  │ [offline]           │    & grey  │
+│  └─────────────────────┘  └─────────────────────┘            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+* **Header** — optional `title` plus a `4/4` style count showing how many cameras are visible.
+* **Tile** — full single-camera card per cell. Each tile carries a colored outline based on the camera's tier:
+  * **Green** — online, privacy off (live).
+  * **Orange** — online, privacy on (lens covered).
+  * **Grey** — offline / unreachable.
+
+#### Tile sort order
+
+Two-level sort: tiers come first (always live → privat → offline), then within each tier either alphabetic (default) or Bosch-app-priority (since v10.4.10).
+
+| Mode | YAML | Behavior |
+|---|---|---|
+| Alphabetic *(default)* | `use_bosch_sort: false` (or omit) | Inside each tier, sort by `friendly_name` using German collation. |
+| Bosch-app priority | `use_bosch_sort: true` | Inside each tier, sort by the `bosch_priority` attribute (`GET /v11/video_inputs` `priority` field — that's also what `PUT /v11/video_inputs/order` from the Bosch app sets). Cameras without a numeric priority fall back to alphabetic at the end of their tier, so foreign / non-Bosch `include:` entries don't disappear. |
+
+The `online_offline_view: false` option hides the offline tier entirely — only online cameras (green and orange tiles) are rendered.
+
+#### Per-camera overrides
+
+The grid creates one `bosch-camera-card` per discovered camera using sensible defaults. To customise a specific tile (different title, attached automations, faster refresh, etc.) pass it through `overrides`:
 
 ```yaml
-# Minimal — auto-discovers all Bosch cameras, responsive grid
-type: custom:bosch-camera-overview-card
-
-# With options
-type: custom:bosch-camera-overview-card
-title: Kameras
-online_offline_view: true     # false = hide offline tier
-columns: 2                    # "auto" | 1 | 2 | 3 | 4   (default "auto")
-min_width: 380px              # cell min-width for "auto" mode (default 360px)
-use_bosch_sort: true          # follow Bosch-app priority inside each tier
-                              # (default false → alphabetic)
-# Per-camera overrides — merged into each child card's setConfig
 overrides:
   camera.bosch_terrasse:
     automations:
@@ -748,11 +796,50 @@ overrides:
   camera.bosch_garten:
     refresh_interval_streaming: 3
     title: Eingang (Gen1)
-# exclude: [camera.bosch_test]          # skip these
-# include: [camera.bosch_terrasse, ...] # override auto-discovery with explicit list
+    minimal: true                    # compact layout for this tile only
 ```
 
-On viewports ≤ 640 px the grid always falls back to a single column, regardless of `columns`, so the cards stay legible on phones. For a full-width dashboard without sections-view clamping, place the card in a `panel: true` view.
+Each override is deep-merged into the child card's `setConfig()`. The wrapping `camera_entity` is always set automatically — no need to repeat it. The top-level `card_defaults` map applies the same options to every tile (e.g. `card_defaults: { minimal: true }` makes the whole grid compact).
+
+#### Card YAML
+
+```yaml
+# Minimal — auto-discovers every Bosch camera, alphabetic order
+type: custom:bosch-camera-overview-card
+
+# Full options
+type: custom:bosch-camera-overview-card
+title: Kameras                  # optional header
+online_offline_view: true       # default true; false = hide offline tier
+columns: auto                   # "auto" | 1 | 2 | 3 | 4   (default "auto")
+min_width: 360px                # cell min-width when columns: auto (default 360px)
+gap: 12px                       # grid gap (default 12px)
+use_bosch_sort: true            # default false; true = follow Bosch-app priority
+minimal: false                  # default false; true = compact tiles for the whole grid
+exclude:                        # skip these entity_ids
+  - camera.bosch_test
+include:                        # bypass auto-discovery and use exactly these
+  - camera.bosch_terrasse
+  - camera.bosch_innenbereich
+overrides:                      # per-camera setConfig() overrides
+  camera.bosch_terrasse:
+    automations:
+      - automation.alarmanlage
+card_defaults:                  # base options applied to every tile (overrides win over these)
+  refresh_interval_streaming: 5
+```
+
+#### Responsive behavior
+
+* **Viewports > 640 px** — `columns: auto` packs as many cells as fit `min_width` per row; explicit `columns: 1|2|3|4` forces that count.
+* **Viewports ≤ 640 px** — always one column regardless of `columns`, so cards stay legible on phones. The grid `gap` shrinks to 8 px in this mode.
+* **Full-width dashboards** — to escape the sections-view max-width clamp (which limits standard dashboards to ~870 px), put the overview card in a view with `panel: true`. It then uses the full browser width.
+
+#### Behavior notes
+
+* **Discovery is live.** When a camera is added or removed, the overview re-discovers on the next `hass` update — no card config edit required.
+* **Tier transitions are smooth.** When a camera's privacy switch flips or it goes offline, only the changed tile re-mounts; the others stay (no full grid rebuild).
+* **`bosch_priority` attribute.** Exposed on every Bosch camera entity (`camera.bosch_*`). Visible in Developer Tools → States. You can also use it in templates / sensors outside the card, e. g. to drive a different layout.
 
 ---
 
