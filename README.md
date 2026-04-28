@@ -538,7 +538,7 @@ data:
 
 ## Lovelace Card
 
-> **Card version: v2.8.9** — hls.js pinned to 1.6.16 (SRI lockup fix), Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.10.12** — Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 ![Bosch Camera Card Screenshot](card-screenshot.png)
 
@@ -594,13 +594,16 @@ data:
 
 - **Consistent snapshot refresh** — backend frame interval is shorter than the card's poll interval, so every card request always returns a fresh frame (no jitter).
 - **HLS auto-recovery** — hls.js soft errors recover automatically; fatal errors trigger a full reconnect after 2 s. Buffer-stall detection seeks to the live edge on the first two stalls and does a full reconnect on the third (`bosch-camera-card: 3 buffer stalls, reconnecting HLS`).
-- **hls.js CDN load hardening** (v2.8.9) — the card loads hls.js from jsdelivr with a pinned version + subresource-integrity hash (`hls.js@1.6.16` + matching `sha384`). The previous floating `@1` range broke silently whenever jsdelivr shipped a new patch release; updates now require an explicit version + hash bump.
+- **hls.js CDN load hardening** — the card loads hls.js from jsdelivr with a pinned version + subresource-integrity hash (`hls.js@1.6.16` + matching `sha384`). The previous floating `@1` range broke silently whenever jsdelivr shipped a new patch release; updates now require an explicit version + hash bump.
+- **Cred-rotation refresh** — Bosch rotates the per-session digest creds on every `PUT /connection LOCAL`. The heartbeat parses each response, caches the new `user`/`password`, rebuilds the cached `rtspsUrl`, and calls `Stream.update_source()` so the next reconnect uses fresh creds. A reactive 401 rescue (max 1 per 5 min per cam) covers the rare cases where the proactive refresh missed a tick. Together they keep AUTO-mode streams on LAN even after long idle gaps (HLS consumer disconnect → reconnect would otherwise hit HTTP 401).
 - **Session renewal** — REMOTE proxy hashes expire after ~60 s; the backend opens a new connection before expiry and hands the card a fresh URL via `Stream.update_source()`. LOCAL streams survive the Gen2 Outdoor firmware's ~65 s RTSP TCP reset via a transparent FFmpeg reconnect on the same TLS proxy port with the same Digest credentials (~2 s gap, HLS output continues).
+- **TLS-proxy circuit breaker** — when the camera goes physically offline (privacy hardware button, power cut, Wi-Fi drop), the proxy stops retrying after 5 consecutive connect failures within 30 s instead of looping forever. The coordinator decides whether to rebuild via `try_live_connection()` once the camera is reachable again.
+- **Hardware-privacy auto-teardown** — when the camera's physical privacy button is pressed (or the Bosch app toggles privacy), the coordinator detects the OFF→ON transition and tears down the live session, the same path as a user-toggle. No more stuck `state: streaming` or endless reconnect loop.
 - **"Connecting" badge** — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays. Safety timeout hides the overlay after 120 s if the video never produces a frame, keeping the snapshot visible underneath.
-- **Stream uptime counter** (v1.9.5) — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
-- **Frame Δt in debug line** (v1.9.5) — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
-- **Snap error retry** (v1.9.5) — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
-- **Connection type badge** (v1.9.6) — shows "LAN" (green) or "Cloud" (gray) in the header while streaming.
+- **Stream uptime counter** — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
+- **Frame Δt in debug line** — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
+- **Snap error retry** — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
+- **Connection type badge** — shows "LAN" (green) or "Cloud" (gray) in the header while streaming.
 
 ### Stream Connection Types
 
@@ -663,12 +666,11 @@ The watchdog gets entity IDs directly from HA states, so it works even when the 
 
 ### Privacy Guard
 
-The **Live Stream switch cannot be turned ON while Privacy Mode is active** (camera shutter is closed). If attempted:
-- The switch stays OFF
-- A **persistent notification** appears in HA: *"Der Live-Stream kann nicht gestartet werden — Privacy-Modus aktiv"*
-- A warning is logged
-
-This prevents wasted API calls and confusing error states when the camera physically can't stream.
+The **Live Stream switch cannot be turned ON while Privacy Mode is active** (camera shutter is closed). Since v10.4.6 this is enforced at four levels so there's no bypass path:
+- `BoschLiveStreamSwitch.available` returns `False` while privacy is on → the entity greys out in the UI.
+- An attempted service call raises a `ServiceValidationError` → HA shows a clean toast in the UI, no persistent notification clutter.
+- `BoschAudioSwitch._apply_audio_change` and `coordinator.try_live_connection()` both early-exit with a logged warning if privacy is active.
+- When privacy gets enabled while a stream is already running — including via the camera's hardware privacy button or the Bosch app — the coordinator detects the OFF→ON transition and tears down the live session automatically (v10.4.10).
 
 ### Fast Startup
 
@@ -676,25 +678,32 @@ The first coordinator tick after HA restart **skips events and slow-tier API cal
 
 ### Model-Specific Configuration
 
-Camera timing and behavior is configured per model via `CameraModelConfig`:
+Camera timing and behavior is configured per model via `CameraModelConfig`. Indoor cams keep an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), while Gen1/Gen2 outdoor cams have heartbeat disabled (`= renewal_interval`) because the Outdoor firmware rotates digest creds on every PUT and would invalidate the running RTSP session.
 
-| Parameter | Indoor (360) | Outdoor (Eyes) | Purpose |
-|-----------|-------------|----------------|---------|
-| Heartbeat interval | 30 s | 10 s | PUT /connection keepalive frequency |
-| Pre-warm delay | 1 s | 2 s | Wait before first RTSP DESCRIBE |
-| Pre-warm retries | 3 | 8 | Max DESCRIBE attempts |
-| Min total wait | 25 s | 35 s | Minimum time before exposing RTSP URL |
-| Renewal interval | 3500 s | 3500 s | Proactive session renewal (safety net) |
-| Snapshot warmup | 3 s | 5 s | Wait before LOCAL snap.jpg fetch |
+| Parameter | 360 Innenkamera (Gen1) | Eyes Innenkamera II (Gen2) | Eyes Außenkamera (Gen1) | Eyes Außenkamera II (Gen2) | Purpose |
+|---|---|---|---|---|---|
+| Heartbeat interval | 30 s | 30 s | 3600 s (≈ off) | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
+| Pre-warm delay | 1 s | 1 s | 2 s | 2 s | Wait before first RTSP DESCRIBE |
+| Pre-warm retries | 3 | 3 | 8 | 8 | Max DESCRIBE attempts |
+| Min total wait | 25 s | 25 s | 35 s | 35 s | Minimum time before exposing RTSP URL |
+| Renewal interval | 3500 s | 3500 s | 3600 s | 3600 s | Proactive session renewal (safety net) |
+| Max session duration | 3600 s | 3600 s | 3600 s | 3600 s | Sent in RTSP URL `maxSessionDuration=` (Bosch default hint is 60 s but cams accept 3600) |
 
 ### HLS Buffer Tuning
 
-The card's HLS.js configuration is tuned to prevent HA's stream component from killing FFmpeg:
+The card's HLS.js configuration is tuned to prevent HA's stream component from killing FFmpeg, and since v10.4.7 it's selectable via the **HLS player buffer profile** (`live_buffer_mode`) option in the integration settings:
 
-- **`maxBufferLength: 10`** — Must be less than HA's `OUTPUT_IDLE_TIMEOUT` (30 s). If hls.js buffers ≥ 30 s, it stops requesting segments → HA thinks nobody is watching → kills FFmpeg → video freezes.
-- **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net
-- **`liveSyncDurationCount: 3`** — Stays 3 segments behind live edge for smooth playback
-- **SRI integrity hash** on hls.js CDN load for supply-chain security
+| Profile | `liveSync` / `maxLatency` / `maxBuffer` / `maxMaxBuffer` / `lowLatencyMode` | Lag | Trade-off |
+|---|---|---|---|
+| **Latency** | `3 / 6 / 10 / 20 / true` | ~4–6 s | Lowest delay, may stutter on flaky Wi-Fi |
+| **Balanced** *(default)* | `4 / 8 / 14 / 22 / false` | ~8–10 s | Robust against typical Wi-Fi hiccups |
+| **Stable** | `6 / 12 / 22 / 30 / false` | ~12–15 s | Smooth even on weak links |
+
+- **`maxBufferLength` cap** — All three modes stay below HA's `OUTPUT_IDLE_TIMEOUT` (30 s). If hls.js buffered ≥ 30 s it would stop requesting segments → HA thinks nobody's watching → kills FFmpeg → freeze.
+- **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net.
+- **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
+
+The player buffer profile is independent of the **Reaktion** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
 
 ### Card YAML
 
