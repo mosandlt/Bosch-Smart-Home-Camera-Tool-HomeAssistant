@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.11";
+const CARD_VERSION = "2.10.12";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -3699,8 +3699,13 @@ window.customCards.push({
 //   title: "Meine Kameras"        # optional — header above the grid
 //   exclude: []                   # optional — entity_ids to skip
 //   include: []                   # optional — override auto-discovery
+//   use_bosch_sort: true          # optional — order each tier (live/privacy/
+//                                 #   offline) by the Bosch-app priority
+//                                 #   (`bosch_priority` attribute on each cam,
+//                                 #   mirror of GET /v11/video_inputs.priority).
+//                                 #   Default false: alphabetic ordering.
 // ─────────────────────────────────────────────────────────────────────────────
-const OVERVIEW_VERSION = "1.0.0";
+const OVERVIEW_VERSION = "1.1.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
   constructor() {
@@ -3723,6 +3728,13 @@ class BoschCameraOverviewCard extends HTMLElement {
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
       include:   Array.isArray(config.include) ? config.include : [],
       compact:   !!config.compact,
+      // When true, sort cameras inside each tier (live → privacy → offline)
+      // by the Bosch-app priority instead of alphabetically. Priority is
+      // read from the `bosch_priority` attribute that the camera entity
+      // exposes (mirror of GET /v11/video_inputs.priority). Cameras
+      // without a priority value fall back to alphabetic at the end of
+      // their tier so foreign / non-Bosch include entries don't disappear.
+      use_bosch_sort: config.use_bosch_sort === true,
       // Top-level `minimal: true` applies the compact child-card layout to
       // every discovered camera. Per-camera overrides can still opt in/out
       // individually via `overrides.<entity>.minimal`. Folded into
@@ -3853,19 +3865,31 @@ class BoschCameraOverviewCard extends HTMLElement {
       const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
       // tier: 0 = online active (privacy off), 1 = online but privacy on, 2 = offline
       const tier = !online ? 2 : (privacyOn ? 1 : 0);
+      const rawPrio = a.bosch_priority;
+      const priority = (typeof rawPrio === "number" && isFinite(rawPrio)) ? rawPrio : null;
       list.push({
         entity_id: eid,
         name:   a.friendly_name || eid,
         online,
         privacyOn,
         tier,
+        priority,
         status: status || "UNKNOWN",
         model:  a.model_name || "",
       });
     }
 
+    const useBosch = this._config.use_bosch_sort;
     list.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
+      if (useBosch) {
+        // Bosch-app order. Cams without a priority value sort after
+        // those with one inside the same tier; alphabetic fallback below.
+        const aHas = a.priority !== null;
+        const bHas = b.priority !== null;
+        if (aHas && bHas && a.priority !== b.priority) return a.priority - b.priority;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+      }
       return a.name.localeCompare(b.name, "de");
     });
     return list;
