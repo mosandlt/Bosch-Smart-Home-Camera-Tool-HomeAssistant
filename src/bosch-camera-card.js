@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.12";
+const CARD_VERSION = "2.10.13";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -380,9 +380,46 @@ class BoschCameraCard extends HTMLElement {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
       // Page just came to foreground — trigger fresh snapshot like on page load
       this._triggerFreshSnapshot();
+      // Also pull authoritative state for the toggleable switches via REST.
+      // The HA-Companion-App suspends its WebSocket on backgrounding, and
+      // when it resumes the local `hass.states` cache may briefly disagree
+      // with the server until the next WS push arrives. A user tap during
+      // that window can fire a wrong-direction toggle (observed 2026-04-28:
+      // stream silently turned off because the card was seeing a stale state).
+      // Best-effort, fire-and-forget; the next WS push would correct it
+      // anyway, this just makes it instant.
+      this._pullFreshSwitchStates();
     }
     // Restart timer with the correct interval (60 s or 1800 s)
     this._startRefreshTimer();
+  }
+
+  async _pullFreshSwitchStates() {
+    if (!this._hass) return;
+    const ids = [
+      this._entities.switch,
+      this._entities.privacy,
+      this._entities.audio,
+      this._entities.light,
+    ].filter(Boolean);
+    let changed = false;
+    for (const id of ids) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${id}`);
+        if (fresh && fresh.state && this._hass.states[id]?.state !== fresh.state) {
+          // Don't mutate the shared hass.states cache (HA-core owns it) —
+          // just clear any optimistic override we held so the next render
+          // picks up the WS-pushed state. WS push for this delta is
+          // typically <500 ms behind the REST result.
+          delete this._optimistic[id];
+          changed = true;
+        }
+      } catch (e) {
+        // REST call failed (offline, auth issue) — silently skip; the
+        // cached state is still the best we have.
+      }
+    }
+    if (changed) this._update();
   }
 
   _stopRefreshTimer() {
@@ -3462,8 +3499,39 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
-  _toggleStream() {
-    const isOn = this._isStreaming();
+  async _toggleStream() {
+    // Defensive pre-check: pull authoritative state from the server before
+    // sending turn_on/turn_off. The HA-Companion-App's WebSocket subscription
+    // can go stale after backgrounding or a Wi-Fi/Mobile-data switch, in
+    // which case `_isStreaming()` returns the *old* state and a tap fires
+    // the wrong direction (e.g. a "Stop" call when the user actually
+    // wanted to start). Observed 2026-04-28: stream silently turned off
+    // because the card was reading a stale `on` while the server already
+    // had `off` — the toggle then re-flipped to off again.
+    let serverIsOn = null;
+    if (this._hass && this._entities.switch) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh && fresh.state) serverIsOn = fresh.state === "on";
+      } catch (e) {
+        // REST failed — fall through to cached state, no worse than before
+      }
+    }
+    const cachedIsOn = this._isStreaming();
+    if (serverIsOn !== null && serverIsOn !== cachedIsOn) {
+      console.warn(
+        "bosch-camera-card: stale state detected — card thought " +
+        (cachedIsOn ? "streaming" : "idle") +
+        ", server says " + (serverIsOn ? "streaming" : "idle") +
+        ". Refreshing the view; tap again to toggle.",
+      );
+      // Drop any optimistic override and re-render so the user sees the
+      // real state. They tap again if they still want to toggle.
+      delete this._optimistic[this._entities.switch];
+      this._update();
+      return;
+    }
+    const isOn = serverIsOn !== null ? serverIsOn : cachedIsOn;
     // Optimistic update — badge and button update instantly
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
     if (isOn) {

@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.12";
+const CARD_VERSION = "2.10.13";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -222,8 +222,24 @@ class BoschCameraCard extends HTMLElement {
   _onVisibilityChange() {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
       this._triggerFreshSnapshot();
+      this._pullFreshSwitchStates();
     }
     this._startRefreshTimer();
+  }
+  async _pullFreshSwitchStates() {
+    if (!this._hass) return;
+    const ids = [ this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(Boolean);
+    let changed = false;
+    for (const id of ids) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${id}`);
+        if (fresh && fresh.state && this._hass.states[id]?.state !== fresh.state) {
+          delete this._optimistic[id];
+          changed = true;
+        }
+      } catch (e) {}
+    }
+    if (changed) this._update();
   }
   _stopRefreshTimer() {
     if (this._refreshTimer) {
@@ -2008,8 +2024,22 @@ class BoschCameraCard extends HTMLElement {
       }
     }
   }
-  _toggleStream() {
-    const isOn = this._isStreaming();
+  async _toggleStream() {
+    let serverIsOn = null;
+    if (this._hass && this._entities.switch) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh && fresh.state) serverIsOn = fresh.state === "on";
+      } catch (e) {}
+    }
+    const cachedIsOn = this._isStreaming();
+    if (serverIsOn !== null && serverIsOn !== cachedIsOn) {
+      console.warn("bosch-camera-card: stale state detected — card thought " + (cachedIsOn ? "streaming" : "idle") + ", server says " + (serverIsOn ? "streaming" : "idle") + ". Refreshing the view; tap again to toggle.");
+      delete this._optimistic[this._entities.switch];
+      this._update();
+      return;
+    }
+    const isOn = serverIsOn !== null ? serverIsOn : cachedIsOn;
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
     if (isOn) {
       this._streamConnecting = false;
