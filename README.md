@@ -738,6 +738,8 @@ cards:
 
 Since **v10.3.0** there is a second card type — `bosch-camera-overview-card` — that discovers every Bosch camera on the HA instance (`attributes.brand === "Bosch"`) and renders one tile per camera in a responsive grid. Sort order is **Live → Privat → Offline** (privacy state is read from `switch.<cam>_privacy_mode`), and each tile gets a colored outline (green / orange / grey) marking its tier.
 
+Since **v10.4.10** the overview card can also follow the Bosch-app camera order. Set `use_bosch_sort: true` and inside each tier the cards are arranged by the float `priority` returned from `GET /v11/video_inputs` — the same order you see when re-sorting cameras in the Bosch app (which calls `PUT /v11/video_inputs/order`). Every Bosch camera entity exposes the value as `bosch_priority` in its attributes, so you can also use it from templates / sensors. Default is `false`, which keeps the prior alphabetic ordering.
+
 ```yaml
 # Minimal — auto-discovers all Bosch cameras, responsive grid
 type: custom:bosch-camera-overview-card
@@ -748,6 +750,8 @@ title: Kameras
 online_offline_view: true     # false = hide offline tier
 columns: 2                    # "auto" | 1 | 2 | 3 | 4   (default "auto")
 min_width: 380px              # cell min-width for "auto" mode (default 360px)
+use_bosch_sort: true          # follow Bosch-app priority inside each tier
+                              # (default false → alphabetic)
 # Per-camera overrides — merged into each child card's setConfig
 overrides:
   camera.bosch_terrasse:
