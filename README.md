@@ -1,6 +1,6 @@
 # Bosch Smart Home Camera — Home Assistant Integration
 
-Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Includes a custom **Lovelace card** with live streaming, controls, and event info.
+Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Ships with two custom **Lovelace cards** — one detailed view per camera and a multi-camera grid — plus live streaming, controls, snapshot retrieval, and event-driven notifications.
 
 **Supported models:** Eyes Außenkamera (Gen1), Eyes Außenkamera II (Gen2), 360 Innenkamera (Gen1), Eyes Innenkamera II (Gen2) — model-specific timing and configuration is automatic.
 
@@ -21,7 +21,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 [commits-shield]: https://img.shields.io/github/commit-activity/y/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
 [commits]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/commits/main
 [license-shield]: https://img.shields.io/github/license/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
-[hacsbadge]: https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge
+[hacsbadge]: https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge
 [hacs]: https://hacs.xyz
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40mosandlt-blue.svg?style=for-the-badge
 [user_profile]: https://github.com/mosandlt
@@ -244,7 +244,7 @@ graph LR
         Card["Lovelace cards<br/>bosch-camera-card +<br/>bosch-camera-overview-card"]
         Int["bosch_shc_camera<br/>(integration)"]
         Stream["stream component<br/>+ FFmpeg"]
-        G2["bundled go2rtc 1.9.x"]
+        G2["bundled go2rtc"]
         TLS["TLS proxy<br/>(per camera)"]
     end
     subgraph LAN["Local Network"]
@@ -323,7 +323,7 @@ Since **v10.3.24** the same Python TLS proxy carries both LOCAL and REMOTE — F
 | Unread events count | `sensor` | disabled by default |
 | Privacy sound (360 only) | `switch` | enabled (config category) |
 | Commissioned status | `sensor` | diagnostic, disabled by default |
-| Acoustic alarm (siren, 360 only) | `button` | disabled by default |
+| Acoustic alarm (siren) | `button` | disabled by default — added for every camera; cameras without a built-in siren return HTTP 442 (handled gracefully) |
 | Live stream (30fps H.264 + AAC) | `camera` | via Live Stream switch |
 | Timestamp overlay (clock on video) | `switch` | disabled by default |
 | Movement notifications | `switch` | disabled by default |
