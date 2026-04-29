@@ -665,6 +665,20 @@ The integration supports three connection modes, configurable in **Settings → 
 | **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
 | **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. |
 
+#### Stream Status Sensor
+
+Every camera gets a `sensor.bosch_{name}_stream_status` entity that exposes the current live stream state as a persistent HA sensor:
+
+| State | Meaning |
+|---|---|
+| `idle` | Stream is off |
+| `warming_up` | LOCAL pre-warm running — waiting for camera encoder to initialise |
+| `connecting` | RTSP URL obtained, FFmpeg connecting |
+| `streaming` | Active, via local LAN |
+| `streaming_remote` | Active, via Bosch cloud proxy |
+
+The card reads this sensor on every `hass` update — so opening a dashboard while the stream is already warming up correctly shows the overlay and snapshot background without needing a toggle click (cold-open fix). You can also use the sensor in automations to react to stream state changes.
+
 #### Stream Startup Timing
 
 The card badge progresses `idle` → `warming_up` / `connecting` (yellow) → `streaming` (blue) when you flip the live-stream switch on. How long that first transition takes depends on the connection mode and the camera model — the LOCAL path has a deliberate pre-warm to wake the camera's H.264 encoder before exposing the RTSP URL to FFmpeg, while REMOTE is just a cloud-proxy handshake.
