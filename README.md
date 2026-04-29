@@ -981,8 +981,8 @@ Everything renders automatically when the integration detects a Gen2 Indoor II.
 
 ## Releases
 
-Latest stable: **v10.4.10** — see the GitHub release page for full notes:
-[**v10.4.10 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.4.10)
+Latest stable: **v10.5.0** — see the GitHub release page for full notes:
+[**v10.5.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.0)
 
 | | |
 |---|---|
