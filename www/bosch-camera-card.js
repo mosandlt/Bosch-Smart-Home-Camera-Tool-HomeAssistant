@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.15";
+const CARD_VERSION = "2.10.18";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -87,6 +87,7 @@ class BoschCameraCard extends HTMLElement {
       title: config.title || null,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
       show_motion_zones: config.show_motion_zones ?? false,
+      snapshot_during_warmup: config.snapshot_during_warmup !== false,
       minimal: config.minimal === true
     };
     this._storageKey = `bosch_cam_${config.camera_entity}`;
@@ -124,6 +125,7 @@ class BoschCameraCard extends HTMLElement {
       audioToday: config.audio_today_entity || `sensor.${base}_audio_events_today`,
       motionZones: config.motion_zones_entity || `sensor.${base}_motion_zones`,
       privacyMasks: config.privacy_masks_entity || `sensor.${base}_privacy_masks`,
+      streamStatus: config.stream_status_entity || `sensor.${base}_stream_status`,
       ambientSchedule: config.ambient_schedule_entity || `sensor.${base}_dauerlicht_zeitplan`,
       scheduleRules: config.rules_entity || `sensor.${base}_schedule_rules`,
       frontLight: config.front_light_entity || `switch.${base}_front_light`,
@@ -1297,12 +1299,18 @@ class BoschCameraCard extends HTMLElement {
       this._startRefreshTimer();
     }
     this._lastStreaming = isStreaming;
-    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
       this._waitingForStream = true;
-      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      const overlayText = backendStreamStatus === "warming_up" ? "Kamera wird aufgeweckt…" : backendStreamStatus === "connecting" ? "Verbindung wird aufgebaut…" : "Stream wird gestartet…";
+      if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
+        this._triggerFreshSnapshot();
+      }
+      this._setLoadingOverlay(true, overlayText);
       this._waitForStreamReady();
     }
-    if (!shouldVideo) {
+    if (!shouldVideo && !backendWaiting) {
       this._waitingForStream = false;
     }
     if (!shouldVideo && this._liveVideoActive) {

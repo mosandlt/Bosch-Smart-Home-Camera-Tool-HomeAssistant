@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.15";
+const CARD_VERSION = "2.10.18";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -217,6 +217,12 @@ class BoschCameraCard extends HTMLElement {
       title:                      config.title || null,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
       show_motion_zones:         config.show_motion_zones ?? false,
+      // During warming_up/connecting: show last snapshot as background under the
+      // loading overlay instead of a black screen. Looks like a live preview but
+      // the image is actually the last cached snapshot. Set to false to revert to
+      // the classic dark overlay (better on low-end devices to avoid the extra
+      // camera_proxy request while the stream is already starting).
+      snapshot_during_warmup:    config.snapshot_during_warmup !== false,
       // Minimal layout: image + info-row + [Snapshot, Live Stream, ⋮, Vollbild] +
       // Privacy toggle. Everything else (audio/light/notifications, accordions,
       // automations, pan controls) is hidden by default and revealed when the
@@ -261,6 +267,7 @@ class BoschCameraCard extends HTMLElement {
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
       privacyMasks:  config.privacy_masks_entity  || `sensor.${base}_privacy_masks`,
+      streamStatus:  config.stream_status_entity  || `sensor.${base}_stream_status`,
       ambientSchedule: config.ambient_schedule_entity || `sensor.${base}_dauerlicht_zeitplan`,
       scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
       frontLight:    config.front_light_entity   || `switch.${base}_front_light`,
@@ -2684,12 +2691,26 @@ class BoschCameraCard extends HTMLElement {
     // to avoid "does not support play stream" errors from premature WS calls.
     // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
     // Also re-triggers if card got stuck (e.g. WS failed during page load).
-    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+    // "Cold open": if stream_status is warming_up/connecting (read from the
+    // dedicated sensor — persistent across sessions, no toggle-click needed).
+    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
       this._waitingForStream = true;
-      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      const overlayText = backendStreamStatus === "warming_up" ? "Kamera wird aufgeweckt…"
+                        : backendStreamStatus === "connecting"  ? "Verbindung wird aufgebaut…"
+                        : "Stream wird gestartet…";
+      // snapshot_during_warmup: fetch current snapshot so the last known image
+      // shows as background under the semi-transparent overlay instead of black.
+      // Guard with _awaitingFresh to avoid a double fetch when firstHass already
+      // triggered one in set hass().
+      if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
+        this._triggerFreshSnapshot();
+      }
+      this._setLoadingOverlay(true, overlayText);
       this._waitForStreamReady();
     }
-    if (!shouldVideo) {
+    if (!shouldVideo && !backendWaiting) {
       this._waitingForStream = false;
     }
     // Stop video when stream turns OFF

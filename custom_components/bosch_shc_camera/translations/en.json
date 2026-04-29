@@ -164,13 +164,401 @@
   },
   "entity": {
     "switch": {
+      "live_stream": {
+        "name": "Live Stream",
+        "description": "Starts or stops the live RTSP stream. When on, the camera streams continuously to Home Assistant. Turning off immediately closes the session and stops the TLS proxy."
+      },
+      "audio": {
+        "name": "Audio",
+        "description": "Enables or mutes audio on the live stream. When on, the stream includes AAC-LC audio. If a live stream is already active, toggling this re-opens the connection immediately."
+      },
+      "camera_light": {
+        "name": "Camera Light",
+        "description": "Turns the camera indicator LED on or off. Only available for cameras that have a physical light (featureSupport.light = true)."
+      },
+      "front_light": {
+        "name": "Front Light",
+        "description": "Turns the front spotlight on or off independently of the wallwasher LEDs. Only available for cameras with a physical light."
+      },
+      "wallwasher": {
+        "name": "Wallwasher",
+        "description": "Turns the top and bottom ambient LED lights on or off. On Gen2 cameras these are the RGB accent lights; on Gen1 this is the wallwasher LED strip."
+      },
+      "privacy_mode": {
+        "name": "Privacy Mode",
+        "description": "When on, the camera shutter closes and the camera stops recording and streaming. Controlled via the Bosch cloud API — works without an SHC configured."
+      },
+      "notifications": {
+        "name": "Notifications",
+        "description": "Enables or disables push notifications for this camera. When on, notifications follow the camera schedule (FOLLOW_CAMERA_SCHEDULE). When off, notifications are always suppressed."
+      },
+      "motion_detection": {
+        "name": "Motion Detection",
+        "description": "Enables or disables motion detection. Note: the camera's on-device IVA rules may revert this setting within seconds if conflicting rules exist."
+      },
+      "record_sound": {
+        "name": "Record Sound",
+        "description": "Enables or disables audio recording in cloud event clips. When off, recorded video clips contain no sound."
+      },
+      "auto_follow": {
+        "name": "Auto Follow",
+        "description": "Enables automatic pan-tracking: the camera pans to follow detected motion. Only available for the CAMERA_360 indoor model."
+      },
+      "intercom": {
+        "name": "Intercom",
+        "description": "Enables two-way audio so you can speak through the camera speaker. Disabled by default — enable in Settings under Entities."
+      },
       "privacy_sound": {
-        "name": "Privacy Sound"
+        "name": "Privacy Sound",
+        "description": "When on, the camera plays an audible tone whenever privacy mode changes. Only supported on indoor cameras (CAMERA_360, HOME_Eyes_Indoor)."
+      },
+      "timestamp_overlay": {
+        "name": "Timestamp Overlay",
+        "description": "Shows or hides the date and time overlay on the camera video feed."
+      },
+      "status_led": {
+        "name": "Status LED",
+        "description": "Turns the status LED on or off. This is the LED that indicates the camera is recording or active. Gen2 cameras only."
+      },
+      "motion_light": {
+        "name": "Motion Light",
+        "description": "When on, the camera lights turn on automatically when motion is detected. Gen2 cameras only."
+      },
+      "ambient_light": {
+        "name": "Ambient Light",
+        "description": "When on, camera lights stay on according to the configured schedule (dusk-to-dawn or manual times). Gen2 cameras only."
+      },
+      "soft_light_fading": {
+        "name": "Soft Light Fading",
+        "description": "When on, lights fade in and out smoothly instead of switching instantly. Gen2 cameras only."
+      },
+      "intrusion_detection": {
+        "name": "Intrusion Detection",
+        "description": "Enables or disables DualRadar 180° 3D intrusion detection with person recognition. Gen2 cameras only. Cannot be changed while privacy mode is active."
+      },
+      "alarm_system_arm": {
+        "name": "Alarm System",
+        "description": "Arms or disarms the integrated alarm system. When armed, detected intrusion triggers the built-in 75 dB siren. Gen2 Indoor II only."
+      },
+      "alarm_mode": {
+        "name": "Siren",
+        "description": "Enables or disables the main alarm siren. When off, the alarm system is armed but no audible siren fires on intrusion. Gen2 Indoor II only."
+      },
+      "pre_alarm": {
+        "name": "Pre-Alarm",
+        "description": "Enables or disables the LED warning phase that runs before the siren activates. Gives occupants time to disarm before the siren sounds. Gen2 Indoor II only."
+      },
+      "audio_alarm": {
+        "name": "Sound Detection",
+        "description": "Enables or disables sound-level detection. When on, an event is triggered when ambient noise exceeds the configured threshold. This is the free tier detection, not the Audio+ premium subscription."
+      }
+    },
+    "number": {
+      "pan_position": {
+        "name": "Pan Position",
+        "description": "Pans the 360 camera left or right. Range depends on camera model (typically -120° to +120°). Only available for CAMERA_360."
+      },
+      "audio_threshold": {
+        "name": "Audio Threshold",
+        "description": "Sound level in dB that triggers an audio alarm event. Range 0–100 dB. Lower value = more sensitive."
+      },
+      "speaker_level": {
+        "name": "Speaker Level",
+        "description": "Volume of the camera speaker used for the intercom (two-way audio). Range 0–100%."
+      },
+      "front_light_intensity": {
+        "name": "Front Light Intensity",
+        "description": "Brightness of the front spotlight as a percentage (0–100%). Only available for cameras with a physical light."
+      },
+      "lens_elevation": {
+        "name": "Lens Elevation",
+        "description": "Mounting height of the camera lens in meters (0.5–5.0 m). Used by the camera for perspective correction in person detection. Gen2 only."
+      },
+      "microphone_level": {
+        "name": "Microphone Level",
+        "description": "Microphone recording volume (0–100%). Affects audio in live streams and event recordings. Gen2 only."
+      },
+      "white_balance": {
+        "name": "Front Light Color Temperature",
+        "description": "Color temperature of the front spotlight from cool (-1.0) to warm (+1.0). 0.0 is neutral white. Gen2 outdoor cameras only."
+      },
+      "top_led_brightness": {
+        "name": "Top LED Brightness",
+        "description": "Brightness of the upper RGB accent LEDs (0–100%). Gen2 outdoor cameras only."
+      },
+      "bottom_led_brightness": {
+        "name": "Bottom LED Brightness",
+        "description": "Brightness of the lower RGB accent LEDs (0–100%). Gen2 outdoor cameras only."
+      },
+      "motion_light_sensitivity": {
+        "name": "Motion Light Sensitivity",
+        "description": "How sensitive the motion-triggered lighting is (1 = low, 5 = high). A higher value triggers the lights at smaller movements. Gen2 outdoor cameras only."
+      },
+      "darkness_threshold": {
+        "name": "Darkness Threshold",
+        "description": "The ambient brightness level below which the camera switches to night lighting mode (0–100%). 0 = always day mode, 100 = always night mode. Gen2 outdoor cameras only."
+      },
+      "power_led_brightness": {
+        "name": "Power LED Brightness",
+        "description": "Brightness of the white power indicator LED (0–4 steps, 0 = off). This is the LED showing that the camera is powered on, distinct from the red status LED. Gen2 Indoor II only."
+      },
+      "alarm_delay": {
+        "name": "Siren Duration",
+        "description": "How long the 75 dB siren stays active after being triggered, in seconds. Gen2 Indoor II only."
+      },
+      "alarm_activation_delay": {
+        "name": "Alarm Activation Delay",
+        "description": "Time in seconds between intrusion detection and siren activation. Gives occupants time to disarm. Gen2 Indoor II only."
+      },
+      "pre_alarm_delay": {
+        "name": "Pre-Alarm Duration",
+        "description": "How long the LED warning phase runs before the siren fires, in seconds. Gen2 Indoor II only."
+      },
+      "audio_alarm_sensitivity": {
+        "name": "Sound Detection Sensitivity",
+        "description": "Sensitivity of the sound-level detection (0–10). Higher values detect quieter sounds. Gen2 Indoor II only. Write-only — the API does not echo this value back."
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "Refresh Snapshot",
+        "description": "Forces an immediate data and image refresh for this camera without waiting for the next scheduled polling interval."
+      },
+      "acoustic_alarm": {
+        "name": "Siren",
+        "description": "Triggers the built-in camera siren. If the camera model does not support this, the action is silently ignored."
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "Video Quality",
+        "description": "Stream quality for live video. Auto uses 7.5 Mbps; High uses 30 Mbps; Low uses 1.9 Mbps.",
+        "state": {
+          "Auto": "Auto",
+          "Hoch (30 Mbps)": "High (30 Mbps)",
+          "Niedrig (1.9 Mbps)": "Low (1.9 Mbps)"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity",
+        "description": "Sensitivity level for motion detection. SUPER_HIGH triggers on the slightest movement; LOW only triggers on significant motion.",
+        "state": {
+          "SUPER_HIGH": "Super High",
+          "HIGH": "High",
+          "MEDIUM_HIGH": "Medium High",
+          "MEDIUM_LOW": "Medium Low",
+          "LOW": "Low",
+          "OFF": "Off"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "FCM Push Mode",
+        "description": "How the integration receives motion and audio events. Auto tries iOS, then Android, then falls back to periodic polling.",
+        "state": {
+          "Auto": "Auto",
+          "Android": "Android",
+          "iOS": "iOS",
+          "Polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "Stream Mode",
+        "description": "Connection type for live streams. Auto tries the local LAN first and falls back to the Bosch cloud proxy. Changes take effect on the next stream start.",
+        "state": {
+          "Auto (Lokal → Cloud)": "Auto (Local → Cloud)",
+          "Nur Lokal": "Local Only",
+          "Nur Cloud": "Cloud Only"
+        }
+      },
+      "detection_mode": {
+        "name": "Detection Mode",
+        "description": "What the intrusion detection system reacts to. ALL_MOTIONS triggers on any movement; ONLY_HUMANS only triggers on detected persons; ZONES restricts detection to configured areas. Gen2 only.",
+        "state": {
+          "ALL_MOTIONS": "All Motions",
+          "ONLY_HUMANS": "Persons Only",
+          "ZONES": "Zones"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "Motion",
+        "description": "Turns on for 90 seconds after a MOVEMENT event is detected. Useful for automations. Enable in Settings under Entities."
+      },
+      "audio_alarm_binary": {
+        "name": "Audio Alarm",
+        "description": "Turns on for 90 seconds after an AUDIO_ALARM event is detected. Only available for cameras with sound detection (featureSupport.sound = true)."
+      },
+      "person_detected": {
+        "name": "Person Detected",
+        "description": "Turns on for 90 seconds after a PERSON event is detected by the cloud AI."
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware",
+        "description": "Shows the installed firmware version and whether a newer version is available. Firmware updates must be installed via the Bosch Smart Home app."
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "Top LED",
+        "description": "Upper RGB accent LED on Gen2 outdoor cameras. Supports full color and brightness control. Part of the wallwasher lighting group."
+      },
+      "bottom_led_light": {
+        "name": "Bottom LED",
+        "description": "Lower RGB accent LED on Gen2 outdoor cameras. Supports full color and brightness control. Part of the wallwasher lighting group."
+      },
+      "front_light_entity": {
+        "name": "Front Light",
+        "description": "Front spotlight on Gen2 outdoor cameras. Supports brightness and color temperature (cool to warm white). Does not support RGB color."
       }
     },
     "sensor": {
+      "status": {
+        "name": "Status",
+        "description": "Whether the camera is reachable by the Bosch cloud.",
+        "state": {
+          "ONLINE": "Online",
+          "OFFLINE": "Offline",
+          "UNKNOWN": "Unknown"
+        }
+      },
+      "last_event": {
+        "name": "Last Event",
+        "description": "Timestamp of the most recent motion or audio event recorded by the camera."
+      },
+      "events_today": {
+        "name": "Events Today",
+        "description": "Number of motion and audio events that occurred since midnight today."
+      },
+      "wifi_signal": {
+        "name": "WiFi Signal",
+        "description": "Current WiFi signal strength as a percentage (0–100%). Attributes include SSID and IP address."
+      },
+      "firmware_version": {
+        "name": "Firmware Version",
+        "description": "Installed firmware version reported by the camera. Attribute 'up_to_date' indicates whether an update is available."
+      },
+      "ambient_light": {
+        "name": "Ambient Light",
+        "description": "Ambient brightness detected by the camera's light sensor, expressed as a percentage (0–100%)."
+      },
+      "led_dimmer": {
+        "name": "LED Dimmer",
+        "description": "Current brightness of the camera's LED spotlight (0–100%), read via RCP. Only available for cameras with a physical light."
+      },
+      "clock_offset": {
+        "name": "Clock Offset",
+        "description": "Difference in seconds between the camera's internal clock and the Home Assistant server clock. Large values indicate clock drift."
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity",
+        "description": "Motion detection state and configured sensitivity level. Disabled when motion detection is turned off in the Bosch app."
+      },
+      "audio_alarm": {
+        "name": "Audio Alarm",
+        "description": "Audio alarm detection state and threshold. Shows whether sound-triggered alerts are enabled."
+      },
+      "last_event_type": {
+        "name": "Last Event Type",
+        "description": "Category of the most recent event — movement, person detection, audio alarm, or trouble.",
+        "state": {
+          "movement": "Movement",
+          "person": "Person",
+          "audio_alarm": "Audio Alarm",
+          "trouble": "Trouble",
+          "trouble_disconnect": "Trouble (Disconnect)",
+          "trouble_reconnect": "Trouble (Reconnect)",
+          "none": "None"
+        }
+      },
+      "movement_events_today": {
+        "name": "Movement Events Today",
+        "description": "Number of MOVEMENT-type events detected today."
+      },
+      "audio_events_today": {
+        "name": "Audio Events Today",
+        "description": "Number of AUDIO_ALARM-type events detected today."
+      },
+      "push_status": {
+        "name": "Event Detection",
+        "description": "Shows whether events are received via instant FCM push (~2 s) or via periodic polling. One sensor per integration, not per camera.",
+        "state": {
+          "fcm_push": "FCM Push (instant)",
+          "polling": "Polling (fallback)",
+          "disabled": "Disabled"
+        }
+      },
+      "unread_events": {
+        "name": "Unread Events",
+        "description": "Number of events that have not yet been marked as read in the Bosch app."
+      },
       "commissioned": {
-        "name": "Commissioned"
+        "name": "Commissioned",
+        "description": "Commissioning status reported by the Bosch cloud: whether the camera is configured, connected, and fully commissioned."
+      },
+      "schedule_rules": {
+        "name": "Schedule Rules",
+        "description": "Number of cloud-side schedule rules defined for this camera (e.g. privacy or recording schedules). Attributes list each rule with name and active state."
+      },
+      "alarm_catalog": {
+        "name": "Alarm Catalog",
+        "description": "Number of alarm types supported by the camera firmware, read via RCP. Attributes list all types with name and category."
+      },
+      "motion_zones": {
+        "name": "Motion Zones",
+        "description": "Number of configured motion detection zones. Attributes contain zone geometry data for overlay visualisation."
+      },
+      "tls_cert": {
+        "name": "TLS Certificate",
+        "description": "Expiry date of the camera's TLS certificate. Attributes include issuer, key size, and validity period."
+      },
+      "network_services": {
+        "name": "Network Services",
+        "description": "Number of active network services on the camera (HTTP, HTTPS, RTSP, ONVIF, NTP, etc.), read via RCP."
+      },
+      "iva_analytics": {
+        "name": "IVA Analytics",
+        "description": "Number of Intelligent Video Analytics modules available in the camera firmware, read via RCP."
+      },
+      "privacy_masks": {
+        "name": "Privacy Masks",
+        "description": "Number of configured privacy mask areas. Attributes contain mask geometry for overlay visualisation."
+      },
+      "ambient_schedule": {
+        "name": "Ambient Light Schedule",
+        "description": "Ambient light schedule mode for Gen2 outdoor cameras: dusk-to-dawn (automatic) or manual times. Attributes include brightness and colour temperature settings.",
+        "state": {
+          "disabled": "Disabled",
+          "dusk_to_dawn": "Dusk to Dawn",
+          "manual": "Manual"
+        }
+      },
+      "alarm_state": {
+        "name": "Alarm State",
+        "description": "Intrusion alarm state of the Gen2 Indoor II camera. ACTIVE means the alarm is armed.",
+        "state": {
+          "ACTIVE": "Armed",
+          "INACTIVE": "Disarmed",
+          "UNKNOWN": "Unknown",
+          "SYSTEM_MANAGED_ARMED": "Armed (System)",
+          "SYSTEM_MANAGED_DISARMED": "Disarmed (System)",
+          "ARMED_AWAY": "Armed Away",
+          "ARMED_STAY": "Armed Stay",
+          "DISARMED": "Disarmed"
+        }
+      },
+      "stream_status": {
+        "name": "Stream Status",
+        "description": "Current live stream state of the camera.",
+        "state": {
+          "idle": "Idle",
+          "warming_up": "Warming Up",
+          "connecting": "Connecting",
+          "streaming": "Streaming (LAN)",
+          "streaming_remote": "Streaming (Cloud)"
+        }
       }
     }
   },

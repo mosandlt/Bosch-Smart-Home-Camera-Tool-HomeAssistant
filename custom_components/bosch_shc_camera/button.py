@@ -12,6 +12,7 @@ import logging
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -63,9 +64,10 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
-        self._attr_name      = f"Bosch {self._cam_title} Refresh Snapshot"
-        self._attr_unique_id = f"bosch_shc_refresh_{cam_id.lower()}"
-        self._attr_icon      = "mdi:camera-refresh"
+        self._attr_name            = f"Bosch {self._cam_title} Refresh Snapshot"
+        self._attr_unique_id       = f"bosch_shc_refresh_{cam_id.lower()}"
+        self._attr_icon            = "mdi:camera-refresh"
+        self._attr_translation_key = "refresh_snapshot"
 
     @property
     def device_info(self) -> dict:
@@ -102,6 +104,8 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
     """
 
     _attr_entity_registry_enabled_default = False
+    _attr_translation_key = "acoustic_alarm"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -116,9 +120,9 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
-        self._attr_name      = f"Bosch {self._cam_title} Siren"
-        self._attr_unique_id = f"bosch_shc_siren_{cam_id.lower()}"
-        self._attr_icon      = "mdi:alarm-light"
+        self._attr_name            = f"Bosch {self._cam_title} Siren"
+        self._attr_unique_id       = f"bosch_shc_siren_{cam_id.lower()}"
+        self._attr_icon            = "mdi:alarm-light"
 
     @property
     def device_info(self) -> dict:

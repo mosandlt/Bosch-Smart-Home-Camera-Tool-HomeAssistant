@@ -10,6 +10,7 @@ import logging
 from homeassistant.components.update import UpdateEntity, UpdateDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -48,8 +49,10 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
-        self._attr_name = f"Bosch {self._cam_title} Firmware"
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_firmware_update"
+        self._attr_name            = f"Bosch {self._cam_title} Firmware"
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_firmware_update"
+        self._attr_translation_key = "firmware_update"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def device_info(self) -> dict:
