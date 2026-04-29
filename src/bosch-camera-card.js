@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.18";
+const CARD_VERSION = "2.10.20";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -186,6 +186,7 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
+    this._iosMode           = !window.MediaSource && !!document.createElement("video").canPlayType("application/vnd.apple.mpegurl");
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -502,6 +503,23 @@ class BoschCameraCard extends HTMLElement {
         .stream-badge.streaming .dot  { background: #0a84ff; animation: pulse 1.5s infinite; }
         .stream-badge.connecting .dot { background: #ff9f0a; animation: pulse 0.8s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        /* iOS HLS info banner */
+        .ios-hls-banner {
+          display: none;
+          align-items: center; justify-content: space-between;
+          gap: 8px; padding: 6px 10px;
+          background: rgba(0,122,255,.1); border-top: 1px solid rgba(0,122,255,.2);
+          font-size: 11px; color: #0a84ff;
+        }
+        .ios-hls-banner.visible { display: flex; }
+        .ios-hls-banner span { flex: 1; }
+        .ios-hls-banner button {
+          background: rgba(0,122,255,.15); border: 1px solid rgba(0,122,255,.3);
+          color: #0a84ff; border-radius: 6px; padding: 3px 8px;
+          font-size: 11px; cursor: pointer; white-space: nowrap;
+        }
+        .ios-hls-banner button:active { background: rgba(0,122,255,.3); }
 
         /* Push status badge */
         .push-badge {
@@ -914,6 +932,10 @@ class BoschCameraCard extends HTMLElement {
         <div class="img-wrapper" id="img-wrapper">
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
           <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
+          <div class="ios-hls-banner" id="ios-hls-banner">
+            <span>ℹ HLS (kein WebRTC auf iOS)</span>
+            <span style="opacity:0.7">wird automatisch neu gestartet</span>
+          </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
@@ -2035,6 +2057,11 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
+      // Show iOS HLS banner when streaming starts on iOS
+      if (this._iosMode) {
+        const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+        if (banner) banner.classList.add("visible");
+      }
       const clearOverlay = () => {
         // NOW hide the snapshot — video is playing, no black gap
         if (img) img.style.display = "none";
@@ -2104,7 +2131,16 @@ class BoschCameraCard extends HTMLElement {
     // the offer rejects fast (`webrtc_offer_failed: Camera does not support
     // WebRTC` from `require_webrtc_support` decorator), the catch block
     // takes over within ~100 ms, and HLS startup is unaffected.
-    try {
+    //
+    // iOS/WKWebView exception: WebRTC over Cloudflare Tunnel requires UDP
+    // which the tunnel cannot carry — ICE always fails after 5s timeout,
+    // wasting time before HLS starts. On iOS (no MSE → Hls.isSupported()
+    // false) skip WebRTC entirely and go straight to native HLS.
+    const _isIOS = this._iosMode;
+    if (_isIOS) {
+      console.debug("bosch-camera-card: iOS detected — skipping WebRTC, going straight to native HLS");
+    }
+    if (!_isIOS) try {
       try {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
@@ -2540,6 +2576,12 @@ class BoschCameraCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     const hass = this._hass;
     const ents = this._entities;
+
+    // Sync iOS HLS banner visibility with live video state
+    if (this._iosMode) {
+      const iosBanner = this.shadowRoot?.getElementById("ios-hls-banner");
+      if (iosBanner) iosBanner.classList.toggle("visible", !!this._liveVideoActive);
+    }
 
     // Clear optimistic states that have been confirmed by HA
     for (const [entityId, optState] of Object.entries(this._optimistic)) {

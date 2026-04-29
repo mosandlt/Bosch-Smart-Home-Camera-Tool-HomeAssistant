@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.5.1 (patch)
+
+**iOS native HLS direct-path (Card v2.10.20).** On iOS/WKWebView, WebRTC over Cloudflare Tunnel fails after a 5 s ICE timeout (UDP cannot traverse the HTTP tunnel) — the card then fell back to HLS, but the combined delay caused AVFoundation timeouts resulting in a ~1 minute black screen. Fix: iOS is detected via `!window.MediaSource && canPlayType("application/vnd.apple.mpegurl")` and the WebRTC attempt is skipped entirely; native HLS starts immediately via `video.src`. Desktop browsers (Chrome/Firefox) continue to use WebRTC as before. An info banner is shown while streaming on iOS: *"ℹ HLS (kein WebRTC auf iOS) — wird automatisch neu gestartet"*.
+
+---
+
 ## v10.5.1
 
 **Stream Status Sensor.** New `sensor.bosch_{name}_stream_status` entity per camera with states `idle / warming_up / connecting / streaming / streaming_remote`. `device_class: enum` with `_attr_options` so HA's more-info popup shows all possible states and a categorical state-history timeline. The card reads this sensor on every `hass` update — cold-open fix: opening a dashboard while the backend is already pre-warming shows the correct overlay and snapshot background without requiring a toggle click (`_awaitingFresh` guard prevents duplicate snapshot fetches). New `snapshot_during_warmup` card config option (default `true`).

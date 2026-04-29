@@ -51,7 +51,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
   - [`bosch-camera-overview-card` — multi-camera grid](#bosch-camera-overview-card--multi-camera-grid)
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
-- [Known Limitations](#known-limitations) — HLS via Cloudflare Tunnel + iOS Companion App on cellular
+- [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
 - [Related Projects](#related-projects)
 - [License](#license)
@@ -579,10 +579,10 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.15 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.20 |
 | `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline** with colored outlines per tier (green / orange / grey), or by Bosch-app `priority` if `use_bosch_sort: true`. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v1.1.0 |
 
-> **Card version: v2.10.14** — iOS Companion App livestream fix (native HLS fallback when hls.js CDN-load is blocked by WKWebView), stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.10.20** — iOS native HLS direct-path (skips WebRTC on iOS, no 5 s timeout), info banner on iOS while streaming, stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
 
@@ -996,61 +996,22 @@ Everything renders automatically when the integration detects a Gen2 Indoor II.
 
 ## Known Limitations
 
-### HLS livestream via Cloudflare Tunnel + iOS Companion App on cellular
+### Cloudflare Tunnel + live stream
 
-**Symptom**: The card hangs forever on "HLS wird geladen…" with the snapshot frozen behind the spinner — but only in this exact combination:
+The integration ships `cf_unbuffer.py` — a runtime patch that rewrites HA's HLS view classes to send `Transfer-Encoding: chunked` (no `Content-Length`) for `.m4s` segments and `text/event-stream` content-type for `.m3u8` playlists. This ensures cloudflared's `shouldFlush()` triggers immediately instead of buffering the full segment before forwarding.
 
-| Path | iOS Companion App | Mobile Safari |
-|---|---|---|
-| WLAN (LAN-direct) | ✓ works | ✓ works |
-| 5G / cellular via Cloudflare Tunnel | ✗ **stilles Bild** | ✓ works |
+On **iOS** (Companion App and Mobile Safari), the card detects the platform automatically and skips the WebRTC attempt — going straight to native HLS via `video.src`. This avoids the 5 s ICE timeout that WebRTC would incur over a Cloudflare Tunnel (UDP cannot traverse the HTTP tunnel). The card shows an info banner while streaming on iOS.
 
-**Root cause**: Cloudflare Tunnel buffers HTTP responses by default unless the origin sends `Content-Type: text/event-stream` ([Cloudflare docs — common errors](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/troubleshoot-tunnels/common-errors/), [cloudflared #1095](https://github.com/cloudflare/cloudflared/issues/1095)). The HLS master playlist and segments are served as `application/vnd.apple.mpegurl` / `video/mp4`, so cloudflared collects each segment fully at the edge before forwarding. **Mobile Safari's HLS player tolerates the buffer-then-flush pattern**; the **WKWebView inside the iOS Companion App is stricter on cellular** (higher RTT amplifies the gap) and cancels the request before cloudflared can deliver. Confirmed by the `Incoming request ended abruptly: context canceled` line in the cloudflared add-on log when the App requests `master_playlist.m3u8` on 5G.
-
-The same pattern is reported widely for HA + iOS + cellular streaming ([HA Community thread](https://community.home-assistant.io/t/unable-to-view-live-camera-feed-on-mobile-data/450352), [cloudflared #1519](https://github.com/cloudflare/cloudflared/issues/1519)).
-
-**Not a bug in this integration** — backend (HA HLS, go2rtc, TLS proxy, RTSP to camera) is fully healthy on every transport.
-
-### Built-in mitigations (shipped in v10.5.1)
-
-The integration applies a runtime patch to HA's HLS view classes that:
-
-- Rewrites the `Content-Type` of `*.m3u8` manifests to `text/event-stream; x-actual=...` so cloudflared's `shouldFlush()` Branch (C) triggers
-- Re-emits `*.m4s` / `init.mp4` segments as chunked `web.StreamResponse` (no `Content-Length`) so cloudflared's `shouldFlush()` Branch (B) triggers
-
-Verify it's active:
+Verify the unbuffer patch is active:
 
 ```bash
 curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
 # Expected: Transfer-Encoding: chunked  AND  no Content-Length
 ```
 
-This eliminates the cloudflared "Incoming request ended abruptly: context canceled" log entries for `/api/hls/*` paths and helps every HLS-via-Cloudflare-Tunnel setup. **However**: in our own real-world test (iPhone, 5G, iOS Companion App, Cloudflare-Tunnel via cloudflared add-on), this fix alone was not sufficient — see "Why HLS over Cloudflare Tunnel is fragile" below.
+### Optional cloudflared improvement
 
-### Why HLS over Cloudflare Tunnel is fragile (and what to do)
-
-Even with cloudflared correctly streaming the responses (verified with the patch above), AVFoundation in iOS' WKWebView has its own ~10 s segment-load timeout. On cellular networks with high RTT plus the QUIC instability between iPhone and Cloudflare's edge, segments still arrive too late and the player either freezes on the init frame or loops between "HLS wird geladen…" and a still image. **The Companion App's WKWebView is stricter than Mobile Safari** — Mobile Safari on the same cellular session plays the same stream fine, the App does not. We cannot fix this from inside the integration.
-
-There is also a Cloudflare-side concern: **Cloudflare's Self-Serve Subscription Agreement, Section 2.8** prohibits streaming non-HTML content (incl. video) through the Free / Pro tunnel. HA Community moderators in the "External access in 2025" Reddit thread confirm: *"CF Tunnel for the UI is fine, just don't stream cameras through it — people have been suspended."* Sources: [Cloudflare TOS](https://www.cloudflare.com/terms/), [Frigate Discussion #4247](https://github.com/blakeblackshear/frigate/discussions/4247), [HA Community](https://community.home-assistant.io/t/cloudflare-tunnel-and-streaming-camera/).
-
-### Recommended setup — VPN for the stream, Cloudflare for the UI
-
-The pragmatic 2026 best practice is a **hybrid**: keep Cloudflare Tunnel for the dashboard / REST / WebSocket / snapshots, route the live-stream traffic via a private VPN. Three concrete options, ordered by ease for a typical HA OS user:
-
-1. **FRITZ!Box + WireGuard** (recommended if you already have a FRITZ!Box) — FRITZ!OS ≥ 7.50 has WireGuard built-in, no add-on needed.
-   - On the FRITZ!Box: *Internet → Freigaben → VPN (WireGuard) → Add Connection*
-   - Export the iPhone profile (QR code), scan it in the WireGuard iOS app
-   - In the HA Companion App: open *Settings → Companion App → Connection → Internal URL* and set `http://192.168.x.x:8123` (your HA's LAN IP). Leave the External URL as `https://your-ha.example.com` (Cloudflare).
-   - Connection-Type: leave "Auto" with your home Wi-Fi SSID — when on cellular the App will use the External URL **unless WireGuard is up**, in which case the LAN IP becomes routable and the App uses Internal directly.
-   - Effect: cellular App with WG on = LAN-speed stream. Cellular App with WG off = same Cloudflare path as before (UI works, Stream patchy).
-2. **Tailscale** — same outcome but with NAT-traversal magic, works through CGNAT'd cellular and any router. Free for up to 100 devices. Apps on iOS + HA add-on.
-3. **Nabu Casa Cloud** — official HA paid service (€7.50/month), bundles a TURN relay so WebRTC also works.
-
-`bosch-camera-card` itself is not affected by this — the card just renders whatever stream URL HA returns. The bottleneck is the network path between iPhone and HA, not anything we control in this integration.
-
-### Optional cloudflared improvement that helps in general
-
-Independent of the camera question, force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (we observed `failed to accept QUIC stream: timeout` errors regularly). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
+Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
 
 ## Releases
 
