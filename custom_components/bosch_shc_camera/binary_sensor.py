@@ -35,8 +35,12 @@ from . import DOMAIN, BoschCameraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# How long (seconds) a motion/audio event keeps the binary sensor ON
-EVENT_ACTIVE_WINDOW = 30
+# How long (seconds) a motion/audio event keeps the binary sensor ON.
+# 90 s covers the polling-only fallback (coordinator scan_interval is 60 s, so
+# an event could be up to 60 s old when first seen by data[]); 30 s would
+# systematically miss events in that path and only fire when an FCM push
+# happens to land between two ticks.
+EVENT_ACTIVE_WINDOW = 90
 
 
 async def async_setup_entry(

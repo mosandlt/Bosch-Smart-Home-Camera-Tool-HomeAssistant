@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.13";
+const CARD_VERSION = "2.10.14";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -848,8 +848,13 @@ class BoschCameraCard extends HTMLElement {
           }, 2e3);
         });
       };
-      const Hls = await this._loadHlsJs();
-      if (Hls.isSupported()) {
+      let Hls = null;
+      try {
+        Hls = await this._loadHlsJs();
+      } catch (e) {
+        console.warn("bosch-camera-card: hls.js load failed, will try native HLS:", e?.message);
+      }
+      if (Hls && Hls.isSupported()) {
         if (this._hls) {
           this._hls.destroy();
           this._hls = null;

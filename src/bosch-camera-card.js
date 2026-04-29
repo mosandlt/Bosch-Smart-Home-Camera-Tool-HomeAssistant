@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.13";
+const CARD_VERSION = "2.10.14";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -2153,8 +2153,17 @@ class BoschCameraCard extends HTMLElement {
           });
       };
 
-      const Hls = await this._loadHlsJs();
-      if (Hls.isSupported()) {
+      // hls.js CDN-Load kann in der iOS Companion App (WKWebView) blockieren
+      // (strikte ATS/CSP). Ohne diesen guard wirft `await` durch in den catch
+      // und der native-HLS-Fallback unten wird nie erreicht — Spinner hängt
+      // dauerhaft. Daher: Load-Fehler abfangen und auf native HLS durchfallen.
+      let Hls = null;
+      try {
+        Hls = await this._loadHlsJs();
+      } catch (e) {
+        console.warn("bosch-camera-card: hls.js load failed, will try native HLS:", e?.message);
+      }
+      if (Hls && Hls.isSupported()) {
         if (this._hls) { this._hls.destroy(); this._hls = null; }
         // Apply the buffer profile selected via integration options.
         // CRITICAL: maxBufferLength MUST stay < HA's OUTPUT_IDLE_TIMEOUT (30s).
