@@ -3889,6 +3889,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # See _StreamSupportNoiseFilter docstring for context.
     _install_stream_support_noise_filter()
 
+    # Cloudflare-Tunnel HLS-buffering workaround (idempotent). Rewrites the
+    # Content-Type on /api/hls/* responses so cloudflared switches to
+    # streaming mode instead of buffering each segment at the edge — fixes
+    # the iOS Companion App on cellular ("HLS wird geladen…" hang).
+    # See cf_unbuffer.py docstring + knowledge-base/cloudflared-tunnel-hls-buffering.md
+    from . import cf_unbuffer
+    cf_unbuffer.register(hass)
+
     # Listen on HA's stream component logger for worker-error events. This
     # catches the auto-restart cycle from Stream._run_worker() — which our
     # own polling watchdog can miss when its tick lands during a brief

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.14";
+const CARD_VERSION = "2.10.15";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -906,7 +906,7 @@ class BoschCameraCard extends HTMLElement {
 
         <div class="img-wrapper" id="img-wrapper">
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
-          <video class="cam-video" id="cam-video" autoplay playsinline style="display:none; cursor:pointer"></video>
+          <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
@@ -2276,9 +2276,29 @@ class BoschCameraCard extends HTMLElement {
     /**
      * Start WebRTC stream via go2rtc (HA's camera/webrtc/offer WS API).
      * Provides ~2s latency vs ~12s for HLS.
+     *
+     * STUN/TURN: without ICE servers, RTCPeerConnection only collects host
+     * candidates (LAN IPs). On the same subnet that's fine, but a client on
+     * cellular reaching HA via Cloudflare Tunnel cannot route to host
+     * candidates like 192.168.x.x — ICE stays in `checking` forever, no
+     * track is delivered, and the card hangs until the 5s timeout below
+     * fires. We pull HA's configured ICE servers via the same WS API HA's
+     * own ha-web-rtc-player uses (`camera/webrtc/get_client_config`) so
+     * cellular clients have a public relay path. Failure is non-fatal —
+     * fall back to a default STUN so LAN clients still work.
      */
     const entityId = this._entities.camera;
-    const pc = new RTCPeerConnection();
+    let rtcConfig = { iceServers: [{ urls: "stun:stun.home-assistant.io:80" }] };
+    try {
+      const settings = await this._hass.callWS({
+        type: "camera/webrtc/get_client_config",
+        entity_id: entityId,
+      });
+      if (settings?.configuration) rtcConfig = settings.configuration;
+    } catch (e) {
+      console.debug("bosch-camera-card: get_client_config unavailable, using default STUN:", e?.message);
+    }
+    const pc = new RTCPeerConnection(rtcConfig);
     this._webrtcPc = pc;
 
     pc.addTransceiver("video", { direction: "recvonly" });
@@ -2313,9 +2333,20 @@ class BoschCameraCard extends HTMLElement {
     );
     this._webrtcUnsub = unsub;
 
-    // Wait for first track with timeout
+    // Wait for first track with timeout. Also surface ICE failure
+    // immediately — when ICE never finds a working pair (most common cause:
+    // cellular client + LAN-only host candidates from go2rtc) the underlying
+    // pc fires `iceconnectionstatechange` with `failed` long before 5s, but
+    // we'd otherwise stall the full timeout. Reject early so HLS fallback
+    // kicks in fast.
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 10s")), 10000);
+      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 5s")), 5000);
+      pc.addEventListener("iceconnectionstatechange", () => {
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          clearTimeout(timeout);
+          reject(new Error("WebRTC: ICE " + pc.iceConnectionState));
+        }
+      });
       pc.ontrack = (ev) => {
         clearTimeout(timeout);
         remoteStream.addTrack(ev.track);
