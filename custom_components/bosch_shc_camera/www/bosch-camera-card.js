@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.10.11";
+const CARD_VERSION = "2.10.13";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -222,8 +222,24 @@ class BoschCameraCard extends HTMLElement {
   _onVisibilityChange() {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
       this._triggerFreshSnapshot();
+      this._pullFreshSwitchStates();
     }
     this._startRefreshTimer();
+  }
+  async _pullFreshSwitchStates() {
+    if (!this._hass) return;
+    const ids = [ this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(Boolean);
+    let changed = false;
+    for (const id of ids) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${id}`);
+        if (fresh && fresh.state && this._hass.states[id]?.state !== fresh.state) {
+          delete this._optimistic[id];
+          changed = true;
+        }
+      } catch (e) {}
+    }
+    if (changed) this._update();
   }
   _stopRefreshTimer() {
     if (this._refreshTimer) {
@@ -2008,8 +2024,22 @@ class BoschCameraCard extends HTMLElement {
       }
     }
   }
-  _toggleStream() {
-    const isOn = this._isStreaming();
+  async _toggleStream() {
+    let serverIsOn = null;
+    if (this._hass && this._entities.switch) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh && fresh.state) serverIsOn = fresh.state === "on";
+      } catch (e) {}
+    }
+    const cachedIsOn = this._isStreaming();
+    if (serverIsOn !== null && serverIsOn !== cachedIsOn) {
+      console.warn("bosch-camera-card: stale state detected — card thought " + (cachedIsOn ? "streaming" : "idle") + ", server says " + (serverIsOn ? "streaming" : "idle") + ". Refreshing the view; tap again to toggle.");
+      delete this._optimistic[this._entities.switch];
+      this._update();
+      return;
+    }
+    const isOn = serverIsOn !== null ? serverIsOn : cachedIsOn;
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
     if (isOn) {
       this._streamConnecting = false;
@@ -2210,7 +2240,7 @@ window.customCards.push({
   preview: false
 });
 
-const OVERVIEW_VERSION = "1.0.0";
+const OVERVIEW_VERSION = "1.1.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
   constructor() {
@@ -2234,6 +2264,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       exclude: Array.isArray(config.exclude) ? config.exclude : [],
       include: Array.isArray(config.include) ? config.include : [],
       compact: !!config.compact,
+      use_bosch_sort: config.use_bosch_sort === true,
       minimal: config.minimal === true,
       overrides: config.overrides && typeof config.overrides === "object" ? config.overrides : {},
       card_defaults: config.card_defaults && typeof config.card_defaults === "object" ? config.card_defaults : {}
@@ -2290,18 +2321,28 @@ class BoschCameraOverviewCard extends HTMLElement {
       const privState = states[`switch.${base}_privacy_mode`];
       const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
       const tier = !online ? 2 : privacyOn ? 1 : 0;
+      const rawPrio = a.bosch_priority;
+      const priority = typeof rawPrio === "number" && isFinite(rawPrio) ? rawPrio : null;
       list.push({
         entity_id: eid,
         name: a.friendly_name || eid,
         online: online,
         privacyOn: privacyOn,
         tier: tier,
+        priority: priority,
         status: status || "UNKNOWN",
         model: a.model_name || ""
       });
     }
+    const useBosch = this._config.use_bosch_sort;
     list.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
+      if (useBosch) {
+        const aHas = a.priority !== null;
+        const bHas = b.priority !== null;
+        if (aHas && bHas && a.priority !== b.priority) return a.priority - b.priority;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+      }
       return a.name.localeCompare(b.name, "de");
     });
     return list;

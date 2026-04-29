@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "2.10.11"
+CARD_VERSION = "2.10.13"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -57,12 +57,13 @@ DEFAULT_OPTIONS = {
     "audio_default_on": True,
     "enable_intercom": False,
     "enable_smb_upload": False,
+    "upload_protocol": "smb",
     "smb_server": "",
     "smb_share": "",
     "smb_username": "",
     "smb_password": "",
     "smb_base_path": "Bosch-Kameras",
-    "smb_folder_pattern": "{year}/{month}",
+    "smb_folder_pattern": "{year}/{month}/{day}",
     "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     "smb_retention_days": 180,
     "smb_disk_warn_mb": 5120,

@@ -542,6 +542,16 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("enable_smb_upload", False)),
                 ): bool,
                 vol.Optional(
+                    "upload_protocol",
+                    default=str(opts.get("upload_protocol", "smb")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="smb", label="SMB / CIFS (Standard)"),
+                        SelectOptionDict(value="ftp", label="FTP (z.B. FRITZ.NAS — schneller bei vielen Files)"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
+                vol.Optional(
                     "smb_server",
                     description={"suggested_value": opts.get("smb_server", "")},
                 ): str,
@@ -563,7 +573,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): str,
                 vol.Optional(
                     "smb_folder_pattern",
-                    description={"suggested_value": opts.get("smb_folder_pattern", "{year}/{month}")},
+                    description={"suggested_value": opts.get("smb_folder_pattern", "{year}/{month}/{day}")},
                 ): str,
                 vol.Optional(
                     "smb_file_pattern",

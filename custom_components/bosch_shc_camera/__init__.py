@@ -78,6 +78,63 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 _LOGGER = logging.getLogger(__name__)
 
 
+class _StreamSupportNoiseFilter(logging.Filter):
+    """Rate-limit HA camera-component log spam during stream pre-warm.
+
+    When the user starts a Bosch live stream, the LOCAL pre-warm path needs
+    ~25 s (PUT /connection → TLS proxy bring-up → Bosch encoder warm-up →
+    rtspsUrl set). During that window any consumer that calls the
+    `camera/stream` WS API gets a stream_source()==None response, and
+    HA's camera component logs `Error requesting stream: camera.<id> does
+    not support play stream service` — once per call. With multiple
+    Lovelace tabs / a Companion app in the background / our own card's
+    `_startLiveVideo` HLS fallback all polling around the same time, real
+    captures show 9 of these in 15 s for a single stream start. Each
+    line is benign (the Bosch coordinator is just slower than the
+    consumer's first try) but the noise crowds out actually-useful log
+    lines and worries users.
+
+    Filter strategy: keep one ERROR per 30 s per entity_id so a real
+    "stream truly broken" issue still surfaces, but the pre-warm-window
+    burst is collapsed to a single line. Limited to bosch_* entity ids
+    so other camera integrations are unaffected.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._last_passed: dict[str, float] = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
+        if "does not support play stream service" not in msg:
+            return True
+        # Extract entity_id from "Error requesting stream: camera.<id> ..."
+        ent = ""
+        prefix = "camera."
+        idx = msg.find(prefix)
+        if idx != -1:
+            tail = msg[idx + len(prefix):]
+            ent = tail.split(" ", 1)[0]
+        if not ent.startswith("bosch_"):
+            return True  # not us, leave alone
+        import time as _t
+        now = _t.monotonic()
+        last = self._last_passed.get(ent, 0.0)
+        if (now - last) < 30.0:
+            return False
+        self._last_passed[ent] = now
+        return True
+
+
+def _install_stream_support_noise_filter() -> None:
+    """Install the Bosch-side filter on HA's camera component logger once."""
+    cam_logger = logging.getLogger("homeassistant.components.camera")
+    for f in cam_logger.filters:
+        if isinstance(f, _StreamSupportNoiseFilter):
+            return
+    cam_logger.addFilter(_StreamSupportNoiseFilter())
+
+
 class _StreamWorkerErrorListener(logging.Handler):
     """Intercept `Error from stream worker` log records from HA's stream
     component and route each one to the coordinator's stream-error handler.
@@ -1547,7 +1604,32 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     and (time.monotonic() - self._privacy_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
                 )
                 if privacy_str and not privacy_locked:
-                    cache["privacy_mode"] = (privacy_str.upper() == "ON")
+                    new_privacy = (privacy_str.upper() == "ON")
+                    old_privacy = cache.get("privacy_mode")
+                    cache["privacy_mode"] = new_privacy
+                    # Hardware/external privacy trigger detection.
+                    # When the cam's physical privacy button is pressed (or someone
+                    # toggles privacy in the Bosch app), the cloud reports
+                    # privacyMode=ON but our `BoschPrivacyModeSwitch.async_turn_on`
+                    # — which is the only path that calls `_tear_down_live_stream`
+                    # — never runs. The result is a stuck `state: streaming`,
+                    # the live-stream switch frozen on `on`, and the TLS proxy
+                    # entering an endless reconnect loop against the now-gone
+                    # camera (Errno 113 Host unreachable). We detect the
+                    # OFF→ON transition here and schedule the same teardown
+                    # the user-toggle path uses.
+                    if (
+                        new_privacy is True
+                        and old_privacy is not True
+                        and self._live_connections.get(cam_id_key)
+                    ):
+                        _LOGGER.info(
+                            "Privacy ON detected externally for %s — tearing down active stream",
+                            cam_id_key[:8],
+                        )
+                        self.hass.async_create_task(
+                            self._tear_down_live_stream(cam_id_key)
+                        )
                 cache["has_light"] = has_light
                 # Use cloud featureStatus for light state; SHC supplements if available.
                 # Skip overwrite if a write happened within _WRITE_LOCK_SECS — the cloud
@@ -3802,6 +3884,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms = ["binary_sensor"] + platforms
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
+
+    # Quench the camera-component log spam during stream pre-warm (idempotent).
+    # See _StreamSupportNoiseFilter docstring for context.
+    _install_stream_support_noise_filter()
 
     # Listen on HA's stream component logger for worker-error events. This
     # catches the auto-restart cycle from Stream._run_worker() — which our

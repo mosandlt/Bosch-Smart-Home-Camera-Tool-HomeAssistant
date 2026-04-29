@@ -339,6 +339,8 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         else:
             stream_status = "idle"
 
+        info = cam_data.get("info", {})
+        bosch_priority = info.get("priority")
         attrs = {
             "camera_id":       self._cam_id,
             "status":          cam_data.get("status", "UNKNOWN"),
@@ -353,6 +355,11 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
             "live_rtsps":      rtsps_url,
             "live_proxy":      live.get("proxyUrl", ""),
             "stream_errors":   err_count,
+            # Bosch-app camera order. Mirrors the float priority returned by
+            # GET /v11/video_inputs (settable via PUT /v11/video_inputs/order).
+            # The overview card reads this when `use_bosch_sort: true` so the
+            # HA layout matches the Bosch app order.
+            "bosch_priority":  bosch_priority,
         }
         if rtsps_url:
             attrs["stream_url"] = rtsps_url

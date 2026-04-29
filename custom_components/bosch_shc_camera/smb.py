@@ -86,11 +86,15 @@ def _download_one(
 # ── SMB/NAS upload (runs in executor thread) ──────────────────────────────────
 
 def sync_smb_upload(coordinator, data: dict, token: str) -> None:
-    """Upload new event files to SMB/NAS share.
+    """Upload new event files to SMB or FTP.
 
-    Folder structure: {smb_base_path}/{year}/{month}/{camera_name}_{date}_{time}_{type}.{ext}
-    Uses smbprotocol for cross-platform SMB access.
+    Folder structure: {smb_base_path}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
+    Backend selected via ``upload_protocol`` option ("smb" default, or "ftp").
     """
+    protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
+    if protocol == "ftp":
+        return _sync_ftp_upload(coordinator, data, token)
+
     import requests as req
     import urllib3
     urllib3.disable_warnings()
@@ -101,7 +105,7 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}").strip()
+    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
     file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
     if not server or not share:
@@ -242,7 +246,10 @@ def smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder
 # ── SMB retention cleanup (runs in executor thread, once per day) ─────────────
 
 def sync_smb_cleanup(coordinator) -> None:
-    """Delete files on the SMB share that are older than smb_retention_days."""
+    """Delete files on the SMB or FTP share that are older than smb_retention_days."""
+    protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
+    if protocol == "ftp":
+        return _sync_ftp_cleanup(coordinator)
     try:
         from smbclient import register_session, scandir, remove, stat as smb_stat
     except ImportError:
@@ -305,6 +312,10 @@ def sync_smb_cleanup(coordinator) -> None:
 
 def sync_smb_disk_check(coordinator) -> None:
     """Check free space on the SMB share and fire an HA alert if low."""
+    protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
+    if protocol == "ftp":
+        # FTP has no portable disk-free RPC across servers; skip silently.
+        return
     try:
         from smbclient import register_session
         import smbclient._io as _smb_io  # noqa: F401 — ensure smbclient loaded
@@ -384,4 +395,237 @@ async def async_smb_disk_alert(coordinator, message: str, notify_service: str) -
                 "message": message,
                 "notification_id": "bosch_smb_disk_warn",
             },
+        )
+
+
+# ── FTP backend (FRITZ.NAS, plain FTP servers) ────────────────────────────────
+# FRITZ!Box SMB on macOS Sequoia hangs in `rename()` for minutes; FTP RNFR/RNTO
+# is ~75 file/s on the same hardware. FTP backend reuses smb_* options
+# (server / username / password / base_path / patterns); smb_share is unused
+# because FTP has no shares — the base_path is relative to the FTP root.
+
+def _ftp_connect(server: str, username: str, password: str):
+    """Open a passive-mode FTP connection. Caller closes via .quit()."""
+    import ftplib
+    ftp = ftplib.FTP(server, timeout=30)
+    ftp.login(username, password)
+    ftp.set_pasv(True)
+    return ftp
+
+
+def _ftp_exists(ftp, path: str) -> bool:
+    import ftplib
+    try:
+        ftp.size(path)
+        return True
+    except ftplib.error_perm:
+        return False
+    except Exception:
+        return False
+
+
+def _ftp_makedirs(ftp, path: str) -> None:
+    """Create FTP directories recursively, ignoring already-exists errors."""
+    import ftplib
+    parts = [p for p in path.split("/") if p]
+    current = ""
+    for part in parts:
+        current = f"{current}/{part}"
+        try:
+            ftp.mkd(current)
+        except ftplib.error_perm:
+            pass  # already exists or permission — ignore
+
+
+def _sync_ftp_upload(coordinator, data: dict, token: str) -> None:
+    """Upload event files to an FTP server (e.g. FRITZ.NAS via plain FTP)."""
+    import requests as req
+    import urllib3
+    from io import BytesIO
+    urllib3.disable_warnings()
+
+    opts = coordinator.options
+    server = opts.get("smb_server", "").strip()
+    username = opts.get("smb_username", "").strip()
+    password = opts.get("smb_password", "")
+    base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
+    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
+    file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+
+    if not server:
+        return
+
+    try:
+        ftp = _ftp_connect(server, username, password)
+    except Exception as err:
+        _LOGGER.warning("FTP login to %s failed: %s", server, err)
+        return
+
+    session = req.Session()
+    session.headers["Authorization"] = f"Bearer {token}"
+    session.verify = False
+
+    try:
+        for cam_id, cam_data in data.items():
+            cam_name = cam_data["info"].get("title", cam_id)
+            ev_list = cam_data.get("events", [])
+            _LOGGER.debug("FTP upload: %s has %d events", cam_name, len(ev_list))
+
+            for ev in ev_list:
+                ts = ev.get("timestamp", "")
+                if not ts or len(ts) < 19:
+                    continue
+
+                year = ts[:4]
+                month = ts[5:7]
+                day = ts[8:10]
+                date_str = f"{year}-{month}-{day}"
+                time_str = ts[11:19].replace(":", "-")
+                etype = ev.get("eventType", "EVENT")
+                ev_id = ev.get("id", "")[:8]
+
+                folder_parts = folder_pattern.format(
+                    year=year, month=month, day=day,
+                    camera=cam_name, type=etype,
+                ).strip("/")
+                file_base = file_pattern.format(
+                    camera=cam_name, date=date_str, time=time_str,
+                    type=etype, id=ev_id, year=year, month=month, day=day,
+                )
+
+                ftp_dir = f"/{base_path}/{folder_parts}".replace("//", "/").rstrip("/")
+                _ftp_makedirs(ftp, ftp_dir)
+
+                # Snapshot
+                img_url = ev.get("imageUrl")
+                if img_url and _is_safe_bosch_url(img_url):
+                    fname = f"{file_base}.jpg"
+                    fpath = f"{ftp_dir}/{fname}"
+                    if _ftp_exists(ftp, fpath):
+                        _LOGGER.debug("FTP skip (exists): %s", fname)
+                    else:
+                        try:
+                            r = session.get(img_url, timeout=30)
+                            if r.status_code == 200 and r.content:
+                                ftp.storbinary(f"STOR {fpath}", BytesIO(r.content))
+                                _LOGGER.info("FTP uploaded: %s (%d bytes)", fname, len(r.content))
+                            else:
+                                _LOGGER.warning("FTP snapshot download failed: HTTP %d", r.status_code)
+                        except Exception as err:
+                            _LOGGER.warning("FTP upload error for %s: %s", fname, err)
+
+                # Video clip
+                clip_url = ev.get("videoClipUrl")
+                clip_status = ev.get("videoClipUploadStatus", "")
+                if clip_url and clip_status == "Done" and _is_safe_bosch_url(clip_url):
+                    fname = f"{file_base}.mp4"
+                    fpath = f"{ftp_dir}/{fname}"
+                    if _ftp_exists(ftp, fpath):
+                        _LOGGER.debug("FTP skip (exists): %s", fname)
+                    else:
+                        try:
+                            r = session.get(clip_url, timeout=60, stream=True)
+                            if r.status_code == 200:
+                                ftp.storbinary(f"STOR {fpath}", r.raw)
+                                _LOGGER.info("FTP uploaded: %s", fname)
+                            else:
+                                _LOGGER.warning("FTP clip download failed: HTTP %d", r.status_code)
+                        except Exception as err:
+                            _LOGGER.warning("FTP clip upload error for %s: %s", fname, err)
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            try:
+                ftp.close()
+            except Exception:
+                pass
+
+
+def _sync_ftp_cleanup(coordinator) -> None:
+    """Delete files on the FTP server older than smb_retention_days."""
+    import ftplib
+    from datetime import datetime, timezone
+
+    opts = coordinator.options
+    server = opts.get("smb_server", "").strip()
+    username = opts.get("smb_username", "").strip()
+    password = opts.get("smb_password", "")
+    base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
+    retention_days = int(opts.get("smb_retention_days", 180))
+
+    if not server or retention_days <= 0:
+        return
+
+    try:
+        ftp = _ftp_connect(server, username, password)
+    except Exception as err:
+        _LOGGER.warning("FTP cleanup: login to %s failed: %s", server, err)
+        return
+
+    cutoff = time.time() - retention_days * 86400
+    deleted = 0
+
+    def _walk_and_delete(path: str) -> None:
+        nonlocal deleted
+        try:
+            ftp.cwd(path)
+        except ftplib.error_perm:
+            return
+        entries: list[str] = []
+        try:
+            ftp.retrlines("LIST", entries.append)
+        except Exception:
+            return
+
+        files: list[str] = []
+        subdirs: list[str] = []
+        for line in entries:
+            parts = line.split(None, 8)
+            if len(parts) < 9:
+                continue
+            perms, name = parts[0], parts[-1]
+            if name in (".", ".."):
+                continue
+            if perms.startswith("d"):
+                subdirs.append(name)
+            elif perms.startswith("-"):
+                files.append(name)
+
+        for name in files:
+            try:
+                # MDTM for accurate mtime; falls back to LIST timestamp parsing if absent
+                resp = ftp.sendcmd(f"MDTM {name}")
+                # "213 YYYYMMDDHHMMSS"
+                ts_str = resp.split()[-1]
+                mt = datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp()
+            except Exception:
+                continue
+            if mt < cutoff:
+                try:
+                    ftp.delete(name)
+                    deleted += 1
+                except Exception as err:
+                    _LOGGER.debug("FTP cleanup: delete %s failed: %s", name, err)
+
+        for sub in subdirs:
+            _walk_and_delete(f"{path}/{sub}")
+            try:
+                ftp.cwd(path)  # back up before next sibling
+            except Exception:
+                pass
+
+    try:
+        root = f"/{base_path}"
+        _walk_and_delete(root)
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+    if deleted:
+        _LOGGER.info(
+            "FTP cleanup: deleted %d file(s) older than %d days from %s",
+            deleted, retention_days, f"{server}/{base_path}",
         )
