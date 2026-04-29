@@ -445,8 +445,16 @@ async def async_handle_fcm_push(coordinator) -> None:
                     event_type, cam_name, newest_id[:8], event_tags,
                 )
 
-                # Update cached events (write to cache only — coordinator tick merges)
+                # Update cached events (next coordinator tick rebuilds data[]).
                 coordinator._cached_events[cam_id] = events
+                # Mirror into coordinator.data so the windowed binary sensors
+                # (motion/person/audio in binary_sensor.py) see the new event
+                # immediately on the async_update_listeners() call below —
+                # otherwise data[] is only refreshed on the next tick (up to
+                # scan_interval seconds away), by which time the event may be
+                # outside EVENT_ACTIVE_WINDOW and the sensor stays OFF.
+                if cam_id in coordinator.data:
+                    coordinator.data[cam_id]["events"] = events
 
                 # Fire HA event bus
                 event_payload = {
