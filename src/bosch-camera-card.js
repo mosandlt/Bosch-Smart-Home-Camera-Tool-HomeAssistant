@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.20";
+const CARD_VERSION = "2.10.21";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -186,7 +186,22 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
-    this._iosMode           = !window.MediaSource && !!document.createElement("video").canPlayType("application/vnd.apple.mpegurl");
+    // Skip WebRTC + show HLS banner only when the HA Companion App is reaching
+    // us through an external endpoint (Cloudflare Tunnel etc.). Browser-on-LAN
+    // and external desktop browsers continue to attempt WebRTC normally.
+    this._extCompanion = (() => {
+      const isCompanion = /Home\s?Assistant/i.test(navigator.userAgent || "");
+      if (!isCompanion) return false;
+      const h = (location.hostname || "").toLowerCase();
+      if (!h) return false;
+      if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
+      if (h.endsWith(".local")) return false;
+      if (/^10\./.test(h)) return false;
+      if (/^192\.168\./.test(h)) return false;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+      if (/^fe80:/i.test(h)) return false;
+      return true;
+    })();
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -933,8 +948,8 @@ class BoschCameraCard extends HTMLElement {
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
           <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
           <div class="ios-hls-banner" id="ios-hls-banner">
-            <span>ℹ HLS (kein WebRTC auf iOS)</span>
-            <span style="opacity:0.7">wird automatisch neu gestartet</span>
+            <span>ℹ Externer Zugriff – HLS-Stream aktiv</span>
+            <span style="opacity:0.7">WebRTC über Tunnel nicht möglich</span>
           </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
@@ -2057,8 +2072,8 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
-      // Show iOS HLS banner when streaming starts on iOS
-      if (this._iosMode) {
+      // Show HLS-fallback banner when streaming starts on Companion App + external
+      if (this._extCompanion) {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) banner.classList.add("visible");
       }
@@ -2132,15 +2147,16 @@ class BoschCameraCard extends HTMLElement {
     // WebRTC` from `require_webrtc_support` decorator), the catch block
     // takes over within ~100 ms, and HLS startup is unaffected.
     //
-    // iOS/WKWebView exception: WebRTC over Cloudflare Tunnel requires UDP
-    // which the tunnel cannot carry — ICE always fails after 5s timeout,
-    // wasting time before HLS starts. On iOS (no MSE → Hls.isSupported()
-    // false) skip WebRTC entirely and go straight to native HLS.
-    const _isIOS = this._iosMode;
-    if (_isIOS) {
-      console.debug("bosch-camera-card: iOS detected — skipping WebRTC, going straight to native HLS");
+    // Companion-App-external exception: WebRTC over Cloudflare Tunnel requires
+    // UDP which the tunnel cannot carry — ICE always fails after 5s timeout,
+    // wasting time before HLS starts. When the HA Companion App reaches us
+    // through an external host (not RFC1918/.local) skip WebRTC entirely and
+    // go straight to HLS. Browser-on-LAN and desktop-external still try WebRTC.
+    const _skipWebRTC = this._extCompanion;
+    if (_skipWebRTC) {
+      console.debug("bosch-camera-card: Companion App + external endpoint — skipping WebRTC, using HLS");
     }
-    if (!_isIOS) try {
+    if (!_skipWebRTC) try {
       try {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
@@ -2577,10 +2593,10 @@ class BoschCameraCard extends HTMLElement {
     const hass = this._hass;
     const ents = this._entities;
 
-    // Sync iOS HLS banner visibility with live video state
-    if (this._iosMode) {
-      const iosBanner = this.shadowRoot?.getElementById("ios-hls-banner");
-      if (iosBanner) iosBanner.classList.toggle("visible", !!this._liveVideoActive);
+    // Sync HLS-fallback banner visibility with live video state (Companion+ext only)
+    if (this._extCompanion) {
+      const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+      if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
     }
 
     // Clear optimistic states that have been confirmed by HA
