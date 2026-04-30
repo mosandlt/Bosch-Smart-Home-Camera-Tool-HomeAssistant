@@ -483,12 +483,13 @@ The integration fires events on the HA event bus for custom automations:
 
 Event data: `camera_id`, `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`).
 
-To inspect events live, open **Developer Tools → Events**, scroll to **"Listen to events"**, type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
+To inspect events live, open **Developer Tools → Events** (HA ≥ 2026.4: **Entwicklerwerkzeuge → Ereignisse → Ereignisse abonnieren**), type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
 
 ```yaml
 # Example: notify on every motion at one specific camera
+# HA ≥ 2026.4: use `trigger: event`; older HA: use `platform: event`
 trigger:
-  - platform: event
+  - trigger: event
     event_type: bosch_shc_camera_motion
     event_data:
       camera_id: 00000000-0000-0000-0000-000000000000  # from camera attributes
@@ -500,6 +501,29 @@ action:
 ```
 
 Drop `event_data:` to react to all cameras and filter inside `condition:` via `trigger.event.data.camera_id`.
+
+#### When to use the bus event vs. the `events_today` sensor
+
+`bosch_shc_camera_motion` and `sensor.bosch_<name>_movement_events_today` are fed from two different paths and are not interchangeable as automation triggers:
+
+| | `bosch_shc_camera_motion` (event bus) | `sensor.*_movement_events_today` (state) |
+|---|---|---|
+| Source | FCM push (~2 s) **or** poll tick | Poll tick of `/v11/events` |
+| Fires per | New event ID, max once per 60 s dedup window | Every poll tick where the daily counter increased |
+| Burst handling | Polling tick with N new events fires the bus event **once** for the newest ID — older IDs in the same tick are not re-fired | Counter advances by N regardless of burst size |
+| Best for | Live reaction with FCM Push enabled | Robust fallback when FCM is unreliable, or "any motion happened" automations |
+
+If you primarily care about reacting to *every* motion and FCM occasionally drops on your network/phone, prefer a state trigger on the sensor:
+
+```yaml
+trigger:
+  - trigger: state
+    entity_id: sensor.bosch_terrasse_movement_events_today
+```
+
+The two can be combined: `bosch_shc_camera_motion` for fast reaction (~2 s via FCM) plus a state trigger on the sensor as a safety net for missed pushes.
+
+To check FCM health: `select.bosch_camera_fcm_push_mode` should be `auto`, and `sensor.bosch_<name>_event_detection` should report `fcm_push`. If it sits on `polling`, FCM is not delivering and you'll see the burst-merge effect described above.
 
 ### Developer Tools — Services
 
