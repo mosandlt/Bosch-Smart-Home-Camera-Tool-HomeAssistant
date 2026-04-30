@@ -71,6 +71,7 @@ from .rcp import async_update_rcp_data, get_cached_rcp_session
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -217,6 +218,8 @@ from .const import (  # noqa: E402
     TIMEOUT_SNAP,
     TIMEOUT_PUT_CONNECTION,
 )
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 def get_options(entry: ConfigEntry) -> dict:
