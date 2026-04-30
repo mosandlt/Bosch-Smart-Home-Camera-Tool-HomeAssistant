@@ -476,12 +476,30 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
 
 ### HA Events
 
-The integration fires events for custom automations:
+The integration fires events on the HA event bus for custom automations:
 - `bosch_shc_camera_motion` — movement detected
 - `bosch_shc_camera_audio_alarm` — audio alarm triggered
-- `bosch_shc_camera_person` — person detected
+- `bosch_shc_camera_person` — person detected (Gen2 DualRadar only)
 
-Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`)
+Event data: `camera_id`, `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`).
+
+To inspect events live, open **Developer Tools → Events**, scroll to **"Listen to events"**, type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
+
+```yaml
+# Example: notify on every motion at one specific camera
+trigger:
+  - platform: event
+    event_type: bosch_shc_camera_motion
+    event_data:
+      camera_id: 00000000-0000-0000-0000-000000000000  # from camera attributes
+action:
+  - service: notify.mobile_app_xxx
+    data:
+      title: "Bewegung erkannt"
+      message: "{{ trigger.event.data.camera_name }} – {{ trigger.event.data.timestamp }}"
+```
+
+Drop `event_data:` to react to all cameras and filter inside `condition:` via `trigger.event.data.camera_id`.
 
 ### Developer Tools — Services
 
@@ -579,10 +597,10 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.20 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.21 |
 | `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline** with colored outlines per tier (green / orange / grey), or by Bosch-app `priority` if `use_bosch_sort: true`. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v1.1.0 |
 
-> **Card version: v2.10.20** — iOS native HLS direct-path (skips WebRTC on iOS, no 5 s timeout), info banner on iOS while streaming, stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.10.21** — Companion App + external-endpoint detection skips WebRTC and uses native HLS directly (covers Cloudflare-Tunnel/iOS where UDP can't traverse), desktop browsers externally still try WebRTC normally; info banner while streaming over the tunnel, stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
 
