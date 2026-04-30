@@ -131,22 +131,22 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschCameraStatusSensor(_BoschSensorBase):
-    """Sensor: ONLINE / OFFLINE / UNKNOWN."""
+    """Sensor: online / offline / unknown."""
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_status_{cam_id.lower()}"
         self._attr_translation_key = "status"
-        self._attr_options         = ["ONLINE", "OFFLINE", "UNKNOWN"]
+        self._attr_options         = ["online", "offline", "unknown"]
         self._attr_device_class    = SensorDeviceClass.ENUM
 
     @property
     def native_value(self) -> str:
-        return self._cam_data.get("status", "UNKNOWN")
+        return self._cam_data.get("status", "UNKNOWN").lower()
 
     @property
     def icon(self) -> str:
-        return "mdi:camera" if self.native_value == "ONLINE" else "mdi:camera-off"
+        return "mdi:camera" if self.native_value == "online" else "mdi:camera-off"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1200,9 +1200,9 @@ class BoschAlarmStateSensor(_BoschSensorBase):
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_state"
         self._attr_translation_key = "alarm_state"
         self._attr_options         = [
-            "ACTIVE", "INACTIVE", "UNKNOWN",
-            "SYSTEM_MANAGED_ARMED", "SYSTEM_MANAGED_DISARMED",
-            "ARMED_AWAY", "ARMED_STAY", "DISARMED",
+            "active", "inactive", "unknown",
+            "system_managed_armed", "system_managed_disarmed",
+            "armed_away", "armed_stay", "disarmed",
         ]
         self._attr_device_class    = SensorDeviceClass.ENUM
 
@@ -1210,13 +1210,13 @@ class BoschAlarmStateSensor(_BoschSensorBase):
     def native_value(self) -> str:
         status = self.coordinator._alarm_status_cache.get(self._cam_id, {})
         if status:
-            return str(status.get("intrusionSystem", "UNKNOWN")).upper()
+            return str(status.get("intrusionSystem", "unknown")).lower()
         armed = self.coordinator._arming_cache.get(self._cam_id)
         if armed is True:
-            return "ACTIVE"
+            return "active"
         if armed is False:
-            return "INACTIVE"
-        return "UNKNOWN"
+            return "inactive"
+        return "unknown"
 
     @property
     def available(self) -> bool:

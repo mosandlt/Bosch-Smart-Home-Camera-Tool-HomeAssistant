@@ -25,29 +25,17 @@ from . import BoschCameraCoordinator, DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
-STREAM_MODE_OPTIONS = ["Auto (Lokal → Cloud)", "Nur Lokal", "Nur Cloud"]
-STREAM_MODE_MAP     = {
-    "Auto (Lokal → Cloud)": "auto",
-    "Nur Lokal":            "local",
-    "Nur Cloud":            "remote",
-}
-STREAM_MODE_MAP_REVERSE = {v: k for k, v in STREAM_MODE_MAP.items()}
+STREAM_MODE_OPTIONS = ["auto", "local", "remote"]
 
-QUALITY_OPTIONS = ["Auto", "Hoch (30 Mbps)", "Niedrig (1.9 Mbps)"]
-QUALITY_MAP = {
-    "Auto":              "auto",
-    "Hoch (30 Mbps)":   "high",
-    "Niedrig (1.9 Mbps)": "low",
-}
-QUALITY_MAP_REVERSE = {v: k for k, v in QUALITY_MAP.items()}
+QUALITY_OPTIONS = ["auto", "high", "low"]
 
-MOTION_SENSITIVITY_OPTIONS = ["SUPER_HIGH", "HIGH", "MEDIUM_HIGH", "MEDIUM_LOW", "LOW", "OFF"]
+MOTION_SENSITIVITY_OPTIONS = ["super_high", "high", "medium_high", "medium_low", "low", "off"]
+SENSITIVITY_TO_API = {k: k.upper() for k in MOTION_SENSITIVITY_OPTIONS}
 
-DETECTION_MODE_OPTIONS = ["ALL_MOTIONS", "ONLY_HUMANS", "ZONES"]
+DETECTION_MODE_OPTIONS = ["all_motions", "only_humans", "zones"]
+DETECTION_TO_API = {k: k.upper() for k in DETECTION_MODE_OPTIONS}
 
-FCM_PUSH_MODE_OPTIONS = ["Auto", "Android", "iOS", "Polling"]
-FCM_PUSH_MODE_MAP = {"Auto": "auto", "Android": "android", "iOS": "ios", "Polling": "polling"}
-FCM_PUSH_MODE_MAP_REVERSE = {v: k for k, v in FCM_PUSH_MODE_MAP.items()}
+FCM_PUSH_MODE_OPTIONS = ["auto", "android", "ios", "polling"]
 
 
 async def async_setup_entry(
@@ -101,10 +89,14 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         """Restore last quality selection after HA restart."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state and last_state.state in QUALITY_MAP:
-            quality_key = QUALITY_MAP[last_state.state]
-            self.coordinator.set_quality(self._cam_id, quality_key)
-            _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
+        if last_state:
+            saved = last_state.state
+            # Backward compat: old states were display text like "Auto"
+            _LEGACY_MAP = {"Auto": "auto", "Hoch (30 Mbps)": "high", "Niedrig (1.9 Mbps)": "low"}
+            quality_key = _LEGACY_MAP.get(saved, saved if saved in QUALITY_OPTIONS else None)
+            if quality_key:
+                self.coordinator.set_quality(self._cam_id, quality_key)
+                _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
 
     @property
     def device_info(self):
@@ -120,14 +112,13 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
     @property
     def current_option(self) -> str:
-        """Return the current quality label."""
+        """Return the current quality key."""
         quality_key = self.coordinator.get_quality(self._cam_id)
-        return QUALITY_MAP_REVERSE.get(quality_key, "Auto")
+        return quality_key if quality_key in QUALITY_OPTIONS else "auto"
 
     async def async_select_option(self, option: str) -> None:
         """Handle quality selection — update coordinator preference and reconnect stream."""
-        quality_key = QUALITY_MAP.get(option, "auto")
-        self.coordinator.set_quality(self._cam_id, quality_key)
+        self.coordinator.set_quality(self._cam_id, option)
         # If stream is currently active, reconnect with new quality
         live = self.coordinator.data.get(self._cam_id, {}).get("live", {})
         if live.get("rtspsUrl") or live.get("proxyUrl"):
@@ -193,8 +184,10 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
         """Return the current motion sensitivity level."""
         settings = self.coordinator.motion_settings(self._cam_id)
         val = settings.get("motionAlarmConfiguration")
-        if val in MOTION_SENSITIVITY_OPTIONS:
-            return val
+        if val:
+            lower = val.lower()
+            if lower in MOTION_SENSITIVITY_OPTIONS:
+                return lower
         return None
 
     @property
@@ -213,21 +206,20 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
         from .switch import _is_gen2_indoor, _warn_if_privacy_on
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungsempfindlichkeit"):
             return
-        # Read current enabled state (preserve it; default True if unknown)
+        api_value = SENSITIVITY_TO_API[option]
         settings = self.coordinator.motion_settings(self._cam_id)
         enabled  = settings.get("enabled", True)
         success  = await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
-            {"enabled": enabled, "motionAlarmConfiguration": option},
+            {"enabled": enabled, "motionAlarmConfiguration": api_value},
         )
         if success:
-            # Optimistically update coordinator data so UI reflects immediately
             motion_data = self.coordinator.data.get(self._cam_id, {}).get("motion", {})
-            motion_data["motionAlarmConfiguration"] = option
+            motion_data["motionAlarmConfiguration"] = api_value
             if self._cam_id in self.coordinator.data:
                 self.coordinator.data[self._cam_id]["motion"] = motion_data
-            _LOGGER.debug("Motion sensitivity set to %s for %s", option, self._cam_id)
+            _LOGGER.debug("Motion sensitivity set to %s for %s", api_value, self._cam_id)
         else:
             _LOGGER.warning("Failed to set motion sensitivity for %s", self._cam_id)
         self.async_write_ha_state()
@@ -275,14 +267,13 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
     @property
     def current_option(self) -> str:
         mode = get_options(self._entry).get("fcm_push_mode", "auto")
-        return FCM_PUSH_MODE_MAP_REVERSE.get(mode, "Auto")
+        return mode if mode in FCM_PUSH_MODE_OPTIONS else "auto"
 
     async def async_select_option(self, option: str) -> None:
         """Handle push mode selection — update options and restart FCM."""
-        mode_key = FCM_PUSH_MODE_MAP.get(option, "auto")
         # Update the integration options
         new_options = dict(self._entry.options)
-        new_options["fcm_push_mode"] = mode_key
+        new_options["fcm_push_mode"] = option
         self.hass.config_entries.async_update_entry(
             self._entry, options=new_options,
         )
@@ -341,18 +332,16 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self) -> str:
-        """Return the current stream mode label."""
-        # In-memory override takes priority; fall back to options default
+        """Return the current stream mode key."""
         mode = self.coordinator._stream_type_override
         if mode is None:
             mode = get_options(self._entry).get("stream_connection_type", "auto")
-        return STREAM_MODE_MAP_REVERSE.get(mode, "Auto (Lokal → Cloud)")
+        return mode if mode in STREAM_MODE_OPTIONS else "auto"
 
     async def async_select_option(self, option: str) -> None:
         """Handle stream mode selection — update in-memory preference immediately."""
-        mode = STREAM_MODE_MAP.get(option, "auto")
-        self.coordinator._stream_type_override = mode
-        _LOGGER.info("Stream mode set to %s (%s)", option, mode)
+        self.coordinator._stream_type_override = option
+        _LOGGER.info("Stream mode set to %s", option)
         self.async_write_ha_state()
 
 
@@ -401,8 +390,10 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
     def current_option(self) -> str | None:
         cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
         val = cfg.get("detectionMode")
-        if val in DETECTION_MODE_OPTIONS:
-            return val
+        if val:
+            lower = val.lower()
+            if lower in DETECTION_MODE_OPTIONS:
+                return lower
         return None
 
     @property
@@ -415,22 +406,20 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         if option not in DETECTION_MODE_OPTIONS:
             return
-        # Write-guard: /intrusionDetectionConfig returns HTTP 443 while
-        # privacy mode is ON. Show persistent notification instead of
-        # silently failing in the logs.
         from .switch import _warn_if_privacy_on
         if await _warn_if_privacy_on(self, "Erkennungsmodus"):
             return
+        api_value = DETECTION_TO_API[option]
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
-        cfg["detectionMode"] = option
+        cfg["detectionMode"] = api_value
         success = await self.coordinator.async_put_camera(
             self._cam_id, "intrusionDetectionConfig", cfg
         )
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
-            _LOGGER.debug("Detection mode set to %s for %s", option, self._cam_id[:8])
+            _LOGGER.debug("Detection mode set to %s for %s", api_value, self._cam_id[:8])
         else:
             _LOGGER.warning("Failed to set detection mode for %s", self._cam_id[:8])
         self.async_write_ha_state()

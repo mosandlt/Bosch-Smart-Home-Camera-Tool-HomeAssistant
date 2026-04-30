@@ -334,49 +334,49 @@
         "name": "Video Quality",
         "description": "Stream quality for live video. Auto uses 7.5 Mbps; High uses 30 Mbps; Low uses 1.9 Mbps.",
         "state": {
-          "Auto": "Auto",
-          "Hoch (30 Mbps)": "High (30 Mbps)",
-          "Niedrig (1.9 Mbps)": "Low (1.9 Mbps)"
+          "auto": "Auto",
+          "high": "High (30 Mbps)",
+          "low": "Low (1.9 Mbps)"
         }
       },
       "motion_sensitivity": {
         "name": "Motion Sensitivity",
         "description": "Sensitivity level for motion detection. SUPER_HIGH triggers on the slightest movement; LOW only triggers on significant motion.",
         "state": {
-          "SUPER_HIGH": "Super High",
-          "HIGH": "High",
-          "MEDIUM_HIGH": "Medium High",
-          "MEDIUM_LOW": "Medium Low",
-          "LOW": "Low",
-          "OFF": "Off"
+          "super_high": "Super High",
+          "high": "High",
+          "medium_high": "Medium High",
+          "medium_low": "Medium Low",
+          "low": "Low",
+          "off": "Off"
         }
       },
       "fcm_push_mode": {
         "name": "FCM Push Mode",
         "description": "How the integration receives motion and audio events. Auto tries iOS, then Android, then falls back to periodic polling.",
         "state": {
-          "Auto": "Auto",
-          "Android": "Android",
-          "iOS": "iOS",
-          "Polling": "Polling"
+          "auto": "Auto",
+          "android": "Android",
+          "ios": "iOS",
+          "polling": "Polling"
         }
       },
       "stream_mode": {
         "name": "Stream Mode",
         "description": "Connection type for live streams. Auto tries the local LAN first and falls back to the Bosch cloud proxy. Changes take effect on the next stream start.",
         "state": {
-          "Auto (Lokal → Cloud)": "Auto (Local → Cloud)",
-          "Nur Lokal": "Local Only",
-          "Nur Cloud": "Cloud Only"
+          "auto": "Auto (Local → Cloud)",
+          "local": "Local Only",
+          "remote": "Cloud Only"
         }
       },
       "detection_mode": {
         "name": "Detection Mode",
         "description": "What the intrusion detection system reacts to. ALL_MOTIONS triggers on any movement; ONLY_HUMANS only triggers on detected persons; ZONES restricts detection to configured areas. Gen2 only.",
         "state": {
-          "ALL_MOTIONS": "All Motions",
-          "ONLY_HUMANS": "Persons Only",
-          "ZONES": "Zones"
+          "all_motions": "All Motions",
+          "only_humans": "Persons Only",
+          "zones": "Zones"
         }
       }
     },
@@ -419,9 +419,9 @@
         "name": "Status",
         "description": "Whether the camera is reachable by the Bosch cloud.",
         "state": {
-          "ONLINE": "Online",
-          "OFFLINE": "Offline",
-          "UNKNOWN": "Unknown"
+          "online": "Online",
+          "offline": "Offline",
+          "unknown": "Unknown"
         }
       },
       "last_event": {
@@ -539,14 +539,14 @@
         "name": "Alarm State",
         "description": "Intrusion alarm state of the Gen2 Indoor II camera. ACTIVE means the alarm is armed.",
         "state": {
-          "ACTIVE": "Armed",
-          "INACTIVE": "Disarmed",
-          "UNKNOWN": "Unknown",
-          "SYSTEM_MANAGED_ARMED": "Armed (System)",
-          "SYSTEM_MANAGED_DISARMED": "Disarmed (System)",
-          "ARMED_AWAY": "Armed Away",
-          "ARMED_STAY": "Armed Stay",
-          "DISARMED": "Disarmed"
+          "active": "Armed",
+          "inactive": "Disarmed",
+          "unknown": "Unknown",
+          "system_managed_armed": "Armed (System)",
+          "system_managed_disarmed": "Disarmed (System)",
+          "armed_away": "Armed Away",
+          "armed_stay": "Armed Stay",
+          "disarmed": "Disarmed"
         }
       },
       "stream_status": {

@@ -334,49 +334,49 @@
         "name": "Videoqualität",
         "description": "Streaming-Qualität für Live-Video. Auto verwendet 7,5 Mbps; Hoch 30 Mbps; Niedrig 1,9 Mbps.",
         "state": {
-          "Auto": "Auto",
-          "Hoch (30 Mbps)": "Hoch (30 Mbps)",
-          "Niedrig (1.9 Mbps)": "Niedrig (1,9 Mbps)"
+          "auto": "Auto",
+          "high": "Hoch (30 Mbps)",
+          "low": "Niedrig (1,9 Mbps)"
         }
       },
       "motion_sensitivity": {
         "name": "Bewegungsempfindlichkeit",
         "description": "Empfindlichkeitsstufe der Bewegungserkennung. SUPER_HIGH reagiert auf kleinste Bewegungen; LOW nur auf deutliche Bewegungen.",
         "state": {
-          "SUPER_HIGH": "Sehr hoch",
-          "HIGH": "Hoch",
-          "MEDIUM_HIGH": "Mittel-hoch",
-          "MEDIUM_LOW": "Mittel-niedrig",
-          "LOW": "Niedrig",
-          "OFF": "Aus"
+          "super_high": "Sehr hoch",
+          "high": "Hoch",
+          "medium_high": "Mittel-hoch",
+          "medium_low": "Mittel-niedrig",
+          "low": "Niedrig",
+          "off": "Aus"
         }
       },
       "fcm_push_mode": {
         "name": "FCM Push-Modus",
         "description": "Wie die Integration Bewegungs- und Audio-Ereignisse empfängt. Auto versucht zuerst iOS, dann Android, dann Polling.",
         "state": {
-          "Auto": "Auto",
-          "Android": "Android",
-          "iOS": "iOS",
-          "Polling": "Polling"
+          "auto": "Auto",
+          "android": "Android",
+          "ios": "iOS",
+          "polling": "Polling"
         }
       },
       "stream_mode": {
         "name": "Stream-Modus",
         "description": "Verbindungstyp für Live-Streams. Auto versucht zuerst das lokale Netzwerk und fällt auf den Bosch Cloud-Proxy zurück. Änderungen wirken beim nächsten Stream-Start.",
         "state": {
-          "Auto (Lokal → Cloud)": "Auto (Lokal → Cloud)",
-          "Nur Lokal": "Nur Lokal",
-          "Nur Cloud": "Nur Cloud"
+          "auto": "Auto (Lokal → Cloud)",
+          "local": "Nur Lokal",
+          "remote": "Nur Cloud"
         }
       },
       "detection_mode": {
         "name": "Erkennungsmodus",
         "description": "Worauf die Einbrucherkennung reagiert. ALL_MOTIONS reagiert auf jede Bewegung; ONLY_HUMANS nur auf erkannte Personen; ZONES beschränkt die Erkennung auf konfigurierte Bereiche. Nur Gen2.",
         "state": {
-          "ALL_MOTIONS": "Alle Bewegungen",
-          "ONLY_HUMANS": "Nur Personen",
-          "ZONES": "Zonen"
+          "all_motions": "Alle Bewegungen",
+          "only_humans": "Nur Personen",
+          "zones": "Zonen"
         }
       }
     },
@@ -419,9 +419,9 @@
         "name": "Status",
         "description": "Gibt an, ob die Kamera von der Bosch Cloud erreichbar ist.",
         "state": {
-          "ONLINE": "Online",
-          "OFFLINE": "Offline",
-          "UNKNOWN": "Unbekannt"
+          "online": "Online",
+          "offline": "Offline",
+          "unknown": "Unbekannt"
         }
       },
       "last_event": {
@@ -539,14 +539,14 @@
         "name": "Alarm-Status",
         "description": "Einbruchalarm-Status der Gen2 Indoor II Kamera. ACTIVE bedeutet, dass der Alarm scharf geschaltet ist.",
         "state": {
-          "ACTIVE": "Scharf",
-          "INACTIVE": "Unscharf",
-          "UNKNOWN": "Unbekannt",
-          "SYSTEM_MANAGED_ARMED": "Scharf (System)",
-          "SYSTEM_MANAGED_DISARMED": "Unscharf (System)",
-          "ARMED_AWAY": "Scharf (Abwesend)",
-          "ARMED_STAY": "Scharf (Zuhause)",
-          "DISARMED": "Unscharf"
+          "active": "Scharf",
+          "inactive": "Unscharf",
+          "unknown": "Unbekannt",
+          "system_managed_armed": "Scharf (System)",
+          "system_managed_disarmed": "Unscharf (System)",
+          "armed_away": "Scharf (Abwesend)",
+          "armed_stay": "Scharf (Zuhause)",
+          "disarmed": "Unscharf"
         }
       },
       "stream_status": {
