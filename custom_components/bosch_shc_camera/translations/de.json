@@ -165,174 +165,133 @@
   "entity": {
     "switch": {
       "live_stream": {
-        "name": "Live Stream",
-        "description": "Startet oder stoppt den Live-RTSP-Stream. Bei EIN streamt die Kamera kontinuierlich zu Home Assistant. Bei AUS wird die Verbindung sofort getrennt und der TLS-Proxy gestoppt."
+        "name": "Live Stream"
       },
       "audio": {
-        "name": "Audio",
-        "description": "Aktiviert oder deaktiviert den Ton im Live-Stream. Bei EIN enthält der Stream AAC-LC-Audio. Wenn ein Stream bereits läuft, wird die Verbindung mit der neuen Einstellung sofort neu aufgebaut."
+        "name": "Audio"
       },
       "camera_light": {
-        "name": "Kameralicht",
-        "description": "Schaltet die Kamera-LED ein oder aus. Nur verfügbar für Kameras mit physischem Licht (featureSupport.light = true)."
+        "name": "Kameralicht"
       },
       "front_light": {
-        "name": "Frontlicht",
-        "description": "Schaltet den Frontscheinwerfer unabhängig von den Wallwasher-LEDs ein oder aus. Nur für Kameras mit physischem Licht verfügbar."
+        "name": "Frontlicht"
       },
       "wallwasher": {
-        "name": "Wallwasher",
-        "description": "Schaltet die oberen und unteren Umgebungslichter ein oder aus. Bei Gen2-Kameras sind das die RGB-Akzentlichter, bei Gen1 der Wallwasher-LED-Streifen."
+        "name": "Wallwasher"
       },
       "privacy_mode": {
-        "name": "Datenschutz-Modus",
-        "description": "Bei EIN schließt der Kameraverschluss und die Kamera stoppt Aufnahme und Streaming. Wird über die Bosch Cloud-API gesteuert — funktioniert auch ohne konfigurierten SHC."
+        "name": "Datenschutz-Modus"
       },
       "notifications": {
-        "name": "Benachrichtigungen",
-        "description": "Aktiviert oder deaktiviert Push-Benachrichtigungen für diese Kamera. Bei EIN folgen Benachrichtigungen dem Kamerazeitplan (FOLLOW_CAMERA_SCHEDULE). Bei AUS werden alle Benachrichtigungen unterdrückt."
+        "name": "Benachrichtigungen"
       },
       "motion_detection": {
-        "name": "Bewegungserkennung",
-        "description": "Aktiviert oder deaktiviert die Bewegungserkennung. Hinweis: Die geräteseitigen IVA-Regeln können diese Einstellung innerhalb von Sekunden zurücksetzen."
+        "name": "Bewegungserkennung"
       },
       "record_sound": {
-        "name": "Ton aufnehmen",
-        "description": "Aktiviert oder deaktiviert die Audioaufzeichnung in Cloud-Ereignisclips. Bei AUS enthalten aufgenommene Videos keinen Ton."
+        "name": "Ton aufnehmen"
       },
       "auto_follow": {
-        "name": "Auto-Follow",
-        "description": "Aktiviert automatisches Schwenken: Die Kamera dreht sich, um erkannte Bewegungen zu verfolgen. Nur für das CAMERA_360 Indoor-Modell verfügbar."
+        "name": "Auto-Follow"
       },
       "intercom": {
-        "name": "Gegensprechanlage",
-        "description": "Aktiviert Zwei-Wege-Audio, sodass über den Kamera-Lautsprecher gesprochen werden kann. Standardmäßig deaktiviert — in den Einstellungen unter Entitäten aktivieren."
+        "name": "Gegensprechanlage"
       },
       "privacy_sound": {
-        "name": "Datenschutz-Ton",
-        "description": "Bei EIN gibt die Kamera einen Ton aus, wenn der Datenschutz-Modus aktiviert oder deaktiviert wird. Nur von Indoor-Kameras unterstützt (CAMERA_360, HOME_Eyes_Indoor)."
+        "name": "Datenschutz-Ton"
       },
       "timestamp_overlay": {
-        "name": "Zeitstempel-Einblendung",
-        "description": "Zeigt oder verbirgt die Datum-/Uhrzeit-Einblendung im Kamerabild."
+        "name": "Zeitstempel-Einblendung"
       },
       "status_led": {
-        "name": "Status-LED",
-        "description": "Schaltet die Status-LED ein oder aus. Diese LED zeigt an, dass die Kamera aufnimmt oder aktiv ist. Nur Gen2-Kameras."
+        "name": "Status-LED"
       },
       "motion_light": {
-        "name": "Licht bei Bewegung",
-        "description": "Bei EIN schalten sich die Kameraleuchten bei erkannter Bewegung automatisch ein. Nur Gen2-Kameras."
+        "name": "Licht bei Bewegung"
       },
       "ambient_light": {
-        "name": "Dauerlicht",
-        "description": "Bei EIN bleiben die Kameraleuchten gemäß dem konfigurierten Zeitplan an (Dämmerung bis Morgengrauen oder manuelle Zeiten). Nur Gen2-Kameras."
+        "name": "Dauerlicht"
       },
       "soft_light_fading": {
-        "name": "Weiches Lichtfading",
-        "description": "Bei EIN werden die Lichter weich ein- und ausgeblendet statt abrupt zu schalten. Nur Gen2-Kameras."
+        "name": "Weiches Lichtfading"
       },
       "intrusion_detection": {
-        "name": "Einbrucherkennung",
-        "description": "Aktiviert oder deaktiviert die DualRadar 180° 3D-Einbrucherkennung mit Personenerkennung. Nur Gen2-Kameras. Kann nicht geändert werden, solange der Datenschutz-Modus aktiv ist."
+        "name": "Einbrucherkennung"
       },
       "alarm_system_arm": {
-        "name": "Alarmanlage",
-        "description": "Schaltet die integrierte Alarmanlage scharf oder unscharf. Bei scharf löst eine erkannte Intrusion die eingebaute 75-dB-Sirene aus. Nur Gen2 Indoor II."
+        "name": "Alarmanlage"
       },
       "alarm_mode": {
-        "name": "Sirene",
-        "description": "Aktiviert oder deaktiviert die Hauptalarm-Sirene. Bei AUS ist die Alarmanlage zwar scharf, aber bei Intrusion ertönt keine Sirene. Nur Gen2 Indoor II."
+        "name": "Sirene"
       },
       "pre_alarm": {
-        "name": "Pre-Alarm",
-        "description": "Aktiviert oder deaktiviert die LED-Warnphase, die vor der Sirene ausgelöst wird. Gibt Bewohnern Zeit zum Entschärfen. Nur Gen2 Indoor II."
+        "name": "Pre-Alarm"
       },
       "audio_alarm": {
-        "name": "Geräusch-Erkennung",
-        "description": "Aktiviert oder deaktiviert die Lautstärke-Erkennung. Bei EIN wird ein Ereignis ausgelöst, wenn der Umgebungslärm den konfigurierten Schwellenwert überschreitet. Dies ist die kostenlose Erkennung, nicht das Audio+-Abo."
+        "name": "Geräusch-Erkennung"
       }
     },
     "number": {
       "pan_position": {
-        "name": "Schwenkposition",
-        "description": "Schwenkt die 360-Kamera nach links oder rechts. Der Bereich hängt vom Modell ab (typischerweise -120° bis +120°). Nur für CAMERA_360 verfügbar."
+        "name": "Schwenkposition"
       },
       "audio_threshold": {
-        "name": "Audio-Schwellenwert",
-        "description": "Lautstärke in dB, ab der ein Audio-Alarm-Ereignis ausgelöst wird. Bereich 0–100 dB. Niedrigerer Wert = empfindlicher."
+        "name": "Audio-Schwellenwert"
       },
       "speaker_level": {
-        "name": "Lautsprecher-Lautstärke",
-        "description": "Lautstärke des Kamera-Lautsprechers für die Gegensprechanlage (Zwei-Wege-Audio). Bereich 0–100 %."
+        "name": "Lautsprecher-Lautstärke"
       },
       "front_light_intensity": {
-        "name": "Frontlicht-Helligkeit",
-        "description": "Helligkeit des Frontscheinwerfers in Prozent (0–100 %). Nur für Kameras mit physischem Licht verfügbar."
+        "name": "Frontlicht-Helligkeit"
       },
       "lens_elevation": {
-        "name": "Montagehöhe",
-        "description": "Montagehöhe des Kameraobjektivs in Metern (0,5–5,0 m). Wird von der Kamera zur Perspektivkorrektur bei der Personenerkennung genutzt. Nur Gen2."
+        "name": "Montagehöhe"
       },
       "microphone_level": {
-        "name": "Mikrofon-Lautstärke",
-        "description": "Aufnahmelautstärke des Mikrofons (0–100 %). Beeinflusst den Ton in Live-Streams und Ereignisaufnahmen. Nur Gen2."
+        "name": "Mikrofon-Lautstärke"
       },
       "white_balance": {
-        "name": "Farbtemperatur Frontlicht",
-        "description": "Farbtemperatur des Frontscheinwerfers von kühl (-1,0) bis warm (+1,0). 0,0 ist neutrales Weiß. Nur Gen2-Außenkameras."
+        "name": "Farbtemperatur Frontlicht"
       },
       "top_led_brightness": {
-        "name": "Helligkeit Oberes Licht",
-        "description": "Helligkeit der oberen RGB-Akzent-LEDs (0–100 %). Nur Gen2-Außenkameras."
+        "name": "Helligkeit Oberes Licht"
       },
       "bottom_led_brightness": {
-        "name": "Helligkeit Unteres Licht",
-        "description": "Helligkeit der unteren RGB-Akzent-LEDs (0–100 %). Nur Gen2-Außenkameras."
+        "name": "Helligkeit Unteres Licht"
       },
       "motion_light_sensitivity": {
-        "name": "Bewegungslicht-Empfindlichkeit",
-        "description": "Empfindlichkeit des bewegungsgesteuerten Lichts (1 = gering, 5 = hoch). Höherer Wert schaltet das Licht bei kleineren Bewegungen ein. Nur Gen2-Außenkameras."
+        "name": "Bewegungslicht-Empfindlichkeit"
       },
       "darkness_threshold": {
-        "name": "Dunkelheitsschwelle",
-        "description": "Umgebungshelligkeit, unterhalb derer die Kamera auf Nacht-Beleuchtungsmodus wechselt (0–100 %). 0 = immer Tagmodus, 100 = immer Nachtmodus. Nur Gen2-Außenkameras."
+        "name": "Dunkelheitsschwelle"
       },
       "power_led_brightness": {
-        "name": "Power-LED-Helligkeit",
-        "description": "Helligkeit der weißen Betriebs-LED (0–4 Stufen, 0 = aus). Diese LED zeigt an, dass die Kamera eingeschaltet ist – nicht zu verwechseln mit der roten Status-LED. Nur Gen2 Indoor II."
+        "name": "Power-LED-Helligkeit"
       },
       "alarm_delay": {
-        "name": "Sirenen-Dauer",
-        "description": "Wie lange die 75-dB-Sirene nach dem Auslösen aktiv bleibt, in Sekunden. Nur Gen2 Indoor II."
+        "name": "Sirenen-Dauer"
       },
       "alarm_activation_delay": {
-        "name": "Alarm-Verzögerung",
-        "description": "Zeit in Sekunden zwischen Einbrucherkennung und Sirenenaktivierung. Gibt Bewohnern Zeit zum Entschärfen. Nur Gen2 Indoor II."
+        "name": "Alarm-Verzögerung"
       },
       "pre_alarm_delay": {
-        "name": "Pre-Alarm-Dauer",
-        "description": "Wie lange die LED-Warnphase vor dem Sirenenauslösen aktiv ist, in Sekunden. Nur Gen2 Indoor II."
+        "name": "Pre-Alarm-Dauer"
       },
       "audio_alarm_sensitivity": {
-        "name": "Geräusch-Empfindlichkeit",
-        "description": "Empfindlichkeit der Lautstärke-Erkennung (0–10). Höhere Werte erkennen leisere Geräusche. Nur Gen2 Indoor II. Nur-Schreib-Wert — die API gibt diesen Wert nicht zurück."
+        "name": "Geräusch-Empfindlichkeit"
       }
     },
     "button": {
       "refresh_snapshot": {
-        "name": "Snapshot aktualisieren",
-        "description": "Erzwingt eine sofortige Daten- und Bildaktualisierung für diese Kamera, ohne auf das nächste reguläre Abfrageintervall zu warten."
+        "name": "Snapshot aktualisieren"
       },
       "acoustic_alarm": {
-        "name": "Sirene auslösen",
-        "description": "Löst die eingebaute Kamera-Sirene aus. Unterstützt das Kameramodell diese Funktion nicht, wird die Aktion still ignoriert."
+        "name": "Sirene auslösen"
       }
     },
     "select": {
       "video_quality": {
         "name": "Videoqualität",
-        "description": "Streaming-Qualität für Live-Video. Auto verwendet 7,5 Mbps; Hoch 30 Mbps; Niedrig 1,9 Mbps.",
         "state": {
           "auto": "Auto",
           "high": "Hoch (30 Mbps)",
@@ -341,7 +300,6 @@
       },
       "motion_sensitivity": {
         "name": "Bewegungsempfindlichkeit",
-        "description": "Empfindlichkeitsstufe der Bewegungserkennung. SUPER_HIGH reagiert auf kleinste Bewegungen; LOW nur auf deutliche Bewegungen.",
         "state": {
           "super_high": "Sehr hoch",
           "high": "Hoch",
@@ -353,7 +311,6 @@
       },
       "fcm_push_mode": {
         "name": "FCM Push-Modus",
-        "description": "Wie die Integration Bewegungs- und Audio-Ereignisse empfängt. Auto versucht zuerst iOS, dann Android, dann Polling.",
         "state": {
           "auto": "Auto",
           "android": "Android",
@@ -363,7 +320,6 @@
       },
       "stream_mode": {
         "name": "Stream-Modus",
-        "description": "Verbindungstyp für Live-Streams. Auto versucht zuerst das lokale Netzwerk und fällt auf den Bosch Cloud-Proxy zurück. Änderungen wirken beim nächsten Stream-Start.",
         "state": {
           "auto": "Auto (Lokal → Cloud)",
           "local": "Nur Lokal",
@@ -372,7 +328,6 @@
       },
       "detection_mode": {
         "name": "Erkennungsmodus",
-        "description": "Worauf die Einbrucherkennung reagiert. ALL_MOTIONS reagiert auf jede Bewegung; ONLY_HUMANS nur auf erkannte Personen; ZONES beschränkt die Erkennung auf konfigurierte Bereiche. Nur Gen2.",
         "state": {
           "all_motions": "Alle Bewegungen",
           "only_humans": "Nur Personen",
@@ -382,42 +337,34 @@
     },
     "binary_sensor": {
       "motion": {
-        "name": "Bewegung",
-        "description": "Bleibt 90 Sekunden lang EIN, nachdem ein MOVEMENT-Ereignis erkannt wurde. Nützlich für Automationen. In den Einstellungen unter Entitäten aktivieren."
+        "name": "Bewegung"
       },
       "audio_alarm_binary": {
-        "name": "Audio-Alarm",
-        "description": "Bleibt 90 Sekunden lang EIN, nachdem ein AUDIO_ALARM-Ereignis erkannt wurde. Nur für Kameras mit Geräuscherkennung verfügbar (featureSupport.sound = true)."
+        "name": "Audio-Alarm"
       },
       "person_detected": {
-        "name": "Person erkannt",
-        "description": "Bleibt 90 Sekunden lang EIN, nachdem die Cloud-KI ein PERSON-Ereignis erkannt hat."
+        "name": "Person erkannt"
       }
     },
     "update": {
       "firmware_update": {
-        "name": "Firmware",
-        "description": "Zeigt die installierte Firmware-Version und ob eine neuere Version verfügbar ist. Firmware-Updates müssen über die Bosch Smart Home App eingespielt werden."
+        "name": "Firmware"
       }
     },
     "light": {
       "top_led_light": {
-        "name": "Oberes Licht",
-        "description": "Obere RGB-Akzent-LED bei Gen2-Außenkameras. Unterstützt Vollfarbsteuerung und Helligkeitsregelung. Teil der Wallwasher-Beleuchtungsgruppe."
+        "name": "Oberes Licht"
       },
       "bottom_led_light": {
-        "name": "Unteres Licht",
-        "description": "Untere RGB-Akzent-LED bei Gen2-Außenkameras. Unterstützt Vollfarbsteuerung und Helligkeitsregelung. Teil der Wallwasher-Beleuchtungsgruppe."
+        "name": "Unteres Licht"
       },
       "front_light_entity": {
-        "name": "Frontlicht",
-        "description": "Frontscheinwerfer bei Gen2-Außenkameras. Unterstützt Helligkeit und Farbtemperatur (kühlweiß bis warmweiß). Keine RGB-Farben."
+        "name": "Frontlicht"
       }
     },
     "sensor": {
       "status": {
         "name": "Status",
-        "description": "Gibt an, ob die Kamera von der Bosch Cloud erreichbar ist.",
         "state": {
           "online": "Online",
           "offline": "Offline",
@@ -425,44 +372,34 @@
         }
       },
       "last_event": {
-        "name": "Letztes Ereignis",
-        "description": "Zeitstempel des zuletzt aufgezeichneten Bewegungs- oder Audioereignisses."
+        "name": "Letztes Ereignis"
       },
       "events_today": {
-        "name": "Ereignisse heute",
-        "description": "Anzahl der seit Mitternacht erkannten Bewegungs- und Audioereignisse."
+        "name": "Ereignisse heute"
       },
       "wifi_signal": {
-        "name": "WiFi-Signal",
-        "description": "Aktuelle WLAN-Signalstärke in Prozent (0–100 %). Attribute enthalten SSID und IP-Adresse."
+        "name": "WiFi-Signal"
       },
       "firmware_version": {
-        "name": "Firmware-Version",
-        "description": "Installierte Firmware-Version der Kamera. Das Attribut 'up_to_date' zeigt, ob ein Update verfügbar ist."
+        "name": "Firmware-Version"
       },
       "ambient_light": {
-        "name": "Umgebungslicht",
-        "description": "Aktuelle Umgebungshelligkeit laut Lichtsensor der Kamera, in Prozent (0–100 %)."
+        "name": "Umgebungslicht"
       },
       "led_dimmer": {
-        "name": "LED-Dimmer",
-        "description": "Aktuelle Helligkeit des Kamera-Spotlights (0–100 %), ausgelesen via RCP. Nur für Kameras mit eingebautem Licht verfügbar."
+        "name": "LED-Dimmer"
       },
       "clock_offset": {
-        "name": "Uhrzeit-Abweichung",
-        "description": "Differenz in Sekunden zwischen der internen Kamera-Uhr und dem Home-Assistant-Server. Große Werte deuten auf eine Uhrdrift hin."
+        "name": "Uhrzeit-Abweichung"
       },
       "motion_sensitivity": {
-        "name": "Bewegungsempfindlichkeit",
-        "description": "Aktivierungszustand und Empfindlichkeitsstufe der Bewegungserkennung. Deaktiviert, wenn die Erkennung in der Bosch App ausgeschaltet ist."
+        "name": "Bewegungsempfindlichkeit"
       },
       "audio_alarm": {
-        "name": "Audio-Alarm",
-        "description": "Aktivierungszustand und Schwellwert des Audioalarms. Zeigt, ob lautgesteuerte Benachrichtigungen eingeschaltet sind."
+        "name": "Audio-Alarm"
       },
       "last_event_type": {
         "name": "Letzter Ereignistyp",
-        "description": "Kategorie des letzten Ereignisses: Bewegung, Personenerkennung, Audio-Alarm oder Störung.",
         "state": {
           "movement": "Bewegung",
           "person": "Person",
@@ -474,16 +411,13 @@
         }
       },
       "movement_events_today": {
-        "name": "Bewegungsereignisse heute",
-        "description": "Anzahl der heute erkannten Bewegungsereignisse (Typ MOVEMENT)."
+        "name": "Bewegungsereignisse heute"
       },
       "audio_events_today": {
-        "name": "Audio-Ereignisse heute",
-        "description": "Anzahl der heute ausgelösten Audio-Alarme (Typ AUDIO_ALARM)."
+        "name": "Audio-Ereignisse heute"
       },
       "push_status": {
         "name": "Ereignis-Erkennung",
-        "description": "Zeigt ob Ereignisse per FCM-Push (~2 s) oder per periodischem Polling empfangen werden. Ein Sensor pro Integration, nicht pro Kamera.",
         "state": {
           "fcm_push": "FCM Push (sofort)",
           "polling": "Polling (Fallback)",
@@ -491,44 +425,34 @@
         }
       },
       "unread_events": {
-        "name": "Ungelesene Ereignisse",
-        "description": "Anzahl der Ereignisse, die in der Bosch App noch nicht als gelesen markiert wurden."
+        "name": "Ungelesene Ereignisse"
       },
       "commissioned": {
-        "name": "Inbetriebnahme-Status",
-        "description": "Inbetriebnahmestatus laut Bosch Cloud: ob die Kamera konfiguriert, verbunden und vollständig in Betrieb genommen wurde."
+        "name": "Inbetriebnahme-Status"
       },
       "schedule_rules": {
-        "name": "Zeitplanregeln",
-        "description": "Anzahl der in der Bosch Cloud definierten Zeitplanregeln für diese Kamera (z. B. Datenschutz- oder Aufnahmezeitpläne). Attribute listen Regel-Name und Aktivierungsstatus."
+        "name": "Zeitplanregeln"
       },
       "alarm_catalog": {
-        "name": "Alarm-Katalog",
-        "description": "Anzahl der vom Kamera-Firmware unterstützten Alarmtypen, ausgelesen via RCP. Attribute listen alle Typen mit Name und Kategorie."
+        "name": "Alarm-Katalog"
       },
       "motion_zones": {
-        "name": "Bewegungszonen",
-        "description": "Anzahl der konfigurierten Bewegungserkennungszonen. Attribute enthalten die Zonengeometrie zur Overlay-Visualisierung."
+        "name": "Bewegungszonen"
       },
       "tls_cert": {
-        "name": "TLS-Zertifikat",
-        "description": "Ablaufdatum des Kamera-TLS-Zertifikats. Attribute enthalten Aussteller, Schlüsselgröße und Gültigkeitszeitraum."
+        "name": "TLS-Zertifikat"
       },
       "network_services": {
-        "name": "Netzwerkdienste",
-        "description": "Anzahl der aktiven Netzwerkdienste auf der Kamera (HTTP, HTTPS, RTSP, ONVIF, NTP usw.), ausgelesen via RCP."
+        "name": "Netzwerkdienste"
       },
       "iva_analytics": {
-        "name": "IVA-Analyse",
-        "description": "Anzahl der im Kamera-Firmware verfügbaren IVA-Module (Intelligent Video Analytics), ausgelesen via RCP."
+        "name": "IVA-Analyse"
       },
       "privacy_masks": {
-        "name": "Datenschutzbereiche",
-        "description": "Anzahl der konfigurierten Datenschutzbereiche. Attribute enthalten die Maskengeometrie zur Overlay-Visualisierung."
+        "name": "Datenschutzbereiche"
       },
       "ambient_schedule": {
         "name": "Dauerlicht-Zeitplan",
-        "description": "Zeitplanmodus der Dauerbeleuchtung bei Gen2-Außenkameras: automatisch (Dämmerung bis Morgengrauen) oder manuelle Zeiten. Attribute enthalten Helligkeit und Farbtemperatur.",
         "state": {
           "disabled": "Deaktiviert",
           "dusk_to_dawn": "Dämmerung bis Morgengrauen",
@@ -537,7 +461,6 @@
       },
       "alarm_state": {
         "name": "Alarm-Status",
-        "description": "Einbruchalarm-Status der Gen2 Indoor II Kamera. ACTIVE bedeutet, dass der Alarm scharf geschaltet ist.",
         "state": {
           "active": "Scharf",
           "inactive": "Unscharf",
@@ -551,7 +474,6 @@
       },
       "stream_status": {
         "name": "Stream-Status",
-        "description": "Aktueller Live-Stream-Status der Kamera.",
         "state": {
           "idle": "Inaktiv",
           "warming_up": "Kamera wird aufgeweckt",
