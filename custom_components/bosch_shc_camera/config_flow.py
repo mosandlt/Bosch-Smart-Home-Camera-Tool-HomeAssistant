@@ -379,7 +379,8 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "enable_snapshot_button", "enable_auto_download",
                       "high_quality_video", "enable_binary_sensors",
                       "enable_fcm_push", "alert_save_snapshots",
-                      "alert_delete_after_send", "audio_default_on",
+                      "alert_delete_after_send", "mark_events_read",
+                      "audio_default_on",
                       "enable_intercom",
                       "enable_smb_upload",
                       "enable_go2rtc",
@@ -524,6 +525,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     "alert_delete_after_send",
                     default=bool(opts.get("alert_delete_after_send", True)),
+                ): bool,
+                vol.Optional(
+                    "mark_events_read",
+                    default=bool(opts.get("mark_events_read", True)),
                 ): bool,
                 vol.Optional(
                     "fcm_push_mode",

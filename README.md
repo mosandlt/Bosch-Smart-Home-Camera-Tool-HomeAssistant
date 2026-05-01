@@ -1057,8 +1057,8 @@ Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regula
 
 ## Releases
 
-Latest stable: **v10.5.1** — see the GitHub release page for full notes:
-[**v10.5.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.1)
+Latest stable: **v10.5.2** — see the GitHub release page for full notes:
+[**v10.5.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.2)
 
 | | |
 |---|---|

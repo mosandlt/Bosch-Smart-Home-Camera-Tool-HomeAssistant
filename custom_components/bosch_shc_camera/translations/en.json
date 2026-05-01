@@ -62,6 +62,7 @@
           "alert_notify_video": "Step 3 — video clip",
           "alert_save_snapshots": "Save alert images/videos locally",
           "alert_delete_after_send": "Delete files after sending",
+          "mark_events_read": "Mark Bosch cloud events as read",
           "high_quality_video": "High quality video (30 Mbps) — default for stream quality",
           "stream_connection_type": "Stream connection type",
           "live_buffer_mode": "Player buffer profile (HLS)",
@@ -106,6 +107,7 @@
           "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
           "alert_save_snapshots": "Keep downloaded event images and videos in www/bosch_alerts/ (inside the HA config dir). If OFF, files are deleted within seconds after sending.",
           "alert_delete_after_send": "Remove local files after the notification service has received them. Only applies when 'Save locally' is OFF.",
+          "mark_events_read": "When ON (default), motion/audio events are marked as read on the Bosch cloud after being processed by the integration. Turn OFF to keep new events as 'unread' in the Bosch app — useful if you only use HA for live streaming and still want to see new events highlighted in the Bosch app.",
           "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity.",
           "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
           "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
@@ -417,7 +419,7 @@
         "name": "Audio Events Today"
       },
       "push_status": {
-        "name": "Event Detection",
+        "name": "FCM Push Status",
         "state": {
           "fcm_push": "FCM Push (instant)",
           "polling": "Polling (fallback)",

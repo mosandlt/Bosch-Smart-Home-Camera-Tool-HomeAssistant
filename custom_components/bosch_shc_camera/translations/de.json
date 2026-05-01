@@ -62,6 +62,7 @@
           "alert_notify_video": "Stufe 3 — Videoclip",
           "alert_save_snapshots": "Alert-Bilder/Videos lokal speichern",
           "alert_delete_after_send": "Dateien nach Senden löschen",
+          "mark_events_read": "Ereignisse in der Bosch-Cloud als gelesen markieren",
           "high_quality_video": "Hohe Videoqualität (30 Mbps) — Standard für Stream-Qualität",
           "stream_connection_type": "Stream-Verbindungstyp",
           "live_buffer_mode": "Puffer-Verhalten (HLS Player)",
@@ -106,6 +107,7 @@
           "alert_notify_video": "Dienste für Stufe 3 — Videoclip. Leer = Schritt wird übersprungen (kein Fallback).",
           "alert_save_snapshots": "Event-Bilder und Videos in www/bosch_alerts/ (im HA-config-Verzeichnis) behalten. Wenn AUS, werden Dateien innerhalb von Sekunden nach dem Senden gelöscht.",
           "alert_delete_after_send": "Lokale Dateien löschen nachdem der Benachrichtigungsdienst sie empfangen hat. Gilt nur wenn 'Lokal speichern' AUS ist.",
+          "mark_events_read": "Wenn AN (Standard), werden Bewegungs-/Audio-Ereignisse nach der Verarbeitung durch die Integration in der Bosch-Cloud als gelesen markiert. AUS schalten, damit neue Ereignisse in der Bosch-App weiterhin als 'ungelesen' erscheinen — sinnvoll wenn HA nur für den Live-Stream genutzt wird und neue Ereignisse in der Bosch-App hervorgehoben bleiben sollen.",
           "high_quality_video": "Standard-Videoqualität für Live-Streams auf 30 Mbps setzen (statt Auto ~7.5 Mbps). Kann zur Laufzeit mit dem 'Video Quality'-Entity überschrieben werden.",
           "stream_connection_type": "Standard-Verbindungstyp für Live-Streams.\n• **auto** (empfohlen): Erst lokales Netzwerk (LAN) versuchen, bei Fehler automatisch auf Bosch Cloud-Proxy wechseln.\n• **local**: Nur direktes LAN — kein Internet nötig. Schnelleres RTSP, aber langsamere Snapshots (~6–10 s). Verbindung wird alle 50 s automatisch erneuert.\n• **remote**: Immer über Bosch Cloud-Proxy. Snapshots schneller (~0.4–1.9 s). Standard-Fallback wenn LAN nicht erreichbar.\nDer 'Stream Modus'-Select-Entity überschreibt diese Einstellung zur Laufzeit ohne Neustart.",
           "live_buffer_mode": "Wie viele Sekunden Video der Player zwischenpuffert, bevor er anzeigt. Mehr Puffer = weniger Ruckler, aber höhere Verzögerung zur Echtzeit.\n• **Latenz**: kleiner Puffer (~4-6 s Verzögerung). Auf Wi-Fi mit Schwankungen kann es ruckeln.\n• **Ausgewogen** (empfohlen): mittlerer Puffer (~8-10 s). Robust gegen typische Wi-Fi-Hänger.\n• **Stabil**: großer Puffer (~12-15 s). Kein Ruckeln auch bei schwachen Verbindungen, aber spürbar verzögert.\nÄndert nur die Card-Anzeige — keine Auswirkung auf Kamera, Aufnahme oder Snapshots.",
@@ -417,7 +419,7 @@
         "name": "Audio-Ereignisse heute"
       },
       "push_status": {
-        "name": "Ereignis-Erkennung",
+        "name": "FCM Push-Status",
         "state": {
           "fcm_push": "FCM Push (sofort)",
           "polling": "Polling (Fallback)",

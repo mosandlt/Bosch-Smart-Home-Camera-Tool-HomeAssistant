@@ -265,6 +265,15 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
         }
 
     @property
+    def available(self) -> bool:
+        # Gating: dropdown is wirkungslos solange Master-Switch enable_fcm_push aus ist.
+        # Unavailable signalisiert dem User explizit dass erst die Integration-Option
+        # gesetzt werden muss, bevor der Push-Mode irgendetwas tut.
+        if not super().available:
+            return False
+        return bool(self.coordinator.options.get("enable_fcm_push", False))
+
+    @property
     def current_option(self) -> str:
         mode = get_options(self._entry).get("fcm_push_mode", "auto")
         return mode if mode in FCM_PUSH_MODE_OPTIONS else "auto"

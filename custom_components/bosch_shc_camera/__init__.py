@@ -1483,7 +1483,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             ev.get("id") for ev in events
                             if ev.get("id") and not ev.get("isRead", False)
                         ]
-                        if unread_ids:
+                        if unread_ids and self.options.get("mark_events_read", True):
                             _LOGGER.debug(
                                 "Startup: marking %d unread event(s) as read for %s",
                                 len(unread_ids), cam_id,
@@ -1553,12 +1553,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 newest_event.get("videoClipUploadStatus", ""),
                             )
                         )
-                        try:
-                            await self.async_mark_events_read([newest_id])
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as err:
-                            _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
+                        if self.options.get("mark_events_read", True):
+                            try:
+                                await self.async_mark_events_read([newest_id])
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as err:
+                                _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
                     elif newest_id:
                         self._last_event_ids[cam_id] = newest_id
 
@@ -1962,7 +1963,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         eid = ev_dl.get("id")
                         if eid:
                             dl_event_ids.append(eid)
-                if dl_event_ids:
+                if dl_event_ids and self.options.get("mark_events_read", True):
                     try:
                         await self.async_mark_events_read(dl_event_ids)
                     except asyncio.CancelledError:

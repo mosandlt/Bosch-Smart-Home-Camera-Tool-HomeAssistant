@@ -7,6 +7,16 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.5.2
+
+**New option `mark_events_read` (default ON).** The integration calls `PUT /v11/events {id, isRead: true}` after processing each motion/audio event from five different code paths (startup poll, per-event coordinator tick, auto-download cycle, FCM push handler, FCM clip handler). Side effect: motion events appear as already viewed in the Bosch app, even if the user only consumes them via HA's live stream and never opens an automation. Reported by xDraGGi on the simon42 forum (Topic 81743 / Post 364079). New option `mark_events_read` in *Integration → Configure* gates all five call sites — default `True` preserves backwards-compatible behaviour, set to `False` to keep events flagged as unread in the Bosch app while still receiving them in HA. Local dedup via `_last_event_ids` is unaffected (lives independent of the cloud `isRead` flag).
+
+**Sensor renamed: `Event Detection` → `FCM Push Status`.** The diagnostic sensor `BoschFcmPushStatusSensor` was named "Event Detection" in entity translations, which suggested that a `disabled` state meant *no event detection at all*. In reality the sensor only reflects the FCM-push pipeline (states: `fcm_push` / `polling` / `disabled`) — normal coordinator polling continues regardless. The `unique_id` (`bosch_shc_camera_fcm_push_status`) was already correct and is unchanged, so historical state preserves cleanly across the rename.
+
+**`FCM Push Mode` dropdown gated on master switch.** The per-integration `select.fcm_push_mode` entity is now `available=False` whenever `enable_fcm_push` is OFF in *Integration → Configure*. Previously the dropdown was fully interactive on the device page even though changing it had no effect until the master switch was enabled — discovered via simon42-forum PN where geotie reported `Event Detection: disabled` while showing `FCM Push Mode: Auto` in the same screenshot.
+
+---
+
 ## v10.5.1 (patch)
 
 **iOS native HLS direct-path (Card v2.10.20).** On iOS/WKWebView, WebRTC over Cloudflare Tunnel fails after a 5 s ICE timeout (UDP cannot traverse the HTTP tunnel) — the card then fell back to HLS, but the combined delay caused AVFoundation timeouts resulting in a ~1 minute black screen. Fix: iOS is detected via `!window.MediaSource && canPlayType("application/vnd.apple.mpegurl")` and the WebRTC attempt is skipped entirely; native HLS starts immediately via `video.src`. Desktop browsers (Chrome/Firefox) continue to use WebRTC as before. An info banner is shown while streaming on iOS: *"ℹ HLS (kein WebRTC auf iOS) — wird automatisch neu gestartet"*.

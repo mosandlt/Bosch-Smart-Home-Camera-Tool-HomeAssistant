@@ -636,7 +636,7 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
 
     @property
     def name(self) -> str:
-        return "Bosch Camera Event Detection"
+        return "Bosch Camera FCM Push Status"
 
     @property
     def unique_id(self) -> str:
