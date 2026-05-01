@@ -62,6 +62,7 @@
           "alert_notify_video": "Step 3 — video clip",
           "alert_save_snapshots": "Save alert images/videos locally",
           "alert_delete_after_send": "Delete files after sending",
+          "mark_events_read": "Mark Bosch cloud events as read",
           "high_quality_video": "High quality video (30 Mbps) — default for stream quality",
           "stream_connection_type": "Stream connection type",
           "live_buffer_mode": "Player buffer profile (HLS)",
@@ -106,6 +107,7 @@
           "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
           "alert_save_snapshots": "Keep downloaded event images and videos in www/bosch_alerts/ (inside the HA config dir). If OFF, files are deleted within seconds after sending.",
           "alert_delete_after_send": "Remove local files after the notification service has received them. Only applies when 'Save locally' is OFF.",
+          "mark_events_read": "When ON (default), motion/audio events are marked as read on the Bosch cloud after being processed by the integration. Turn OFF to keep new events as 'unread' in the Bosch app — useful if you only use HA for live streaming and still want to see new events highlighted in the Bosch app.",
           "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity.",
           "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
           "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
@@ -164,13 +166,323 @@
   },
   "entity": {
     "switch": {
+      "live_stream": {
+        "name": "Live Stream"
+      },
+      "audio": {
+        "name": "Audio"
+      },
+      "camera_light": {
+        "name": "Camera Light"
+      },
+      "front_light": {
+        "name": "Front Light"
+      },
+      "wallwasher": {
+        "name": "Wallwasher"
+      },
+      "privacy_mode": {
+        "name": "Privacy Mode"
+      },
+      "notifications": {
+        "name": "Notifications"
+      },
+      "motion_detection": {
+        "name": "Motion Detection"
+      },
+      "record_sound": {
+        "name": "Record Sound"
+      },
+      "auto_follow": {
+        "name": "Auto Follow"
+      },
+      "intercom": {
+        "name": "Intercom"
+      },
       "privacy_sound": {
         "name": "Privacy Sound"
+      },
+      "timestamp_overlay": {
+        "name": "Timestamp Overlay"
+      },
+      "status_led": {
+        "name": "Status LED"
+      },
+      "motion_light": {
+        "name": "Motion Light"
+      },
+      "ambient_light": {
+        "name": "Ambient Light"
+      },
+      "soft_light_fading": {
+        "name": "Soft Light Fading"
+      },
+      "intrusion_detection": {
+        "name": "Intrusion Detection"
+      },
+      "alarm_system_arm": {
+        "name": "Alarm System"
+      },
+      "alarm_mode": {
+        "name": "Siren"
+      },
+      "pre_alarm": {
+        "name": "Pre-Alarm"
+      },
+      "audio_alarm": {
+        "name": "Sound Detection"
+      }
+    },
+    "number": {
+      "pan_position": {
+        "name": "Pan Position"
+      },
+      "audio_threshold": {
+        "name": "Audio Threshold"
+      },
+      "speaker_level": {
+        "name": "Speaker Level"
+      },
+      "front_light_intensity": {
+        "name": "Front Light Intensity"
+      },
+      "lens_elevation": {
+        "name": "Lens Elevation"
+      },
+      "microphone_level": {
+        "name": "Microphone Level"
+      },
+      "white_balance": {
+        "name": "Front Light Color Temperature"
+      },
+      "top_led_brightness": {
+        "name": "Top LED Brightness"
+      },
+      "bottom_led_brightness": {
+        "name": "Bottom LED Brightness"
+      },
+      "motion_light_sensitivity": {
+        "name": "Motion Light Sensitivity"
+      },
+      "darkness_threshold": {
+        "name": "Darkness Threshold"
+      },
+      "power_led_brightness": {
+        "name": "Power LED Brightness"
+      },
+      "alarm_delay": {
+        "name": "Siren Duration"
+      },
+      "alarm_activation_delay": {
+        "name": "Alarm Activation Delay"
+      },
+      "pre_alarm_delay": {
+        "name": "Pre-Alarm Duration"
+      },
+      "audio_alarm_sensitivity": {
+        "name": "Sound Detection Sensitivity"
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "Refresh Snapshot"
+      },
+      "acoustic_alarm": {
+        "name": "Siren"
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "Video Quality",
+        "state": {
+          "auto": "Auto",
+          "high": "High (30 Mbps)",
+          "low": "Low (1.9 Mbps)"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity",
+        "state": {
+          "super_high": "Super High",
+          "high": "High",
+          "medium_high": "Medium High",
+          "medium_low": "Medium Low",
+          "low": "Low",
+          "off": "Off"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "FCM Push Mode",
+        "state": {
+          "auto": "Auto",
+          "android": "Android",
+          "ios": "iOS",
+          "polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "Stream Mode",
+        "state": {
+          "auto": "Auto (Local → Cloud)",
+          "local": "Local Only",
+          "remote": "Cloud Only"
+        }
+      },
+      "detection_mode": {
+        "name": "Detection Mode",
+        "state": {
+          "all_motions": "All Motions",
+          "only_humans": "Persons Only",
+          "zones": "Zones"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "Motion"
+      },
+      "audio_alarm_binary": {
+        "name": "Audio Alarm"
+      },
+      "person_detected": {
+        "name": "Person Detected"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "Top LED"
+      },
+      "bottom_led_light": {
+        "name": "Bottom LED"
+      },
+      "front_light_entity": {
+        "name": "Front Light"
       }
     },
     "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "online": "Online",
+          "offline": "Offline",
+          "unknown": "Unknown"
+        }
+      },
+      "last_event": {
+        "name": "Last Event"
+      },
+      "events_today": {
+        "name": "Events Today"
+      },
+      "wifi_signal": {
+        "name": "WiFi Signal"
+      },
+      "firmware_version": {
+        "name": "Firmware Version"
+      },
+      "ambient_light": {
+        "name": "Ambient Light"
+      },
+      "led_dimmer": {
+        "name": "LED Dimmer"
+      },
+      "clock_offset": {
+        "name": "Clock Offset"
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity"
+      },
+      "audio_alarm": {
+        "name": "Audio Alarm"
+      },
+      "last_event_type": {
+        "name": "Last Event Type",
+        "state": {
+          "movement": "Movement",
+          "person": "Person",
+          "audio_alarm": "Audio Alarm",
+          "trouble": "Trouble",
+          "trouble_disconnect": "Trouble (Disconnect)",
+          "trouble_reconnect": "Trouble (Reconnect)",
+          "none": "None"
+        }
+      },
+      "movement_events_today": {
+        "name": "Movement Events Today"
+      },
+      "audio_events_today": {
+        "name": "Audio Events Today"
+      },
+      "push_status": {
+        "name": "FCM Push Status",
+        "state": {
+          "fcm_push": "FCM Push (instant)",
+          "polling": "Polling (fallback)",
+          "disabled": "Disabled"
+        }
+      },
+      "unread_events": {
+        "name": "Unread Events"
+      },
       "commissioned": {
         "name": "Commissioned"
+      },
+      "schedule_rules": {
+        "name": "Schedule Rules"
+      },
+      "alarm_catalog": {
+        "name": "Alarm Catalog"
+      },
+      "motion_zones": {
+        "name": "Motion Zones"
+      },
+      "tls_cert": {
+        "name": "TLS Certificate"
+      },
+      "network_services": {
+        "name": "Network Services"
+      },
+      "iva_analytics": {
+        "name": "IVA Analytics"
+      },
+      "privacy_masks": {
+        "name": "Privacy Masks"
+      },
+      "ambient_schedule": {
+        "name": "Ambient Light Schedule",
+        "state": {
+          "disabled": "Disabled",
+          "dusk_to_dawn": "Dusk to Dawn",
+          "manual": "Manual"
+        }
+      },
+      "alarm_state": {
+        "name": "Alarm State",
+        "state": {
+          "active": "Armed",
+          "inactive": "Disarmed",
+          "unknown": "Unknown",
+          "system_managed_armed": "Armed (System)",
+          "system_managed_disarmed": "Disarmed (System)",
+          "armed_away": "Armed Away",
+          "armed_stay": "Armed Stay",
+          "disarmed": "Disarmed"
+        }
+      },
+      "stream_status": {
+        "name": "Stream Status",
+        "state": {
+          "idle": "Idle",
+          "warming_up": "Warming Up",
+          "connecting": "Connecting",
+          "streaming": "Streaming (LAN)",
+          "streaming_remote": "Streaming (Cloud)"
+        }
       }
     }
   },

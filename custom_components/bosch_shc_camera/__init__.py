@@ -71,6 +71,7 @@ from .rcp import async_update_rcp_data, get_cached_rcp_session
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -217,6 +218,8 @@ from .const import (  # noqa: E402
     TIMEOUT_SNAP,
     TIMEOUT_PUT_CONNECTION,
 )
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 def get_options(entry: ConfigEntry) -> dict:
@@ -1480,7 +1483,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             ev.get("id") for ev in events
                             if ev.get("id") and not ev.get("isRead", False)
                         ]
-                        if unread_ids:
+                        if unread_ids and self.options.get("mark_events_read", True):
                             _LOGGER.debug(
                                 "Startup: marking %d unread event(s) as read for %s",
                                 len(unread_ids), cam_id,
@@ -1550,12 +1553,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 newest_event.get("videoClipUploadStatus", ""),
                             )
                         )
-                        try:
-                            await self.async_mark_events_read([newest_id])
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as err:
-                            _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
+                        if self.options.get("mark_events_read", True):
+                            try:
+                                await self.async_mark_events_read([newest_id])
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as err:
+                                _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
                     elif newest_id:
                         self._last_event_ids[cam_id] = newest_id
 
@@ -1959,7 +1963,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         eid = ev_dl.get("id")
                         if eid:
                             dl_event_ids.append(eid)
-                if dl_event_ids:
+                if dl_event_ids and self.options.get("mark_events_read", True):
                     try:
                         await self.async_mark_events_read(dl_event_ids)
                     except asyncio.CancelledError:
@@ -3888,6 +3892,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Quench the camera-component log spam during stream pre-warm (idempotent).
     # See _StreamSupportNoiseFilter docstring for context.
     _install_stream_support_noise_filter()
+
+    # Cloudflare-Tunnel HLS-buffering workaround (idempotent). Rewrites the
+    # Content-Type on /api/hls/* responses so cloudflared switches to
+    # streaming mode instead of buffering each segment at the edge — fixes
+    # the iOS Companion App on cellular ("HLS wird geladen…" hang).
+    # See cf_unbuffer.py docstring + knowledge-base/cloudflared-tunnel-hls-buffering.md
+    from . import cf_unbuffer
+    cf_unbuffer.register(hass)
 
     # Listen on HA's stream component logger for worker-error events. This
     # catches the auto-restart cycle from Stream._run_worker() — which our

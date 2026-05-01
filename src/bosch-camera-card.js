@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.14";
+const CARD_VERSION = "2.10.21";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -186,6 +186,22 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
+    // Skip WebRTC + show HLS banner only when the HA Companion App is reaching
+    // us through an external endpoint (Cloudflare Tunnel etc.). Browser-on-LAN
+    // and external desktop browsers continue to attempt WebRTC normally.
+    this._extCompanion = (() => {
+      const isCompanion = /Home\s?Assistant/i.test(navigator.userAgent || "");
+      if (!isCompanion) return false;
+      const h = (location.hostname || "").toLowerCase();
+      if (!h) return false;
+      if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
+      if (h.endsWith(".local")) return false;
+      if (/^10\./.test(h)) return false;
+      if (/^192\.168\./.test(h)) return false;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+      if (/^fe80:/i.test(h)) return false;
+      return true;
+    })();
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -217,6 +233,12 @@ class BoschCameraCard extends HTMLElement {
       title:                      config.title || null,
       refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
       show_motion_zones:         config.show_motion_zones ?? false,
+      // During warming_up/connecting: show last snapshot as background under the
+      // loading overlay instead of a black screen. Looks like a live preview but
+      // the image is actually the last cached snapshot. Set to false to revert to
+      // the classic dark overlay (better on low-end devices to avoid the extra
+      // camera_proxy request while the stream is already starting).
+      snapshot_during_warmup:    config.snapshot_during_warmup !== false,
       // Minimal layout: image + info-row + [Snapshot, Live Stream, ⋮, Vollbild] +
       // Privacy toggle. Everything else (audio/light/notifications, accordions,
       // automations, pan controls) is hidden by default and revealed when the
@@ -261,6 +283,7 @@ class BoschCameraCard extends HTMLElement {
       audioToday:    config.audio_today_entity    || `sensor.${base}_audio_events_today`,
       motionZones:   config.motion_zones_entity   || `sensor.${base}_motion_zones`,
       privacyMasks:  config.privacy_masks_entity  || `sensor.${base}_privacy_masks`,
+      streamStatus:  config.stream_status_entity  || `sensor.${base}_stream_status`,
       ambientSchedule: config.ambient_schedule_entity || `sensor.${base}_dauerlicht_zeitplan`,
       scheduleRules: config.rules_entity          || `sensor.${base}_schedule_rules`,
       frontLight:    config.front_light_entity   || `switch.${base}_front_light`,
@@ -495,6 +518,23 @@ class BoschCameraCard extends HTMLElement {
         .stream-badge.streaming .dot  { background: #0a84ff; animation: pulse 1.5s infinite; }
         .stream-badge.connecting .dot { background: #ff9f0a; animation: pulse 0.8s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        /* iOS HLS info banner */
+        .ios-hls-banner {
+          display: none;
+          align-items: center; justify-content: space-between;
+          gap: 8px; padding: 6px 10px;
+          background: rgba(0,122,255,.1); border-top: 1px solid rgba(0,122,255,.2);
+          font-size: 11px; color: #0a84ff;
+        }
+        .ios-hls-banner.visible { display: flex; }
+        .ios-hls-banner span { flex: 1; }
+        .ios-hls-banner button {
+          background: rgba(0,122,255,.15); border: 1px solid rgba(0,122,255,.3);
+          color: #0a84ff; border-radius: 6px; padding: 3px 8px;
+          font-size: 11px; cursor: pointer; white-space: nowrap;
+        }
+        .ios-hls-banner button:active { background: rgba(0,122,255,.3); }
 
         /* Push status badge */
         .push-badge {
@@ -906,7 +946,11 @@ class BoschCameraCard extends HTMLElement {
 
         <div class="img-wrapper" id="img-wrapper">
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
-          <video class="cam-video" id="cam-video" autoplay playsinline style="display:none; cursor:pointer"></video>
+          <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
+          <div class="ios-hls-banner" id="ios-hls-banner">
+            <span>ℹ Externer Zugriff – HLS-Stream aktiv</span>
+            <span style="opacity:0.7">WebRTC über Tunnel nicht möglich</span>
+          </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
@@ -2028,6 +2072,11 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
+      // Show HLS-fallback banner when streaming starts on Companion App + external
+      if (this._extCompanion) {
+        const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+        if (banner) banner.classList.add("visible");
+      }
       const clearOverlay = () => {
         // NOW hide the snapshot — video is playing, no black gap
         if (img) img.style.display = "none";
@@ -2097,7 +2146,17 @@ class BoschCameraCard extends HTMLElement {
     // the offer rejects fast (`webrtc_offer_failed: Camera does not support
     // WebRTC` from `require_webrtc_support` decorator), the catch block
     // takes over within ~100 ms, and HLS startup is unaffected.
-    try {
+    //
+    // Companion-App-external exception: WebRTC over Cloudflare Tunnel requires
+    // UDP which the tunnel cannot carry — ICE always fails after 5s timeout,
+    // wasting time before HLS starts. When the HA Companion App reaches us
+    // through an external host (not RFC1918/.local) skip WebRTC entirely and
+    // go straight to HLS. Browser-on-LAN and desktop-external still try WebRTC.
+    const _skipWebRTC = this._extCompanion;
+    if (_skipWebRTC) {
+      console.debug("bosch-camera-card: Companion App + external endpoint — skipping WebRTC, using HLS");
+    }
+    if (!_skipWebRTC) try {
       try {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
@@ -2276,9 +2335,29 @@ class BoschCameraCard extends HTMLElement {
     /**
      * Start WebRTC stream via go2rtc (HA's camera/webrtc/offer WS API).
      * Provides ~2s latency vs ~12s for HLS.
+     *
+     * STUN/TURN: without ICE servers, RTCPeerConnection only collects host
+     * candidates (LAN IPs). On the same subnet that's fine, but a client on
+     * cellular reaching HA via Cloudflare Tunnel cannot route to host
+     * candidates like 192.168.x.x — ICE stays in `checking` forever, no
+     * track is delivered, and the card hangs until the 5s timeout below
+     * fires. We pull HA's configured ICE servers via the same WS API HA's
+     * own ha-web-rtc-player uses (`camera/webrtc/get_client_config`) so
+     * cellular clients have a public relay path. Failure is non-fatal —
+     * fall back to a default STUN so LAN clients still work.
      */
     const entityId = this._entities.camera;
-    const pc = new RTCPeerConnection();
+    let rtcConfig = { iceServers: [{ urls: "stun:stun.home-assistant.io:80" }] };
+    try {
+      const settings = await this._hass.callWS({
+        type: "camera/webrtc/get_client_config",
+        entity_id: entityId,
+      });
+      if (settings?.configuration) rtcConfig = settings.configuration;
+    } catch (e) {
+      console.debug("bosch-camera-card: get_client_config unavailable, using default STUN:", e?.message);
+    }
+    const pc = new RTCPeerConnection(rtcConfig);
     this._webrtcPc = pc;
 
     pc.addTransceiver("video", { direction: "recvonly" });
@@ -2313,9 +2392,20 @@ class BoschCameraCard extends HTMLElement {
     );
     this._webrtcUnsub = unsub;
 
-    // Wait for first track with timeout
+    // Wait for first track with timeout. Also surface ICE failure
+    // immediately — when ICE never finds a working pair (most common cause:
+    // cellular client + LAN-only host candidates from go2rtc) the underlying
+    // pc fires `iceconnectionstatechange` with `failed` long before 5s, but
+    // we'd otherwise stall the full timeout. Reject early so HLS fallback
+    // kicks in fast.
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 10s")), 10000);
+      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 5s")), 5000);
+      pc.addEventListener("iceconnectionstatechange", () => {
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          clearTimeout(timeout);
+          reject(new Error("WebRTC: ICE " + pc.iceConnectionState));
+        }
+      });
       pc.ontrack = (ev) => {
         clearTimeout(timeout);
         remoteStream.addTrack(ev.track);
@@ -2503,6 +2593,12 @@ class BoschCameraCard extends HTMLElement {
     const hass = this._hass;
     const ents = this._entities;
 
+    // Sync HLS-fallback banner visibility with live video state (Companion+ext only)
+    if (this._extCompanion) {
+      const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+      if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
+    }
+
     // Clear optimistic states that have been confirmed by HA
     for (const [entityId, optState] of Object.entries(this._optimistic)) {
       const actual = hass.states[entityId]?.state;
@@ -2653,12 +2749,26 @@ class BoschCameraCard extends HTMLElement {
     // to avoid "does not support play stream" errors from premature WS calls.
     // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
     // Also re-triggers if card got stuck (e.g. WS failed during page load).
-    if (shouldVideo && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+    // "Cold open": if stream_status is warming_up/connecting (read from the
+    // dedicated sensor — persistent across sessions, no toggle-click needed).
+    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
       this._waitingForStream = true;
-      this._setLoadingOverlay(true, "Stream wird gestartet…");
+      const overlayText = backendStreamStatus === "warming_up" ? "Kamera wird aufgeweckt…"
+                        : backendStreamStatus === "connecting"  ? "Verbindung wird aufgebaut…"
+                        : "Stream wird gestartet…";
+      // snapshot_during_warmup: fetch current snapshot so the last known image
+      // shows as background under the semi-transparent overlay instead of black.
+      // Guard with _awaitingFresh to avoid a double fetch when firstHass already
+      // triggered one in set hass().
+      if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
+        this._triggerFreshSnapshot();
+      }
+      this._setLoadingOverlay(true, overlayText);
       this._waitForStreamReady();
     }
-    if (!shouldVideo) {
+    if (!shouldVideo && !backendWaiting) {
       this._waitingForStream = false;
     }
     // Stop video when stream turns OFF

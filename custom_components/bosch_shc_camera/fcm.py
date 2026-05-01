@@ -536,11 +536,12 @@ async def async_handle_fcm_push(coordinator) -> None:
                 # Notify all entity listeners
                 coordinator.async_update_listeners()
 
-                # Mark new event as read on the Bosch cloud
-                try:
-                    await async_mark_events_read(coordinator, [newest_id])
-                except Exception:
-                    pass
+                # Mark new event as read on the Bosch cloud (gated by user option)
+                if coordinator.options.get("mark_events_read", True):
+                    try:
+                        await async_mark_events_read(coordinator, [newest_id])
+                    except Exception:
+                        pass
 
             elif newest_id:
                 coordinator._last_event_ids[cam_id] = newest_id
@@ -846,7 +847,7 @@ async def async_send_alert(
             _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
 
     # -- Mark event as read ------------------------------------------------
-    if cam_id:
+    if cam_id and coordinator.options.get("mark_events_read", True):
         event_id = coordinator._last_event_ids.get(cam_id, "")
         if event_id:
             try:

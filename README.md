@@ -51,6 +51,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
   - [`bosch-camera-overview-card` — multi-camera grid](#bosch-camera-overview-card--multi-camera-grid)
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
+- [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
 - [Related Projects](#related-projects)
 - [License](#license)
@@ -475,12 +476,54 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
 
 ### HA Events
 
-The integration fires events for custom automations:
+The integration fires events on the HA event bus for custom automations:
 - `bosch_shc_camera_motion` — movement detected
 - `bosch_shc_camera_audio_alarm` — audio alarm triggered
-- `bosch_shc_camera_person` — person detected
+- `bosch_shc_camera_person` — person detected (Gen2 DualRadar only)
 
-Event data: `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`)
+Event data: `camera_id`, `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`).
+
+To inspect events live, open **Developer Tools → Events** (HA ≥ 2026.4: **Entwicklerwerkzeuge → Ereignisse → Ereignisse abonnieren**), type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
+
+```yaml
+# Example: notify on every motion at one specific camera
+# HA ≥ 2026.4: use `trigger: event`; older HA: use `platform: event`
+trigger:
+  - trigger: event
+    event_type: bosch_shc_camera_motion
+    event_data:
+      camera_id: 00000000-0000-0000-0000-000000000000  # from camera attributes
+action:
+  - service: notify.mobile_app_xxx
+    data:
+      title: "Bewegung erkannt"
+      message: "{{ trigger.event.data.camera_name }} – {{ trigger.event.data.timestamp }}"
+```
+
+Drop `event_data:` to react to all cameras and filter inside `condition:` via `trigger.event.data.camera_id`.
+
+#### When to use the bus event vs. the `events_today` sensor
+
+`bosch_shc_camera_motion` and `sensor.bosch_<name>_movement_events_today` are fed from two different paths and are not interchangeable as automation triggers:
+
+| | `bosch_shc_camera_motion` (event bus) | `sensor.*_movement_events_today` (state) |
+|---|---|---|
+| Source | FCM push (~2 s) **or** poll tick | Poll tick of `/v11/events` |
+| Fires per | New event ID, max once per 60 s dedup window | Every poll tick where the daily counter increased |
+| Burst handling | Polling tick with N new events fires the bus event **once** for the newest ID — older IDs in the same tick are not re-fired | Counter advances by N regardless of burst size |
+| Best for | Live reaction with FCM Push enabled | Robust fallback when FCM is unreliable, or "any motion happened" automations |
+
+If you primarily care about reacting to *every* motion and FCM occasionally drops on your network/phone, prefer a state trigger on the sensor:
+
+```yaml
+trigger:
+  - trigger: state
+    entity_id: sensor.bosch_terrasse_movement_events_today
+```
+
+The two can be combined: `bosch_shc_camera_motion` for fast reaction (~2 s via FCM) plus a state trigger on the sensor as a safety net for missed pushes.
+
+To check FCM health: `select.bosch_camera_fcm_push_mode` should be `auto`, and `sensor.bosch_<name>_event_detection` should report `fcm_push`. If it sits on `polling`, FCM is not delivering and you'll see the burst-merge effect described above.
 
 ### Developer Tools — Services
 
@@ -578,10 +621,10 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.14 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.21 |
 | `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline** with colored outlines per tier (green / orange / grey), or by Bosch-app `priority` if `use_bosch_sort: true`. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v1.1.0 |
 
-> **Card version: v2.10.14** — iOS Companion App livestream fix (native HLS fallback when hls.js CDN-load is blocked by WKWebView), stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.10.21** — Companion App + external-endpoint detection skips WebRTC and uses native HLS directly (covers Cloudflare-Tunnel/iOS where UDP can't traverse), desktop browsers externally still try WebRTC normally; info banner while streaming over the tunnel, stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
 
@@ -663,6 +706,20 @@ The integration supports three connection modes, configurable in **Settings → 
 | **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
 | **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
 | **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. |
+
+#### Stream Status Sensor
+
+Every camera gets a `sensor.bosch_{name}_stream_status` entity that exposes the current live stream state as a persistent HA sensor:
+
+| State | Meaning |
+|---|---|
+| `idle` | Stream is off |
+| `warming_up` | LOCAL pre-warm running — waiting for camera encoder to initialise |
+| `connecting` | RTSP URL obtained, FFmpeg connecting |
+| `streaming` | Active, via local LAN |
+| `streaming_remote` | Active, via Bosch cloud proxy |
+
+The card reads this sensor on every `hass` update — so opening a dashboard while the stream is already warming up correctly shows the overlay and snapshot background without needing a toggle click (cold-open fix). You can also use the sensor in automations to react to stream state changes.
 
 #### Stream Startup Timing
 
@@ -979,10 +1036,29 @@ title: "Eyes Innenkamera II"
 
 Everything renders automatically when the integration detects a Gen2 Indoor II.
 
+## Known Limitations
+
+### Cloudflare Tunnel + live stream
+
+The integration ships `cf_unbuffer.py` — a runtime patch that rewrites HA's HLS view classes to send `Transfer-Encoding: chunked` (no `Content-Length`) for `.m4s` segments and `text/event-stream` content-type for `.m3u8` playlists. This ensures cloudflared's `shouldFlush()` triggers immediately instead of buffering the full segment before forwarding.
+
+On **iOS** (Companion App and Mobile Safari), the card detects the platform automatically and skips the WebRTC attempt — going straight to native HLS via `video.src`. This avoids the 5 s ICE timeout that WebRTC would incur over a Cloudflare Tunnel (UDP cannot traverse the HTTP tunnel). The card shows an info banner while streaming on iOS.
+
+Verify the unbuffer patch is active:
+
+```bash
+curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
+# Expected: Transfer-Encoding: chunked  AND  no Content-Length
+```
+
+### Optional cloudflared improvement
+
+Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
+
 ## Releases
 
-Latest stable: **v10.5.1** — see the GitHub release page for full notes:
-[**v10.5.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.1)
+Latest stable: **v10.5.2** — see the GitHub release page for full notes:
+[**v10.5.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.2)
 
 | | |
 |---|---|

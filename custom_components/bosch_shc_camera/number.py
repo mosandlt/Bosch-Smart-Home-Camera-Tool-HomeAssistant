@@ -96,6 +96,8 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):
         self._attr_mode             = NumberMode.SLIDER
         self._attr_native_unit_of_measurement = "°"
         self._attr_icon             = "mdi:pan-horizontal"
+        self._attr_translation_key  = "pan_position"
+        self._attr_entity_category  = EntityCategory.CONFIG
 
     @property
     def device_info(self) -> dict:
@@ -156,6 +158,8 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):
 
         self._attr_name      = f"Bosch {self._cam_title} Audio Threshold"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_threshold"
+        self._attr_translation_key = "audio_threshold"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def device_info(self) -> dict:
@@ -249,6 +253,8 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
 
         self._attr_name      = f"Bosch {self._cam_title} Speaker Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_speaker_level"
+        self._attr_translation_key = "speaker_level"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def device_info(self) -> dict:
@@ -326,6 +332,8 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):
 
         self._attr_name      = f"Bosch {self._cam_title} Front Light Intensity"
         self._attr_unique_id = f"bosch_shc_front_light_intensity_{cam_id.lower()}"
+        self._attr_translation_key = "front_light_intensity"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def device_info(self) -> dict:
@@ -406,6 +414,8 @@ class BoschLensElevationNumber(_BoschGen2NumberBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Lens Elevation"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lens_elevation"
+        self._attr_translation_key = "lens_elevation"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def native_value(self) -> float | None:
@@ -444,6 +454,8 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Microphone Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_mic_level"
+        self._attr_translation_key = "microphone_level"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def native_value(self) -> float | None:
@@ -489,6 +501,8 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
         self._attr_name      = f"Bosch {self._cam_title} Farbtemperatur Frontlicht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_white_balance"
         self._wb_value: float | None = None
+        self._attr_translation_key = "white_balance"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def native_value(self) -> float | None:
@@ -613,6 +627,8 @@ class BoschTopLedBrightnessNumber(_BoschLedBrightnessBase):
         self._attr_name      = f"Bosch {self._cam_title} Helligkeit Oberes Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_brightness"
         self._attr_icon      = "mdi:arrow-up-bold"
+        self._attr_translation_key = "top_led_brightness"
+        self._attr_entity_category = EntityCategory.CONFIG
 
 
 class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
@@ -624,6 +640,8 @@ class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
         self._attr_name      = f"Bosch {self._cam_title} Helligkeit Unteres Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
         self._attr_icon      = "mdi:arrow-down-bold"
+        self._attr_translation_key = "bottom_led_brightness"
+        self._attr_entity_category = EntityCategory.CONFIG
 
 
 class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
@@ -644,6 +662,8 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Bewegungslicht Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light_sensitivity"
+        self._attr_translation_key = "motion_light_sensitivity"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def native_value(self) -> float | None:
@@ -692,6 +712,7 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Dunkelheitsschwelle"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_darkness_threshold"
+        self._attr_translation_key = "darkness_threshold"
 
     @property
     def native_value(self) -> float | None:
@@ -743,6 +764,7 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Power-LED"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_power_led_brightness"
+        self._attr_translation_key = "power_led_brightness"
 
     @property
     def native_value(self) -> float | None:
@@ -819,6 +841,7 @@ class BoschAlarmDelayNumber(_BoschAlarmDelayBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Sirenen-Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_delay"
+        self._attr_translation_key = "alarm_delay"
 
 
 class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
@@ -836,6 +859,7 @@ class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Alarm-Verzögerung"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_activation_delay"
+        self._attr_translation_key = "alarm_activation_delay"
 
 
 class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
@@ -854,6 +878,7 @@ class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_name      = f"Bosch {self._cam_title} Pre-Alarm Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm_delay"
+        self._attr_translation_key = "pre_alarm_delay"
 
 
 class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
@@ -878,6 +903,7 @@ class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
         self._attr_name      = f"Bosch {self._cam_title} Geraeusch Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_sensitivity"
         self._last_written: int = 0
+        self._attr_translation_key = "audio_alarm_sensitivity"
 
     @property
     def _settings(self) -> dict:
