@@ -528,7 +528,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
                 vol.Optional(
                     "mark_events_read",
-                    default=bool(opts.get("mark_events_read", True)),
+                    default=bool(opts.get("mark_events_read", False)),
                 ): bool,
                 vol.Optional(
                     "fcm_push_mode",
