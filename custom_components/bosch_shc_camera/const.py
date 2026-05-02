@@ -53,7 +53,7 @@ DEFAULT_OPTIONS = {
     "alert_notify_video": "",
     "alert_save_snapshots": False,
     "alert_delete_after_send": True,
-    "mark_events_read": True,
+    "mark_events_read": False,
     "fcm_push_mode": "auto",
     "audio_default_on": True,
     "enable_intercom": False,

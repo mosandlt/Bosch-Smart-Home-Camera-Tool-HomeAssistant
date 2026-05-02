@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.5.3
+
+**`mark_events_read` default flipped to OFF.** v10.5.2 introduced the option but kept the previous behaviour as default — events were still being marked as read on the Bosch cloud after HA processed them, which silently consumed the "new event" highlight in the Bosch app for users who only use HA for live streaming. simon42 forum (Topic 81743 / Post 366006) confirmed the default-ON path was the wrong choice for the typical user. The default in `OPTIONS_DEFAULTS`, in the *Configure* dialog, and in all five gating call sites (`__init__.py` startup-poll / per-event tick / auto-download cycle, `fcm.py` push handler / clip handler) now resolves to `False` — fresh installs and existing installs that never explicitly toggled the option both stop firing `PUT /v11/events {isRead: true}`. The Bosch app keeps treating new events as unread regardless of whether HA already saw them. Users who prefer the previous behaviour (HA as primary client, no stale "new event" badges in the app) can enable it via *Integration → Configure → Mark Bosch cloud events as read*. English/German option-help text updated to describe the new default.
+
+---
+
 ## v10.5.2
 
 **New option `mark_events_read` (default ON).** The integration calls `PUT /v11/events {id, isRead: true}` after processing each motion/audio event from five different code paths (startup poll, per-event coordinator tick, auto-download cycle, FCM push handler, FCM clip handler). Side effect: motion events appear as already viewed in the Bosch app, even if the user only consumes them via HA's live stream and never opens an automation. Reported by xDraGGi on the simon42 forum (Topic 81743 / Post 364079). New option `mark_events_read` in *Integration → Configure* gates all five call sites — default `True` preserves backwards-compatible behaviour, set to `False` to keep events flagged as unread in the Bosch app while still receiving them in HA. Local dedup via `_last_event_ids` is unaffected (lives independent of the cloud `isRead` flag).

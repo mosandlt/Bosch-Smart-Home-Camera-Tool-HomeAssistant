@@ -1483,7 +1483,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             ev.get("id") for ev in events
                             if ev.get("id") and not ev.get("isRead", False)
                         ]
-                        if unread_ids and self.options.get("mark_events_read", True):
+                        if unread_ids and self.options.get("mark_events_read", False):
                             _LOGGER.debug(
                                 "Startup: marking %d unread event(s) as read for %s",
                                 len(unread_ids), cam_id,
@@ -1553,7 +1553,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 newest_event.get("videoClipUploadStatus", ""),
                             )
                         )
-                        if self.options.get("mark_events_read", True):
+                        if self.options.get("mark_events_read", False):
                             try:
                                 await self.async_mark_events_read([newest_id])
                             except asyncio.CancelledError:
@@ -1963,7 +1963,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         eid = ev_dl.get("id")
                         if eid:
                             dl_event_ids.append(eid)
-                if dl_event_ids and self.options.get("mark_events_read", True):
+                if dl_event_ids and self.options.get("mark_events_read", False):
                     try:
                         await self.async_mark_events_read(dl_event_ids)
                     except asyncio.CancelledError:
