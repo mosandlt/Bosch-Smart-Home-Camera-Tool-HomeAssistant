@@ -477,7 +477,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
         # Stream error tracking — consecutive FFmpeg failures per camera.
         # After max_stream_errors, auto-fallback from LOCAL → REMOTE.
+        # `_stream_error_at` records monotonic ts of the last record_stream_error
+        # tick so AUTO mode can time-decay the counter (cf. _STREAM_ERROR_TTL_SEC
+        # in _try_live_connection_inner). Without decay a one-off LAN blip
+        # (router reboot, transient WLAN dropout) pins the cam to REMOTE forever
+        # because record_stream_success only fires on a successful LOCAL stream
+        # and AUTO has already stopped attempting LOCAL.
         self._stream_error_count: dict[str, int] = {}
+        self._stream_error_at: dict[str, float] = {}
         self._stream_fell_back: dict[str, bool] = {}  # True = currently using REMOTE fallback
         # LOCAL session-cred rescue counter. When the HLS consumer goes idle
         # the camera quietly invalidates the per-session digest creds; a later
@@ -498,6 +505,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
         # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
         self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
+        # Active LOCAL-promotion cooldown: monotonic ts of last attempt to lift
+        # an active REMOTE-fallback stream onto LOCAL via Stream.update_source.
+        # Prevents ping-pong if LAN is flapping in/out of reachability.
+        self._local_promote_at: dict[str, float] = {}
         # Pre-create SSL context for TLS proxy (blocking call — must not run in event loop)
         import ssl
         # SSL context created lazily on first use (ssl.create_default_context
@@ -632,8 +643,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
     def record_stream_error(self, cam_id: str) -> None:
         """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
+        # The counter exists to suppress LOCAL after consecutive LAN failures.
+        # Errors that happened while we were on REMOTE are unrelated to the
+        # LAN's health — letting them saturate the counter would leave the
+        # cam permanently pinned to REMOTE after a single Cloud-side hiccup,
+        # even when LAN works fine again.
+        live = self._live_connections.get(cam_id, {})
+        if live.get("_connection_type") == "REMOTE":
+            return
         count = self._stream_error_count.get(cam_id, 0) + 1
         self._stream_error_count[cam_id] = count
+        self._stream_error_at[cam_id] = time.monotonic()
         cfg = self.get_model_config(cam_id)
         # Log only on the transition to threshold — not every subsequent tick while still failing
         if count == cfg.max_stream_errors:
@@ -652,6 +672,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if self._stream_error_count.get(cam_id, 0) > 0:
             _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
         self._stream_error_count[cam_id] = 0
+        self._stream_error_at.pop(cam_id, None)
         self._stream_fell_back[cam_id] = False
         self._local_rescue_attempts.pop(cam_id, None)
         self._local_rescue_at.pop(cam_id, None)
@@ -693,6 +714,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._live_connections.pop(cam_id, None)
         self._live_opened_at.pop(cam_id, None)
         self._stream_error_count.pop(cam_id, None)
+        self._stream_error_at.pop(cam_id, None)
         self._stream_fell_back.pop(cam_id, None)
         self._local_rescue_attempts.pop(cam_id, None)
         self._local_rescue_at.pop(cam_id, None)
@@ -702,8 +724,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if cam_entity is not None:
             stream = getattr(cam_entity, "stream", None)
             if stream is not None:
+                # Hard 5 s timeout: HA's Stream.stop() awaits the worker to
+                # exit, which never happens if the worker is stuck in an
+                # FFmpeg reconnect-loop against a dead URL (e.g. an expired
+                # REMOTE TLS-proxy port from a session that the relay has
+                # already capped). Without the timeout the entire teardown
+                # blocks the next stream-on for >5 min and pre-warm appears
+                # to "never start" (the stuck-warming watchdog clears it at
+                # 300 s). Setting `cam_entity.stream = None` synchronously
+                # afterwards is sufficient — HA's internal cleanup runs in
+                # a background task once the reference is dropped.
                 try:
-                    await stream.stop()
+                    await asyncio.wait_for(stream.stop(), timeout=5)
+                except asyncio.TimeoutError:
+                    _LOGGER.warning(
+                        "camera.stream.stop() for %s timed out after 5s — "
+                        "force-detaching, worker will be GC'd",
+                        cam_id[:8],
+                    )
                 except Exception as exc:
                     _LOGGER.debug("camera.stream.stop() for %s failed: %s", cam_id[:8], exc)
                 cam_entity.stream = None
@@ -1356,6 +1394,46 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     self._per_cam_status_at[cam_id] = now
                     self._offline_since.pop(cam_id, None)  # clear offline tracking
                     _LOGGER.debug("Local TCP ping OK for %s — ONLINE (cloud check skipped)", cam_id[:8])
+                    # Active LOCAL promotion: if this cam is currently pinned to
+                    # REMOTE because of a past LAN-fail burst (auto-mode
+                    # fallback) and the LAN is reachable again, clear the
+                    # error counter + fallback flag so the next stream-on
+                    # gets to attempt LOCAL again. If a stream is *currently*
+                    # running on REMOTE-fallback we additionally schedule a
+                    # background `try_live_connection(is_renewal=True)` —
+                    # the inner already runs `Stream.update_source()` after
+                    # pre-warm, so the live HLS session swaps from Cloud to
+                    # LAN with a brief (~2-3 s) re-buffer instead of
+                    # waiting for the user to re-toggle. Cooldown 5 min
+                    # prevents ping-pong if LAN flaps in/out.
+                    if self._stream_fell_back.get(cam_id):
+                        opts = get_options(self._entry)
+                        if opts.get("stream_connection_type", "auto") == "auto":
+                            err_count_was = self._stream_error_count.get(cam_id, 0)
+                            _LOGGER.info(
+                                "AUTO mode: %s LAN reachable again — clearing "
+                                "REMOTE fallback flag (counter=%d)",
+                                cam_id[:8], err_count_was,
+                            )
+                            self._stream_error_count.pop(cam_id, None)
+                            self._stream_error_at.pop(cam_id, None)
+                            self._stream_fell_back.pop(cam_id, None)
+                            # Active promotion path: only when a stream is
+                            # actively running on REMOTE-fallback.
+                            live = self._live_connections.get(cam_id, {})
+                            if live.get("_connection_type") == "REMOTE":
+                                last_promote = self._local_promote_at.get(cam_id, 0)
+                                _LOCAL_PROMOTE_COOLDOWN_S = 300
+                                if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
+                                    self._local_promote_at[cam_id] = now
+                                    _LOGGER.info(
+                                        "AUTO mode: %s active REMOTE stream — "
+                                        "attempting live LOCAL promotion via renewal",
+                                        cam_id[:8],
+                                    )
+                                    self.hass.async_create_task(
+                                        self._promote_to_local(cam_id)
+                                    )
                     return (cam_id, "ONLINE")
 
                 # Cloud path: /ping (primary, 8 bytes) + /commissioned (fallback)
@@ -2164,6 +2242,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 candidates = ["LOCAL"]
             elif conn_type_pref == "auto":
                 cfg = self.get_model_config(cam_id)
+                # Time-decay the error counter: failures older than the TTL
+                # belong to a previous network state (router reboot, transient
+                # WLAN dropout). Without decay the cam stays pinned on REMOTE
+                # forever because record_stream_success only fires on a
+                # successful LOCAL stream — and AUTO has stopped attempting
+                # LOCAL by then. Cf. _LOCAL_RESCUE_TTL_SEC / _local_rescue_at.
+                # TTL is shorter when LAN is currently reachable (the burst is
+                # almost certainly stale) and longer otherwise (LAN may still
+                # be flaky — keep the cam on REMOTE a bit longer to avoid
+                # ping-pong fallback loops).
+                lan_ok = self._lan_tcp_reachable.get(cam_id, (False, 0))[0]
+                _STREAM_ERROR_TTL_SEC = 300 if lan_ok else 1800
+                err_ts = self._stream_error_at.get(cam_id, 0)
+                if err_ts and (time.monotonic() - err_ts) > _STREAM_ERROR_TTL_SEC:
+                    if self._stream_error_count.get(cam_id, 0) > 0:
+                        _LOGGER.info(
+                            "AUTO mode: %s stream-error counter aged out "
+                            "(%.0fs since last error, LAN=%s) — re-attempting LOCAL",
+                            cam_id[:8], time.monotonic() - err_ts,
+                            "ok" if lan_ok else "unknown",
+                        )
+                    self._stream_error_count.pop(cam_id, None)
+                    self._stream_error_at.pop(cam_id, None)
+                    self._stream_fell_back.pop(cam_id, None)
                 # Check if LOCAL should be skipped:
                 # 1. Too many consecutive stream errors → fall back to REMOTE
                 err_count = self._stream_error_count.get(cam_id, 0)
@@ -2403,8 +2505,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             if cam_ent is not None:
                                 stale = getattr(cam_ent, "stream", None)
                                 if stale is not None:
+                                    # Hard 5 s timeout: if HA's stream_worker
+                                    # is stuck in a reconnect-loop against an
+                                    # expired URL (e.g. a prior REMOTE session
+                                    # whose relay-side cap already passed),
+                                    # `stale.stop()` awaits the worker to exit
+                                    # and never returns — pinning this whole
+                                    # coroutine and the per-cam stream lock,
+                                    # which makes every subsequent switch-ON
+                                    # fail with "already in progress" until
+                                    # the integration is reloaded. Force-
+                                    # detach instead; HA will GC the worker.
                                     try:
-                                        await stale.stop()
+                                        await asyncio.wait_for(stale.stop(), timeout=5)
+                                    except asyncio.TimeoutError:
+                                        _LOGGER.warning(
+                                            "%s: stale Stream.stop() for %s timed out — "
+                                            "force-detaching",
+                                            "Renewal" if is_renewal else "Fresh toggle",
+                                            cam_id[:8],
+                                        )
                                     except Exception as _exc:  # noqa: BLE001
                                         _LOGGER.debug(
                                             "%s: stale Stream.stop() for %s failed: %s",
@@ -2530,6 +2650,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             self._auto_renew_generation[cam_id] = gen
                             self._replace_renewal_task(
                                 cam_id, self._auto_renew_local_session(cam_id, gen)
+                            )
+                        # ── REMOTE session lifetime watchdog ─────────────
+                        # The relay drops the RTSP TCP at the URL's
+                        # maxSessionDuration boundary with a hard reset, which
+                        # leaves HA's stream_worker in a tight reconnect loop
+                        # against a dead URL until HLS times out. We schedule a
+                        # clean teardown ~60s before that boundary so the switch
+                        # flips OFF gracefully and the user sees a defined
+                        # state instead of a buffering spinner.
+                        elif type_val == "REMOTE":
+                            gen = self._auto_renew_generation.get(cam_id, 0) + 1
+                            self._auto_renew_generation[cam_id] = gen
+                            self._replace_renewal_task(
+                                cam_id, self._remote_session_terminator(cam_id, gen)
                             )
                         self.hass.async_create_task(self.async_request_refresh())
                         self.hass.async_create_task(self._check_and_recover_webrtc(cam_id))
@@ -3427,6 +3561,112 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         finally:
           self._renewal_tasks.pop(cam_id, None)
           _LOGGER.debug("Keepalive loop ended for %s (gen=%d)", cam_id[:8], generation)
+
+    async def _promote_to_local(self, cam_id: str) -> None:
+        """Lift an active REMOTE-fallback stream onto LOCAL via a renewal.
+
+        Triggered from the status loop when the cam's TCP-ping cache flips
+        from unreachable → reachable while a stream is currently running on
+        REMOTE-fallback. Calls `try_live_connection(is_renewal=True)` which
+        — with `_stream_fell_back` already cleared by the caller — runs the
+        AUTO candidate list (LOCAL first, REMOTE as fallback) and on a
+        successful LOCAL pre-warm invokes `Stream.update_source()` so the
+        live HLS session swaps from Cloud to LAN with a brief re-buffer.
+        Falls back to REMOTE again on LAN failure (no harm — the stream
+        keeps running, just on the original path).
+        """
+        try:
+            live = self._live_connections.get(cam_id, {})
+            if not live or live.get("_connection_type") != "REMOTE":
+                return
+            result = await self.try_live_connection(cam_id, is_renewal=True)
+            if not result:
+                _LOGGER.debug(
+                    "Active LOCAL promotion: %s renewal returned None — "
+                    "stream stays on REMOTE", cam_id[:8],
+                )
+                return
+            new_type = result.get("_connection_type")
+            if new_type == "LOCAL":
+                _LOGGER.info(
+                    "Active LOCAL promotion: %s migrated REMOTE → LOCAL", cam_id[:8],
+                )
+            else:
+                _LOGGER.debug(
+                    "Active LOCAL promotion: %s renewal landed on %s "
+                    "(LAN attempt did not stick)", cam_id[:8], new_type,
+                )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "Active LOCAL promotion failed for %s: %s", cam_id[:8], err,
+            )
+
+    async def _remote_session_terminator(self, cam_id: str, generation: int) -> None:
+        """Schedule a clean teardown of a REMOTE live session before the
+        relay-side lifetime cap.
+
+        Background: when the session reaches `maxSessionDuration` the upstream
+        relay drops the RTSP TCP with a hard reset. HA's stream_worker then
+        enters a tight reconnect loop against the dead URL until the HLS
+        consumer's read timeout fires — anywhere from 30 s (browser) to
+        several minutes of buffering spinner depending on the consumer. By
+        tearing the stream down ourselves shortly before the cap, the switch
+        flips OFF cleanly and the user sees a defined state. A re-toggle
+        starts a fresh REMOTE session at full lifetime.
+
+        We do not auto-renew REMOTE: the relay only mints a brand-new URL on
+        each PUT /connection, so renewal would force a 30+ s pre-warm window
+        every ~58 min — worse UX than a clean stop.
+
+        Generation-tracked the same way as `_auto_renew_local_session`: any
+        OFF→ON cycle bumps `_auto_renew_generation`, this loop's generation
+        check then exits without action.
+        """
+        cfg = self.get_model_config(cam_id)
+        # Tear down 60 s before the URL's maxSessionDuration so the camera
+        # never hits the relay-side cap; if the user has shortened the cap
+        # via the model config (<=60), still give ourselves 1 s.
+        delay = max(1, cfg.max_session_duration - 60)
+        _LOGGER.debug(
+            "REMOTE session terminator scheduled for %s (gen=%d, %ds until teardown)",
+            cam_id[:8], generation, delay,
+        )
+        try:
+            await asyncio.sleep(delay)
+            # Stop if a newer generation was started (OFF→ON cycle, or a
+            # subsequent LOCAL upgrade replaced the REMOTE session).
+            if self._auto_renew_generation.get(cam_id, 0) != generation:
+                _LOGGER.debug(
+                    "REMOTE terminator: stale gen=%d for %s — skipping",
+                    generation, cam_id[:8],
+                )
+                return
+            # Stop if the stream was already turned off.
+            if cam_id not in self._live_connections:
+                _LOGGER.debug(
+                    "REMOTE terminator: stream already off for %s — skipping",
+                    cam_id[:8],
+                )
+                return
+            live = self._live_connections.get(cam_id, {})
+            if live.get("_connection_type") != "REMOTE":
+                _LOGGER.debug(
+                    "REMOTE terminator: %s is %s now — skipping",
+                    cam_id[:8], live.get("_connection_type"),
+                )
+                return
+            _LOGGER.info(
+                "REMOTE session lifetime reached for %s — tearing down cleanly",
+                cam_id[:8],
+            )
+            await self._tear_down_live_stream(cam_id)
+            self.hass.async_create_task(self.async_request_refresh())
+        except asyncio.CancelledError:
+            _LOGGER.debug(
+                "REMOTE terminator cancelled for %s (gen=%d)", cam_id[:8], generation,
+            )
+        finally:
+            self._renewal_tasks.pop(cam_id, None)
 
     # ── FCM push notifications — delegated to fcm.py ─────────────────────────
     async def _fetch_firebase_config(self) -> dict:

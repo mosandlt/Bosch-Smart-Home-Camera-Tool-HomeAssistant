@@ -7,6 +7,21 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.5.4
+
+**Stream switch unblocked when prior session has expired upstream.** When a previous live session had its underlying URL invalidated (e.g. the relay-side lifetime cap was reached while the switch was still ON), HA's `Stream.stop()` could block waiting for a stuck FFmpeg reconnect-loop to exit. Both teardown paths (`_tear_down_live_stream` shared exit, fresh-toggle stale-Stream invalidation in `_try_live_connection_inner`) now wrap the call in `asyncio.wait_for(timeout=5)` and force-detach on timeout. Without this, a single hung `stream.stop()` held the per-camera setup lock for >5 minutes and every subsequent switch-ON returned `try_live_connection: already in progress for ... — skipping`.
+
+**REMOTE session lifetime watchdog.** Mirror of the existing LOCAL keepalive task: when a stream opens against the cloud relay, a generation-tracked terminator is scheduled for `max_session_duration - 60 s` and tears the session down cleanly before the relay drops the RTSP TCP with a hard reset. Without this, the URL goes stale silently — switch shows "streaming" but FFmpeg is in a reconnect-loop, the next consumer sees a 2-minute HLS spinner. Generation counter shared with `_auto_renew_local_session`; OFF→ON cycles cancel the watchdog automatically.
+
+**AUTO-mode REMOTE-fallback now self-heals.** Three independent fixes reduce the "permanently pinned to Cloud" failure mode that occurred after a transient LAN issue saturated the LOCAL error counter:
+
+- `record_stream_error` skips the increment when the active connection is REMOTE — Cloud-side hiccups no longer count against the LAN's health budget.
+- The error counter time-decays in `_try_live_connection_inner`'s AUTO branch: 5 minutes if the camera's TCP-ping cache says LAN is currently reachable, 30 minutes otherwise. Modeled after the existing `_LOCAL_RESCUE_TTL_SEC` decay for cred-rotation rescues.
+- The status-loop's TCP-ping fast-path actively clears the fallback flag the moment LAN becomes reachable again — the next stream-on attempts LOCAL first instead of going straight to REMOTE. Only fires when `stream_connection_type == "auto"` and a fallback was actually in effect.
+- During a *currently running* REMOTE-fallback stream, the same trigger additionally schedules a `try_live_connection(is_renewal=True)` so the live HLS session migrates Cloud → LAN via `Stream.update_source()` without waiting for a re-toggle. Brief (~2-3 s) re-buffer during the swap; LAN failure simply lands back on REMOTE. 5-minute cooldown prevents ping-pong if LAN flaps.
+
+---
+
 ## v10.5.3
 
 **`mark_events_read` default flipped to OFF.** v10.5.2 introduced the option but kept the previous behaviour as default — events were still being marked as read on the Bosch cloud after HA processed them, which silently consumed the "new event" highlight in the Bosch app for users who only use HA for live streaming. simon42 forum (Topic 81743 / Post 366006) confirmed the default-ON path was the wrong choice for the typical user. The default in `OPTIONS_DEFAULTS`, in the *Configure* dialog, and in all five gating call sites (`__init__.py` startup-poll / per-event tick / auto-download cycle, `fcm.py` push handler / clip handler) now resolves to `False` — fresh installs and existing installs that never explicitly toggled the option both stop firing `PUT /v11/events {isRead: true}`. The Bosch app keeps treating new events as unread regardless of whether HA already saw them. Users who prefer the previous behaviour (HA as primary client, no stale "new event" badges in the app) can enable it via *Integration → Configure → Mark Bosch cloud events as read*. English/German option-help text updated to describe the new default.
