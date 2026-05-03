@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — Gen1 hardware-cut: power the camera off via a smart plug
+# Bewegungslicht — Gen1 Hardware-Trennung: Kamera per Smart-Plug abschalten
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: The absolute "no flash, no buts" option for Gen1. Plug the camera (or
+#     PoE injector) into a smart plug, and cut power for the duration. The
+#     camera is offline — no recording, no events, but also no flashes.
+# DE: Die absolute "kein Blinken, keine Diskussion"-Option für Gen1. Kamera
+#     (oder PoE-Injector) in eine Smart-Plug stecken und für die Dauer Strom
+#     abschalten. Kamera ist offline — keine Aufnahme, keine Events, aber
+#     auch kein Blinken.
+#
+# Trade-offs / Trade-offs:
+# EN: - No camera coverage during the off window
+#     - Cold boot ~60-90 s when power returns
+#     - Modern eMMC handles daily on/off fine in practice
+#     - Gen1 Eyes EOL is end of 2028 — ~2 years of daily cycles before EOL
+# DE: - Keine Kamera-Abdeckung während der Aus-Phase
+#     - Kaltstart ~60-90 s nach Strom wieder an
+#     - Modernes eMMC verkraftet tägliches An/Aus problemlos
+#     - Gen1 Eyes EOL ist Ende 2028 — ~2 Jahre tägliche Zyklen bis EOL
+#
+# Replace switch.porch_camera_plug with your smart plug entity.
+# switch.porch_camera_plug mit eurer Smart-Plug-Entity ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Variant A — manual via helper switch / Variante A — manuell per Helper-Switch
+input_boolean:
+  porch_camera_offline:
+    name: "Porch — camera offline (power cut)"
+    icon: mdi:power-plug-off
+
+automation:
+  - alias: "Porch camera offline switch → cut power"
+    description: >
+      EN: Helper toggle that cuts/restores camera power.
+      DE: Helper-Schalter trennt/stellt die Stromversorgung wieder her.
+    trigger:
+      - platform: state
+        entity_id: input_boolean.porch_camera_offline
+        to: "on"
+        id: cut
+      - platform: state
+        entity_id: input_boolean.porch_camera_offline
+        to: "off"
+        id: restore
+    action:
+      - choose:
+          - conditions: [{ condition: trigger, id: cut }]
+            sequence:
+              - service: switch.turn_off
+                target: { entity_id: switch.porch_camera_plug }
+              - service: persistent_notification.create
+                data:
+                  title: "Porch camera offline / Terrasse-Kamera offline"
+                  message: >
+                    EN: Camera power cut. No recording until you turn the
+                        helper back off.
+                    DE: Kamera-Strom getrennt. Keine Aufnahme bis Helper
+                        wieder ausgeschaltet.
+          - conditions: [{ condition: trigger, id: restore }]
+            sequence:
+              - service: switch.turn_on
+                target: { entity_id: switch.porch_camera_plug }
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant B — driven by door / presence with safety cap
+# DE: Variante B — getriggert via Tür / Anwesenheit mit Sicherheitsbegrenzung
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Porch in use → cut camera power"
+#     trigger:
+#       - platform: state
+#         entity_id: binary_sensor.porch_door
+#         to: "on"
+#     action:
+#       - service: switch.turn_off
+#         target: { entity_id: switch.porch_camera_plug }
+#       - delay: "00:30:00"        # EN: safety cap / DE: Sicherheits-Cap
+#       - service: switch.turn_on
+#         target: { entity_id: switch.porch_camera_plug }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Bonus — daily 04:00 restart for general hygiene
+# DE: Bonus — täglicher 04:00 Neustart für allgemeine Hygiene
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Camera daily restart at 04:00"
+#     trigger:
+#       - platform: time
+#         at: "04:00:00"
+#     action:
+#       - service: switch.turn_off
+#         target: { entity_id: switch.porch_camera_plug }
+#       - delay: "00:01:00"
+#       - service: switch.turn_on
+#         target: { entity_id: switch.porch_camera_plug }

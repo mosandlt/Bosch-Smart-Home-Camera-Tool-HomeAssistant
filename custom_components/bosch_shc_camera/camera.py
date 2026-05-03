@@ -43,6 +43,26 @@ DEFAULT_SNAPSHOT_INTERVAL = 1800 # default proactive background refresh interval
 IDLE_FRAME_INTERVAL     = 60    # seconds — how often HA's camera proxy calls async_camera_image
 
 
+def _rotate_jpeg_180(jpeg_bytes: bytes) -> bytes:
+    """Rotate a JPEG image by 180° using PIL. Sync — call via executor.
+
+    Used by async_camera_image when the user enabled the Bild 180° drehen
+    switch (ceiling-mounted indoor cameras). Typical 1280×720 JPEG: ~15-30 ms
+    with libjpeg-turbo. Returns the original bytes if rotation fails.
+    """
+    try:
+        from PIL import Image
+        from io import BytesIO
+        img = Image.open(BytesIO(jpeg_bytes))
+        rotated = img.rotate(180)
+        out = BytesIO()
+        rotated.save(out, format="JPEG", quality=90)
+        return out.getvalue()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("rotate_jpeg_180 failed (%s) — returning original", err)
+        return jpeg_bytes
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -515,7 +535,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         """
         try:
             result = await self._async_camera_image_impl(width, height)
-            return result if result else self._PLACEHOLDER_JPEG
+            jpeg = result if result else self._PLACEHOLDER_JPEG
         except asyncio.CancelledError:
             raise  # let cancellation propagate cleanly
         except Exception as err:  # noqa: BLE001
@@ -523,7 +543,13 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                 "%s: async_camera_image failed (%s) — serving placeholder",
                 self._attr_name, err,
             )
-            return self._cached_image or self._PLACEHOLDER_JPEG
+            jpeg = self._cached_image or self._PLACEHOLDER_JPEG
+        # Apply 180° rotation if the user enabled it via the Bild 180° drehen
+        # switch (ceiling-mounted indoor cameras). Skip the placeholder JPEG.
+        rotate = bool(getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id))
+        if rotate and jpeg is not self._PLACEHOLDER_JPEG and jpeg:
+            jpeg = await self.hass.async_add_executor_job(_rotate_jpeg_180, jpeg)
+        return jpeg
 
     async def _async_camera_image_impl(
         self, width: int | None = None, height: int | None = None

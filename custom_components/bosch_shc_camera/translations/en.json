@@ -220,6 +220,9 @@
       "intrusion_detection": {
         "name": "Intrusion Detection"
       },
+      "image_rotation_180": {
+        "name": "Rotate Image 180°"
+      },
       "alarm_system_arm": {
         "name": "Alarm System"
       },

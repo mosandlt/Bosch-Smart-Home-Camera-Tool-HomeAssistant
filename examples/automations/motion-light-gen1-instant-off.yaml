@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — Gen1 fallback: instantly turn the light back off
+# Bewegungslicht — Gen1-Fallback: Licht sofort wieder ausschalten
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Gen1 Eyes Außenkamera v1 has no Cloud-API toggle for the motion-
+#     triggered light — the on-device firmware decides. Best non-hardware
+#     workaround: react to the motion event as fast as HA can. The light
+#     still flashes for ~0.5–1.5 s, then goes dark.
+# DE: Die Gen1 Eyes Außenkamera v1 hat keinen Cloud-API-Schalter für das
+#     Bewegungslicht — die Firmware entscheidet. Bester Software-Workaround:
+#     auf das Motion-Event so schnell wie möglich reagieren. Das Licht blinkt
+#     kurz auf (~0.5–1.5 s), dann wird es dunkel.
+#
+# EN: Gated by an input_boolean — suppression only runs when YOU enable it.
+# DE: Über input_boolean gesteuert — Unterdrückung läuft nur wenn IHR es aktiviert.
+#
+# Replace <cam> with your camera slug. binary_sensor.bosch_<cam>_motion is
+# typically the camera's motion entity ID.
+# <cam> mit eurem Kamera-Slug ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+input_boolean:
+  porch_suppress_motion_light:
+    name: "Porch — suppress motion light (Gen1)"
+    icon: mdi:weather-night
+
+automation:
+  - alias: "Gen1 camera — instant-off motion light when suppressed"
+    description: >
+      EN: When motion is reported AND suppression is enabled, immediately
+          send camera_light=off via the lighting_override API.
+      DE: Bei Motion + aktivierter Unterdrückung sofort camera_light=off
+          per lighting_override API senden.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<cam>_motion
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.porch_suppress_motion_light
+        state: "on"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id:
+            - switch.bosch_<cam>_camera_light
+            - switch.bosch_<cam>_front_light
+            - switch.bosch_<cam>_wallwasher
+    mode: parallel
+    max: 10   # EN: allow rapid-fire motion / DE: erlaubt schnelle Motion-Ketten
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Optional — also act on the integration's bus event (~0.2–0.5 s faster)
+# DE: Optional — auch auf das Bus-Event reagieren (~0.2–0.5 s schneller)
+# ─────────────────────────────────────────────────────────────────────────────
+#   trigger:
+#     - platform: event
+#       event_type: bosch_smart_home_camera_event
+#       event_data:
+#         camera_id: "<your_camera_uuid>"
+#         event_type: motion
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Tying it together — auto-enable suppression based on door / presence:
+# DE: Kombiniert — Unterdrückung automatisch via Tür / Anwesenheit aktivieren:
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Porch in use → enable Gen1 motion light suppression"
+#     trigger:
+#       - platform: state
+#         entity_id: binary_sensor.porch_door
+#         to: "on"
+#     action:
+#       - service: input_boolean.turn_on
+#         target:
+#           entity_id: input_boolean.porch_suppress_motion_light

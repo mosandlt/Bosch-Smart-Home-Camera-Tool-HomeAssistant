@@ -52,6 +52,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
 - [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
+- [Roadmap](#roadmap) — parked features and what's under consideration
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
 - [Related Projects](#related-projects)
 - [License](#license)
@@ -644,6 +645,20 @@ data:
 - [`examples/automation_signal_alert.yaml`](examples/automation_signal_alert.yaml) — Signal text message
 - [`blueprints/bosch_camera_signal_alert.yaml`](blueprints/bosch_camera_signal_alert.yaml) — configurable blueprint
 
+### Example Library — `examples/automations/`
+
+A growing collection of bilingual (EN + DE) automation snippets that cover common Bosch-camera scenarios. Every file is self-contained and explains its placeholders inline, so you can copy → adapt entity IDs → drop into your `automations.yaml`.
+
+| Category | What's in there |
+|---|---|
+| **Motion-light control** (silence the porch spotlight when you don't want it flaring) | manual "dinner mode" helper · door / window sensor trigger · presence sensor (mmWave / PIR / BLE) · time + sunset-driven schedule · Gen1 instant-off fallback · Gen1 hardware power-cut · **production-grade door + privacy + light coordination** with `mode: restart`, day/night-aware delays, HA-restart recovery |
+| **Privacy & away mode** | indoor privacy auto-toggle by who's home · arm/disarm all cameras when the house empties out · per-person precise cleanup (only turn off what they had on) |
+| **Smart notifications** | snapshot + push with image · weather-aware (skip during storms) · doorbell-style auto-display on a wall tablet · sleep mode (quiet at night, but real intruder pattern still wakes you) · vacation deterrent with random light flashes · **escalating offline alert** (silent → info → critical based on outage duration) |
+| **Garage & vehicles** | combine the driveway camera with the garage-door cover entity to detect "vehicle arriving" / "vehicle leaving" — optional AI vehicle classification (own car / delivery / unknown) |
+| **AI vision** | classify motion via Gemini / GPT-4o / Claude / local Ollama → push only for person/vehicle/package, ignore pets · package-delivery detection · daily AI summary of camera events · TTS visitor greeting |
+
+→ **[Browse the full example library](examples/automations/README.md)** — index, generation matrix (Gen1 vs Gen2), placeholder reference, and combination patterns.
+
 ---
 
 ## Lovelace Cards
@@ -1086,10 +1101,23 @@ curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
 
 Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
 
+## Roadmap
+
+Features investigated or intentionally parked — listed here so the direction is visible. Not planned for active development; **open an issue if any item matters to you** and we'll pick it up based on demand.
+
+### Parked
+
+- **Motion-zone editor (read-only)** — local read access via RCP+ (`0x0c0a` + `0x0c00`) is technically possible using the per-session `cbs-…` user from `PUT /connection LOCAL`. A read-only viewer is feasible today; full write support requires capabilities not yet exposed locally.
+
+- **Rules editor** (`/v11/video_inputs/{id}/rules`) — adjust event rules from the HA UI
+- **Camera sharing** (`/v11/friends`) — manage shared access from HA
+- **Live thumbnail via local RCP+** — opcode `0x099e` is reachable, but the local XML endpoint returns `<err>0x60</err>` for the `F_DATA` reads we tried (the cloud proxy uses binary TLV on the same path). Use case is narrow anyway: the card already shows live HLS as soon as the LOCAL session is up.
+- **`low_bandwidth: true` card option** — would suppress HLS autostart, showing a ▶ overlay until tapped (mobile data saver). Earlier attempts in card v2.10.3–v2.10.5 introduced stream-startup races and were reverted. Parked because the HA Companion App handles bandwidth on its own.
+
 ## Releases
 
-Latest stable: **v10.5.4** — see the GitHub release page for full notes:
-[**v10.5.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.4)
+Latest stable: **v10.6.0** — see the GitHub release page for full notes:
+[**v10.6.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.6.0)
 
 | | |
 |---|---|

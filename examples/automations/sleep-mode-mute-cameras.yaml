@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sleep mode — quiet outdoor cameras during the night
+# Schlaf-Modus — Außenkameras nachts ruhig stellen
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: At bedtime, no phone push for the cat triggering the porch camera. But
+#     recording continues. AND loud / sustained activity still wakes you via
+#     a critical-priority alert that bypasses Do Not Disturb.
+# DE: Nachts kein Phone-Push für die Katze auf der Terrasse. Aber Aufnahme
+#     läuft weiter. UND laute / anhaltende Aktivität weckt euch trotzdem über
+#     einen Critical-Priority-Alert, der Nicht-Stören umgeht.
+# ─────────────────────────────────────────────────────────────────────────────
+
+input_boolean:
+  sleep_mode:
+    name: "Sleep mode / Schlaf-Modus"
+    icon: mdi:sleep
+
+# EN: Auto-toggle by schedule / DE: Auto-Umschalten per Zeitplan
+automation:
+  - alias: "Sleep mode — auto on/off by schedule"
+    trigger:
+      - platform: time
+        at: "23:00:00"
+        id: sleep_on
+      - platform: time
+        at: "06:30:00"
+        id: sleep_off
+    action:
+      - choose:
+          - conditions: ["{{ trigger.id == 'sleep_on' }}"]
+            sequence:
+              - service: input_boolean.turn_on
+                target: { entity_id: input_boolean.sleep_mode }
+          - conditions: ["{{ trigger.id == 'sleep_off' }}"]
+            sequence:
+              - service: input_boolean.turn_off
+                target: { entity_id: input_boolean.sleep_mode }
+
+# EN: Standard motion → push, BUT skip during sleep mode
+# DE: Standard-Motion → Push, ABER nicht während Schlaf-Modus
+  - alias: "Camera motion → quiet push (skip during sleep)"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.sleep_mode
+        state: "off"
+    action:
+      - service: notify.mobile_app_<your_phone>
+        data:
+          message: "📷 Motion at <outdoor_cam> / Bewegung bei <outdoor_cam>"
+
+# EN: Sustained activity → critical alert (bypasses DND)
+# DE: Anhaltende Aktivität → Critical-Alert (umgeht Nicht-Stören)
+  - alias: "Camera intrusion alert — bypasses sleep mode"
+    description: >
+      EN: 3+ motion events in 5 minutes during sleep hours = real intruder
+          pattern (not single fox/cat). Fires critical-priority push.
+      DE: 3+ Motion-Events in 5 Min während Schlaf = echtes Einbruch-Muster
+          (nicht einzelner Fuchs/Katze). Feuert Critical-Priority-Push.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.sleep_mode
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ (state_attr('sensor.bosch_<outdoor_cam>_events_today', 'last_5min') | int(0)) >= 3 }}
+    action:
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "⚠️ Intrusion at <outdoor_cam> / Einbruch bei <outdoor_cam>"
+          message: >
+            EN: Sustained motion — 3+ events in 5 min
+            DE: Anhaltende Bewegung — 3+ Events in 5 Min
+          data:
+            push:
+              sound: { name: "default", critical: 1, volume: 1.0 }
+            channel: "critical"
+            importance: high
+            ttl: 0
+            priority: high
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Counter helper for "events in 5-min window" if sensor doesn't expose it
+# DE: Counter-Helper für "Events im 5-Min-Fenster" falls Sensor das nicht hat
+# ─────────────────────────────────────────────────────────────────────────────
+# counter:
+#   <cam>_motion_5min:
+#     name: "<cam> motion (5 min window)"
+#     restore: false
+#     step: 1
+#
+# automation:
+#   - alias: "Increment counter on motion"
+#     trigger:
+#       - platform: state
+#         entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+#         to: "on"
+#     action:
+#       - service: counter.increment
+#         target: { entity_id: counter.<cam>_motion_5min }
+#       - delay: "00:05:00"
+#       - service: counter.decrement
+#         target: { entity_id: counter.<cam>_motion_5min }

@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — disable on demand via a "Dinner Mode" switch
+# Bewegungslicht — auf Knopfdruck per "Dinner-Mode" Schalter deaktivieren
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: When you sit on the porch / patio for dinner, you don't want the
+#     camera light to flare up every time someone moves. Flip this switch
+#     yourself (dashboard tile, voice command, NFC tag), and the camera's
+#     motion-triggered light stops reacting until you flip it back off.
+#
+# DE: Wenn ihr auf der Terrasse esst, soll das Kamera-Licht nicht bei jeder
+#     Bewegung losgehen. Diesen Schalter manuell aktivieren (Dashboard,
+#     Sprachbefehl, NFC-Tag) — das bewegungsgetriggerte Licht reagiert
+#     nicht mehr, bis ihr ihn wieder ausschaltet.
+#
+# Replace <cam> with your camera slug (e.g. terrasse, porch, eingang).
+# <cam> mit eurem Kamera-Slug ersetzen (z.B. terrasse, porch, eingang).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 1) Helper — paste into configuration.yaml, OR create via
+#    Helper — in configuration.yaml einfügen ODER erstellen via
+#    Settings → Devices & Services → Helpers → "Toggle"
+input_boolean:
+  porch_dinner_mode:
+    name: "Porch dinner mode / Terrasse Dinner-Mode"
+    icon: mdi:silverware-fork-knife
+
+# 2) Automation — Gen2 native path (Eyes Außenkamera II / Innenkamera II)
+#    Automation — Gen2 nativ (Eyes Außenkamera II / Innenkamera II)
+automation:
+  - alias: "Porch dinner mode → camera motion light follows switch"
+    description: >
+      EN: Mirrors the dinner-mode helper into the Bosch motion-light switch.
+          When dinner mode is ON, motion will not trigger the camera light.
+      DE: Spiegelt den Dinner-Mode-Helper auf den Bosch-Bewegungslicht-Schalter.
+          Bei Dinner-Mode AN reagiert das Licht nicht mehr auf Bewegung.
+    trigger:
+      - platform: state
+        entity_id: input_boolean.porch_dinner_mode
+        to: "on"
+        id: dinner_on
+      - platform: state
+        entity_id: input_boolean.porch_dinner_mode
+        to: "off"
+        id: dinner_off
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: dinner_on
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+          - conditions:
+              - condition: trigger
+                id: dinner_off
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+    mode: single
+
+# EN: Gen1 cameras — replace the action block above with a reference to the
+#     instant-off pattern (see motion-light-gen1-instant-off.yaml). The helper
+#     switch then gates whether that automation runs:
+# DE: Gen1-Kameras — den action-Block durch das Instant-Off-Pattern ersetzen
+#     (siehe motion-light-gen1-instant-off.yaml). Der Helper-Switch entscheidet
+#     dann, ob die Automation läuft:
+#
+#   condition:
+#     - condition: state
+#       entity_id: input_boolean.porch_dinner_mode
+#       state: "on"

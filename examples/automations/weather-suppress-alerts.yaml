@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Suppress motion alerts during high wind / heavy rain
+# Motion-Alerts unterdrücken bei starkem Wind / Regen
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Outdoor cameras false-positive on swaying trees, blowing leaves, heavy
+#     rain across the lens. Instead of fighting it with sensitivity tweaks
+#     (which can suppress real events), gate phone notifications on local
+#     weather. NAS recording continues — you just don't get woken up by every
+#     gust.
+# DE: Außenkameras lösen falsch aus bei wehenden Bäumen, Blättern, starkem
+#     Regen. Statt Sensitivity zu drehen (die echte Events unterdrückt),
+#     besser Phone-Push am lokalen Wetter koppeln. NAS-Aufnahme läuft
+#     weiter — ihr werdet nur nicht von jedem Windstoß geweckt.
+#
+# EN: Works with any HA weather integration (Met.no, OpenWeatherMap,
+#     Pirate Weather, KNMI, custom DWD).
+# DE: Funktioniert mit jeder HA-Wetter-Integration (Met.no, OpenWeatherMap,
+#     Pirate Weather, KNMI, custom DWD).
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Camera motion → notify (skip during storms)"
+    description: >
+      EN: Push on motion EXCEPT when wind > 35 km/h or rain > 5 mm/h.
+      DE: Push bei Motion AUSSER bei Wind > 35 km/h oder Regen > 5 mm/h.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+        to: "on"
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.weather_wind_speed
+        below: 35
+      - condition: numeric_state
+        entity_id: sensor.weather_precipitation
+        below: 5
+    action:
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "📷 Motion outside / Bewegung draußen"
+          message: "{{ now().strftime('%H:%M:%S') }}"
+    mode: parallel
+    max: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Bonus — log suppressed events for later review
+# DE: Bonus — unterdrückte Events fürs Nachschauen ins Logbuch
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Storm-suppressed motion → log only"
+#     trigger:
+#       - platform: state
+#         entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+#         to: "on"
+#     condition:
+#       - condition: or
+#         conditions:
+#           - condition: numeric_state
+#             entity_id: sensor.weather_wind_speed
+#             above: 35
+#           - condition: numeric_state
+#             entity_id: sensor.weather_precipitation
+#             above: 5
+#     action:
+#       - service: logbook.log
+#         data:
+#           name: "Camera motion suppressed (weather) / Motion unterdrückt (Wetter)"
+#           message: >
+#             Wind {{ states('sensor.weather_wind_speed') }} km/h,
+#             rain {{ states('sensor.weather_precipitation') }} mm/h

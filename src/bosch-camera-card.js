@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.10.21";
+const CARD_VERSION = "2.11.1";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -318,6 +318,9 @@ class BoschCameraCard extends HTMLElement {
       preAlarmDelay:   config.prealarm_delay_entity    || `number.${base}_pre_alarm_dauer`,
       powerLedBrightness: config.power_led_entity      || `number.${base}_power_led`,
       audioAlarmSensitivity: config.audio_alarm_sensitivity_entity || `number.${base}_audio_plus_empfindlichkeit`,
+      // Image rotation 180° (indoor cameras only — Gen1 360 + Gen2 Indoor II).
+      // HA slugifies "180°" to "180deg" — this default matches the actual entity slug.
+      imageRotation180: config.image_rotation_180_entity || `switch.${base}_bild_180deg_drehen`,
     };
 
     this._showMotionZones = this._config.show_motion_zones;
@@ -342,6 +345,7 @@ class BoschCameraCard extends HTMLElement {
         this._discoverAutomationsViaWs(hass);
       }
     }
+    this._applyImageRotation180();
     this._update();
     // _render() calls _scheduleImageLoad(0) before _hass is assigned (HA sets hass
     // AFTER setConfig), so the first image load silently returns early.
@@ -358,6 +362,19 @@ class BoschCameraCard extends HTMLElement {
       }
       this._triggerFreshSnapshot();
     }
+  }
+
+  // Apply 180° CSS rotation to the image+video wrapper based on the
+  // switch.<base>_bild_180_drehen entity state (indoor cameras only).
+  // Cheap — runs on every hass set, just toggles a class. Browser ignores
+  // no-op class toggles so there's no re-layout cost when state didn't change.
+  _applyImageRotation180() {
+    if (!this._hass || !this.shadowRoot) return;
+    const wrap = this.shadowRoot.querySelector(".img-wrapper");
+    if (!wrap) return;
+    const ent = this._hass.states[this._entities.imageRotation180];
+    const on = ent && ent.state === "on";
+    wrap.classList.toggle("rotated-180", !!on);
   }
 
   disconnectedCallback() {
@@ -574,6 +591,14 @@ class BoschCameraCard extends HTMLElement {
           position: absolute; inset: 0;
           width: 100%; height: 100%; display: block; object-fit: cover;
           min-height: 160px; background: transparent;
+        }
+
+        /* Image rotation 180° (ceiling-mounted indoor cameras).
+           Pure CSS transform — zero CPU, zero latency, GPU-composited.
+           Toggled by the integration's switch.<base>_bild_180_drehen entity. */
+        .img-wrapper.rotated-180 .cam-img,
+        .img-wrapper.rotated-180 .cam-video {
+          transform: rotate(180deg);
         }
 
         /* Fullscreen — native API (desktop/Android) */

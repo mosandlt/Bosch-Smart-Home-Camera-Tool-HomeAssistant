@@ -220,6 +220,9 @@
       "intrusion_detection": {
         "name": "Einbrucherkennung"
       },
+      "image_rotation_180": {
+        "name": "Bild 180° drehen"
+      },
       "alarm_system_arm": {
         "name": "Alarmanlage"
       },

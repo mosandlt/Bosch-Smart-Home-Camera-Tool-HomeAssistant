@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Away mode — arm all cameras when the house empties out
+# Abwesenheits-Mode — alle Kameras scharfstellen wenn das Haus leer ist
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: When the last household member leaves, switch all cameras into
+#     "watchful mode": privacy off (so they record), motion light on as a
+#     deterrent, alert routing to push notifications. When anyone returns,
+#     reverse it.
+# DE: Wenn der letzte aus dem Haushalt geht, alle Kameras in den "Wachmodus"
+#     schalten: Privacy aus (damit sie aufnehmen), Bewegungslicht an als
+#     Abschreckung, Alerts per Push. Wenn jemand zurückkommt, wieder zurück.
+#
+# Pairs nicely with privacy-when-home.yaml.
+# Passt gut zusammen mit privacy-when-home.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  # ───── ARM (last person leaves) / SCHARFSTELLEN (letzter geht) ─────────
+  - alias: "Cameras — arm when last person leaves"
+    description: >
+      EN: Triggered when last household member leaves. Sets all cameras
+          to active surveillance mode.
+      DE: Ausgelöst wenn der letzte aus dem Haushalt geht. Alle Kameras in
+          Überwachungsmodus.
+    trigger:
+      - platform: state
+        entity_id:
+          - person.thomas
+          - person.partner
+        to: "not_home"
+    condition:
+      - condition: template
+        value_template: >
+          {{ expand('person.thomas','person.partner')
+             | selectattr('state','eq','home') | list | count == 0 }}
+    action:
+      # EN: Outdoor — privacy off, motion light on (deterrent)
+      # DE: Außen — Privacy aus, Bewegungslicht an (Abschreckung)
+      - service: switch.turn_off
+        target: { entity_id: switch.bosch_<outdoor_cam>_privacy_mode }
+      - service: switch.turn_on
+        target: { entity_id: switch.bosch_<outdoor_cam>_licht_bei_bewegung }   # Gen2 only
+      # EN: Indoor — privacy off (now recording) / DE: Innen — Privacy aus (filmt jetzt)
+      - service: switch.turn_off
+        target: { entity_id: switch.bosch_<indoor_cam>_privacy_mode }
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "🏠 Away mode armed / Abwesenheit aktiv"
+          message: "EN: Cameras active. / DE: Kameras aktiv."
+
+  # ───── DISARM (anyone returns) / ENTSCHÄRFEN (jemand kommt) ──────────────
+  - alias: "Cameras — disarm when first person returns"
+    description: >
+      EN: Triggered on first arrival. Reverts to home mode.
+      DE: Ausgelöst bei erster Heimkehr. Zurück in Heim-Modus.
+    trigger:
+      - platform: state
+        entity_id:
+          - person.thomas
+          - person.partner
+        to: "home"
+    condition:
+      - condition: template
+        value_template: >
+          {{ expand('person.thomas','person.partner')
+             | selectattr('state','eq','home') | list | count == 1 }}
+    action:
+      - service: switch.turn_on
+        target: { entity_id: switch.bosch_<indoor_cam>_privacy_mode }
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "🏠 Welcome home / Willkommen zuhause"
+          message: >
+            EN: Indoor cameras paused. Outdoor still active.
+            DE: Innenkameras pausiert. Außen weiter aktiv.
+
+# EN: Tip — hook into HA alarm_control_panel for cleaner integration with
+#     existing security flow (replace person triggers with armed_away/disarmed).
+# DE: Tipp — an HA alarm_control_panel anbinden für sauberere Integration
+#     (person-Trigger durch armed_away/disarmed ersetzen).
