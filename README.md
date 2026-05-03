@@ -272,6 +272,31 @@ graph LR
 
 Since **v10.3.24** the same Python TLS proxy carries both LOCAL and REMOTE — FFmpeg and go2rtc always connect to `rtsp://127.0.0.1:N`, the proxy decides whether to terminate TLS to the camera (LOCAL) or to the Bosch cloud proxy (REMOTE). Symmetric path means there's no scheme-switching trick (`rtspx://` etc.) on the consumer side, and the cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` is handled in one place.
 
+### Stream connection state machine
+
+In **AUTO** mode the integration tries LOCAL first and falls back to the cloud relay only when LAN attempts fail. Since **v10.5.4** the fallback self-heals — once LAN reachability returns, the live stream is migrated back to LOCAL via `Stream.update_source()` without waiting for the user to re-toggle. Both LOCAL and REMOTE sessions are kept inside their respective lifetime bounds by background watchdogs (LOCAL is renewed before relay-side rotation, REMOTE is torn down cleanly ~60 s before the relay's `maxSessionDuration` cap so the consumer never sees a hard reset on the wire).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> LOCAL: switch ON\n(auto + LAN ok)
+    Idle --> REMOTE: switch ON\n(mode=remote, or\nauto + LAN down)
+
+    LOCAL --> REMOTE_fallback: 3 consecutive\nstream errors
+    REMOTE_fallback --> LOCAL: LAN reachable\n+ active promotion\n(update_source)
+
+    LOCAL --> Idle: switch OFF
+    REMOTE --> Idle: switch OFF /\nlifetime watchdog
+    REMOTE_fallback --> Idle: switch OFF /\nlifetime watchdog
+
+    note right of REMOTE_fallback
+        Error counter decays automatically
+        5 min if LAN currently reachable
+        30 min if LAN unknown/unreachable
+        REMOTE-side errors do not increment
+    end note
+```
+
 ### REMOTE / Cloud differences
 
 * **`/connection {type:"REMOTE"}`** returns `rtsps://proxy-NN.live.cbs.boschsecurity.com:42090/<hash>` — the Bosch cloud proxy serves the camera over the public internet.
