@@ -110,9 +110,21 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }
 
+    def _rotation_180(self) -> bool:
+        """Return True if the camera is configured as ceiling-mounted (image
+        rotated 180°). When True, the slider sign is inverted so that "right"
+        on the slider stays "right" on the user's screen.
+        """
+        return bool(
+            getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
+        )
+
     @property
     def native_value(self) -> float | None:
-        return self.coordinator._pan_cache.get(self._cam_id)
+        raw = self.coordinator._pan_cache.get(self._cam_id)
+        if raw is None:
+            return None
+        return -raw if self._rotation_180() else raw
 
     @property
     def available(self) -> bool:
@@ -122,7 +134,10 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_cloud_set_pan(self._cam_id, int(value))
+        # Invert sign when the camera is ceiling-mounted so the user-visible
+        # direction matches the camera-physical pan direction.
+        actual = -int(value) if self._rotation_180() else int(value)
+        await self.coordinator.async_cloud_set_pan(self._cam_id, actual)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

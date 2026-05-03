@@ -40,6 +40,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, get_options, CLOUD_API
@@ -48,6 +49,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 _GEN2_INDOOR_HW = {"HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
+_INDOOR_HW = {"INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
 
 
 def _is_gen2_indoor(entity) -> bool:
@@ -212,6 +214,13 @@ async def async_setup_entry(
             entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAudioAlarmSwitch(coordinator, cam_id, config_entry))
+        # Image rotation 180° — only for indoor cameras (Gen1 360 + Gen2 Indoor II).
+        # Outdoor cameras have a fixed mounting orientation by design and don't
+        # need this. The switch is purely client-side display state — the card
+        # applies CSS transform, the snapshot path applies PIL rotation, and
+        # (for Gen1 360) the pan slider sign is inverted.
+        if hw_version in _INDOOR_HW:
+            entities.append(BoschImageRotation180Switch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1684,3 +1693,62 @@ class BoschAudioAlarmSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs):
         await self._set(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):
+    """Switch: ON = display the camera image rotated 180° (ceiling mount).
+
+    Indoor-only — outdoor cameras have a fixed mounting orientation. Bosch's
+    Cloud API does not expose any image-rotation field; this switch is a
+    pure client-side display flag with three effects:
+
+      1. The Lovelace card applies `transform: rotate(180deg)` to its <video>
+         and <img> elements (zero CPU, zero latency, GPU-composited).
+      2. `camera.async_camera_image()` rotates the snapshot JPEG via PIL
+         before serving it (so push notifications, NAS clips, and other
+         consumers see the right-way-up image too).
+      3. For PTZ cameras (Gen1 360), `BoschPanNumber` inverts the sign of
+         the pan value so "right" on the slider stays "right" on screen
+         even when the camera is upside-down.
+
+    State persists across restarts via RestoreEntity. Default: OFF.
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name            = f"Bosch {self._cam_title} Bild 180° drehen"
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_image_rotation_180"
+        self._attr_icon            = "mdi:image-auto-adjust"
+        self._attr_translation_key = "image_rotation_180"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator._image_rotation_180.get(self._cam_id, False))
+
+    @property
+    def available(self) -> bool:
+        # Always available — pure client-side flag, no API dependency
+        return self.coordinator.last_update_success
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self.coordinator._image_rotation_180[self._cam_id] = True
+            _LOGGER.debug(
+                "image_rotation_180: restored ON for %s from previous state",
+                self._cam_id[:8],
+            )
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator._image_rotation_180[self._cam_id] = True
+        self.async_write_ha_state()
+        # Notify pan number entity to refresh display value (sign flips).
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator._image_rotation_180[self._cam_id] = False
+        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()

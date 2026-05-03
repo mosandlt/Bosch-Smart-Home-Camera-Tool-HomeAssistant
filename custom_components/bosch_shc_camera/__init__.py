@@ -411,6 +411,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._audio_cache: dict[str, dict] = {}
         # Motion light cache — keyed by cam_id, from GET /lighting/motion (Gen2 only)
         self._motion_light_cache: dict[str, dict] = {}
+        # Image rotation 180° flag — keyed by cam_id, indoor cameras only.
+        # No API call — purely a client-side display flag for ceiling-mounted cams.
+        # Read by camera.async_camera_image (rotates JPEG via PIL) and by the
+        # Pan number entity (inverts sign so "right" stays "right" on screen).
+        # State is owned by BoschImageRotation180Switch (RestoreEntity).
+        self._image_rotation_180: dict[str, bool] = {}
         # Ambient lighting config cache — keyed by cam_id, from GET /lighting/ambient (Gen2 only)
         self._ambient_lighting_cache: dict[str, dict] = {}
         # Lighting switch cache — keyed by cam_id, from GET /lighting/switch (Gen2 only)

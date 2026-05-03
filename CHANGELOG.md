@@ -7,6 +7,18 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.6.0
+
+**Image rotation 180° for ceiling-mounted indoor cameras.** New per-camera switch `switch.bosch_<cam>_bild_180deg_drehen` that rotates the camera image by 180° for upside-down (ceiling) mounting. Indoor-only — outdoor cameras have a fixed mounting orientation and don't get the switch. Three layers of effect, all client-side (Bosch firmware does not expose any image-rotation API):
+
+- **Lovelace card** applies a CSS `transform: rotate(180deg)` to the `<video>` and `<img>` elements. Zero CPU, zero latency, GPU-composited — the toggle is instant with no stream restart and no re-encode.
+- **Snapshot path** rotates the JPEG via PIL before serving it through `camera.async_camera_image()`, so push notifications, NAS clip uploads, and any other consumer that reads the camera entity also see the right-way-up image. ~15-30 ms per snapshot.
+- **PTZ pan inversion** — for the Gen1 360 camera, `BoschPanNumber` automatically inverts the slider sign when the rotation switch is on, so "right" on the slider stays "right" on the user's screen even when the camera is upside-down.
+
+State persists across HA restarts via `RestoreEntity`. Default OFF. Available on Gen1 360 Innenkamera and Gen2 Eyes Innenkamera II.
+
+**Card v2.11.1** ships alongside.
+
 ## v10.5.4
 
 **Stream switch unblocked when prior session has expired upstream.** When a previous live session had its underlying URL invalidated (e.g. the relay-side lifetime cap was reached while the switch was still ON), HA's `Stream.stop()` could block waiting for a stuck FFmpeg reconnect-loop to exit. Both teardown paths (`_tear_down_live_stream` shared exit, fresh-toggle stale-Stream invalidation in `_try_live_connection_inner`) now wrap the call in `asyncio.wait_for(timeout=5)` and force-detach on timeout. Without this, a single hung `stream.stop()` held the per-camera setup lock for >5 minutes and every subsequent switch-ON returned `try_live_connection: already in progress for ... — skipping`.
