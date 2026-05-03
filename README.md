@@ -52,6 +52,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
 - [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
+- [Roadmap](#roadmap) — parked features and what's under consideration
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
 - [Related Projects](#related-projects)
 - [License](#license)
@@ -1085,6 +1086,19 @@ curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
 ### Optional cloudflared improvement
 
 Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
+
+## Roadmap
+
+Features investigated or intentionally parked — listed here so the direction is visible. Not planned for active development; **open an issue if any item matters to you** and we'll pick it up based on demand.
+
+### Parked
+
+- **Motion-zone editor (read-only)** — local read access via RCP+ (`0x0c0a` + `0x0c00`) is technically possible using the per-session `cbs-…` user from `PUT /connection LOCAL`. A read-only viewer is feasible today; full write support requires capabilities not yet exposed locally.
+- **Motion-zone editor with write support** — Gen2 `/zones`, Gen1 `/motion_sensitive_areas`
+- **Rules editor** (`/v11/video_inputs/{id}/rules`) — adjust event rules from the HA UI
+- **Camera sharing** (`/v11/friends`) — manage shared access from HA
+- **Live thumbnail via local RCP+** — opcode `0x099e` is reachable, but the local XML endpoint returns `<err>0x60</err>` for the `F_DATA` reads we tried (the cloud proxy uses binary TLV on the same path). Use case is narrow anyway: the card already shows live HLS as soon as the LOCAL session is up.
+- **`low_bandwidth: true` card option** — would suppress HLS autostart, showing a ▶ overlay until tapped (mobile data saver). Earlier attempts in card v2.10.3–v2.10.5 introduced stream-startup races and were reverted. Parked because the HA Companion App handles bandwidth on its own.
 
 ## Releases
 
