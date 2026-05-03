@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Doorbell-style — auto-display the live stream on a tablet when motion fires
+# Türklingel-Style — Live-Stream automatisch auf Tablet bei Motion anzeigen
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: When someone approaches the front door, the kitchen / hallway tablet
+#     wakes up and displays the live stream for 30 s. Like a doorbell with
+#     a peephole, except hands-free.
+# DE: Wenn jemand zur Haustür kommt, wacht das Küchen-/Flur-Tablet auf und
+#     zeigt den Live-Stream für 30 s. Wie eine Türklingel mit Spion, nur
+#     hands-free.
+#
+# EN: Requires a wall-mounted Android tablet running HA Companion or Fully
+#     Kiosk Browser.
+# DE: Voraussetzung: ein wandmontiertes Android-Tablet mit HA Companion
+#     oder Fully Kiosk Browser.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Front door motion → auto-display stream on hallway tablet"
+    description: >
+      EN: Wake tablet, switch to camera dashboard, hold 30 s, return to default.
+      DE: Tablet aufwecken, auf Kamera-Dashboard wechseln, 30 s halten,
+          zurück zu Default.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<doorbell_cam>_motion
+        to: "on"
+    # EN: Throttle 30 s / DE: Drosselung 30 s
+    condition:
+      - condition: template
+        value_template: >
+          {{ (now() - this.attributes.last_triggered).total_seconds() > 30
+             if this.attributes.last_triggered else true }}
+    action:
+      - service: notify.mobile_app_hallway_tablet
+        data: { message: "command_screen_on" }
+      - service: notify.mobile_app_hallway_tablet
+        data:
+          message: "command_activity"
+          data:
+            intent_action: "android.intent.action.VIEW"
+            intent_uri: "https://your-ha.example.com/lovelace/cameras"
+      - delay: "00:00:30"
+      - service: notify.mobile_app_hallway_tablet
+        data:
+          message: "command_activity"
+          data:
+            intent_action: "android.intent.action.VIEW"
+            intent_uri: "https://your-ha.example.com/lovelace/home"
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant — Fully Kiosk Browser instead of HA Companion
+# DE: Variante — Fully Kiosk Browser statt HA Companion
+# ─────────────────────────────────────────────────────────────────────────────
+#   - service: fully_kiosk.load_url
+#     target: { device_id: <hallway_tablet_device> }
+#     data: { url: "/lovelace/cameras" }
+#   - service: fully_kiosk.screensaver_stop
+#     target: { device_id: <hallway_tablet_device> }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Bonus — only at sensible hours (no 3am tablet blast for cats)
+# DE: Bonus — nur zu sinnvollen Zeiten (kein 3-Uhr-Tablet-Blitz für Katzen)
+# ─────────────────────────────────────────────────────────────────────────────
+#   condition:
+#     - condition: time
+#       after: "07:00:00"
+#       before: "22:30:00"

@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Snapshot + push notification on every motion event
+# Snapshot + Push-Benachrichtigung bei jedem Motion-Event
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: "Doorbell-style" notification — when motion is detected, snap a still
+#     image immediately and send it to your phone with an actionable
+#     notification. Tap "View" → opens the live stream.
+# DE: "Türklingel-Style" — bei Bewegung sofort ein Standbild aufnehmen und
+#     mit Action-Button per Push aufs Handy. Tap "Ansehen" → öffnet Live-Stream.
+#
+# EN: Integration's 3-step alert system already covers SMB + Signal + clip.
+#     This is for personal phone push only, with image-in-notification.
+# DE: Das 3-Schritt-Alert-System der Integration deckt schon SMB + Signal +
+#     Clip ab. Diese Automation ist nur für persönlichen Phone-Push mit Bild.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Camera motion → snapshot + push to phone"
+    description: >
+      EN: On motion, take snapshot, save to /media/snapshots, push with
+          image attached and "View live" action.
+      DE: Bei Motion Snapshot machen, in /media/snapshots speichern, per
+          Push mit Bild und "Live ansehen"-Action.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<cam>_motion
+        to: "on"
+    # EN: Throttle to one notification per 60 s / DE: Drosselung auf 1 Push pro 60 s
+    condition:
+      - condition: template
+        value_template: >
+          {{ (now() - this.attributes.last_triggered).total_seconds() > 60
+             if this.attributes.last_triggered else true }}
+    action:
+      - variables:
+          ts: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
+          file: "/media/snapshots/<cam>_{{ ts }}.jpg"
+          public_path: "/media/local/snapshots/<cam>_{{ ts }}.jpg"
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<cam> }
+        data: { filename: "{{ file }}" }
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "📷 Motion at <cam> / Bewegung bei <cam>"
+          message: "{{ now().strftime('%H:%M:%S') }}"
+          data:
+            image: "{{ public_path }}"
+            actions:
+              - action: URI
+                title: "View live / Live ansehen"
+                uri: "/lovelace/cameras"
+              - action: "MOTION_DISMISS"
+                title: "Dismiss / Schließen"
+            tag: "<cam>_motion"   # EN: replaces previous notif / DE: ersetzt vorherige Benachr.
+            channel: "Camera alerts"
+            importance: high
+    mode: parallel
+    max: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant — only notify when away from home
+# DE: Variante — nur benachrichtigen wenn nicht zuhause
+# ─────────────────────────────────────────────────────────────────────────────
+#   condition:
+#     - condition: state
+#       entity_id: person.thomas
+#       state: not_home
+#     - condition: template
+#       value_template: >
+#         {{ (now() - this.attributes.last_triggered).total_seconds() > 60
+#            if this.attributes.last_triggered else true }}

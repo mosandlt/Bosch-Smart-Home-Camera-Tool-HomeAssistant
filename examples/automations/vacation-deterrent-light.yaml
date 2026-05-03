@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Vacation deterrent — randomized camera light during away periods
+# Urlaubs-Abschreckung — zufälliges Kamera-Licht während Abwesenheit
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: When you're on vacation, give the impression someone is around. Trigger
+#     the outdoor camera light at random intervals during evening hours.
+#     Combined with smart bulbs inside, surprisingly effective deterrent
+#     (and free — the camera light is already there).
+# DE: Im Urlaub den Eindruck erwecken, jemand sei zuhause. Die Außen-Kamera-
+#     Beleuchtung in unregelmäßigen Abständen am Abend einschalten. Kombiniert
+#     mit smarten Innenlampen erstaunlich wirksam (und kostenlos — das Licht
+#     ist eh schon da).
+# ─────────────────────────────────────────────────────────────────────────────
+
+input_boolean:
+  vacation_mode:
+    name: "Vacation mode / Urlaubs-Modus"
+    icon: mdi:beach
+
+automation:
+  - alias: "Vacation deterrent — random camera light flash"
+    description: >
+      EN: During vacation mode, randomly flash outdoor camera light between
+          19:00 and 23:30. ~7% chance per 5-min tick.
+      DE: Im Urlaubs-Modus zufällig Außen-Kameralicht zwischen 19:00 und
+          23:30 anschalten. ~7% Chance pro 5-Min-Tick.
+    trigger:
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: state
+        entity_id: input_boolean.vacation_mode
+        state: "on"
+      - condition: time
+        after: "19:00:00"
+        before: "23:30:00"
+      - condition: template
+        value_template: "{{ range(0, 100) | random < 7 }}"
+    action:
+      - service: switch.turn_on
+        target: { entity_id: switch.bosch_<outdoor_cam>_camera_light }
+      - delay:
+          # EN: 30s to 4 min — feels like "checked something briefly"
+          # DE: 30s bis 4 Min — wirkt wie "kurz nachgeschaut"
+          seconds: "{{ range(30, 240) | random }}"
+      - service: switch.turn_off
+        target: { entity_id: switch.bosch_<outdoor_cam>_camera_light }
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant — react to motion with random probability (more believable)
+# DE: Variante — auf Motion reagieren mit Zufallswahrscheinlichkeit (glaubhafter)
+# ─────────────────────────────────────────────────────────────────────────────
+#   trigger:
+#     - platform: state
+#       entity_id: binary_sensor.bosch_<outdoor_cam>_motion
+#       to: "on"
+#   condition:
+#     - condition: state
+#       entity_id: input_boolean.vacation_mode
+#       state: "on"
+#     - condition: time
+#       after: "19:00:00"
+#       before: "23:30:00"
+#     - condition: template
+#       value_template: "{{ range(0, 100) | random < 30 }}"   # ~30% reaction
+#   action:
+#     - service: switch.turn_on
+#       target: { entity_id: switch.bosch_<outdoor_cam>_camera_light }
+#     - delay:
+#         seconds: "{{ range(15, 90) | random }}"
+#     - service: switch.turn_off
+#       target: { entity_id: switch.bosch_<outdoor_cam>_camera_light }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Auto-disable on arrival / DE: Bei Heimkehr automatisch deaktivieren
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Disable vacation mode on arrival"
+#     trigger:
+#       - platform: state
+#         entity_id: person.thomas
+#         to: "home"
+#     condition:
+#       - condition: state
+#         entity_id: input_boolean.vacation_mode
+#         state: "on"
+#     action:
+#       - service: input_boolean.turn_off
+#         target: { entity_id: input_boolean.vacation_mode }

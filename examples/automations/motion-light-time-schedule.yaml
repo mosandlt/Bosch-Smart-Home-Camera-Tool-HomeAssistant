@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — time-based schedule (with sunrise / sunset support)
+# Bewegungslicht — Zeitplan-basiert (mit Sonnenauf-/-untergang)
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Predictable on/off windows. The classic "no light flares during evening
+#     dinner hours" scenario plus the more elegant "follow the sun" variant
+#     for outdoor cameras (no light reaction during daylight at all).
+# DE: Vorhersagbare An/Aus-Zeitfenster. Der Klassiker "kein Licht während des
+#     Abendessens" plus die elegantere "Sonne folgen"-Variante für Außen-
+#     kameras (tagsüber gar keine Licht-Reaktion).
+#
+# Replace <cam> with your camera slug. <cam> mit eurem Kamera-Slug ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Variant A — fixed time window / Variante A — festes Zeitfenster
+automation:
+  - alias: "Camera motion light off during dinner hours"
+    description: >
+      EN: Disable the motion-triggered light from 19:00 to 22:00 every day.
+      DE: Bewegungslicht täglich von 19:00 bis 22:00 deaktivieren.
+    trigger:
+      - platform: time
+        at: "19:00:00"
+        id: off_window
+      - platform: time
+        at: "22:00:00"
+        id: on_window
+    action:
+      - choose:
+          - conditions: [{ condition: trigger, id: off_window }]
+            sequence:
+              - service: switch.turn_off
+                target: { entity_id: switch.bosch_<cam>_licht_bei_bewegung }
+          - conditions: [{ condition: trigger, id: on_window }]
+            sequence:
+              - service: switch.turn_on
+                target: { entity_id: switch.bosch_<cam>_licht_bei_bewegung }
+    mode: single
+
+# Variant B — follow the sun / Variante B — der Sonne folgen
+  - alias: "Camera motion light follows daylight"
+    description: >
+      EN: No spotlight needed during daylight. Light reaction only between
+          sunset and sunrise — no more "why did the camera flash at noon?".
+      DE: Tagsüber kein Spotlight nötig. Licht-Reaktion nur zwischen Sonnen-
+          untergang und Sonnenaufgang — kein "warum hat die Kamera mittags
+          geblitzt?" mehr.
+    trigger:
+      - platform: sun
+        event: sunset
+        offset: "-00:15:00"   # EN: 15 min before sunset / DE: 15 Min vor Sonnenuntergang
+        id: enable
+      - platform: sun
+        event: sunrise
+        offset: "+00:15:00"   # EN: 15 min after sunrise / DE: 15 Min nach Sonnenaufgang
+        id: disable
+    action:
+      - choose:
+          - conditions: [{ condition: trigger, id: enable }]
+            sequence:
+              - service: switch.turn_on
+                target: { entity_id: switch.bosch_<cam>_licht_bei_bewegung }
+          - conditions: [{ condition: trigger, id: disable }]
+            sequence:
+              - service: switch.turn_off
+                target: { entity_id: switch.bosch_<cam>_licht_bei_bewegung }
+    mode: single
+
+# EN: Variant C — combine schedule with override switch (input_boolean) so
+#     you can mute it temporarily without disabling the automation:
+# DE: Variante C — Zeitplan mit Override-Schalter (input_boolean) kombinieren,
+#     damit ihr es temporär stummschalten könnt ohne Automation zu deaktivieren:
+#
+#   condition:
+#     - condition: state
+#       entity_id: input_boolean.porch_dinner_mode
+#       state: "off"   # EN: schedule only if dinner mode OFF / DE: Zeitplan nur bei Dinner-Mode AUS

@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — disable when presence is detected on the porch
+# Bewegungslicht — deaktivieren wenn Anwesenheit auf der Terrasse erkannt
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: As long as someone is detected on the porch / patio / driveway, don't
+#     trigger the camera light. As soon as the area is empty, the light
+#     reaction comes back automatically. No door sensor needed — pure presence.
+#
+# DE: Solange jemand auf der Terrasse / Einfahrt / im Garten erkannt wird,
+#     soll das Kamera-Licht nicht losgehen. Sobald der Bereich leer ist,
+#     reagiert das Licht wieder automatisch. Kein Türsensor nötig — reine
+#     Anwesenheitserkennung.
+#
+# EN: Works with any presence/occupancy sensor: mmWave (Aqara FP1/FP2,
+#     Tuya, EverSensor), PIR (Aqara, Hue, Sonoff, Bosch SHC, FRITZ!DECT 350),
+#     BLE proxy (ESPresense, Bermuda, room-assistant), phone-based (HA
+#     Companion BLE / Wi-Fi), or combined via a template binary_sensor.
+# DE: Funktioniert mit jedem Anwesenheits-/Bewegungs-Sensor: mmWave (Aqara
+#     FP1/FP2, Tuya, EverSensor), PIR (Aqara, Hue, Sonoff, Bosch SHC,
+#     FRITZ!DECT 350), BLE-Proxy (ESPresense, Bermuda, room-assistant),
+#     Phone-basiert (HA Companion BLE/WiFi), oder kombiniert via Template.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Porch presence → camera motion light off"
+    description: >
+      EN: Disable the Bosch motion-triggered light while presence is detected
+          on the porch. Re-enable after 5 min empty.
+      DE: Bewegungslicht deaktivieren solange Anwesenheit auf der Terrasse
+          erkannt wird. Nach 5 Min Leerstand wieder aktivieren.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.porch_presence
+        to: "on"
+        id: occupied
+      - platform: state
+        entity_id: binary_sensor.porch_presence
+        to: "off"
+        for: "00:05:00"   # EN: dropout grace / DE: Nachlaufzeit (mmWave braucht oft länger)
+        id: empty
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: occupied
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+          - conditions:
+              - condition: trigger
+                id: empty
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Aggregating multiple presence signals via a template binary_sensor
+# DE: Mehrere Anwesenheits-Signale per Template-binary_sensor zusammenführen
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: If you have several signals (mmWave + door + person zone), fold them
+#     into one virtual sensor and trigger on that.
+# DE: Bei mehreren Signalen (mmWave + Tür + Person-Zone) zu einem virtuellen
+#     Sensor zusammenfassen und darauf triggern.
+#
+# template:
+#   - binary_sensor:
+#       - name: "Porch occupied"
+#         device_class: occupancy
+#         state: >
+#           {{ is_state('binary_sensor.porch_mmwave', 'on')
+#              or is_state('binary_sensor.porch_door', 'on')
+#              or is_state('person.you', 'porch_zone') }}
+#         delay_off: "00:02:00"   # EN: grace baked in / DE: Karenzzeit eingebaut
+
+# EN: Gen1 cameras — same trigger, but action becomes "instant-off pattern
+#     enabled while presence detected" — see motion-light-gen1-instant-off.yaml.
+# DE: Gen1 — gleicher Trigger, Action wird "Instant-Off-Pattern aktiv solange
+#     Anwesenheit erkannt" — siehe motion-light-gen1-instant-off.yaml.

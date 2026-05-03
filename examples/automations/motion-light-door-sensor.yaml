@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion light — disable while a door / window is open
+# Bewegungslicht — deaktivieren solange Tür / Fenster offen ist
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: As soon as you open the porch door (you're going outside), the camera
+#     should stop reacting with its light. When the door closes again, the
+#     light reaction comes back automatically. No manual toggle, no schedule —
+#     the door tells the camera "people are out here, stop bothering us".
+#
+# DE: Sobald die Terrassentür aufgeht (ihr geht raus), soll die Kamera nicht
+#     mehr mit Licht reagieren. Wenn die Tür wieder zugeht, geht das Licht-
+#     verhalten automatisch zurück. Kein Schalter, kein Zeitplan — die Tür
+#     sagt der Kamera "wir sind draußen, lass uns in Ruhe".
+#
+# EN: Works with any door / window / gate sensor (Aqara, Hue, Shelly,
+#     Bosch SHC contact, FRITZ!DECT, Sonoff, ZHA, Z-Wave, …).
+# DE: Funktioniert mit jedem Tür-/Fenster-/Tor-Sensor (Aqara, Hue, Shelly,
+#     Bosch SHC Kontakt, FRITZ!DECT, Sonoff, ZHA, Z-Wave, …).
+#
+# Replace <cam> + binary_sensor.porch_door with your entities.
+# <cam> + binary_sensor.porch_door durch eure Entities ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Porch door open → camera motion light off"
+    description: >
+      EN: When the porch door opens, disable the motion-triggered camera
+          light. When it closes (and stays closed for 2 minutes), re-enable.
+      DE: Beim Öffnen der Terrassentür wird das bewegungsgetriggerte
+          Kamera-Licht deaktiviert. Nach 2 Minuten geschlossener Tür wieder an.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.porch_door
+        to: "on"
+        id: door_open
+      - platform: state
+        entity_id: binary_sensor.porch_door
+        to: "off"
+        for: "00:02:00"   # EN: grace period — avoid flicker / DE: Karenzzeit gegen Flackern
+        id: door_closed
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: door_open
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+          - conditions:
+              - condition: trigger
+                id: door_closed
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.bosch_<cam>_licht_bei_bewegung
+    mode: single
+
+# EN: Bonus — combine with a presence helper to also catch the case where you
+#     enter the porch via a side gate (no door sensor). See motion-light-presence.yaml.
+# DE: Bonus — mit Presence-Helper kombinieren, um auch den Fall abzudecken
+#     wenn ihr über ein Seitentor reinkommt. Siehe motion-light-presence.yaml.
+
+# EN: Gen1 cameras — replace the switch entity with the instant-off pattern
+#     from motion-light-gen1-instant-off.yaml, gated by a binary_sensor:
+# DE: Gen1-Kameras — Switch-Entity durch Instant-Off-Pattern ersetzen
+#     (motion-light-gen1-instant-off.yaml), getriggert über binary_sensor:
+#
+#   binary_sensor:
+#     - platform: template
+#       sensors:
+#         porch_in_use:
+#           value_template: >
+#             {{ is_state('binary_sensor.porch_door', 'on') }}

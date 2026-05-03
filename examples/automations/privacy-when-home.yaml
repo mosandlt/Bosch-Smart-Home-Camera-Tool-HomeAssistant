@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Privacy mode — automatic on/off based on who's home
+# Privacy-Mode — automatisch je nachdem wer zuhause ist
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Indoor cameras stop recording the moment anyone in the household is
+#     home, and start recording again the moment everyone has left. The
+#     GDPR-friendly "no recording while we're inside" pattern.
+# DE: Innenkameras hören sofort auf zu filmen sobald jemand aus dem Haushalt
+#     zuhause ist, und fangen wieder an sobald alle weg sind. Das DSGVO-
+#     freundliche "wir filmen uns nicht selbst"-Muster.
+#
+# EN: Privacy mode (unlike motion detection) is *persistent* — once set, the
+#     camera respects it across reboots and cloud reconnections.
+# DE: Privacy-Mode (im Gegensatz zur Bewegungserkennung) ist *persistent* —
+#     einmal gesetzt, bleibt es über Reboots und Cloud-Reconnects bestehen.
+#
+# Replace <indoor_cam> + person.* with your entities.
+# <indoor_cam> + person.* mit euren Entities ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Indoor camera privacy — follows who's home"
+    description: >
+      EN: Privacy ON when any member is home; OFF when home empty.
+      DE: Privacy AN wenn jemand zuhause; AUS wenn leer.
+    trigger:
+      - platform: state
+        entity_id:
+          - person.thomas
+          - person.partner
+          - person.kid_a
+        to: ~          # EN: any state change / DE: jede Statusänderung
+    action:
+      - variables:
+          anyone_home: >
+            {{ expand('person.thomas','person.partner','person.kid_a')
+               | selectattr('state','eq','home') | list | count > 0 }}
+      - choose:
+          - conditions: "{{ anyone_home }}"
+            sequence:
+              - service: switch.turn_on
+                target: { entity_id: switch.bosch_<indoor_cam>_privacy_mode }
+          - conditions: "{{ not anyone_home }}"
+            sequence:
+              - service: switch.turn_off
+                target: { entity_id: switch.bosch_<indoor_cam>_privacy_mode }
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant B — guest mode override (privacy stays ON even when no one home)
+# DE: Variante B — Gast-Mode (Privacy bleibt AN auch wenn niemand da ist)
+# ─────────────────────────────────────────────────────────────────────────────
+# input_boolean:
+#   guest_mode:
+#     name: "Guest mode / Gast-Modus"
+#     icon: mdi:account-multiple
+#
+# Then add to action condition:
+# Dann zur Action-Condition hinzufügen:
+#   - conditions: "{{ anyone_home or is_state('input_boolean.guest_mode','on') }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Notification — confirm camera state on arrival
+# DE: Benachrichtigung — Kamera-Status bei Ankunft bestätigen
+# ─────────────────────────────────────────────────────────────────────────────
+#   - alias: "Privacy mode confirmation"
+#     trigger:
+#       - platform: state
+#         entity_id: switch.bosch_<indoor_cam>_privacy_mode
+#         to: "on"
+#     action:
+#       - service: notify.mobile_app_<your_phone>
+#         data:
+#           message: "🛡️ Indoor camera privacy ON — welcome home / Willkommen zuhause"

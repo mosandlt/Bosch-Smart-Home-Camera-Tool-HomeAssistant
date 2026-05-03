@@ -645,6 +645,19 @@ data:
 - [`examples/automation_signal_alert.yaml`](examples/automation_signal_alert.yaml) — Signal text message
 - [`blueprints/bosch_camera_signal_alert.yaml`](blueprints/bosch_camera_signal_alert.yaml) — configurable blueprint
 
+### Example Library — `examples/automations/`
+
+A growing collection of bilingual (EN + DE) automation snippets that cover common Bosch-camera scenarios. Every file is self-contained and explains its placeholders inline, so you can copy → adapt entity IDs → drop into your `automations.yaml`.
+
+| Category | What's in there |
+|---|---|
+| **Motion-light control** (silence the porch spotlight when you don't want it flaring) | manual "dinner mode" helper · door / window sensor trigger · presence sensor (mmWave / PIR / BLE) · time + sunset-driven schedule · Gen1 instant-off fallback · Gen1 hardware power-cut |
+| **Privacy & away mode** | indoor privacy auto-toggle by who's home · arm/disarm all cameras when the house empties out |
+| **Smart notifications** | snapshot + push with image · weather-aware (skip during storms) · doorbell-style auto-display on a wall tablet · sleep mode (quiet at night, but real intruder pattern still wakes you) · vacation deterrent with random light flashes |
+| **AI vision** | classify motion via Gemini / GPT-4o / Claude / local Ollama → push only for person/vehicle/package, ignore pets · package-delivery detection · daily AI summary of camera events · TTS visitor greeting |
+
+→ **[Browse the full example library](examples/automations/README.md)** — index, generation matrix (Gen1 vs Gen2), placeholder reference, and combination patterns.
+
 ---
 
 ## Lovelace Cards

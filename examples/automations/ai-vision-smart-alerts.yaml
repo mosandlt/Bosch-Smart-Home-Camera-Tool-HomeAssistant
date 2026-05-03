@@ -1,0 +1,213 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AI vision — smart alerts that actually understand the scene
+# AI Vision — intelligente Alerts die die Szene verstehen
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Plain motion alerts get noisy. Combine the camera with a vision LLM
+#     (Google Gemini, OpenAI GPT-4o, local Ollama+LLaVA, Anthropic Claude
+#     via REST) to get *meaningful* push notifications:
+#       "A delivery person just dropped a package at the door"
+#       "Someone is loitering near the garage"
+#       "Cat in the flowerbed again 🙄"
+#     instead of "Motion at front door".
+# DE: Stumpfe Motion-Alerts nerven. Kamera mit einem Vision-LLM kombinieren
+#     (Google Gemini, OpenAI GPT-4o, lokal Ollama+LLaVA, Anthropic Claude
+#     per REST) für *sinnvolle* Push-Benachrichtigungen:
+#       "Ein Paketbote hat gerade ein Paket abgestellt"
+#       "Jemand lungert vor der Garage rum"
+#       "Schon wieder die Katze im Blumenbeet 🙄"
+#     statt "Bewegung an Haustür".
+#
+# EN: Best-paired with the LLM Vision integration:
+# DE: Am einfachsten mit der LLM Vision Integration:
+#     https://github.com/valentinfrlch/ha-llmvision
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Use case 1 — Smart classified push (skip pets, classify the rest)
+# Use case 1 — Klassifizierter Push (Tiere überspringen, Rest beschreiben)
+# ─────────────────────────────────────────────────────────────────────────────
+automation:
+  - alias: "AI — classify motion and push only when interesting"
+    description: >
+      EN: On motion, snapshot the camera, run AI classification. Push only
+          if the scene contains a person, vehicle, or package. Skip cats,
+          dogs, leaves, shadows.
+      DE: Bei Motion Snapshot machen, AI klassifizieren. Nur pushen wenn
+          Person, Fahrzeug oder Paket im Bild. Katzen, Hunde, Blätter,
+          Schatten ignorieren.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<cam>_motion
+        to: "on"
+    action:
+      - variables:
+          ts: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
+          file: "/media/snapshots/<cam>_{{ ts }}.jpg"
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<cam> }
+        data: { filename: "{{ file }}" }
+      # EN: Ask the LLM what's in the picture / DE: Das LLM fragen was im Bild ist
+      - service: llmvision.image_analyzer
+        data:
+          provider: "your_provider_id"   # EN: as configured in LLM Vision / DE: aus LLM Vision Config
+          model: "gemini-2.0-flash"      # EN: cheap+fast / DE: günstig+schnell
+          message: >
+            Look at this porch camera image. Answer in JSON only:
+            {"category": "person|vehicle|package|pet|other|nothing",
+             "description": "<one sentence, English>",
+             "beschreibung": "<ein Satz, Deutsch>",
+             "urgent": true|false}
+          image_file: "{{ file }}"
+          max_tokens: 120
+          temperature: 0.1
+        response_variable: ai
+      - variables:
+          parsed: "{{ ai.response_text | from_json }}"
+      - choose:
+          # EN: Interesting → push with description / DE: Interessant → Push mit Beschreibung
+          - conditions: "{{ parsed.category in ['person','vehicle','package'] }}"
+            sequence:
+              - service: notify.mobile_app_<your_phone>
+                data:
+                  title: >
+                    {% if parsed.urgent %}⚠️{% else %}📷{% endif %}
+                    {{ parsed.category | capitalize }} at <cam>
+                  message: "{{ parsed.beschreibung }} — {{ parsed.description }}"
+                  data:
+                    image: "/media/local/snapshots/<cam>_{{ ts }}.jpg"
+                    importance: "{{ 'high' if parsed.urgent else 'default' }}"
+        # EN: pet/other/nothing → silent log only / DE: pet/other/nothing → nur log
+        default:
+          - service: logbook.log
+            data:
+              name: "AI suppressed motion / AI hat Motion unterdrückt"
+              message: "{{ parsed.category }} — {{ parsed.beschreibung }}"
+    mode: parallel
+    max: 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Use case 2 — Package delivery detection
+# Use case 2 — Paket-Lieferung erkennen
+# ─────────────────────────────────────────────────────────────────────────────
+  - alias: "AI — package delivery detection"
+    description: >
+      EN: Detect when a package is left at the door (motion + vision +
+          stays still afterward). Sends a high-priority push with photo.
+      DE: Erkennt wenn ein Paket an der Tür abgelegt wird (Motion + Vision +
+          danach Ruhe). Sendet High-Priority-Push mit Foto.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<doorbell_cam>_motion
+        to: "off"
+        for: "00:00:30"   # EN: 30 s of stillness after / DE: 30 s Ruhe danach
+    action:
+      - variables:
+          ts: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
+          file: "/media/snapshots/door_{{ ts }}.jpg"
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<doorbell_cam> }
+        data: { filename: "{{ file }}" }
+      - service: llmvision.image_analyzer
+        data:
+          provider: "your_provider_id"
+          model: "gemini-2.0-flash"
+          message: >
+            Is there a package, parcel, or delivery box visible at the
+            doorstep that wasn't there before? Reply only with YES or NO.
+          image_file: "{{ file }}"
+          max_tokens: 5
+        response_variable: ai
+      - condition: template
+        value_template: "{{ 'YES' in ai.response_text | upper }}"
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "📦 Package delivered / Paket abgestellt"
+          message: "{{ now().strftime('%H:%M') }}"
+          data:
+            image: "/media/local/snapshots/door_{{ ts }}.jpg"
+            importance: high
+            tag: "package_delivery"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Use case 3 — Daily AI summary of camera activity
+# Use case 3 — Tägliche AI-Zusammenfassung der Kamera-Aktivität
+# ─────────────────────────────────────────────────────────────────────────────
+  - alias: "AI — evening summary of today's camera events"
+    description: >
+      EN: Every evening at 21:00, ask the AI to summarize today's camera
+          events into a short paragraph and push it as a daily digest.
+      DE: Jeden Abend um 21:00 die AI bitten, die heutigen Kamera-Events
+          in einem kurzen Absatz zusammenzufassen und als Daily-Digest pushen.
+    trigger:
+      - platform: time
+        at: "21:00:00"
+    action:
+      - variables:
+          events_today: "{{ states('sensor.bosch_<cam>_events_today') }}"
+      - service: llmvision.text_query    # EN: text-only / DE: nur Text
+        data:
+          provider: "your_provider_id"
+          model: "gemini-2.0-flash"
+          message: >
+            Today there were {{ events_today }} motion events at the porch
+            camera. Write a 2-sentence friendly evening summary, in German.
+            Be casual, like a doorman's report.
+          max_tokens: 120
+        response_variable: digest
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "🌙 Tageszusammenfassung / Daily summary"
+          message: "{{ digest.response_text }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Use case 4 — Visitor greeting via TTS
+# Use case 4 — Besucher-Begrüßung per TTS
+# ─────────────────────────────────────────────────────────────────────────────
+  - alias: "AI — recognize visitor and greet via outdoor speaker"
+    description: >
+      EN: When motion at the door is identified by AI as a person (not a
+          delivery), play a friendly greeting through an outdoor speaker.
+          Uses TTS — service depends on your speaker setup.
+      DE: Wenn AI an der Tür eine Person erkennt (kein Paketbote), eine
+          freundliche Begrüßung über Außenlautsprecher abspielen.
+          Verwendet TTS — Service hängt vom Lautsprecher-Setup ab.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<doorbell_cam>_motion
+        to: "on"
+    condition:
+      - condition: time
+        after: "08:00:00"
+        before: "21:00:00"
+    action:
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<doorbell_cam> }
+        data: { filename: "/media/snapshots/visitor.jpg" }
+      - service: llmvision.image_analyzer
+        data:
+          provider: "your_provider_id"
+          model: "gemini-2.0-flash"
+          message: >
+            Is there a person standing at the door who looks like a
+            visitor (not in a delivery uniform)? Reply YES or NO only.
+          image_file: "/media/snapshots/visitor.jpg"
+          max_tokens: 5
+        response_variable: ai
+      - condition: template
+        value_template: "{{ 'YES' in ai.response_text | upper }}"
+      - service: tts.cloud_say   # EN: or your TTS provider / DE: oder euer TTS
+        data:
+          entity_id: media_player.outdoor_speaker
+          message: "Hallo! Es ist gerade niemand da, wir sind aber gleich für Sie da."
+          language: "de-DE"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Cost notes
+# DE: Kosten-Hinweis
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Gemini 2.0 Flash is currently the cheapest cloud option (~$0.0001
+#     per image at this resolution). 100 motion events/day = ~$3/year.
+#     Local Ollama+LLaVA is free but needs a GPU for sub-second response.
+# DE: Gemini 2.0 Flash ist aktuell die günstigste Cloud-Option (~$0.0001
+#     pro Bild bei dieser Auflösung). 100 Motion/Tag = ~3$/Jahr.
+#     Lokales Ollama+LLaVA ist kostenlos, braucht aber GPU für <1 s Antwort.
