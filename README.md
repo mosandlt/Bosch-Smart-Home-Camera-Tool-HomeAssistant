@@ -278,6 +278,7 @@ In **AUTO** mode the integration tries LOCAL first and falls back to the cloud r
 
 ```mermaid
 stateDiagram-v2
+    direction RL
     [*] --> Idle
     Idle --> LOCAL: switch ON\n(auto + LAN ok)
     Idle --> REMOTE: switch ON\n(mode=remote, or\nauto + LAN down)
