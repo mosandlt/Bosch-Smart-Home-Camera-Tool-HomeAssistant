@@ -35,6 +35,7 @@ Every file contains both English (EN:) and German (DE:) explanations side by sid
 | [`doorbell-stream-on-tablet.yaml`](doorbell-stream-on-tablet.yaml) | EN: Wall-mounted tablet auto-displays the live stream on motion. <br> DE: Wandtablet zeigt den Live-Stream automatisch bei Bewegung. |
 | [`sleep-mode-mute-cameras.yaml`](sleep-mode-mute-cameras.yaml) | EN: Quiet at night, but real intruder pattern (3+ events in 5 min) wakes you. <br> DE: Nachts ruhig, aber echtes Einbruchsmuster (3+ Events in 5 Min) weckt euch. |
 | [`vacation-deterrent-light.yaml`](vacation-deterrent-light.yaml) | EN: Random camera light flashes during vacation — looks lived-in. <br> DE: Zufällige Lichtblitze im Urlaub — wirkt bewohnt. |
+| [`garage-vehicle-coordination.yaml`](garage-vehicle-coordination.yaml) | EN: Garage door + driveway camera = "vehicle arriving / leaving" events, plus optional AI-driven vehicle ID (our car / delivery van / unknown). <br> DE: Garagentor + Einfahrt-Kamera = "Fahrzeug kommt/fährt"-Events, plus optional AI-Erkennung welches Fahrzeug. |
 
 ### AI & vision / AI & Vision
 

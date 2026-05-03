@@ -1,0 +1,133 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Garage + camera coordination — vehicle arriving / leaving
+# Garage + Kamera Koordination — Fahrzeug kommt / fährt
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Combine the driveway / garage camera with the garage-door sensor.
+#     Gives you "vehicle arriving" and "vehicle leaving" events without any
+#     extra hardware. Optionally use AI vision to identify *which* vehicle
+#     and trigger personal automations (parking light on, garage light timer,
+#     "welcome home" announcement).
+# DE: Einfahrt-/Garagenkamera mit dem Garagen-Sensor kombinieren.
+#     Liefert "Fahrzeug kommt" und "Fahrzeug fährt"-Events ohne zusätzliche
+#     Hardware. Optional mit AI-Vision *welches* Fahrzeug erkennen und
+#     persönliche Automationen (Parkleuchte an, Garagenlicht-Timer,
+#     "Willkommen"-Ansage).
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  # ───── Vehicle arriving / Fahrzeug kommt ────────────────────────────────
+  - alias: "Vehicle arriving — door opens after motion at driveway"
+    description: >
+      EN: Camera sees motion → 60 s window → garage door opens → vehicle arriving.
+      DE: Kamera sieht Bewegung → 60 s Fenster → Garagentor geht auf → Fahrzeug kommt.
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: "closed"
+        to: "open"
+    condition:
+      - condition: template
+        value_template: >
+          {% set last_motion = states('sensor.bosch_<driveway_cam>_last_motion_seconds_ago') | int(99999) %}
+          {{ last_motion < 60 }}
+    action:
+      - service: switch.turn_on
+        target: { entity_id: light.garage }
+      - service: light.turn_on
+        target: { entity_id: light.parking_spot }
+        data:
+          brightness_pct: 100
+          transition: 1
+      # EN: Snapshot for the day's record / DE: Snapshot fürs Tagesprotokoll
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<driveway_cam> }
+        data: { filename: "/media/snapshots/arrivals/{{ now().strftime('%Y%m%d_%H%M%S') }}.jpg" }
+      # EN: Auto-off after 5 min / DE: Nach 5 Min automatisch aus
+      - delay: "00:05:00"
+      - service: light.turn_off
+        target: { entity_id: light.parking_spot }
+
+  # ───── Vehicle leaving / Fahrzeug fährt ─────────────────────────────────
+  - alias: "Vehicle leaving — garage opens, no recent motion"
+    description: >
+      EN: Garage door opens with NO recent driveway motion → leaving (from inside).
+      DE: Garagentor öffnet OHNE kürzliche Einfahrts-Bewegung → fährt raus.
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: "closed"
+        to: "open"
+    condition:
+      - condition: template
+        value_template: >
+          {% set last_motion = states('sensor.bosch_<driveway_cam>_last_motion_seconds_ago') | int(99999) %}
+          {{ last_motion > 60 }}
+    action:
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "🚗 Vehicle leaving / Fahrzeug fährt"
+          message: "{{ now().strftime('%H:%M') }}"
+      # EN: Optional — start tracking departure for a "home distance" sensor
+      # DE: Optional — Abfahrt für "Heim-Distanz"-Sensor tracken
+
+  # ───── AI — identify which vehicle / Welches Fahrzeug erkennen ──────────
+  - alias: "Vehicle identified by AI vision"
+    description: >
+      EN: AI checks the snapshot — if our car, run home arrival routine;
+          if delivery van, log; if unknown, alert.
+      DE: AI prüft Snapshot — eigenes Auto → Heim-Routine, Lieferwagen
+          → loggen, unbekannt → Alert.
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.bosch_<driveway_cam>_motion
+        to: "on"
+    action:
+      - service: camera.snapshot
+        target: { entity_id: camera.bosch_<driveway_cam> }
+        data: { filename: "/media/snapshots/driveway_latest.jpg" }
+      - service: llmvision.image_analyzer
+        data:
+          provider: "your_provider_id"
+          model: "gemini-2.0-flash"
+          message: >
+            What is in this driveway image? Reply JSON only:
+            {"type": "our_car|delivery_van|unknown_car|person|nothing",
+             "color": "<color or null>",
+             "confidence": "high|medium|low"}
+            Our car is a [BRAND MODEL COLOR] — only mark "our_car" if this matches.
+          image_file: "/media/snapshots/driveway_latest.jpg"
+          max_tokens: 80
+        response_variable: ai
+      - variables:
+          parsed: "{{ ai.response_text | from_json }}"
+      - choose:
+          - conditions: "{{ parsed.type == 'our_car' }}"
+            sequence:
+              - service: scene.turn_on
+                target: { entity_id: scene.welcome_home }
+          - conditions: "{{ parsed.type == 'delivery_van' }}"
+            sequence:
+              - service: logbook.log
+                data:
+                  name: "Delivery vehicle / Lieferfahrzeug"
+                  message: "{{ parsed.color }} delivery van detected"
+          - conditions: "{{ parsed.type == 'unknown_car' }}"
+            sequence:
+              - service: notify.mobile_app_<your_phone>
+                data:
+                  title: "🚙 Unknown vehicle in driveway / Unbekanntes Fahrzeug"
+                  message: "{{ parsed.color }} car ({{ parsed.confidence }} confidence)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Note — sensor.bosch_<cam>_last_motion_seconds_ago is a derived sensor
+#     created via template_sensor (since it isn't built into the integration):
+# DE: Hinweis — sensor.bosch_<cam>_last_motion_seconds_ago ist ein abgeleiteter
+#     Sensor via template_sensor (ist nicht eingebaut):
+#
+# template:
+#   - sensor:
+#       - name: "Driveway camera last motion seconds ago"
+#         state: >
+#           {% set last = state_attr('binary_sensor.bosch_<driveway_cam>_motion','last_changed') %}
+#           {{ (now() - last).total_seconds() | int if last else 99999 }}
+#         unit_of_measurement: "s"
