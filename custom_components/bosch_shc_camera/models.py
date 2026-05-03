@@ -47,7 +47,16 @@ class CameraModelConfig:
                                   # Bosch app uses ~1s. Outdoor needs more aggressive keepalive.
 
     # ── Fallback / error recovery ────────────────────────────────────────
-    max_stream_errors: int = 3   # After this many consecutive FFmpeg errors, fall back to REMOTE
+    # Consecutive FFmpeg errors before AUTO mode falls back to REMOTE.
+    # Bumped from a flat 3 to per-model values in v10.5.4: with the active-
+    # promotion + counter-decay self-heal in place, false fallbacks recover
+    # automatically, so the gradual-counter path can be more tolerant before
+    # giving up on LOCAL. Indoor cameras are stable on a wired-equivalent
+    # WLAN and rarely produce real bursts; outdoor cameras see real WLAN
+    # flakiness + slower encoder init and benefit from a higher tolerance.
+    # The watchdog's hard 120 s "no healthy HLS output" path is unaffected
+    # — it still forces fallback regardless of this counter.
+    max_stream_errors: int = 5
     min_wifi_for_local: int = 40  # Minimum WiFi signal % to attempt LOCAL (below → use REMOTE)
 
     # ── Snapshots ────────────────────────────────────────────────────────
@@ -99,6 +108,7 @@ MODELS: dict[str, CameraModelConfig] = {
         max_session_duration=3600,
         heartbeat_interval=10,
         snapshot_warmup=5,
+        max_stream_errors=10,  # outdoor: real WLAN flap + slower encoder
     ),
 }
 
@@ -139,6 +149,7 @@ MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     max_session_duration=3600,
     heartbeat_interval=3600,
     snapshot_warmup=5,
+    max_stream_errors=10,  # outdoor: real WLAN flap + slower encoder
 )
 MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
 

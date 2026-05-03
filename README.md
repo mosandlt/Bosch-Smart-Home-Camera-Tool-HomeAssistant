@@ -272,6 +272,37 @@ graph LR
 
 Since **v10.3.24** the same Python TLS proxy carries both LOCAL and REMOTE — FFmpeg and go2rtc always connect to `rtsp://127.0.0.1:N`, the proxy decides whether to terminate TLS to the camera (LOCAL) or to the Bosch cloud proxy (REMOTE). Symmetric path means there's no scheme-switching trick (`rtspx://` etc.) on the consumer side, and the cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` is handled in one place.
 
+### Stream connection state machine
+
+In **AUTO** mode the integration tries LOCAL first and falls back to the cloud relay only when LAN attempts fail. Since **v10.5.4** the fallback self-heals — once LAN reachability returns, the live stream is migrated back to LOCAL via `Stream.update_source()` without waiting for the user to re-toggle. Both LOCAL and REMOTE sessions are kept inside their respective lifetime bounds by background watchdogs (LOCAL is renewed before relay-side rotation, REMOTE is torn down cleanly ~60 s before the relay's `maxSessionDuration` cap so the consumer never sees a hard reset on the wire).
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Idle
+
+    state "Cloud streaming" as Cloud {
+        REMOTE
+        REMOTE_fallback
+    }
+
+    Idle --> LOCAL: ON · auto + LAN ok
+    Idle --> REMOTE: ON · mode = remote
+    Idle --> REMOTE_fallback: ON · auto + LAN down
+
+    LOCAL --> REMOTE_fallback: 5 (indoor) / 10 (outdoor)\nconsecutive stream errors
+    REMOTE_fallback --> LOCAL: LAN ok · active promotion
+
+    LOCAL --> Idle: OFF
+    Cloud --> Idle: OFF · or lifetime watchdog
+
+    note right of REMOTE_fallback
+        Error counter time-decays automatically:
+        5 min if LAN reachable, 30 min otherwise.
+        Cloud-side errors do not increment the counter.
+    end note
+```
+
 ### REMOTE / Cloud differences
 
 * **`/connection {type:"REMOTE"}`** returns `rtsps://proxy-NN.live.cbs.boschsecurity.com:42090/<hash>` — the Bosch cloud proxy serves the camera over the public internet.
@@ -1057,8 +1088,8 @@ Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regula
 
 ## Releases
 
-Latest stable: **v10.5.3** — see the GitHub release page for full notes:
-[**v10.5.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.3)
+Latest stable: **v10.5.4** — see the GitHub release page for full notes:
+[**v10.5.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.5.4)
 
 | | |
 |---|---|
