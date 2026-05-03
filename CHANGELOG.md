@@ -7,6 +7,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.6.1
+
+**Branding refresh.** The integration's icon files (`brand/icon.png`, `icon@2x.png`, `dark_icon.png`, `dark_icon@2x.png`) now use the official Bosch Smart Home brand mark — same icon HA Core's bundled `bosch_shc` integration uses (sourced from the [Home Assistant Brands](https://github.com/home-assistant/brands/tree/master/core_integrations/bosch_shc) repository, CC BY 4.0). Replaces the previous custom red camera icon for visual consistency with the rest of the Bosch Smart Home ecosystem in HA. Pure asset swap — no code change.
+
 ## v10.6.0
 
 **Image rotation 180° for ceiling-mounted indoor cameras.** New per-camera switch `switch.bosch_<cam>_bild_180deg_drehen` that rotates the camera image by 180° for upside-down (ceiling) mounting. Indoor-only — outdoor cameras have a fixed mounting orientation and don't get the switch. Three layers of effect, all client-side (Bosch firmware does not expose any image-rotation API):
