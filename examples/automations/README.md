@@ -18,6 +18,7 @@ Every file contains both English (EN:) and German (DE:) explanations side by sid
 | [`motion-light-time-schedule.yaml`](motion-light-time-schedule.yaml) | EN: Fixed time window OR sunset/sunrise-driven. <br> DE: Festes Zeitfenster ODER Sonnenuntergangs-/Sonnenaufgangs-getrieben. | Gen2 |
 | [`motion-light-gen1-instant-off.yaml`](motion-light-gen1-instant-off.yaml) | EN: Gen1 fallback — react to motion event, instantly send light=off. <br> DE: Gen1-Fallback — auf Motion reagieren, sofort light=off senden. | **Gen1 only** |
 | [`motion-light-gen1-power-cycle.yaml`](motion-light-gen1-power-cycle.yaml) | EN: Gen1 hardware cut — power the camera off via a smart plug. <br> DE: Gen1 Hardware-Trennung — Kamera per Smart-Plug abschalten. | **Gen1 only** |
+| [`door-privacy-light-production.yaml`](door-privacy-light-production.yaml) | EN: **Production-grade** — door/garage opens → privacy + (if dark) light. Close → staged cleanup with day/night-aware delays, defensive re-checks, HA-restart recovery, `mode: restart`. <br> DE: **Produktions-tauglich** — Tür/Garage auf → Privacy + (wenn dunkel) Licht. Zu → gestufter Cleanup mit Tag/Nacht-Verzögerung, defensiven Re-Checks, HA-Restart-Recovery, `mode: restart`. | Both / beide |
 
 ### Privacy & away mode / Privacy & Abwesenheit
 
@@ -25,6 +26,7 @@ Every file contains both English (EN:) and German (DE:) explanations side by sid
 |---|---|
 | [`privacy-when-home.yaml`](privacy-when-home.yaml) | EN: Indoor cameras automatically privacy-on when anyone is home. <br> DE: Innenkameras automatisch auf Privacy wenn jemand zuhause ist. |
 | [`away-mode-arm-cameras.yaml`](away-mode-arm-cameras.yaml) | EN: Arm all cameras when last person leaves; disarm when first returns. <br> DE: Alle Kameras scharfstellen wenn der Letzte geht; entschärfen wenn jemand zurück. |
+| [`person-leaves-precise-cleanup.yaml`](person-leaves-precise-cleanup.yaml) | EN: Single person leaves → turn off only the lights/cameras THEY had on (templated `select('is_state','on')` filter — no log spam, no no-op writes). <br> DE: Einzelperson geht → nur ihre eingeschalteten Lichter/Kameras aus (`select('is_state','on')`-Filter — kein Log-Spam, keine No-Op-Writes). |
 
 ### Notifications & integrations / Benachrichtigungen & Integrationen
 
@@ -36,6 +38,7 @@ Every file contains both English (EN:) and German (DE:) explanations side by sid
 | [`sleep-mode-mute-cameras.yaml`](sleep-mode-mute-cameras.yaml) | EN: Quiet at night, but real intruder pattern (3+ events in 5 min) wakes you. <br> DE: Nachts ruhig, aber echtes Einbruchsmuster (3+ Events in 5 Min) weckt euch. |
 | [`vacation-deterrent-light.yaml`](vacation-deterrent-light.yaml) | EN: Random camera light flashes during vacation — looks lived-in. <br> DE: Zufällige Lichtblitze im Urlaub — wirkt bewohnt. |
 | [`garage-vehicle-coordination.yaml`](garage-vehicle-coordination.yaml) | EN: Garage door + driveway camera = "vehicle arriving / leaving" events, plus optional AI-driven vehicle ID (our car / delivery van / unknown). <br> DE: Garagentor + Einfahrt-Kamera = "Fahrzeug kommt/fährt"-Events, plus optional AI-Erkennung welches Fahrzeug. |
+| [`camera-offline-escalating-alert.yaml`](camera-offline-escalating-alert.yaml) | EN: Escalating alert if a camera disappears: silent <2 min (Wi-Fi blip), info push 2 min–24 h, critical (DND-bypass) push >24 h. Includes auto-confirm when camera returns. <br> DE: Eskalierender Alert wenn eine Kamera verschwindet: still <2 Min (WLAN-Blip), Info-Push 2 Min–24 h, Critical-Push (umgeht Nicht-Stören) >24 h. Auto-Bestätigung wenn Kamera zurück. |
 
 ### AI & vision / AI & Vision
 

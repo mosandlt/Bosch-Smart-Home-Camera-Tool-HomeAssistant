@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Person leaves → precise cleanup of only-what's-on
+# Person verlässt → präziser Cleanup nur der eingeschalteten Geräte
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: When a specific person leaves the house, you want to turn off the
+#     things THEY were using — without sending pointless turn-off commands
+#     to everything that's already off. The trick is a templated entity
+#     list filtered through select('is_state', 'on'). Only entities currently
+#     on receive the turn_off — the rest are silently ignored.
+#       - Saves log spam (no "trying to turn off already-off device" entries)
+#       - Faster (HA doesn't queue no-op service calls)
+#       - More reliable with flaky integrations (Tasmota, Shelly, etc.)
+#         that sometimes get cranky about no-op writes
+# DE: Wenn eine bestimmte Person das Haus verlässt, sollen die Geräte
+#     ausgehen die SIE benutzt hat — ohne sinnlose Aus-Befehle an alles
+#     was eh schon aus ist. Trick: getemplate Entity-Liste, gefiltert
+#     durch select('is_state', 'on'). Nur eingeschaltete Entities bekommen
+#     den turn_off — der Rest wird stillschweigend ignoriert.
+#       - Spart Log-Spam (kein "versuche bereits ausgeschaltetes Gerät auszuschalten")
+#       - Schneller (HA reiht keine No-Op-Service-Calls ein)
+#       - Robuster mit zickigen Integrationen (Tasmota, Shelly etc.)
+#         die manchmal No-Op-Writes nicht mögen
+#
+# EN: Pattern adapted from a real production "Sandra leaves the house"
+#     automation — generalised for any household member.
+# DE: Muster adaptiert von einer echten Produktiv-"Sandra verlässt das Haus"-
+#     Automation — verallgemeinert für jedes Haushalts-Mitglied.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Person leaves → switch off only what they had on"
+    description: >
+      EN: When the person has been away for 2 min (avoids GPS jitter at
+          the gate), turn off only the entities currently on.
+      DE: Wenn die Person 2 Min weg ist (gegen GPS-Wackler am Tor), nur
+          die aktuell eingeschalteten Entities ausschalten.
+    triggers:
+      - platform: state
+        entity_id: person.sandra
+        from: "home"
+        for:
+          minutes: 2   # EN: GPS settle time / DE: GPS-Beruhigungszeit
+    actions:
+      # EN: Garden lights + camera light — only the ones currently on
+      # DE: Gartenlampen + Kameralicht — nur die aktuell an sind
+      - alias: "Outdoor cleanup"
+        target:
+          entity_id: >
+            {{ ['switch.garden_light_north',
+                'switch.garden_light_south',
+                'switch.bosch_<outdoor_cam>_camera_light']
+               | select('is_state', 'on') | list }}
+        action: switch.turn_off
+      # EN: Indoor camera privacy — only flip if currently OFF (was watching)
+      # DE: Innen-Kamera-Privacy — nur ändern wenn aktuell AUS (war an)
+      - alias: "Indoor cameras → privacy on (only if currently off)"
+        target:
+          entity_id: >
+            {{ ['switch.bosch_<indoor_cam>_privacy_mode']
+               | select('is_state', 'off') | list }}
+        action: switch.turn_on
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Variant — extend to a whole household
+# DE: Variante — auf den ganzen Haushalt ausweiten
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: For "last person leaves the house" use the away-mode-arm-cameras.yaml
+#     pattern (template condition checking that all members are not_home).
+#     This file is for individual-person cleanups — e.g. "when Sandra leaves
+#     for work, turn off her stuff specifically".
+# DE: Für "letzte Person geht aus dem Haus" das away-mode-arm-cameras.yaml-
+#     Muster nutzen (Template-Condition prüft dass alle nicht zuhause sind).
+#     Diese Datei ist für Einzel-Personen-Cleanups — z.B. "wenn Sandra zur
+#     Arbeit geht, nur ihre Geräte aus".
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Why select('is_state', 'on') is the magic
+# DE: Warum select('is_state', 'on') die Magie ist
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: A naive automation just calls switch.turn_off on every entity. That
+#     works, but every entity that was already off generates a log entry
+#     ("Already off"), wakes up the integration, and on flaky devices
+#     (cheap Tuya / Shelly / Zigbee) sometimes triggers an unnecessary
+#     RF round-trip. The select filter sends turn_off only to entities
+#     that are actually on right now — clean, quiet, fast.
+# DE: Eine naive Automation ruft switch.turn_off auf alle Entities. Das
+#     funktioniert, aber jede schon ausgeschaltete Entity erzeugt einen
+#     Log-Eintrag ("Already off"), weckt die Integration und löst auf
+#     zickigen Geräten (billiges Tuya / Shelly / Zigbee) manchmal einen
+#     unnötigen RF-Roundtrip aus. Der select-Filter sendet turn_off nur
+#     an aktuell eingeschaltete Entities — sauber, leise, schnell.

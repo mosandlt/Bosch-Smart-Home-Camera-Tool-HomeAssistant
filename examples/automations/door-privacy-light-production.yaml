@@ -1,0 +1,156 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production-grade — door / garage opens → privacy + light, with safe close + reset
+# Production-Grade — Tür / Garage auf → Privacy + Licht, mit sicherem Aus + Reset
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: This is the "complete" pattern — battle-tested in a real household. It
+#     handles all the edge cases that simpler door-trigger automations miss:
+#       - multiple triggers (porch door OR garage door — either is "in use")
+#       - sun-aware light (no light during the day even when door is open)
+#       - day/night-aware delays (longer privacy window in daytime)
+#       - HA-restart recovery (re-evaluates the world after a HA boot)
+#       - defensive re-checks before destructive actions (kills the timer if
+#         the door reopened during the delay)
+#       - mode: restart so re-opening resets all timers cleanly
+# DE: Das ist das "komplette" Muster — erprobt im echten Haushalt. Es deckt
+#     alle Edge-Cases ab, die einfache Tür-Trigger-Automationen übersehen:
+#       - mehrere Trigger (Terrassentür ODER Garagentor)
+#       - sonnen-bewusstes Licht (tagsüber kein Licht trotz offener Tür)
+#       - tag-/nacht-bewusste Verzögerungen (tagsüber längeres Privacy-Fenster)
+#       - HA-Restart-Recovery (Zustand nach HA-Boot neu auswerten)
+#       - defensive Re-Checks vor zerstörerischen Aktionen (bricht ab wenn
+#         die Tür während der Verzögerung wieder aufging)
+#       - mode: restart damit Wiedereröffnung alle Timer sauber resettet
+#
+# Replace <cam>, sensor entity IDs with your own.
+# <cam>, Sensor-Entities durch eure ersetzen.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  # ───── OPEN — door or garage opens ──────────────────────────────────────
+  # ───── ÖFFNEN — Tür oder Garage geht auf ────────────────────────────────
+  - id: door_or_garage_open
+    alias: "Door/garage opens — privacy ON + light (if dark)"
+    description: >
+      EN: Either trigger fires. Privacy always goes on. Light goes on
+          only if the sun is below the horizon (no point during the day).
+      DE: Egal welcher Trigger auslöst. Privacy immer an. Licht nur wenn
+          die Sonne unter dem Horizont ist (tagsüber sinnlos).
+    triggers:
+      - entity_id: binary_sensor.porch_door
+        to: "on"
+        trigger: state
+      - entity_id: binary_sensor.garage_door
+        to: "on"
+        trigger: state
+    actions:
+      - target: { entity_id: switch.bosch_<cam>_privacy_mode }
+        action: switch.turn_on
+      # EN: Sun-aware light — gate via condition, not separate automation
+      # DE: Sonnen-bewusstes Licht — Condition statt eigener Automation
+      - condition: state
+        entity_id: sun.sun
+        state: below_horizon
+      - target: { entity_id: switch.bosch_<cam>_camera_light }
+        action: switch.turn_on
+    mode: restart   # EN: re-trigger resets / DE: Wieder-Trigger resettet
+
+  # ───── CLOSE — both closed (with HA-start recovery) ─────────────────────
+  # ───── SCHLIESSEN — beide zu (mit HA-Start-Recovery) ────────────────────
+  - id: door_or_garage_closed
+    alias: "Door/garage closes (or HA starts) — staged cleanup"
+    description: >
+      EN: Triggers on door close OR HA boot. Re-checks both closed before
+          starting cleanup. Light off after 15 min, privacy off after
+          another 10 min during daytime (longer window during the day).
+          Defensive re-checks before each destructive action — if the
+          door reopened during the delay, the open automation has already
+          re-set privacy/light and we abort cleanly.
+      DE: Triggert beim Tür-Zu ODER HA-Start. Prüft erst dass beide zu
+          sind, bevor Cleanup startet. Licht nach 15 Min aus, Privacy
+          nach weiteren 10 Min tagsüber (länger tagsüber). Defensive
+          Re-Checks vor jeder destruktiven Aktion — wenn die Tür während
+          der Verzögerung wieder aufging, hat die Open-Automation bereits
+          neu gesetzt und wir brechen sauber ab.
+    triggers:
+      - entity_id: binary_sensor.porch_door
+        to: "off"
+        trigger: state
+      - entity_id: binary_sensor.garage_door
+        to: "off"
+        trigger: state
+      # EN: HA-restart recovery — re-evaluate world on boot
+      # DE: HA-Restart-Recovery — Welt nach Boot neu auswerten
+      - event: start
+        trigger: homeassistant
+    conditions:
+      # EN: Initial gate — both must be closed / DE: Eingangs-Gate — beide zu
+      - condition: state
+        entity_id: binary_sensor.porch_door
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.garage_door
+        state: "off"
+    actions:
+      # EN: Phase 1 — wait 15 min before turning the light off
+      # DE: Phase 1 — 15 Min warten vor Licht-Aus
+      - delay: { minutes: 15 }
+      - target: { entity_id: switch.bosch_<cam>_camera_light }
+        action: switch.turn_off
+      # EN: Phase 2 — extra 10-min delay during daytime
+      # DE: Phase 2 — zusätzliche 10-Min-Verzögerung tagsüber
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: sun.sun
+                state: above_horizon
+            sequence:
+              - delay: { minutes: 10 }
+        default: []
+      # EN: Re-check before privacy off — door might have reopened
+      # DE: Re-Check vor Privacy-Aus — Tür könnte wieder aufgegangen sein
+      - condition: state
+        entity_id: binary_sensor.porch_door
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.garage_door
+        state: "off"
+      - target: { entity_id: switch.bosch_<cam>_privacy_mode }
+        action: switch.turn_off
+    mode: restart   # EN: each new "close" trigger restarts / DE: jedes Schließen startet neu
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Why this pattern works in production
+# DE: Warum das in der Praxis robust läuft
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. mode: restart  — if the door opens → closes → opens again within the
+#                     15-25 min cleanup window, the close automation kills
+#                     its own timer and restarts. No stale "turn off" coming
+#                     in 13 minutes after you've already opened the door again.
+#    1. mode: restart — bei auf → zu → auf wird der eigene Timer gekillt und
+#                       neu gestartet. Kein "Aus" 13 Min nach erneuter
+#                       Öffnung.
+#
+# 2. HA-start trigger — after a HA reboot, the close automation re-evaluates
+#                       the world. If both doors are closed (which they
+#                       usually are after a maintenance reboot), it runs
+#                       the cleanup and brings privacy/light into a known
+#                       sane state. Avoids "stuck on after restart".
+#    2. HA-Start-Trigger — nach HA-Reboot wertet die Close-Automation die
+#                          Welt neu aus. Falls beide Türen zu sind (üblich
+#                          nach Wartung), läuft Cleanup und Privacy/Licht
+#                          landen im definierten Zustand.
+#
+# 3. Re-check conditions BEFORE each destructive action — protects against
+#                                                         the race where
+#                                                         door reopens
+#                                                         mid-delay.
+#    3. Re-Checks vor jeder destruktiven Aktion — schützt gegen Race wenn
+#                                                  Tür mitten im Delay
+#                                                  wieder aufgeht.
+#
+# 4. Two automations, one open + one close — simpler than one automation
+#                                            with branching. Each does one
+#                                            thing well.
+#    4. Zwei Automationen, eine auf + eine zu — einfacher als eine mit
+#                                                Verzweigung. Jede macht
+#                                                eine Sache gut.

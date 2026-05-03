@@ -1,0 +1,133 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Camera offline — escalating alerts when a camera disappears
+# Kamera offline — eskalierende Alerts wenn eine Kamera verschwindet
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Camera goes offline at 02:00. You don't want a critical-priority push
+#     waking you. But if it's STILL offline at noon — that's a real problem
+#     and you want to know. This pattern scales the alert priority based on
+#     how long the camera has been gone.
+#       0–2 min offline   → silent (probably a Wi-Fi blip, ignore)
+#       2 min–24 h        → quiet info push (normal channel)
+#       > 24 h            → critical push (bypasses Do Not Disturb)
+#       Camera back       → confirm message
+# DE: Kamera fällt um 02:00 aus. Ihr wollt keinen Critical-Push der euch
+#     weckt. Aber wenn sie um 12:00 IMMER NOCH weg ist — echtes Problem,
+#     ihr wollt es wissen. Dieses Muster skaliert die Alert-Priorität nach
+#     der Ausfalldauer.
+#       0–2 Min offline   → still (vermutlich WLAN-Blip, ignorieren)
+#       2 Min–24 h        → leiser Info-Push (Normal-Kanal)
+#       > 24 h            → Critical-Push (umgeht Nicht-Stören)
+#       Kamera wieder da  → Bestätigungsmeldung
+#
+# EN: Pattern adapted from a real production "Heizungsraum-Fenster"
+#     monitoring automation — escalation logic generalised to cameras.
+# DE: Muster adaptiert von einer echten Produktiv-"Heizungsraum-Fenster"-
+#     Überwachung — Eskalationslogik auf Kameras verallgemeinert.
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+  - alias: "Bosch camera availability — escalating offline alert"
+    description: >
+      EN: Triggered on camera state change OR hourly time pattern. Three
+          branches: back online, freshly offline, long-offline.
+      DE: Triggert bei Kamera-Statuswechsel ODER stündlich. Drei Zweige:
+          wieder online, kurz offline, lange offline.
+    triggers:
+      # EN: State change events / DE: Statuswechsel
+      - trigger: state
+        entity_id: binary_sensor.bosch_<cam>_online
+        from: "on"
+        to: "off"
+      - trigger: state
+        entity_id: binary_sensor.bosch_<cam>_online
+        from: "off"
+        to: "on"
+      # EN: Hourly check for long-offline escalation / DE: Stündliche Lang-Offline-Prüfung
+      - trigger: time_pattern
+        hours: "/1"
+    conditions: []
+    actions:
+      - choose:
+          # ─── Camera back online / Kamera wieder online ─────────────────
+          - alias: "Camera back online — confirm"
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.bosch_<cam>_online
+                state: "on"
+              - condition: template
+                value_template: "{{ trigger.platform == 'state' }}"
+            sequence:
+              - service: notify.mobile_app_<your_phone>
+                data:
+                  message: "✅ Camera <cam> wieder online / back online"
+
+          # ─── Long offline (>24 h) — critical / Lange offline >24 h — kritisch ──
+          - alias: "Camera offline > 24 h — critical alert"
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.bosch_<cam>_online
+                state: "off"
+              - condition: template
+                value_template: >
+                  {{ (as_timestamp(now())
+                      - as_timestamp(states.binary_sensor.bosch_<cam>_online.last_changed))
+                     > 86400 }}
+            sequence:
+              - service: notify.mobile_app_<your_phone>
+                data:
+                  title: "🚨 Camera <cam> offline > 24 h"
+                  message: >
+                    EN: Last seen {{ relative_time(states.binary_sensor.bosch_<cam>_online.last_changed) }} ago
+                    DE: Zuletzt vor {{ relative_time(states.binary_sensor.bosch_<cam>_online.last_changed) }}
+                  data:
+                    push:
+                      sound: { name: "default", critical: 1, volume: 1.0 }
+                    importance: high
+                    priority: high
+                    ttl: 0
+
+          # ─── Freshly offline (>2 min) — info / Frisch offline >2 Min — Info ───
+          - alias: "Camera offline > 2 min — info"
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.bosch_<cam>_online
+                state: "off"
+              - condition: template
+                value_template: >
+                  {{ (as_timestamp(now())
+                      - as_timestamp(states.binary_sensor.bosch_<cam>_online.last_changed))
+                     > 120 }}
+              # EN: Throttle hourly reminders / DE: Drosseln auf 1× pro Stunde
+              - condition: template
+                value_template: >
+                  {{ (now() - this.attributes.last_triggered).total_seconds() > 3600
+                     if this.attributes.last_triggered else true }}
+            sequence:
+              - service: notify.mobile_app_<your_phone>
+                data:
+                  title: "📷 Camera <cam> offline"
+                  message: >
+                    {{ relative_time(states.binary_sensor.bosch_<cam>_online.last_changed) }}
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Why this works
+# DE: Warum das funktioniert
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: - Three triggers, one automation. State changes catch the boundary
+#       events; the hourly time_pattern catches the "still offline" case
+#       so escalation continues even without state changes.
+#     - choose: with conditional branches keeps the logic in one place.
+#     - The template "trigger.platform == state" gates the back-online
+#       confirm so you don't get hourly "still online" pings.
+#     - Cooldown via this.attributes.last_triggered limits the info
+#       reminder to once per hour even though the trigger fires hourly.
+# DE: - Drei Trigger, eine Automation. Statewechsel fangen die Grenz-
+#       Events; der stündliche time_pattern fängt das "noch immer offline"
+#       damit Eskalation auch ohne Statewechsel weiterläuft.
+#     - choose: mit Bedingungs-Zweigen hält die Logik an einer Stelle.
+#     - Das Template "trigger.platform == state" gated den Wieder-Online-
+#       Bestätigungs-Push damit ihr keine stündlichen "noch online"-Pings
+#       bekommt.
+#     - Cooldown via this.attributes.last_triggered drosselt den Info-
+#       Reminder auf 1× pro Stunde trotz stündlichem Trigger.
