@@ -7,9 +7,13 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.6.2
+
+**Branding fix — switched to the right Bosch app icon.** v10.6.1 mistakenly used the blue *Bosch Smart Home* hub icon. v10.6.2 uses the red *Bosch Smart Camera* app icon (Robert Bosch GmbH, sourced from the official iOS App Store listing) — that's the camera-specific Bosch branding which matches what this integration actually does. Pure asset swap.
+
 ## v10.6.1
 
-**Branding refresh.** The integration's icon files (`brand/icon.png`, `icon@2x.png`, `dark_icon.png`, `dark_icon@2x.png`) now use the official Bosch Smart Home brand mark — same icon HA Core's bundled `bosch_shc` integration uses (sourced from the [Home Assistant Brands](https://github.com/home-assistant/brands/tree/master/core_integrations/bosch_shc) repository, CC BY 4.0). Replaces the previous custom red camera icon for visual consistency with the rest of the Bosch Smart Home ecosystem in HA. Pure asset swap — no code change.
+**Branding refresh.** The integration's icon files (`brand/icon.png`, `icon@2x.png`, `dark_icon.png`, `dark_icon@2x.png`) now use the official Bosch Smart Home brand mark — same icon HA Core's bundled `bosch_shc` integration uses (sourced from the [Home Assistant Brands](https://github.com/home-assistant/brands/tree/master/core_integrations/bosch_shc) repository, CC BY 4.0). Replaces the previous custom red camera icon for visual consistency with the rest of the Bosch Smart Home ecosystem in HA. Pure asset swap — no code change. *(Superseded by v10.6.2 — wrong icon variant.)*
 
 ## v10.6.0
 
