@@ -21,10 +21,10 @@
 #       - Robuster mit zickigen Integrationen (Tasmota, Shelly etc.)
 #         die manchmal No-Op-Writes nicht mögen
 #
-# EN: Pattern adapted from a real production "Sandra leaves the house"
+# EN: Pattern adapted from a real production "person leaves the house"
 #     automation — generalised for any household member.
-# DE: Muster adaptiert von einer echten Produktiv-"Sandra verlässt das Haus"-
-#     Automation — verallgemeinert für jedes Haushalts-Mitglied.
+# DE: Muster adaptiert von einer echten Produktiv-Automation — verallgemeinert
+#     für jedes Haushalts-Mitglied.
 # ─────────────────────────────────────────────────────────────────────────────
 
 automation:
@@ -36,7 +36,7 @@ automation:
           die aktuell eingeschalteten Entities ausschalten.
     triggers:
       - platform: state
-        entity_id: person.sandra
+        entity_id: person.<household_member>
         from: "home"
         for:
           minutes: 2   # EN: GPS settle time / DE: GPS-Beruhigungszeit
@@ -67,12 +67,12 @@ automation:
 # ─────────────────────────────────────────────────────────────────────────────
 # EN: For "last person leaves the house" use the away-mode-arm-cameras.yaml
 #     pattern (template condition checking that all members are not_home).
-#     This file is for individual-person cleanups — e.g. "when Sandra leaves
-#     for work, turn off her stuff specifically".
+#     This file is for individual-person cleanups — e.g. "when partner leaves
+#     for work, turn off their stuff specifically".
 # DE: Für "letzte Person geht aus dem Haus" das away-mode-arm-cameras.yaml-
 #     Muster nutzen (Template-Condition prüft dass alle nicht zuhause sind).
-#     Diese Datei ist für Einzel-Personen-Cleanups — z.B. "wenn Sandra zur
-#     Arbeit geht, nur ihre Geräte aus".
+#     Diese Datei ist für Einzel-Personen-Cleanups — z.B. "wenn Partner zur
+#     Arbeit geht, nur seine/ihre Geräte aus".
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EN: Why select('is_state', 'on') is the magic
