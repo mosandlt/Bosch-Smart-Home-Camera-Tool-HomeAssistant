@@ -290,7 +290,7 @@ stateDiagram-v2
     Idle --> REMOTE: ON · mode = remote
     Idle --> REMOTE_fallback: ON · auto + LAN down
 
-    LOCAL --> REMOTE_fallback: 3 stream errors
+    LOCAL --> REMOTE_fallback: 5 (indoor) / 10 (outdoor)\nconsecutive stream errors
     REMOTE_fallback --> LOCAL: LAN ok · active promotion
 
     LOCAL --> Idle: OFF

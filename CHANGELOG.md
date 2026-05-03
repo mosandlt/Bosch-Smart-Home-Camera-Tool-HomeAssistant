@@ -20,6 +20,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - The status-loop's TCP-ping fast-path actively clears the fallback flag the moment LAN becomes reachable again — the next stream-on attempts LOCAL first instead of going straight to REMOTE. Only fires when `stream_connection_type == "auto"` and a fallback was actually in effect.
 - During a *currently running* REMOTE-fallback stream, the same trigger additionally schedules a `try_live_connection(is_renewal=True)` so the live HLS session migrates Cloud → LAN via `Stream.update_source()` without waiting for a re-toggle. Brief (~2-3 s) re-buffer during the swap; LAN failure simply lands back on REMOTE. 5-minute cooldown prevents ping-pong if LAN flaps.
 
+**`max_stream_errors` raised — per-model thresholds.** With self-heal in place a false fallback now recovers automatically, so the gradual-counter path can give LOCAL a fairer chance before giving up. Default bumped from 3 → 5 (indoor / `INDOOR`, `HOME_Eyes_Indoor`, default unknown), explicit override 10 for outdoor models (`OUTDOOR` / `CAMERA_EYES`, `HOME_Eyes_Outdoor` / `CAMERA_OUTDOOR_GEN2`) where real WLAN flap + slower encoder init produce more transient bursts. The watchdog's hard 120 s "no healthy HLS output" path is unchanged — it still forces REMOTE fallback regardless of this counter.
+
 ---
 
 ## v10.5.3
