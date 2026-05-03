@@ -280,21 +280,26 @@ In **AUTO** mode the integration tries LOCAL first and falls back to the cloud r
 stateDiagram-v2
     direction LR
     [*] --> Idle
-    Idle --> LOCAL: switch ON\n(auto + LAN ok)
-    Idle --> REMOTE: switch ON\n(mode=remote, or\nauto + LAN down)
 
-    LOCAL --> REMOTE_fallback: 3 consecutive\nstream errors
-    REMOTE_fallback --> LOCAL: LAN reachable\n+ active promotion\n(update_source)
+    state "Cloud streaming" as Cloud {
+        REMOTE
+        REMOTE_fallback
+    }
 
-    LOCAL --> Idle: switch OFF
-    REMOTE --> Idle: switch OFF /\nlifetime watchdog
-    REMOTE_fallback --> Idle: switch OFF /\nlifetime watchdog
+    Idle --> LOCAL: ON · auto + LAN ok
+    Idle --> REMOTE: ON · mode = remote
+    Idle --> REMOTE_fallback: ON · auto + LAN down
+
+    LOCAL --> REMOTE_fallback: 3 stream errors
+    REMOTE_fallback --> LOCAL: LAN ok · active promotion
+
+    LOCAL --> Idle: OFF
+    Cloud --> Idle: OFF · or lifetime watchdog
 
     note right of REMOTE_fallback
-        Error counter decays automatically
-        5 min if LAN currently reachable
-        30 min if LAN unknown/unreachable
-        REMOTE-side errors do not increment
+        Error counter time-decays automatically:
+        5 min if LAN reachable, 30 min otherwise.
+        Cloud-side errors do not increment the counter.
     end note
 ```
 
