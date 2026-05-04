@@ -34,6 +34,10 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_auto_download":   False,
     "download_path":          "",
+    # Filter for the Media Browser provider (separate from upload/download).
+    # auto = show every backend that has data; local/smb = show only that one;
+    # none = hide the provider entirely.
+    "media_browser_source":   "auto",
     "shc_ip":        "",
     "shc_cert_path": "",
     "shc_key_path":  "",
