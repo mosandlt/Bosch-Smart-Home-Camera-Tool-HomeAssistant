@@ -1648,9 +1648,8 @@ class BoschCameraCard extends HTMLElement {
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
     if (privacyOn) this._setLoadingOverlay(false);
     if (this._lastPrivacy === true && !privacyOn) {
-      this._triggerFreshSnapshot();
-      this._scheduleImageLoad(7e3);
-      this._scheduleImageLoad(1e4);
+      this._scheduleImageLoad(6e3);
+      this._scheduleImageLoad(9e3);
     }
     this._lastPrivacy = privacyOn;
     this._updateMotionZones(hass, ents);

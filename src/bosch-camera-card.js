@@ -3161,23 +3161,25 @@ class BoschCameraCard extends HTMLElement {
     // Hide the spinner overlay when privacy is ON (placeholder takes over)
     if (privacyOn) this._setLoadingOverlay(false);
 
-    // Privacy just turned OFF → fetch a fresh image immediately. Use the
-    // shared "fresh snapshot" path (trigger_snapshot service + reload at
-    // 1.5 s + 4 s), then schedule extra reloads at 7 s and 10 s.
+    // Privacy just turned OFF → reload the <img> after the backend's own
+    // post-privacy refresh has had time to land.
     //
-    // Why the extra reloads: the Bosch cloud's snap.jpg endpoint returns
-    // "empty response (privacy mode ON?)" for ~5–10 s after privacy turns
-    // off, while the camera resumes frame delivery. The first two reloads
-    // therefore still see the stale pre-privacy frame; the 7 s / 10 s ones
-    // catch the first real post-privacy frame. Confirmed via HA logs:
-    // privacy-off at t=0, fetch_live_snapshot returns bytes at ~t+7 s.
+    // The integration already schedules a fresh snapshot when privacy
+    // turns off (shc._schedule_privacy_off_snapshot): 0.5 s for outdoor,
+    // 5 s for indoor cameras (the indoor shutter motor needs the time to
+    // open before snap.jpg returns a real frame). Triggering a second
+    // refresh from the card before that delay completes is harmful — it
+    // races the Bosch cooldown, async_camera_image returns the 1×1
+    // placeholder JPEG, and HA's proxy caches that placeholder, which
+    // the user then sees as a black frame for 1–2 s.
     //
-    // No loading overlay — the last cached frame stays visible until the
-    // new one arrives, instead of a grey/black "Aktualisiere…" curtain.
+    // So: no trigger_snapshot service call, no early reloads. Just reload
+    // the <img> at 6 s (covers indoor 5 s delay + 1 s buffer) and 9 s
+    // (safety net for slow cameras). Until then the last cached pre-
+    // privacy frame stays visible — better than a black flash.
     if (this._lastPrivacy === true && !privacyOn) {
-      this._triggerFreshSnapshot();
-      this._scheduleImageLoad(7000);
-      this._scheduleImageLoad(10000);
+      this._scheduleImageLoad(6000);
+      this._scheduleImageLoad(9000);
     }
     this._lastPrivacy = privacyOn;
 
