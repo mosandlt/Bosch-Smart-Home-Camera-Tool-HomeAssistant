@@ -595,8 +595,11 @@ class BoschCameraCard extends HTMLElement {
 
         /* Image rotation 180° (ceiling-mounted indoor cameras).
            Pure CSS transform — zero CPU, zero latency, GPU-composited.
-           Toggled by the integration's switch.<base>_bild_180_drehen entity. */
-        .img-wrapper.rotated-180 .cam-img,
+           Toggled by the integration's switch.<base>_bild_180_drehen entity.
+           Only the <video> is rotated here: the <img> is loaded from
+           /api/camera_proxy/, which is already rotated server-side by
+           camera.async_camera_image() (PIL) — rotating it again would
+           cancel out and the dashboard snapshot would look upright. */
         .img-wrapper.rotated-180 .cam-video {
           transform: rotate(180deg);
         }
@@ -3158,10 +3161,23 @@ class BoschCameraCard extends HTMLElement {
     // Hide the spinner overlay when privacy is ON (placeholder takes over)
     if (privacyOn) this._setLoadingOverlay(false);
 
-    // Privacy just turned OFF → fetch a fresh image immediately
+    // Privacy just turned OFF → fetch a fresh image immediately. Use the
+    // shared "fresh snapshot" path (trigger_snapshot service + reload at
+    // 1.5 s + 4 s), then schedule extra reloads at 7 s and 10 s.
+    //
+    // Why the extra reloads: the Bosch cloud's snap.jpg endpoint returns
+    // "empty response (privacy mode ON?)" for ~5–10 s after privacy turns
+    // off, while the camera resumes frame delivery. The first two reloads
+    // therefore still see the stale pre-privacy frame; the 7 s / 10 s ones
+    // catch the first real post-privacy frame. Confirmed via HA logs:
+    // privacy-off at t=0, fetch_live_snapshot returns bytes at ~t+7 s.
+    //
+    // No loading overlay — the last cached frame stays visible until the
+    // new one arrives, instead of a grey/black "Aktualisiere…" curtain.
     if (this._lastPrivacy === true && !privacyOn) {
-      this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._scheduleImageLoad(1500);
+      this._triggerFreshSnapshot();
+      this._scheduleImageLoad(7000);
+      this._scheduleImageLoad(10000);
     }
     this._lastPrivacy = privacyOn;
 
