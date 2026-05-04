@@ -40,6 +40,7 @@ If your refresh token has already expired on Bosch's side, Home Assistant will a
 - **Motion zones**, **privacy masks**, **detection mode** (DualRadar on Gen2)
 - **Alarm system** — 75 dB siren, pre-alarm LED, arming/disarming (Gen2 Indoor)
 - **3-step alerts** — instant text → snapshot (5s) → video clip (30-90s) via any HA notify service
+- **Media Browser** (v10.7.0+) — browse downloaded events under *Media → Bosch SHC Camera*; works for both local downloads and SMB-uploaded NAS shares (streamed on demand, no HA disk cost)
 
 ## Documentation
 

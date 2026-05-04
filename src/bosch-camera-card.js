@@ -595,8 +595,11 @@ class BoschCameraCard extends HTMLElement {
 
         /* Image rotation 180° (ceiling-mounted indoor cameras).
            Pure CSS transform — zero CPU, zero latency, GPU-composited.
-           Toggled by the integration's switch.<base>_bild_180_drehen entity. */
-        .img-wrapper.rotated-180 .cam-img,
+           Toggled by the integration's switch.<base>_bild_180_drehen entity.
+           Only the <video> is rotated here: the <img> is loaded from
+           /api/camera_proxy/, which is already rotated server-side by
+           camera.async_camera_image() (PIL) — rotating it again would
+           cancel out and the dashboard snapshot would look upright. */
         .img-wrapper.rotated-180 .cam-video {
           transform: rotate(180deg);
         }
@@ -3158,10 +3161,25 @@ class BoschCameraCard extends HTMLElement {
     // Hide the spinner overlay when privacy is ON (placeholder takes over)
     if (privacyOn) this._setLoadingOverlay(false);
 
-    // Privacy just turned OFF → fetch a fresh image immediately
+    // Privacy just turned OFF → reload the <img> after the backend's own
+    // post-privacy refresh has had time to land.
+    //
+    // The integration already schedules a fresh snapshot when privacy
+    // turns off (shc._schedule_privacy_off_snapshot): 0.5 s for outdoor,
+    // 5 s for indoor cameras (the indoor shutter motor needs the time to
+    // open before snap.jpg returns a real frame). Triggering a second
+    // refresh from the card before that delay completes is harmful — it
+    // races the Bosch cooldown, async_camera_image returns the 1×1
+    // placeholder JPEG, and HA's proxy caches that placeholder, which
+    // the user then sees as a black frame for 1–2 s.
+    //
+    // So: no trigger_snapshot service call, no early reloads. Just reload
+    // the <img> at 6 s (covers indoor 5 s delay + 1 s buffer) and 9 s
+    // (safety net for slow cameras). Until then the last cached pre-
+    // privacy frame stays visible — better than a black flash.
     if (this._lastPrivacy === true && !privacyOn) {
-      this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._scheduleImageLoad(1500);
+      this._scheduleImageLoad(6000);
+      this._scheduleImageLoad(9000);
     }
     this._lastPrivacy = privacyOn;
 

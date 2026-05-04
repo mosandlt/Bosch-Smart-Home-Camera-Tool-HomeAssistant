@@ -1703,11 +1703,14 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):
     Cloud API does not expose any image-rotation field; this switch is a
     pure client-side display flag with three effects:
 
-      1. The Lovelace card applies `transform: rotate(180deg)` to its <video>
-         and <img> elements (zero CPU, zero latency, GPU-composited).
-      2. `camera.async_camera_image()` rotates the snapshot JPEG via PIL
-         before serving it (so push notifications, NAS clips, and other
-         consumers see the right-way-up image too).
+      1. `camera.async_camera_image()` rotates the snapshot JPEG via PIL
+         before serving it (so push notifications, NAS clips, the dashboard
+         snapshot, and any other consumer of /api/camera_proxy/ see the
+         right-way-up image).
+      2. The Lovelace card applies `transform: rotate(180deg)` to its
+         <video> element only — the <img> already comes pre-rotated from
+         (1), so rotating it again in CSS would cancel out and leave the
+         dashboard snapshot looking upside-down.
       3. For PTZ cameras (Gen1 360), `BoschPanNumber` inverts the sign of
          the pan value so "right" on the slider stays "right" on screen
          even when the camera is upside-down.

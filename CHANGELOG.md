@@ -7,6 +7,21 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v10.7.0
+
+**Event recordings now appear in HA's Media Browser — both local and NAS.** New `media_source` provider exposes downloaded events under **Media → Bosch SHC Camera**, with two backends auto-detected from existing options:
+
+* **Local** — when *Events automatically download* is enabled with a `download_path`. Tree: *Camera → Date → Event*.
+* **NAS / SMB** — when *SMB upload* is enabled (default for users who don't want to fill HA's small disk). Tree: *Year → Month → Day → Event*; matches the on-disk layout, all cameras share a day folder. Files are streamed on-demand via smbprotocol with HTTP `Range` support so MP4 seeking works.
+
+Each event title shows time, type, and camera (e.g. `09:15:23 — MOVEMENT (Garten)`). MP4 clips play inline; JPEG snapshots double as thumbnails for the matching clip. macOS resource-fork files (`._*`) are filtered out — relevant for FRITZ.NAS / Time Machine targets.
+
+When only one backend is configured, the source-chooser is hidden so the tree opens straight at the meaningful content. With both backends enabled the user picks *Lokal* vs *NAS* at the entry root.
+
+**Manual filter — `Media Browser source` option.** New options-flow dropdown overrides the auto-detect when needed: *Auto* (default — show every backend with data), *Nur Lokal*, *Nur NAS*, *Deaktiviert* (hide the Media Browser entry entirely). Useful when both download_path and SMB upload are active but only one of them should appear in the browser.
+
+Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; path-traversal is blocked, only `image/jpeg` and `video/mp4` are returned. Forum thread context: [simon42 community post #14](https://community.simon42.com/t/bosch-smart-home-kameras-vollstaendig-in-home-assistant-custom-integration-mit-live-stream-bewegungssensoren-cloud-api-kein-shc-noetig/81743/14) — same UX as Reolink's `Media → Reolink` entry.
+
 ## v10.6.2
 
 **Branding fix — switched to the right Bosch app icon.** v10.6.1 mistakenly used the blue *Bosch Smart Home* hub icon. v10.6.2 uses the red *Bosch Smart Camera* app icon (Robert Bosch GmbH, sourced from the official iOS App Store listing) — that's the camera-specific Bosch branding which matches what this integration actually does. Pure asset swap.

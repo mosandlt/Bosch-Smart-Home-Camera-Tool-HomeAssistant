@@ -451,6 +451,18 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "download_path",
                     description={"suggested_value": opts.get("download_path", "")},
                 ): str,
+                vol.Optional(
+                    "media_browser_source",
+                    default=str(opts.get("media_browser_source", "auto")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="auto",  label="Auto (alles Aktive anzeigen)"),
+                        SelectOptionDict(value="local", label="Nur Lokal (download_path)"),
+                        SelectOptionDict(value="smb",   label="Nur NAS (SMB-Upload)"),
+                        SelectOptionDict(value="none",  label="Provider deaktivieren"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
                 # SHC local API — camera light + privacy mode
                 vol.Optional(
                     "shc_ip",

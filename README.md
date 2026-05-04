@@ -506,6 +506,31 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
   1. The configured **notify service** (e.g. Signal, mobile app) if set
   2. **HA persistent notification** as fallback (always shown in the sidebar)
 
+### Media Browser
+
+Once events are being saved — either to the local download folder (`enable_auto_download`) or to a NAS via SMB upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; the integration auto-detects which backends have data.
+
+**Tree shape**
+- *Local backend:* `Camera → Date → Event`
+- *NAS backend:* `Year → Month → Day → Event` (matches the on-disk layout, all cameras share a day folder)
+
+Each event title is `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garten)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. macOS resource-fork files (`._*`) are filtered out — relevant for FRITZ.NAS / Time Machine targets.
+
+When only one backend is configured the source-chooser is hidden and the tree opens straight at the meaningful content. With both backends enabled the entry root shows *Lokal* and *NAS \\server\share* as siblings.
+
+**Manual filter — `Media Browser source` option**
+
+Settings → Devices & Services → Bosch SHC Camera → Configure → **Quelle des Media Browsers**:
+
+| Value | Effect |
+|-------|--------|
+| Auto (default) | Show every backend that has data |
+| Nur Lokal | Hide the NAS even if SMB upload is active |
+| Nur NAS | Hide local files even if auto-download is active |
+| Deaktiviert | Hide the Media Browser entry entirely |
+
+Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; path-traversal is blocked, only `image/jpeg` and `video/mp4` are returned. NAS files are streamed on demand via `smbprotocol` — no local cache, no HA disk usage.
+
 ### HA Events
 
 The integration fires events on the HA event bus for custom automations:
@@ -1116,8 +1141,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v10.6.2** — see the GitHub release page for full notes:
-[**v10.6.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.6.2)
+Latest stable: **v10.7.0** — see the GitHub release page for full notes:
+[**v10.7.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v10.7.0)
 
 | | |
 |---|---|
