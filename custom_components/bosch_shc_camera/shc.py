@@ -222,7 +222,26 @@ async def async_update_shc_states(
         )
         if isinstance(svc, dict):
             val = svc.get("state", {}).get("value", "")
-            entry["privacy_mode"] = (val.upper() == "ENABLED")
+            new_priv = (val.upper() == "ENABLED")
+            # A/B-Diag (debug-only, behavior unchanged) — see CLAUDE.md TODO
+            # 2026-04-27: privacy flips back after user-toggle OFF. Hypothesis:
+            # this fetcher overwrites _shc_state_cache without honoring the
+            # _privacy_set_at write-lock that __init__.py:1690 respects. Logs
+            # the would-be-blocked race so we can confirm before applying the
+            # FORCE-RULE fix.
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                old_priv = entry.get("privacy_mode")
+                lock_ts = coordinator._privacy_set_at.get(cam_id)
+                age = (time.monotonic() - lock_ts) if lock_ts is not None else None
+                ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
+                locked = age is not None and age < ttl
+                if old_priv is not None and old_priv != new_priv and locked:
+                    _LOGGER.debug(
+                        "AB-DIAG privacy_mode race: cam=%s old=%s new=%s "
+                        "lock_age=%.1fs lock_ttl=%.1fs (would-be-blocked)",
+                        cam_id[:8], old_priv, new_priv, age, ttl,
+                    )
+            entry["privacy_mode"] = new_priv
 
 
 # ── SHC setters ──────────────────────────────────────────────────────────────
