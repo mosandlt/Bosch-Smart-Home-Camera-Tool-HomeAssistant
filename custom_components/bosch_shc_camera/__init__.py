@@ -484,9 +484,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
-        self._light_set_at:   dict[str, float] = {}      # lighting_override write timestamp
-        self._notif_set_at:   dict[str, float] = {}      # enable_notifications write timestamp
-        self._privacy_set_at: dict[str, float] = {}      # privacy write timestamp
+        self._light_set_at:         dict[str, float] = {}  # lighting_override write timestamp
+        self._notif_set_at:         dict[str, float] = {}  # enable_notifications write timestamp
+        self._privacy_set_at:       dict[str, float] = {}  # privacy write timestamp
+        self._privacy_sound_set_at: dict[str, float] = {}  # privacy_sound_override write
+        self._timestamp_set_at:     dict[str, float] = {}  # timestamp overlay write
+        self._ledlights_set_at:     dict[str, float] = {}  # status LED write
+        self._arming_set_at:        dict[str, float] = {}  # alarm system arm/disarm write
+        self._audio_alarm_set_at:   dict[str, float] = {}  # audioAlarm config write
         self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
         # Used for model-specific timing (encoder warm-up) and feature gating.
@@ -553,6 +558,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         from .models import get_model_config
         hw = self._hw_version.get(cam_id, "CAMERA")
         return get_model_config(hw)
+
+    def _is_write_locked(self, cam_id: str, set_at_dict: dict[str, float]) -> bool:
+        """Return True if a fresh user-write is still inside the eventual-consistency window.
+
+        Used by every coordinator slow-tier endpoint handler that polls a
+        cloud field also writable from a switch entity. Without this guard,
+        a poll within `_WRITE_LOCK_SECS` of the user toggle can revert the
+        cache to the stale cloud value before it has caught up — the bug
+        shape that bit privacy_mode + camera_light in v11.0.x. Keep the
+        whole pattern in one helper so future cache fields can opt in with
+        a one-liner.
+        """
+        ts = set_at_dict.get(cam_id)
+        return ts is not None and (time.monotonic() - ts) < self._WRITE_LOCK_SECS
 
     def is_camera_online(self, cam_id: str) -> bool:
         """Return True if this camera's last known status is ONLINE.
@@ -1577,6 +1596,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                 raise
                             except Exception as err:
                                 _LOGGER.debug("Mark-read (startup) failed for %s: %s", cam_id, err)
+                        # Bootstrap _last_event_ids so the next polling tick can
+                        # detect newer events. Without this seed, prev_id stays
+                        # None forever in polling-only mode (no FCM) — every
+                        # tick re-enters this branch, alert chain (`elif newest_id
+                        # and newest_id != prev_id`) is never reached, and
+                        # automations on `bosch_shc_camera_motion` never fire
+                        # after a restart. (Forum: geotie 2026 — "Automation
+                        # funktioniert, wird aber oft nicht ausgelöst".)
+                        if newest_id:
+                            self._last_event_ids[cam_id] = newest_id
                     elif newest_id and newest_id != prev_id:
                         # Per-event-ID dedup shared with fcm.async_handle_fcm_push.
                         # Guards against a polling tick firing an alert that the
@@ -1890,7 +1919,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             # Persistent cache (self-level) so entities stay available
                             # between slow-tier ticks. Also mirror into data[cam_id]
                             # for backward compatibility with audio_alarm_settings().
-                            self._audio_alarm_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            # Honor write-lock to avoid clobbering a fresh user-toggle.
+                            if not self._is_write_locked(cam_id_key, self._audio_alarm_set_at):
+                                self._audio_alarm_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                             data[cam_id_key]["audioAlarm"] = ep_data
                         elif ep == "firmware":
                             self._firmware_cache[cam_id_key] = ep_data
@@ -1902,13 +1933,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             elif isinstance(ep_data, (int, float)):
                                 self._unread_events_cache[cam_id_key] = int(ep_data)
                         elif ep == "privacy_sound_override":
-                            self._privacy_sound_cache[cam_id_key] = ep_data.get("result", False)
+                            if not self._is_write_locked(cam_id_key, self._privacy_sound_set_at):
+                                self._privacy_sound_cache[cam_id_key] = ep_data.get("result", False)
                         elif ep == "commissioned":
                             self._commissioned_cache[cam_id_key] = ep_data
                         elif ep == "autofollow":
                             data[cam_id_key]["autofollow"] = ep_data
                         elif ep == "timestamp":
-                            self._timestamp_cache[cam_id_key] = ep_data.get("result", False)
+                            if not self._is_write_locked(cam_id_key, self._timestamp_set_at):
+                                self._timestamp_cache[cam_id_key] = ep_data.get("result", False)
                         elif ep == "notifications":
                             self._notifications_cache[cam_id_key] = ep_data
                         elif ep == "rules":
@@ -1920,7 +1953,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         elif ep == "lighting_options":
                             self._lighting_options_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "ledlights":
-                            self._ledlights_cache[cam_id_key] = ep_data.get("state") == "ON" if isinstance(ep_data, dict) else None
+                            if not self._is_write_locked(cam_id_key, self._ledlights_set_at):
+                                self._ledlights_cache[cam_id_key] = ep_data.get("state") == "ON" if isinstance(ep_data, dict) else None
                         elif ep == "lens_elevation":
                             self._lens_elevation_cache[cam_id_key] = ep_data.get("elevation") if isinstance(ep_data, dict) else None
                         elif ep == "audio":
@@ -1942,7 +1976,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             # Actual response format confirmed 2026-04-11:
                             #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
                             self._alarm_status_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
-                            if isinstance(ep_data, dict):
+                            if isinstance(ep_data, dict) and not self._is_write_locked(
+                                cam_id_key, self._arming_set_at
+                            ):
                                 intrusion = str(ep_data.get("intrusionSystem", "")).upper()
                                 if intrusion == "ACTIVE":
                                     self._arming_cache[cam_id_key] = True
@@ -4009,7 +4045,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         async with asyncio.timeout(10):
                             async with session.put(url, headers=headers, json=payload) as resp2:
                                 return resp2.status in (200, 204)
-                    return resp.status in (200, 204)
+                    return resp.status in (200, 201, 204)
         except Exception as err:
             _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
             return False
@@ -4475,7 +4511,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
                             headers=headers, json=existing,
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Rule %s updated", rule_id)
                                 await coord.async_request_refresh()
                             else:
@@ -4514,7 +4550,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
                             headers=headers, json=zones,
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Motion zones set for %s (%d zones)", cam_id[:8], len(zones))
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
@@ -4609,7 +4645,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             f"{CLOUD_API}/v11/friends/{friend_id}/share",
                             headers=headers, json=shares,
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Shared %d camera(s) with friend %s for %d days", len(camera_ids), friend_id[:8], days)
                                 await hass.services.async_call(
                                     "persistent_notification", "create",
@@ -4693,7 +4729,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
                             headers=headers, json=masks,
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Privacy masks set for %s (%d masks)", cam_id[:8], len(masks))
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
@@ -4737,7 +4773,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
                             headers=headers, json=zones,
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Zone %d deleted, %d zones remaining", zone_index, len(zones))
                                 await coord.async_request_refresh()
                             else:
@@ -4913,7 +4949,7 @@ def _register_services(hass: HomeAssistant) -> None:
                         async with session.delete(
                             f"{CLOUD_API}/v11/friends/{friend_id}", headers=headers
                         ) as resp:
-                            if resp.status in (200, 204):
+                            if resp.status in (200, 201, 204):
                                 _LOGGER.info("Friend %s removed", friend_id)
                             else:
                                 raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Remove friend", "status": str(resp.status)})

@@ -214,7 +214,26 @@ async def async_update_shc_states(
         )
         if isinstance(svc, dict):
             val = svc.get("state", {}).get("value", "")
-            entry["camera_light"] = (val.upper() == "ON")
+            new_light = (val.upper() == "ON")
+            # Honor _light_set_at write-lock — same race as privacy_mode.
+            # Without this, a fresh user-toggle can be overwritten by a
+            # stale SHC reading within the cloud's eventual-consistency
+            # window. Fixed 2026-05-05.
+            light_lock = coordinator._light_set_at.get(cam_id)
+            ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
+            light_locked = (
+                light_lock is not None
+                and (time.monotonic() - light_lock) < ttl
+            )
+            old_light = entry.get("camera_light")
+            if light_locked and old_light is not None and old_light != new_light:
+                _LOGGER.debug(
+                    "camera_light write-lock active for %s — keeping cached "
+                    "%s, ignoring SHC value %s",
+                    cam_id[:8], old_light, new_light,
+                )
+            else:
+                entry["camera_light"] = new_light
 
         # Fetch PrivacyMode service state (SHC is authoritative)
         svc = await async_shc_request(
@@ -223,25 +242,28 @@ async def async_update_shc_states(
         if isinstance(svc, dict):
             val = svc.get("state", {}).get("value", "")
             new_priv = (val.upper() == "ENABLED")
-            # A/B-Diag (debug-only, behavior unchanged) — see CLAUDE.md TODO
-            # 2026-04-27: privacy flips back after user-toggle OFF. Hypothesis:
-            # this fetcher overwrites _shc_state_cache without honoring the
-            # _privacy_set_at write-lock that __init__.py:1690 respects. Logs
-            # the would-be-blocked race so we can confirm before applying the
-            # FORCE-RULE fix.
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                old_priv = entry.get("privacy_mode")
-                lock_ts = coordinator._privacy_set_at.get(cam_id)
-                age = (time.monotonic() - lock_ts) if lock_ts is not None else None
-                ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
-                locked = age is not None and age < ttl
-                if old_priv is not None and old_priv != new_priv and locked:
-                    _LOGGER.debug(
-                        "AB-DIAG privacy_mode race: cam=%s old=%s new=%s "
-                        "lock_age=%.1fs lock_ttl=%.1fs (would-be-blocked)",
-                        cam_id[:8], old_priv, new_priv, age, ttl,
-                    )
-            entry["privacy_mode"] = new_priv
+            # Honor the _privacy_set_at write-lock (same pattern that
+            # __init__.py:1690 already respects for the cloud fetcher).
+            # Without this guard the SHC fetcher overwrites a fresh
+            # user-toggle within the cloud's eventual-consistency window
+            # → first OFF-toggle visibly reverts to ON until the next
+            # user click forces the issue. Fixed 2026-05-05.
+            lock_ts = coordinator._privacy_set_at.get(cam_id)
+            ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
+            locked = (
+                lock_ts is not None
+                and (time.monotonic() - lock_ts) < ttl
+            )
+            old_priv = entry.get("privacy_mode")
+            if locked and old_priv is not None and old_priv != new_priv:
+                _LOGGER.debug(
+                    "privacy_mode write-lock active for %s — keeping cached "
+                    "value %s, ignoring SHC value %s (lock_age=%.1fs ttl=%.1fs)",
+                    cam_id[:8], old_priv, new_priv,
+                    time.monotonic() - lock_ts, ttl,
+                )
+            else:
+                entry["privacy_mode"] = new_priv
 
 
 # ── SHC setters ──────────────────────────────────────────────────────────────
@@ -780,16 +802,25 @@ async def async_cloud_set_pan(
             async with session.put(
                 url, json={"absolutePosition": position}, headers=headers
             ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    actual = data.get("currentAbsolutePosition", position)
+                if resp.status in (200, 201, 204):
+                    # 200 returns a JSON body with currentAbsolutePosition + ETA;
+                    # 204 has no body — fall back to the requested position.
+                    actual = position
+                    eta = 0
+                    if resp.status == 200:
+                        try:
+                            data = await resp.json()
+                            actual = data.get("currentAbsolutePosition", position)
+                            eta = data.get("estimatedTimeToCompletion", 0)
+                        except Exception:  # noqa: BLE001 — body is optional
+                            pass
                     coordinator._pan_cache[cam_id] = actual
                     _LOGGER.debug(
                         "cloud_set_pan: %s -> %d deg (HTTP %d, ETA %dms)",
                         cam_id,
                         actual,
                         resp.status,
-                        data.get("estimatedTimeToCompletion", 0),
+                        eta,
                     )
                     coordinator.hass.async_create_task(
                         coordinator.async_request_refresh()

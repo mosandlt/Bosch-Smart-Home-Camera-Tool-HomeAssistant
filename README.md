@@ -610,6 +610,15 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
 
 Once events are being saved — either to the local download folder (`enable_auto_download`) or to a NAS via SMB upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; the integration auto-detects which backends have data.
 
+**To enable the local backend:**
+
+1. Settings → Devices & Services → **Bosch Smart Home Camera** → ⚙ **Configure** (NOT *Reconfigure* — that's for re-OAuth only).
+2. Scroll to the **SMB / NAS Upload** section — **directly above** it you'll find the toggle labeled **"Events automatisch herunterladen"** (English: *"Auto-download events (JPEG + MP4)"*). Enable it.
+3. The default download path is `/config/bosch_events`; the directory is created automatically the moment you enable the switch (since v11.0.1 — earlier versions waited for the first event to arrive). You don't need to type a path unless you want a different location.
+4. **Submit**. The Media Browser entry appears immediately, empty, and fills as events arrive.
+
+If you upgraded from v10.7.x and the Media Browser stayed empty: enable `enable_auto_download` once via the steps above. v11.0.1 fixes a regression where the directory had to already exist on disk for the entry to show up.
+
 **Tree shape**
 - *Local backend:* `Camera → Date → Event`
 - *NAS backend:* `Year → Month → Day → Event` (matches the on-disk layout, all cameras share a day folder)

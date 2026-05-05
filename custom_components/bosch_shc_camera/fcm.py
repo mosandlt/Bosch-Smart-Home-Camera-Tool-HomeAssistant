@@ -416,8 +416,14 @@ async def async_handle_fcm_push(coordinator) -> None:
                     cam_id, newest_id[:8], _now - _sent[newest_id],
                 )
                 continue
-            # Evict old entries when cache grows past 32 keys
-            if len(_sent) > 32:
+            # Evict entries older than 120s on every call. Original
+            # `if len(_sent) > 32` guard could starve eviction during
+            # burst-event scenarios (4 cams × dense events all within
+            # 120 s window → cache grows past 32 but eviction loop finds
+            # nothing to evict, so it grows unbounded). Plain age-based
+            # cleanup on every call has O(len) cost which is fine — len
+            # stays small.
+            if _sent:
                 for _k in [k for k, v in _sent.items() if v < _now - 120.0]:
                     _sent.pop(_k, None)
 
@@ -930,7 +936,7 @@ async def async_mark_events_read(coordinator, event_ids: list[str]) -> bool:
                     f"{CLOUD_API}/v11/events",
                     headers=headers, json={"id": eid, "isRead": True},
                 ) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         success = True
         except Exception:
             pass

@@ -311,7 +311,7 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
                     headers=headers,
                     json=body,
                 ) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         self._current_level = float(level)
                         _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
                     else:
