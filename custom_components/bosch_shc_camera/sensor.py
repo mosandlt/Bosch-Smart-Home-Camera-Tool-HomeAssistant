@@ -29,6 +29,8 @@ from . import DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0  # coordinator handles all updates; no per-entity parallelism needed
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -41,7 +43,7 @@ async def async_setup_entry(
         _LOGGER.debug("Sensors disabled in options — skipping sensor platform")
         return
 
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
 
     entities = []
     for cam_id in coordinator.data:
@@ -143,10 +145,6 @@ class BoschCameraStatusSensor(_BoschSensorBase):
     @property
     def native_value(self) -> str:
         return self._cam_data.get("status", "UNKNOWN").lower()
-
-    @property
-    def icon(self) -> str:
-        return "mdi:camera" if self.native_value == "online" else "mdi:camera-off"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -649,15 +647,6 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
         if self.coordinator._fcm_healthy:
             return "fcm_push"
         return "polling"
-
-    @property
-    def icon(self) -> str:
-        val = self.native_value
-        if val == "fcm_push":
-            return "mdi:bell-ring"
-        if val == "polling":
-            return "mdi:timer-sand"
-        return "mdi:bell-off"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1265,14 +1254,6 @@ class BoschStreamStatusSensor(_BoschSensorBase):
         if self._cam_id in self.coordinator._live_connections:
             return "connecting"
         return "idle"
-
-    @property
-    def icon(self) -> str:
-        v = self.native_value
-        if v == "streaming":        return "mdi:video"
-        if v == "streaming_remote": return "mdi:video-wireless"
-        if v in ("warming_up", "connecting"): return "mdi:video-box"
-        return "mdi:video-off"
 
     @property
     def extra_state_attributes(self) -> dict:

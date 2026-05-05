@@ -18,13 +18,15 @@ from . import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         entities.append(BoschFirmwareUpdate(coordinator, cam_id, config_entry))
@@ -35,6 +37,7 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
     """Update entity showing camera firmware status."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

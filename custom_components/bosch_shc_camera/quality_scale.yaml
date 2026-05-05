@@ -1,0 +1,80 @@
+rules:
+  # Bronze
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage:
+    status: todo
+    comment: |
+      Pytest framework + config_flow + diagnostics tests under `tests/` cover
+      the Bronze `config-flow-test-coverage` rule. Full 95% coverage of the
+      5000+ line __init__.py + cloud-API integration paths still pending —
+      requires extensive aiohttp mocking and is filed as a follow-up sprint.
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: |
+      Bosch cloud is the source of truth — devices are added by API after the
+      user logs in via the cloud config flow. No local discovery applicable.
+  discovery-update-info:
+    status: exempt
+    comment: |
+      See discovery.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices: done
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues: done
+  stale-devices: done
+
+  # Platinum
+  async-dependency:
+    status: todo
+    comment: |
+      requests (sync) used in some auth/admin paths via hass.async_add_executor_job.
+      firebase-messaging is async; smbprotocol is sync (file I/O in executor).
+  inject-websession: done
+  strict-typing:
+    status: todo
+    comment: |
+      Partial typing; no .strict-typing entry filed in HA core repo (custom integration).

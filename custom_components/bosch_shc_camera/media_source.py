@@ -261,12 +261,11 @@ class _SmbBackend:
 # ── source registry ──────────────────────────────────────────────────────────
 def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend | _SmbBackend]]:
     out: list[tuple[_Source, _LocalBackend | _SmbBackend]] = []
-    for entry_id, data in hass.data.get(DOMAIN, {}).items():
-        if not isinstance(data, dict):
-            continue
-        coord = data.get("coordinator")
+    for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+        coord = getattr(entry, "runtime_data", None)
         if coord is None:
             continue
+        entry_id = entry.entry_id
         opts = coord.options
         # Per-entry filter: auto / local / smb / none
         filt = (opts.get("media_browser_source") or "auto").lower()

@@ -36,13 +36,15 @@ from . import DOMAIN, CLOUD_API
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -67,6 +69,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
     """
 
     _led_key: str = ""  # "frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

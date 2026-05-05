@@ -294,9 +294,12 @@ class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """Start OAuth2 flow — register implementation, then delegate to parent."""
-        # Only enforce unique_id uniqueness on fresh setup, not on reauth —
-        # reauth reuses the existing entry.
-        if self.source != config_entries.SOURCE_REAUTH:
+        # Only enforce unique_id uniqueness on fresh setup. Reauth + reconfigure
+        # both reuse the existing entry.
+        if self.source not in (
+            config_entries.SOURCE_REAUTH,
+            config_entries.SOURCE_RECONFIGURE,
+        ):
             await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
 
@@ -327,17 +330,35 @@ class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             return self.async_show_form(step_id="reauth_confirm")
         return await self.async_step_user()
 
+    async def async_step_reconfigure(
+        self, user_input: dict | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """User-initiated reconfiguration (Quality-Scale Gold rule).
+
+        Triggered by clicking "Reconfigure" on the integration card. Same
+        OAuth flow as initial setup, but updates the existing entry in place
+        — entities, automations, options, FCM/SMB settings all preserved.
+        """
+        if user_input is None:
+            return self.async_show_form(step_id="reconfigure")
+        return await self.async_step_user()
+
     async def async_oauth_create_entry(self, data: dict) -> config_entries.ConfigFlowResult:
-        """Handle completed OAuth2 flow — create new entry or update existing (reauth)."""
+        """Handle completed OAuth2 flow — create new entry or update existing (reauth/reconfigure)."""
         token_data = data.get("token", {})
         new_data = {
             "bearer_token":  token_data.get("access_token", ""),
             "refresh_token": token_data.get("refresh_token", ""),
         }
-        # Reauth: update the existing entry in place (keeps options, entities,
-        # automations, FCM config, SMB settings — everything).
+        # Reauth + reconfigure: update the existing entry in place (keeps
+        # options, entities, automations, FCM config, SMB settings — everything).
         if self.source == config_entries.SOURCE_REAUTH:
             existing = self._get_reauth_entry()
+            return self.async_update_reload_and_abort(
+                existing, data_updates=new_data,
+            )
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            existing = self._get_reconfigure_entry()
             return self.async_update_reload_and_abort(
                 existing, data_updates=new_data,
             )

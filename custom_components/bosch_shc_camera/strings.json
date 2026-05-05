@@ -3,6 +3,16 @@
     "step": {
       "pick_implementation": {
         "title": "Bosch Smart Home Camera"
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Bosch Smart Home Camera",
+        "description": "Your Bosch Cloud token has expired and cannot be refreshed automatically. Click **Submit** to log in again — your existing configuration (entities, automations, options) is preserved.",
+        "submit": "Submit"
+      },
+      "reconfigure": {
+        "title": "Reconfigure Bosch Smart Home Camera",
+        "description": "Run the OAuth login again to refresh your credentials without removing the integration. All existing entities, automations, and options are preserved.",
+        "submit": "Submit"
       }
     },
     "abort": {
@@ -170,6 +180,29 @@
           "description": "Cloud UUID of the camera (find in entity attributes)"
         }
       }
+    }
+  },
+  "exceptions": {
+    "argument_required": {"message": "{argument} is required"},
+    "argument_must_be_list": {"message": "{argument} must be a list"},
+    "missing_field": {"message": "{kind} {index} is missing field {field}"},
+    "value_out_of_range": {"message": "{kind} {index} {field}={value} out of range 0.0–1.0"},
+    "index_out_of_range": {"message": "Index {index} out of range (have {count} items)"},
+    "not_found": {"message": "{kind} {id} not found"},
+    "live_connection_failed": {"message": "Could not establish live connection for camera {cam_id_prefix} — see log for mitmproxy capture instructions"},
+    "http_error": {"message": "{action} failed: HTTP {status}"},
+    "http_error_with_body": {"message": "{action} failed: HTTP {status} — {body}"},
+    "privacy_blocked": {"message": "{action}: feature unavailable while Privacy mode is active"},
+    "unexpected_error": {"message": "{action} failed: {error}"}
+  },
+  "issues": {
+    "token_expired": {
+      "title": "Bosch Camera — Token expired",
+      "description": "The bearer token could not be renewed.\n\n{message}\n\nClick **Reconfigure** on the integration card (Settings → Devices & Services → Bosch Smart Home Camera) to log in again. Existing entities and automations are preserved."
+    },
+    "auth_server_outage": {
+      "title": "Bosch Camera — Auth server outage",
+      "description": "The Bosch authentication server is currently returning HTTP {error}. This is a Bosch-side problem, not a configuration issue on your side.\n\nThe integration will retry automatically (exponential backoff up to 10 minutes). Entities are unavailable until the server recovers — no action needed."
     }
   }
 }
