@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.1";
+const CARD_VERSION = "2.11.2";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -221,6 +221,17 @@ class BoschCameraCard extends HTMLElement {
   connectedCallback() {
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
+    // Mobile reload fix: iOS Safari + HA Companion App (WKWebView) do NOT
+    // reliably fire `disconnectedCallback` on tab reload / app close. Without
+    // an explicit close, the WebRTC RTCPeerConnection lingers on go2rtc's
+    // side as a stale consumer until its internal timeout (~10–15 s) frees
+    // the slot. The next mount's `camera/webrtc/offer` then queues behind
+    // the stale consumer, so the user sees "stream appears magically after
+    // many seconds". `pagehide` fires reliably on iOS / WKWebView right
+    // before unload — calling _stopLiveVideo() flushes pc.close() and the
+    // WS-unsubscribe so go2rtc frees the consumer immediately.
+    this._pagehideHandler = () => this._stopLiveVideo();
+    window.addEventListener("pagehide", this._pagehideHandler);
   }
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -382,6 +393,10 @@ class BoschCameraCard extends HTMLElement {
     if (this._visibilityHandler) {
       document.removeEventListener("visibilitychange", this._visibilityHandler);
       this._visibilityHandler = null;
+    }
+    if (this._pagehideHandler) {
+      window.removeEventListener("pagehide", this._pagehideHandler);
+      this._pagehideHandler = null;
     }
     // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
     // these document-level listeners would leak via `this`-closure.

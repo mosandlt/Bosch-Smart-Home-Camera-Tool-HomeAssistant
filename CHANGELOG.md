@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.2
+
+**Card v2.11.2** — mobile reload fix.
+
+### Bug fixed
+
+- **Stream stalls 10–15 s on mobile after browser reload** — when the user reloaded the camera dashboard on a phone (iOS Safari or HA Companion App), the live stream would not resume immediately; instead it "appeared magically after many seconds". Desktop browsers were unaffected. Root cause: iOS Safari + WKWebView do not reliably fire the custom-element `disconnectedCallback` on tab reload, so `RTCPeerConnection.close()` and the WS subscription teardown never ran. The previous WebRTC consumer lingered on go2rtc's side as a stale slot until its internal timeout (~10–15 s) released it, blocking the next mount's `camera/webrtc/offer`. Fix: hook the `pagehide` event in `connectedCallback` to call `_stopLiveVideo()` — `pagehide` fires reliably on iOS / WKWebView right before unload, so `pc.close()` and the WS-unsubscribe message reach go2rtc / HA cleanly. Regression guards: `tests/test_card_lifecycle.py::test_pagehide_listener_wired` and `::test_pagehide_calls_stop_live_video`.
+
 ## v11.0.1
 
 **645 tests across 38 files. 5 bugs fixed by writing the tests.**
@@ -198,7 +206,7 @@ Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; pat
 
 State persists across HA restarts via `RestoreEntity`. Default OFF. Available on Gen1 360 Innenkamera and Gen2 Eyes Innenkamera II.
 
-**Card v2.11.1** ships alongside.
+**Card v2.11.1** shipped alongside v11.0.1.
 
 ## v10.5.4
 
