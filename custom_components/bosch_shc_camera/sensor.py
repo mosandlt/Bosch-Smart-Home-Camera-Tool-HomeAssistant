@@ -29,6 +29,8 @@ from . import DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0  # coordinator handles all updates; no per-entity parallelism needed
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

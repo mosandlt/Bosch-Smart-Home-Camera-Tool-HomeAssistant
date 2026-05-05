@@ -78,6 +78,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 _LOGGER = logging.getLogger(__name__)
 
+# Read integration version once at import time (sync I/O at module level is fine — import
+# happens in the executor during HA startup, not inside the event loop).
+try:
+    import json as _json, pathlib as _pathlib
+    _INTEGRATION_VERSION: str = _json.loads(
+        (_pathlib.Path(__file__).parent / "manifest.json").read_text()
+    )["version"]
+except Exception:
+    _INTEGRATION_VERSION = "unknown"
+
 
 class _StreamSupportNoiseFilter(logging.Filter):
     """Rate-limit HA camera-component log spam during stream pre-warm.
@@ -101,6 +111,8 @@ class _StreamSupportNoiseFilter(logging.Filter):
     so other camera integrations are unaffected.
     """
 
+    _MAX_TRACKED = 32  # max entity IDs to track — prevents unbounded growth
+
     def __init__(self):
         super().__init__()
         self._last_passed: dict[str, float] = {}
@@ -123,6 +135,10 @@ class _StreamSupportNoiseFilter(logging.Filter):
         last = self._last_passed.get(ent, 0.0)
         if (now - last) < 30.0:
             return False
+        # Prune oldest entry when dict grows too large
+        if len(self._last_passed) >= self._MAX_TRACKED:
+            oldest = min(self._last_passed, key=self._last_passed.__getitem__)
+            del self._last_passed[oldest]
         self._last_passed[ent] = now
         return True
 
@@ -289,10 +305,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._shc_available: bool = True        # assume available until proven otherwise
         self._shc_fail_count: int = 0           # consecutive failures
         self._shc_last_check: float = 0.0       # last time we probed SHC after it went offline
-        _SHC_MAX_FAILS = 3                      # mark offline after this many consecutive failures
-        _SHC_RETRY_INTERVAL = 120               # seconds — retry SHC after this long when offline
-        self._SHC_MAX_FAILS = _SHC_MAX_FAILS
-        self._SHC_RETRY_INTERVAL = _SHC_RETRY_INTERVAL
+        self._SHC_MAX_FAILS = 3                 # mark offline after this many consecutive failures
+        self._SHC_RETRY_INTERVAL = 120          # seconds — retry SHC after this long when offline
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
         self._pan_cache: dict[str, int | None] = {}
         # WiFi info cache — keyed by cam_id, populated from GET /wifiinfo
@@ -363,7 +377,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._feature_flags: dict[str, bool] = {}
         # Protocol version check — run once at startup
         self._protocol_checked: bool = False
-        self._integration_version = "10.3.8"
+        self._integration_version = _INTEGRATION_VERSION
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
@@ -472,8 +486,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._light_set_at:   dict[str, float] = {}      # lighting_override write timestamp
         self._notif_set_at:   dict[str, float] = {}      # enable_notifications write timestamp
         self._privacy_set_at: dict[str, float] = {}      # privacy write timestamp
-        _WRITE_LOCK_SECS = 30.0                          # seconds to hold write lock (Bosch cloud propagation can take 20s+)
-        self._WRITE_LOCK_SECS = _WRITE_LOCK_SECS
+        self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
         # Used for model-specific timing (encoder warm-up) and feature gating.
         self._hw_version: dict[str, str] = {}
@@ -525,8 +538,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._offline_since: dict[str, float] = {}
         # Extended offline interval: cameras offline for >15 min are checked every 15 min
         # instead of the normal interval_status (5 min), reducing unnecessary cloud calls.
-        _OFFLINE_EXTENDED_INTERVAL = 900  # 15 minutes
-        self._OFFLINE_EXTENDED_INTERVAL = _OFFLINE_EXTENDED_INTERVAL
+        self._OFFLINE_EXTENDED_INTERVAL = 900    # 15 minutes
         # Per-camera status check timestamps (for extended offline intervals)
         self._per_cam_status_at: dict[str, float] = {}
 

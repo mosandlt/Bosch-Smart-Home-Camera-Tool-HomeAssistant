@@ -25,6 +25,8 @@ from . import BoschCameraCoordinator, DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0
+
 STREAM_MODE_OPTIONS = ["auto", "local", "remote"]
 
 QUALITY_OPTIONS = ["auto", "high", "low"]
@@ -65,6 +67,7 @@ async def async_setup_entry(
 class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity to choose the RTSPS stream quality (inst + highQualityVideo)."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:video-high-definition"
     _attr_options = QUALITY_OPTIONS
 
@@ -146,6 +149,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
 
     _attr_icon    = "mdi:motion-sensor"
     _attr_options = MOTION_SENSITIVITY_OPTIONS
+    _attr_has_entity_name = True
     _attr_entity_registry_enabled_default = False
 
     def __init__(
@@ -236,6 +240,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
 
     _attr_icon    = "mdi:cellphone-arrow-down"
     _attr_options = FCM_PUSH_MODE_OPTIONS
+    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
@@ -310,6 +315,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
 
     _attr_icon             = "mdi:home-network"
     _attr_options          = STREAM_MODE_OPTIONS
+    _attr_has_entity_name  = True
     _attr_entity_category  = EntityCategory.CONFIG
 
     def __init__(
@@ -365,6 +371,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
 
     _attr_icon    = "mdi:shield-home-outline"
     _attr_options = DETECTION_MODE_OPTIONS
+    _attr_has_entity_name = True
 
     def __init__(
         self,

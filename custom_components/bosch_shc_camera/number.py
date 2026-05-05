@@ -27,6 +27,8 @@ from . import DOMAIN, CLOUD_API
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -73,6 +75,8 @@ async def async_setup_entry(
 
 class BoschPanNumber(CoordinatorEntity, NumberEntity):
     """Number entity to control the pan position of the 360 camera."""
+
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry, pan_limit: int) -> None:
         super().__init__(coordinator)
@@ -156,6 +160,7 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):
     _attr_native_step                 = 1
     _attr_mode                        = NumberMode.BOX
     _attr_native_unit_of_measurement  = "dB"
+    _attr_has_entity_name             = True
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -250,6 +255,7 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):
     _attr_native_step                 = 1
     _attr_mode                        = NumberMode.SLIDER
     _attr_native_unit_of_measurement  = "%"
+    _attr_has_entity_name             = True
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -332,6 +338,7 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):
     _attr_native_step                 = 5
     _attr_mode                        = NumberMode.SLIDER
     _attr_native_unit_of_measurement  = "%"
+    _attr_has_entity_name             = True
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
@@ -385,6 +392,7 @@ class _BoschGen2NumberBase(CoordinatorEntity, NumberEntity):
     """Base class for Gen2-only number entities."""
 
     _attr_entity_registry_enabled_default = True
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

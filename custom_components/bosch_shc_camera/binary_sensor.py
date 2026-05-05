@@ -35,6 +35,8 @@ from . import DOMAIN, BoschCameraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0  # coordinator handles all updates; no per-entity parallelism needed
+
 # How long (seconds) a motion/audio event keeps the binary sensor ON.
 # 90 s covers the polling-only fallback (coordinator scan_interval is 60 s, so
 # an event could be up to 60 s old when first seen by data[]); 30 s would
@@ -67,6 +69,7 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
 
     # Disabled by default — enable explicitly in entity registry if desired
     _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,

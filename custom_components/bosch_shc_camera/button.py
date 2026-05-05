@@ -20,6 +20,8 @@ from . import DOMAIN, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -50,6 +52,8 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
     right now — without waiting for the next scheduled interval.
     Useful after motion events or when you want a fresh snapshot immediately.
     """
+
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -104,6 +108,7 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
     """
 
     _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
     _attr_translation_key = "acoustic_alarm"
     _attr_entity_category = EntityCategory.CONFIG
 

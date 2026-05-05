@@ -19,23 +19,31 @@ Stream session limit: Bosch enforces maxSessionDuration=3600 (60 minutes).
 After 60 minutes the stream stops and must be restarted manually.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
+import urllib3
 
 import aiohttp
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url
+from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator
 from .const import TIMEOUT_SNAP
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES = 0
 
 IMAGE_REFRESH_INTERVAL  = 1800  # fallback: seconds between background proactive refreshes
 CLOUD_SNAP_CACHE_TTL    = 30    # minimum seconds between cloud fetches (de-bounce)
@@ -94,6 +102,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
     # 1×1 black JPEG — prevents HTTP 500 when no cached image available
     _PLACEHOLDER_JPEG = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?\x00T\xdf\xb2\x80\x01\xff\xd9'
+    _attr_has_entity_name = True
 
     @property
     def supported_features(self) -> CameraEntityFeature:
@@ -104,7 +113,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
 
     def __init__(
         self,
-        coordinator,
+        coordinator: BoschCameraCoordinator,
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
@@ -118,6 +127,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
         self._last_image_fetch: float = 0.0      # monotonic timestamp of last fetch
+        self._was_streaming: bool = False
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         title = info.get("title", cam_id)
@@ -135,7 +145,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to HA — kick off initial image fetch."""
         await super().async_added_to_hass()
-        self._was_streaming = False
         # Register with coordinator so button/service can trigger image refresh
         self.coordinator._camera_entities[self._cam_id] = self
         # Fetch a real image shortly after startup (let coordinator settle first).
@@ -151,7 +160,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         is_now_streaming = self.is_streaming
 
         # Stream just stopped → grab a fresh event snapshot immediately
-        if getattr(self, "_was_streaming", False) and not is_now_streaming:
+        if self._was_streaming and not is_now_streaming:
             self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
 
         # Proactive background refresh (even when nobody has the page open).
@@ -306,7 +315,7 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                         snapshot_interval (default 1800 s) controls the proactive
                         background refresh in _handle_coordinator_update, not this.
         """
-        if getattr(self, "_force_image_refresh", False):
+        if self._force_image_refresh:
             return 0.1
         if self.is_streaming:
             return 1.0
@@ -330,15 +339,15 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
         return self.coordinator.last_update_success
 
     @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         self._attr_name,
-            "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers  = {(DOMAIN, self._cam_id)},
+            name         = self._attr_name,
+            manufacturer = "Bosch",
+            model        = self._model_name,
+            sw_version   = self._fw,
+            connections  = {("mac", self._mac)} if self._mac else set(),
+        )
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -599,8 +608,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                 if local_user and local_pass:
                     def _fetch_local_snap() -> bytes | None:
                         import requests as req
-                        import urllib3
-                        urllib3.disable_warnings()
                         try:
                             r = req.get(
                                 proxy_url,
@@ -821,8 +828,6 @@ class BoschSHCCamera(CoordinatorEntity, Camera):
                 snap_url = f"https://{host}:{port}/snap.jpg?JpegSize=1206"
                 def _fetch_outage_snap() -> bytes | None:
                     import requests as req
-                    import urllib3
-                    urllib3.disable_warnings()
                     try:
                         r = req.get(
                             snap_url,
