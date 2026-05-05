@@ -276,7 +276,16 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
         if show_local and opts.get("enable_auto_download"):
             base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
             try:
-                if Path(base).is_dir():
+                base_path = Path(base)
+                # Create the directory on first access so the Media Browser
+                # entry appears immediately after the user enables auto-download
+                # — even before the first event has been downloaded. Without
+                # this, the entry stayed hidden until the first poll cycle
+                # actually wrote a file (the v10.7.1 fix only set the default
+                # path; the directory still had to exist on disk).
+                if not base_path.exists():
+                    base_path.mkdir(parents=True, exist_ok=True)
+                if base_path.is_dir():
                     out.append((_Source(entry_id, "L", "Lokal"), _LocalBackend(base)))
             except OSError:
                 pass
