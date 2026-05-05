@@ -547,6 +547,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._OFFLINE_EXTENDED_INTERVAL = 900    # 15 minutes
         # Per-camera status check timestamps (for extended offline intervals)
         self._per_cam_status_at: dict[str, float] = {}
+        # Stream warm-up state — eagerly initialised so clear_stream_warming() and
+        # is_stream_warming() never need hasattr guards. Lazy init (hasattr) caused
+        # clear_stream_warming() calls before first is_stream_warming() to silently
+        # no-op, leaving the entity badge stuck on "warming" after stream start.
+        self._stream_warming: set[str] = set()
+        self._stream_warming_started: dict[str, float] = {}
 
     @property
     def debug(self) -> bool:
@@ -1611,67 +1617,67 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # Guards against a polling tick firing an alert that the
                         # FCM handler already dispatched for the same event ID.
                         _now_mono = time.monotonic()
-                        if self._alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0:
+                        _dedup_skip = self._alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0
+                        self._last_event_ids[cam_id] = newest_id
+                        if _dedup_skip:
                             _LOGGER.debug(
                                 "Polling dedup: skipping duplicate alert for %s id=%s",
                                 cam_id, newest_id,
                             )
-                            self._last_event_ids[cam_id] = newest_id
-                            continue
-                        self._alert_sent_ids[newest_id] = _now_mono
-                        self._last_event_ids[cam_id] = newest_id
-                        _LOGGER.debug(
-                            "New event detected for %s (id=%s) — triggering snapshot refresh",
-                            cam_id, newest_id,
-                        )
-                        cam_entity = self._camera_entities.get(cam_id)
-                        if cam_entity:
+                        else:
+                            self._alert_sent_ids[newest_id] = _now_mono
+                            _LOGGER.debug(
+                                "New event detected for %s (id=%s) — triggering snapshot refresh",
+                                cam_id, newest_id,
+                            )
+                            cam_entity = self._camera_entities.get(cam_id)
+                            if cam_entity:
+                                self.hass.async_create_task(
+                                    cam_entity._async_trigger_image_refresh(delay=2)
+                                )
+                            newest_event  = events[0]
+                            event_type    = newest_event.get("eventType", "")
+                            event_tags    = newest_event.get("eventTags", []) or []
+                            # Gen2 DualRadar fires eventType=MOVEMENT w/ eventTags=["PERSON"]
+                            # when a human is detected — the tag is more specific, so upgrade.
+                            if "PERSON" in event_tags and event_type == "MOVEMENT":
+                                event_type = "PERSON"
+                            cam_name      = cam.get("title", cam_id)
+                            event_payload = {
+                                "camera_id":   cam_id,
+                                "camera_name": cam_name,
+                                "timestamp":   newest_event.get("timestamp", ""),
+                                "image_url":   newest_event.get("imageUrl", ""),
+                                "event_id":    newest_id,
+                            }
+                            if event_type == "MOVEMENT":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_motion", event_payload
+                                )
+                            elif event_type == "AUDIO_ALARM":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_audio_alarm", event_payload
+                                )
+                            elif event_type == "PERSON":
+                                self.hass.bus.async_fire(
+                                    "bosch_shc_camera_person", event_payload
+                                )
                             self.hass.async_create_task(
-                                cam_entity._async_trigger_image_refresh(delay=2)
+                                self._async_send_alert(
+                                    cam_name, event_type,
+                                    newest_event.get("timestamp", ""),
+                                    newest_event.get("imageUrl", ""),
+                                    newest_event.get("videoClipUrl", ""),
+                                    newest_event.get("videoClipUploadStatus", ""),
+                                )
                             )
-                        newest_event  = events[0]
-                        event_type    = newest_event.get("eventType", "")
-                        event_tags    = newest_event.get("eventTags", []) or []
-                        # Gen2 DualRadar fires eventType=MOVEMENT w/ eventTags=["PERSON"]
-                        # when a human is detected — the tag is more specific, so upgrade.
-                        if "PERSON" in event_tags and event_type == "MOVEMENT":
-                            event_type = "PERSON"
-                        cam_name      = cam.get("title", cam_id)
-                        event_payload = {
-                            "camera_id":   cam_id,
-                            "camera_name": cam_name,
-                            "timestamp":   newest_event.get("timestamp", ""),
-                            "image_url":   newest_event.get("imageUrl", ""),
-                            "event_id":    newest_id,
-                        }
-                        if event_type == "MOVEMENT":
-                            self.hass.bus.async_fire(
-                                "bosch_shc_camera_motion", event_payload
-                            )
-                        elif event_type == "AUDIO_ALARM":
-                            self.hass.bus.async_fire(
-                                "bosch_shc_camera_audio_alarm", event_payload
-                            )
-                        elif event_type == "PERSON":
-                            self.hass.bus.async_fire(
-                                "bosch_shc_camera_person", event_payload
-                            )
-                        self.hass.async_create_task(
-                            self._async_send_alert(
-                                cam_name, event_type,
-                                newest_event.get("timestamp", ""),
-                                newest_event.get("imageUrl", ""),
-                                newest_event.get("videoClipUrl", ""),
-                                newest_event.get("videoClipUploadStatus", ""),
-                            )
-                        )
-                        if self.options.get("mark_events_read", False):
-                            try:
-                                await self.async_mark_events_read([newest_id])
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as err:
-                                _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
+                            if self.options.get("mark_events_read", False):
+                                try:
+                                    await self.async_mark_events_read([newest_id])
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as err:
+                                    _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
                     elif newest_id:
                         self._last_event_ids[cam_id] = newest_id
 
@@ -2191,8 +2197,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         no longer has the cam_id, so the warm-up must have completed or
         errored out without resetting the flag).
         """
-        if hasattr(self, "_stream_warming"):
-            self._stream_warming.discard(cam_id)
+        self._stream_warming.discard(cam_id)
 
     def is_stream_warming(self, cam_id: str) -> bool:
         """True if this camera is currently in the warm-up phase.
@@ -2214,10 +2219,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
              cleanly rather than blocking privacy/snapshot UI forever.
         """
         import time as _time
-        if not hasattr(self, "_stream_warming"):
-            self._stream_warming: set[str] = set()
-        if not hasattr(self, "_stream_warming_started"):
-            self._stream_warming_started: dict[str, float] = {}
         if cam_id not in self._stream_warming:
             return False
         # Scenario 1: warming flag without _live_connections entry
@@ -2541,10 +2542,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # camera responds, plus a safety buffer. The RTSP URL
                         # is withheld from stream_source() until ready.
                         if type_val == "LOCAL" and local_user and local_pass:
-                            if not hasattr(self, "_stream_warming"):
-                                self._stream_warming = set()
-                            if not hasattr(self, "_stream_warming_started"):
-                                self._stream_warming_started = {}
                             self._stream_warming.add(cam_id)
                             self._stream_warming_started[cam_id] = time.monotonic()
                             # Stop HA's existing Stream now — the PUT above
@@ -3444,16 +3441,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             stream_name = cam_entity.entity_id
         else:
             stream_name = f"bosch_shc_cam_{cam_id.lower()}"
-        try:
-            async with asyncio.timeout(3):
-                async with aiohttp.ClientSession() as s:
-                    await s.delete(
-                        f"http://localhost:1984/api/streams",
-                        params={"name": stream_name},
-                    )
-                    _LOGGER.debug("go2rtc stream '%s' removed", stream_name)
-        except (asyncio.TimeoutError, aiohttp.ClientError):
-            pass  # go2rtc may not be running — silently ignore
+        # Try same endpoints as _register_go2rtc_stream — DELETE must reach the
+        # port where the stream was actually registered (11984 on HA 2024+, 1984 legacy).
+        endpoints = [
+            "http://localhost:11984/api/streams",
+            "http://localhost:1984/api/streams",
+        ]
+        for url in endpoints:
+            try:
+                async with asyncio.timeout(3):
+                    async with aiohttp.ClientSession() as s:
+                        await s.delete(url, params={"name": stream_name})
+                        _LOGGER.debug("go2rtc stream '%s' removed via %s", stream_name, url)
+                        break  # stop after first success
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                pass  # go2rtc may not be running on this port — try next
 
     async def _start_tls_proxy(self, cam_id: str, cam_host: str, cam_port: int, is_renewal: bool = False) -> int:
         """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
