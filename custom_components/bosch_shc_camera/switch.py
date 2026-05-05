@@ -906,7 +906,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
                     headers=headers,
                     json=body,
                 ) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         self._is_on = True
                         _LOGGER.info("Intercom ON for %s", self._cam_title)
                     else:
@@ -932,7 +932,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
                     headers=headers,
                     json=body,
                 ) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         self._is_on = False
                         _LOGGER.info("Intercom OFF for %s", self._cam_title)
                     else:
@@ -982,6 +982,7 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
         )
         if success:
             self.coordinator._privacy_sound_cache[self._cam_id] = True
+            self.coordinator._privacy_sound_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
@@ -990,6 +991,7 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
         )
         if success:
             self.coordinator._privacy_sound_cache[self._cam_id] = False
+            self.coordinator._privacy_sound_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
 
@@ -1027,6 +1029,7 @@ class BoschTimestampSwitch(_BoschSwitchBase):
             self._cam_id, "timestamp", {"result": True}
         )
         self.coordinator._timestamp_cache[self._cam_id] = True
+        self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
@@ -1034,6 +1037,7 @@ class BoschTimestampSwitch(_BoschSwitchBase):
             self._cam_id, "timestamp", {"result": False}
         )
         self.coordinator._timestamp_cache[self._cam_id] = False
+        self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
 
@@ -1070,6 +1074,7 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
             self._cam_id, "ledlights", {"state": "ON"}
         )
         self.coordinator._ledlights_cache[self._cam_id] = True
+        self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
@@ -1077,6 +1082,7 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
             self._cam_id, "ledlights", {"state": "OFF"}
         )
         self.coordinator._ledlights_cache[self._cam_id] = False
+        self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
 
@@ -1208,7 +1214,7 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
             data["ambientLightEnabled"] = enabled
             async with asyncio.timeout(10):
                 async with session.put(url, headers=headers, json=data) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         self._is_on = enabled
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
@@ -1266,7 +1272,7 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         try:
             async with asyncio.timeout(10):
                 async with session.put(url, headers=headers, json=body) as resp:
-                    if resp.status in (200, 204):
+                    if resp.status in (200, 201, 204):
                         # Update cache
                         try:
                             rsp = await resp.json()
@@ -1472,6 +1478,7 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
         )
         if success:
             self.coordinator._arming_cache[self._cam_id] = arm
+            self.coordinator._arming_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs):

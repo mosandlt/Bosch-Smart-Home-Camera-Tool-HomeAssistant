@@ -97,3 +97,132 @@ def test_camera_summary_excludes_full_uuid(hass: HomeAssistant) -> None:
     # diagnostics test which builds a real coordinator. This test asserts the
     # contract that cam_id_prefix is used in the summary.
     assert async_get_config_entry_diagnostics is not None
+
+
+# ── Camera summary serialization ─────────────────────────────────────────
+
+
+async def test_camera_summary_includes_required_fields(hass: HomeAssistant) -> None:
+    """Per-camera summary must surface model, firmware, status, etc."""
+    cam_id = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"bearer_token": "secret"},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {
+            cam_id: {
+                "info": {
+                    "title": "Bosch Terrasse",
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                },
+                "status": "ONLINE",
+                "events": [{"id": "e1"}, {"id": "e2"}],
+                "live": {"connectionType": "LOCAL", "age_seconds": 12},
+            }
+        },
+        "last_update_success": True,
+        "_fcm_running": True,
+        "_fcm_healthy": True,
+        "_auth_outage_count": 0,
+        "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    cams = diag["cameras"]
+    assert len(cams) == 1
+    cam = cams[0]
+    assert cam["cam_id_prefix"] == "EF791764"
+    assert cam["title"] == "Bosch Terrasse"
+    assert cam["model"] == "HOME_Eyes_Outdoor"
+    assert cam["firmware"] == "9.40.25"
+    assert cam["status"] == "ONLINE"
+    assert cam["events_today_count"] == 2
+    assert cam["live_connection_type"] == "LOCAL"
+    assert cam["live_age_seconds"] == 12
+
+
+async def test_camera_summary_handles_empty_coordinator(hass: HomeAssistant) -> None:
+    """No coordinator data → empty cameras list, no crash."""
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {},
+        "last_update_success": True,
+        "_fcm_running": False,
+        "_fcm_healthy": True,
+        "_auth_outage_count": 0,
+        "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["cameras"] == []
+    assert diag["coordinator"]["running"] is True
+
+
+async def test_diagnostics_handles_missing_runtime_data(hass: HomeAssistant) -> None:
+    """No runtime_data attr → coordinator.running = False, no crash."""
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    # Intentionally do NOT set runtime_data — test the fallback path.
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["coordinator"]["running"] is False
+    assert diag["cameras"] == []
+
+
+async def test_coordinator_section_exposes_health_signals(
+    hass: HomeAssistant,
+) -> None:
+    """coordinator.running, fcm_running, fcm_healthy, auth_outage_count
+    are essential bug-report context — must appear in diagnostics."""
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {},
+        "last_update_success": False,  # mid-incident
+        "_fcm_running": True,
+        "_fcm_healthy": False,
+        "_auth_outage_count": 4,
+        "update_interval": type("Td", (), {"total_seconds": lambda self: 60.0})(),
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    coord = diag["coordinator"]
+    assert coord["running"] is True
+    assert coord["last_update_success"] is False
+    assert coord["fcm_running"] is True
+    assert coord["fcm_healthy"] is False
+    assert coord["auth_outage_count"] == 4
+    assert coord["scan_interval"] == 60.0
+
+
+async def test_options_redaction_strips_smb_credentials(hass: HomeAssistant) -> None:
+    """SMB credentials in entry.options must be redacted."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={
+            "smb_password": "MySecretSmbPass",
+            "smb_username": "thomas",
+            "smb_server": "192.168.1.1",
+            "smb_share": "FRITZ.NAS",
+        },
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {}, "last_update_success": True,
+        "_fcm_running": False, "_fcm_healthy": True,
+        "_auth_outage_count": 0, "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    redacted_opts = diag["entry"]["options"]
+    assert redacted_opts["smb_password"] == "**REDACTED**"
+    assert redacted_opts["smb_username"] == "**REDACTED**"
+    assert redacted_opts["smb_server"] == "**REDACTED**"
+    # smb_share is not sensitive — it's a public path name
+    assert redacted_opts["smb_share"] == "FRITZ.NAS"

@@ -113,18 +113,26 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         return None
 
     def _event_within_window(self, event: dict) -> bool:
-        """Return True if the event timestamp is within EVENT_ACTIVE_WINDOW seconds of now."""
+        """Return True if the event timestamp is within EVENT_ACTIVE_WINDOW seconds of now.
+
+        Bosch /v11/events returns timestamps in **UTC** (the API string ends
+        with `Z`, e.g. `"2026-03-22T14:30:00.000Z"`). Stripping the suffix
+        and treating the remaining naive datetime as local time would shift
+        the event back/forward by the local UTC offset — in summer-time
+        Europe/Berlin (UTC+2) every event would appear ~2 hours older than
+        it really is, far outside the 90-second window. Fix: parse as
+        explicit UTC and compare both sides in UTC. Reported via simon42
+        forum (geotie) as 'Motion-Sensor wird oft nicht ausgelöst'.
+        """
         ts_str = event.get("timestamp", "")
         if not ts_str:
             return False
         try:
-            # Strip to 19 chars: "2026-03-22T14:30:00" (API may append ".000Z")
+            # Strip to 19 chars: "2026-03-22T14:30:00" (drop the ".000Z" suffix)
             ts_clean = ts_str[:19]
-            dt = datetime.fromisoformat(ts_clean)
-            local_tz = dt_util.get_time_zone(self.hass.config.time_zone)
-            dt_local = dt.replace(tzinfo=local_tz or timezone.utc)
-            now_local = datetime.now(tz=local_tz or timezone.utc)
-            return (now_local - dt_local) <= timedelta(seconds=EVENT_ACTIVE_WINDOW)
+            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=timezone.utc)
+            now_utc = datetime.now(tz=timezone.utc)
+            return (now_utc - dt_utc) <= timedelta(seconds=EVENT_ACTIVE_WINDOW)
         except (ValueError, TypeError):
             return False
 
