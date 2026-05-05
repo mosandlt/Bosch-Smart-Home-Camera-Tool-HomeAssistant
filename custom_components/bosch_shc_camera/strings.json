@@ -80,7 +80,7 @@
           "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
           "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
           "enable_auto_download": "Download event snapshots (JPEG) and video clips (MP4) from the Bosch cloud and save them locally on the HA host. Requires the download folder path below.",
-          "download_path": "Local folder path for auto-downloaded events. Example: /config/bosch_events",
+          "download_path": "Local folder path for auto-downloaded events. Default: /config/bosch_events",
           "media_browser_source": "Filters which backend the Media Browser entry **Bosch SHC Camera** shows.\n• **Auto** (default): show every backend that has data — local download folder and/or NAS upload.\n• **Local only**: hide the NAS even if SMB upload is active.\n• **NAS only**: hide local files even if auto-download is active.\n• **Disabled**: do not expose the Media Browser entry at all.",
           "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
           "alert_notify_service": "Default fallback: used when the per-type fields below are empty. Comma-separated. Examples: notify.signal_messenger, notify.mobile_app_xxx. Leave empty to disable alerts.",

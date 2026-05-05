@@ -38,7 +38,7 @@ from homeassistant.components.media_source.models import (
 from homeassistant.core import HomeAssistant
 from homeassistant.util import raise_if_invalid_path
 
-from .const import DOMAIN
+from .const import DEFAULT_OPTIONS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -274,8 +274,8 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
             continue
         show_local = filt in ("auto", "local")
         show_smb = filt in ("auto", "smb")
-        if show_local and opts.get("enable_auto_download") and (opts.get("download_path") or "").strip():
-            base = opts["download_path"].strip()
+        if show_local and opts.get("enable_auto_download"):
+            base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
             try:
                 if Path(base).is_dir():
                     out.append((_Source(entry_id, "L", "Lokal"), _LocalBackend(base)))
