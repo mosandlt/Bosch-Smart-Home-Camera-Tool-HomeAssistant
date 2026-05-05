@@ -7,7 +7,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## v11.0.1
 
-**643 tests across 38 files. 3 bugs fixed by writing the tests.**
+**645 tests across 38 files. 5 bugs fixed by writing the tests.**
 
 ### Bugs fixed
 
@@ -15,6 +15,9 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - **camera_light cache race** (same function, same shape) — discovered while writing the privacy regression test. The `entry["camera_light"] = (val.upper() == "ON")` assignment had the same unguarded write pattern. A user-toggle of the camera light was vulnerable to the same flip-back when the SHC poll hit within the eventual-consistency window. Fixed by extending the write-lock check to also cover `_light_set_at`. Regression guard: `tests/test_privacy_race.py::test_user_light_off_survives_stale_shc_poll`.
 
 Both were already-known about in the codebase as A/B-Diag debug logs (CLAUDE.md TODO `PRIVACY_REVERT 2026-04-27`) — but the FORCE-RULE fix the comment promised was never applied. The privacy-race test reproduced the bug in <100 lines without any HA fixtures, then the camera_light bug was found by code inspection while looking at the same function.
+
+- **RCP bitrate cache garbage** (`rcp.py:async_update_rcp_data`) — Gen1/360 cameras (e.g. `20E053B5`) return XML-wrapped responses for `0x0c81` via the cloud proxy. Without a guard, the bitrate parser interpreted XML character bytes as big-endian uint32 kbps values (`168442994`, `1668300298`, …), populating the bitrate cache with nonsense. Fix: skip XML-starting payloads and validate all values are in the 100–50 000 kbps range before caching. Regression guard: `tests/test_rcp_extended.py::TestAsyncUpdateRcpDataBitrate::test_garbage_bitrate_from_xml_not_cached`.
+- **RCP network services cache garbage** (`rcp.py:async_update_rcp_data`) — same Gen1 proxy issue for `0x0c62`. Without a guard, the network services parser decoded the full RCP XML document as ASCII and appended it as a single service entry, logging several hundred characters of raw XML. Fix: skip XML-starting payloads. Log message now says "N services" instead of dumping the raw list.
 
 ### New tests under `tests/`
 

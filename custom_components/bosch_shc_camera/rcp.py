@@ -560,13 +560,22 @@ async def async_update_rcp_data(
             _LOGGER.debug("RCP product name read error for %s: %s", cam_id, err)
 
     # Read bitrate ladder (0x0c81) -- series of big-endian uint32 kbps values
+    # Gen1/360 cameras return XML-wrapped responses via cloud proxy — guard against
+    # interpreting XML as binary (produces garbage kbps values like 168442994).
     try:
         raw = await _read("0x0c81", type_="P_OCTET")
-        if raw and len(raw) >= 4:
+        if raw and len(raw) >= 4 and not raw.startswith(b"<"):
             n = len(raw) // 4
             ladder = [struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
-            coordinator._rcp_bitrate_cache[cam_id] = ladder
-            _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
+            # Sanity-check: valid bitrate values are 100 – 50000 kbps
+            if all(100 <= v <= 50_000 for v in ladder):
+                coordinator._rcp_bitrate_cache[cam_id] = ladder
+                _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
+            else:
+                _LOGGER.debug(
+                    "RCP bitrate for %s: out-of-range values %s — cache skipped",
+                    cam_id, ladder[:4],
+                )
     except Exception as err:
         _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
 
@@ -623,12 +632,14 @@ async def async_update_rcp_data(
             _LOGGER.debug("RCP TLS cert read error for %s: %s", cam_id, err)
 
     # Read network services (0x0c62) -- TLV list, ~469 bytes
+    # Gen1/360 cameras via cloud proxy return the full RCP XML document — guard
+    # against caching raw XML as service names.
     try:
         raw = await _read("0x0c62", type_="P_OCTET")
-        if raw and len(raw) > 10:
+        if raw and len(raw) > 10 and not raw.startswith(b"<"):
             services = _parse_network_services(raw)
             coordinator._rcp_network_services_cache[cam_id] = services
-            _LOGGER.debug("RCP network services for %s: %s", cam_id, services)
+            _LOGGER.debug("RCP network services for %s: %d services", cam_id, len(services))
     except Exception as err:
         _LOGGER.debug("RCP network services read error for %s: %s", cam_id, err)
 

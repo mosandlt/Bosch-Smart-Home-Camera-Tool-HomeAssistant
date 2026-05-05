@@ -573,7 +573,7 @@ class TestAsyncUpdateRcpDataBitrate:
         from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
-        # Two bitrate entries: 1000 kbps and 2000 kbps
+        # Two bitrate entries: 1000 kbps and 2000 kbps (within valid 100-50000 range)
         bitrate_bytes = struct.pack(">II", 1000, 2000)
 
         with patch(
@@ -594,6 +594,70 @@ class TestAsyncUpdateRcpDataBitrate:
 
         ladder = coord._rcp_bitrate_cache.get(CAM_ID)
         assert ladder == [1000, 2000], f"Bitrate ladder should be [1000, 2000], got {ladder}"
+
+    @pytest.mark.asyncio
+    async def test_garbage_bitrate_from_xml_not_cached(self):
+        """Gen1/360 cameras return XML-wrapped data — garbage uint32 values must not cache.
+
+        Regression for the log entry:
+        RCP bitrate for 20E053B5: [168442994, 1668300298, ...] — cache skipped
+        Root cause: cloud proxy returns full RCP XML; parser was treating XML chars
+        as big-endian uint32 kbps values. Fix: out-of-range values (> 50000) are rejected.
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        # Simulate what Gen1 returns: XML-decoded payload bytes (garbage uint32s)
+        garbage_bytes = struct.pack(">II", 168442994, 1668300298)  # from real log
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                if cmd == "0x0c81":
+                    return garbage_bytes
+                return None
+
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_bitrate_cache, (
+            "Out-of-range bitrate values (>50000 kbps) must not be cached — "
+            "Gen1 cameras return XML-wrapped data that decodes to garbage uint32s"
+        )
+
+    @pytest.mark.asyncio
+    async def test_xml_wrapped_bitrate_not_cached(self):
+        """If raw bitrate bytes start with '<', it's XML — must not cache."""
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"<rcp><payload>00000000</payload></rcp>"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                if cmd == "0x0c81":
+                    return xml_bytes
+                return None
+
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_bitrate_cache, (
+            "XML-wrapped bitrate response must not be cached (starts with '<')"
+        )
 
 
 # ── _skip / _mark_fail threshold logic ──────────────────────────────────────
