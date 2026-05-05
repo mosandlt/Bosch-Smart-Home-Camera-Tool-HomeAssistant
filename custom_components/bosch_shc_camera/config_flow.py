@@ -449,7 +449,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                 ): bool,
                 vol.Optional(
                     "download_path",
-                    description={"suggested_value": opts.get("download_path", "")},
+                    description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
                 ): str,
                 vol.Optional(
                     "media_browser_source",
