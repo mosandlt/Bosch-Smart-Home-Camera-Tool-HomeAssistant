@@ -51,7 +51,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensor entities for each camera."""
-    coordinator: BoschCameraCoordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator: BoschCameraCoordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         cam_info = coordinator.data[cam_id].get("info", {})

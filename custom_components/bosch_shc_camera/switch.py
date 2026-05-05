@@ -167,7 +167,7 @@ async def async_setup_entry(
     if not opts.get("enable_snapshot_button", True):
         return
 
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -261,10 +261,6 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
             return False
         return not self.coordinator.is_session_stale(self._cam_id)
-
-    @property
-    def icon(self) -> str:
-        return "mdi:video-wireless" if self.is_on else "mdi:video-wireless-outline"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -461,10 +457,6 @@ class BoschAudioSwitch(_BoschSwitchBase):
     def is_on(self) -> bool:
         return self.coordinator._audio_enabled.get(self._cam_id, True)
 
-    @property
-    def icon(self) -> str:
-        return "mdi:volume-high" if self.is_on else "mdi:volume-off"
-
     async def async_turn_on(self, **kwargs) -> None:
         """Enable audio on the live stream."""
         _LOGGER.info("Audio ON for %s", self._cam_title)
@@ -525,10 +517,6 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
         )
-
-    @property
-    def icon(self) -> str:
-        return "mdi:led-on" if self.is_on else "mdi:led-off"
 
     async def async_turn_on(self, **kwargs) -> None:
         await self.coordinator.async_cloud_set_camera_light(self._cam_id, True)
@@ -633,10 +621,6 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             self.coordinator.last_update_success
             and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode") is not None
         )
-
-    @property
-    def icon(self) -> str:
-        return "mdi:eye-off" if self.is_on else "mdi:eye"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -744,10 +728,6 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
             self.coordinator.last_update_success
             and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status") is not None
         )
-
-    @property
-    def icon(self) -> str:
-        return "mdi:bell" if self.is_on else "mdi:bell-off"
 
     async def async_turn_on(self, **kwargs) -> None:
         """Enable notifications (follow camera schedule)."""
@@ -911,10 +891,6 @@ class BoschIntercomSwitch(_BoschSwitchBase):
     def is_on(self) -> bool:
         return self._is_on
 
-    @property
-    def icon(self) -> str:
-        return "mdi:microphone" if self._is_on else "mdi:microphone-off"
-
     async def async_turn_on(self, **kwargs) -> None:
         """Enable intercom (two-way audio) with speaker level 50."""
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -993,10 +969,6 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
         return self.coordinator._privacy_sound_cache.get(self._cam_id)
 
     @property
-    def icon(self) -> str:
-        return "mdi:volume-high" if self.is_on else "mdi:volume-off"
-
-    @property
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
@@ -1043,10 +1015,6 @@ class BoschTimestampSwitch(_BoschSwitchBase):
         return self.coordinator._timestamp_cache.get(self._cam_id)
 
     @property
-    def icon(self) -> str:
-        return "mdi:clock-outline" if self.is_on else "mdi:clock-remove-outline"
-
-    @property
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
@@ -1088,10 +1056,6 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
     @property
     def is_on(self) -> bool | None:
         return self.coordinator._ledlights_cache.get(self._cam_id)
-
-    @property
-    def icon(self) -> str:
-        return "mdi:led-on" if self.is_on else "mdi:led-off"
 
     @property
     def available(self) -> bool:
@@ -1425,7 +1389,9 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
         label = _NOTIF_TYPE_LABELS.get(ntype, ntype)
         self._attr_name            = f"Bosch {self._cam_title} {label}"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_notif_{ntype}"
-        self._attr_translation_key = f"notification_type_{ntype}"
+        # Translation keys must match [a-z0-9_-]+; convert API CamelCase → snake_case
+        _tkey = ntype.replace("cameraAlarm", "camera_alarm").replace("troubleEmail", "trouble_email")
+        self._attr_translation_key = f"notification_type_{_tkey}"
 
     @property
     def is_on(self) -> bool | None:
@@ -1433,10 +1399,6 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
         if not data:
             return None
         return data.get(self._ntype, False)
-
-    @property
-    def icon(self) -> str:
-        return _NOTIF_TYPE_ICONS.get(self._ntype, "mdi:bell")
 
     @property
     def available(self) -> bool:
@@ -1484,10 +1446,6 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
         self._attr_name            = f"Bosch {self._cam_title} Alarmanlage"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_arm"
         self._attr_translation_key = "alarm_system_arm"
-
-    @property
-    def icon(self) -> str:
-        return "mdi:shield-lock" if self.is_on else "mdi:shield-off-outline"
 
     @property
     def is_on(self) -> bool | None:

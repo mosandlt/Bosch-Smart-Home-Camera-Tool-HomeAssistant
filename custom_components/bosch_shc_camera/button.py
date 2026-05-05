@@ -34,7 +34,7 @@ async def async_setup_entry(
         _LOGGER.debug("Buttons disabled in options — skipping button platform")
         return
 
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         entities.append(BoschRefreshSnapshotButton(coordinator, cam_id, config_entry))

@@ -82,7 +82,7 @@ async def async_setup_entry(
         _LOGGER.debug("Camera snapshots disabled in options — skipping camera platform")
         return
 
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator = config_entry.runtime_data
     entities = [
         BoschSHCCamera(coordinator, cam_id, config_entry)
         for cam_id in coordinator.data

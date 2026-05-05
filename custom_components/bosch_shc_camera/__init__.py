@@ -73,7 +73,8 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -1020,31 +1021,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 "Backing off %ds before next attempt (outage #%d).",
                 err, backoff, self._auth_outage_count,
             )
-            # One-time persistent notification after 3 consecutive outages so
-            # the user understands why entities are unavailable.
+            # One-time repair issue after 3 consecutive outages so the user
+            # sees a clear explanation in Settings → Repairs while entities
+            # are unavailable. Quality-Scale Gold rule `repair-issues`.
             if self._auth_outage_count >= 3 and not self._auth_outage_alert_sent:
                 self._auth_outage_alert_sent = True
-                try:
-                    await self.hass.services.async_call(
-                        "persistent_notification", "create",
-                        {
-                            "title": "Bosch Kamera — Auth-Server Störung",
-                            "message": (
-                                "Der Bosch-Authentifizierungsserver "
-                                f"(`smarthome.authz.bosch.com`) antwortet aktuell mit "
-                                f"HTTP {err}. Das ist ein Problem auf Bosch-Seite, "
-                                "kein Fehler bei dir.\n\n"
-                                "Die Integration versucht automatisch weiter "
-                                "(Exponential Backoff bis 10 Minuten). "
-                                "Entitäten sind solange nicht verfügbar.\n\n"
-                                "Kein Handlungsbedarf — sobald Bosch wieder online ist, "
-                                "stellt sich alles von selbst wieder her."
-                            ),
-                            "notification_id": "bosch_auth_server_outage",
-                        },
-                    )
-                except Exception as err2:
-                    _LOGGER.debug("Persistent notification failed: %s", err2)
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    "auth_server_outage",
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="auth_server_outage",
+                    translation_placeholders={"error": str(err)},
+                )
             raise UpdateFailed(
                 f"Bosch auth server outage — will retry in {backoff}s"
             ) from err
@@ -1073,7 +1063,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             if self._token_fail_count > 0:
                 _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
             self._token_fail_count = 0
-            self._token_alert_sent = False
+            if self._token_alert_sent:
+                self._token_alert_sent = False
+                ir.async_delete_issue(self.hass, DOMAIN, "token_expired")
             # Clear auth-server outage state + dismiss the outage notification
             if self._auth_outage_count > 0:
                 _LOGGER.info(
@@ -1084,15 +1076,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 self._auth_outage_next_retry_ts = 0.0
                 if self._auth_outage_alert_sent:
                     self._auth_outage_alert_sent = False
-                    try:
-                        await self.hass.services.async_call(
-                            "persistent_notification", "dismiss",
-                            {"notification_id": "bosch_auth_server_outage"},
-                        )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as err:
-                        _LOGGER.debug("Failed to dismiss auth-outage notification: %s", err)
+                    ir.async_delete_issue(self.hass, DOMAIN, "auth_server_outage")
             return self._refreshed_token
         self._token_fail_count += 1
         _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
@@ -1109,19 +1093,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         raise UpdateFailed("Token refresh failed — will retry")
 
     async def _async_token_failure_alert(self, message: str) -> None:
-        """Send a one-time alert when token refresh fails (notify + persistent notification)."""
+        """Send a one-time alert when token refresh fails (repair issue + notify)."""
         if self._token_alert_sent:
             return
         self._token_alert_sent = True
         title = "⚠️ Bosch Kamera — Token abgelaufen"
-        # HA persistent notification (always — visible in sidebar)
-        try:
-            await self.hass.services.async_call(
-                "persistent_notification", "create",
-                {"title": title, "message": message, "notification_id": "bosch_token_expired"},
-            )
-        except Exception as err:
-            _LOGGER.debug("Persistent notification failed: %s", err)
+        # Repair issue — stays visible under Settings → Repairs until resolved.
+        # Quality-Scale Gold rule `repair-issues` (replaces persistent_notification).
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            "token_expired",
+            is_fixable=False,
+            severity=ir.IssueSeverity.CRITICAL,
+            translation_key="token_expired",
+            translation_placeholders={"message": message},
+        )
         # Notify service (Signal, mobile_app, etc.) — uses system services
         for svc in self._get_alert_services("system"):
             domain, _, name = svc.partition(".")
@@ -2106,6 +2093,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                 except asyncio.TimeoutError:
                     _LOGGER.warning("SMB disk check timed out after 30s")
 
+            # Quality-Scale Gold (stale-devices): remove devices for cameras that
+            # no longer exist in the Bosch cloud account. Skip on the fast first
+            # tick so we don't race the device-registry creation in async_setup_entry.
+            if not is_first_tick and data:
+                self._cleanup_stale_devices(set(data.keys()))
+
             return data
 
         except UpdateFailed:
@@ -2114,6 +2107,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Network error: {err}")
+
+    def _cleanup_stale_devices(self, current_cam_ids: set) -> None:
+        """Remove devices for cameras no longer in the Bosch cloud account.
+
+        Quality-Scale Gold rule `stale-devices`. Compares the device registry
+        against the freshly-fetched camera list — anything tied to our domain
+        with a cam_id that disappeared gets removed (entities + device entry).
+        Without this, a camera removed from the Bosch app stays visible in HA
+        as `unavailable` forever.
+        """
+        from homeassistant.helpers import device_registry as dr
+        dev_reg = dr.async_get(self.hass)
+        for device in dr.async_entries_for_config_entry(dev_reg, self._entry.entry_id):
+            cam_id = next(
+                (ident[1] for ident in device.identifiers if ident[0] == DOMAIN),
+                None,
+            )
+            if cam_id and cam_id not in current_cam_ids:
+                _LOGGER.info(
+                    "Removing stale device for camera %s (no longer in Bosch cloud account)",
+                    cam_id[:8],
+                )
+                dev_reg.async_remove_device(device.id)
 
     # ── Live stream safety guards ────────────────────────────────────────────
     # Prevents concurrent stream setup, privacy toggles during warm-up, etc.
@@ -4053,7 +4069,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     # SMB/NAS upload, download, cleanup, and disk-check functions are in smb.py
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    hass.data.setdefault(DOMAIN, {})
     # Register services at domain level — ensures they are available even when
     # the config entry is in setup_retry (e.g. token expired).
     # Without this, the Lovelace card shows "action not found" errors.
@@ -4129,8 +4144,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    hass.data.setdefault(DOMAIN, {})
-
     coordinator = BoschCameraCoordinator(hass, entry)
 
     await coordinator.async_config_entry_first_refresh()
@@ -4138,7 +4151,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Start proactive background token refresh (5 min before JWT expiry)
     coordinator._schedule_token_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
+    # Quality-Scale Bronze (runtime-data): store on entry.runtime_data, not hass.data[DOMAIN].
+    # HA clears runtime_data automatically on unload — no manual cleanup needed.
+    entry.runtime_data = coordinator
 
     opts = get_options(entry)
     platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
@@ -4294,14 +4309,11 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    if coord := edata.get("coordinator"):
+    coord = getattr(entry, "runtime_data", None)
+    if coord:
         await _async_cancel_coordinator_tasks(coord)
 
-    unloaded = await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
-    if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-    return unloaded
+    return await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -4311,8 +4323,7 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     We only reload if options actually changed — data-only updates
     (e.g. persisting a refreshed token) should NOT trigger a reload.
     """
-    edata = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    coord = edata.get("coordinator")
+    coord = getattr(entry, "runtime_data", None)
     if coord:
         prev_opts = coord._options_snapshot
         new_opts = get_options(entry)
@@ -4327,8 +4338,9 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_trigger_snapshot(call: ServiceCall) -> None:
         """Force an immediate refresh for all cameras (data + images)."""
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 # Fire coordinator refresh in background — do NOT await it.
                 # async_request_refresh() awaits the full coordinator tick which can
                 # take 6-22 s; blocking here freezes the card until the tick finishes.
@@ -4339,12 +4351,17 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_open_live_connection(call: ServiceCall) -> None:
         """Try to open a live proxy connection for a specific camera."""
         cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
         is_renewal = bool(call.data.get("renewal", False))
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 result = await coord.try_live_connection(cam_id, is_renewal=is_renewal)
                 if result:
                     _LOGGER.info("Live connection established: %s", _redact_creds(result))
+                    return
+        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="live_connection_failed", translation_placeholders={"cam_id_prefix": cam_id[:8]})
 
     async def handle_create_rule(call: ServiceCall) -> None:
         """Create a cloud-side schedule rule for a camera."""
@@ -4354,8 +4371,9 @@ def _register_services(hass: HomeAssistant) -> None:
         end_time = call.data.get("end_time", "23:59:00")
         weekdays = call.data.get("weekdays", [0, 1, 2, 3, 4, 5, 6])
         is_active = call.data.get("is_active", True)
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 payload = {
                     "id": None, "name": name, "isActive": is_active,
                     "startTime": start_time, "endTime": end_time,
@@ -4373,17 +4391,20 @@ def _register_services(hass: HomeAssistant) -> None:
                                 result = await resp.json()
                                 _LOGGER.info("Rule created: %s", result)
                             else:
-                                _LOGGER.warning("Create rule failed: HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Create rule", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Create rule error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Create rule", "error": str(err)}) from err
                 break
 
     async def handle_delete_rule(call: ServiceCall) -> None:
         """Delete a cloud-side schedule rule."""
         cam_id = call.data.get("camera_id", "")
         rule_id = call.data.get("rule_id", "")
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
@@ -4395,9 +4416,11 @@ def _register_services(hass: HomeAssistant) -> None:
                             if resp.status == 204:
                                 _LOGGER.info("Rule %s deleted", rule_id)
                             else:
-                                _LOGGER.warning("Delete rule failed: HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Delete rule", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Delete rule error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Delete rule", "error": str(err)}) from err
                 break
 
     async def handle_update_rule(call: ServiceCall) -> None:
@@ -4405,10 +4428,10 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         rule_id = call.data.get("rule_id", "")
         if not cam_id or not rule_id:
-            _LOGGER.warning("update_rule: camera_id and rule_id are required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and rule_id"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 # Fetch current rule from cache or API (API needs all fields for PUT)
@@ -4432,10 +4455,9 @@ def _register_services(hass: HomeAssistant) -> None:
                                             existing = dict(rule)
                                             break
                     except Exception as err:
-                        _LOGGER.warning("Fetch rules for update failed: %s", err)
+                        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Fetch rules for update", "error": str(err)}) from err
                 if not existing:
-                    _LOGGER.warning("update_rule: rule %s not found", rule_id)
-                    return
+                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="not_found", translation_placeholders={"kind": "Rule", "id": rule_id})
                 # Overlay provided fields
                 if "name" in call.data:
                     existing["name"] = call.data["name"]
@@ -4458,9 +4480,11 @@ def _register_services(hass: HomeAssistant) -> None:
                                 await coord.async_request_refresh()
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Update rule failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Update rule", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Update rule error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Update rule", "error": str(err)}) from err
                 break
 
     async def handle_set_motion_zones(call: ServiceCall) -> None:
@@ -4468,23 +4492,20 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         zones = call.data.get("zones", [])
         if not cam_id:
-            _LOGGER.warning("set_motion_zones: camera_id is required")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
         if not isinstance(zones, list):
-            _LOGGER.warning("set_motion_zones: zones must be a list of {x, y, w, h}")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_must_be_list", translation_placeholders={"argument": "zones"})
         # Validate zone coordinates
         for i, z in enumerate(zones):
             for key in ("x", "y", "w", "h"):
                 if key not in z:
-                    _LOGGER.warning("set_motion_zones: zone %d missing '%s'", i, key)
-                    return
+                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="missing_field", translation_placeholders={"kind": "zone", "index": str(i), "field": key})
                 val = float(z[key])
                 if val < 0.0 or val > 1.0:
-                    _LOGGER.warning("set_motion_zones: zone %d '%s'=%.3f out of range 0.0–1.0", i, key, val)
-                    return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="value_out_of_range", translation_placeholders={"kind": "zone", "index": str(i), "field": key, "value": f"{val:.3f}"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 try:
@@ -4497,22 +4518,24 @@ def _register_services(hass: HomeAssistant) -> None:
                                 _LOGGER.info("Motion zones set for %s (%d zones)", cam_id[:8], len(zones))
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
-                                _LOGGER.warning("Set motion zones: not available (HTTP 443) — Privacy mode may be active")
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="privacy_blocked", translation_placeholders={"action": "Set motion zones"})
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Set motion zones failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Set motion zones", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Set motion zones error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Set motion zones", "error": str(err)}) from err
                 break
 
     async def handle_get_motion_zones(call: ServiceCall) -> None:
         """Read current motion detection zones and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            _LOGGER.warning("get_motion_zones: camera_id is required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
@@ -4537,16 +4560,18 @@ def _register_services(hass: HomeAssistant) -> None:
                                 )
                             elif resp.status == 443:
                                 msg = "Motion-Zonen nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
-                                _LOGGER.warning("Get motion zones: %s", msg)
                                 await hass.services.async_call(
                                     "persistent_notification", "create",
                                     {"title": "Motion-Zonen", "message": msg, "notification_id": "bosch_motion_zones"},
                                 )
+                                raise HomeAssistantError(msg)
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Get motion zones failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Get motion zones", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Get motion zones error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Get motion zones", "error": str(err)}) from err
                 break
 
     async def handle_share_camera(call: ServiceCall) -> None:
@@ -4555,11 +4580,9 @@ def _register_services(hass: HomeAssistant) -> None:
         camera_ids = call.data.get("camera_ids", [])
         days = call.data.get("days", 30)
         if not friend_id:
-            _LOGGER.warning("share_camera: friend_id is required")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "friend_id"})
         if not camera_ids:
-            _LOGGER.warning("share_camera: camera_ids list is required")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_ids"})
         if isinstance(camera_ids, str):
             camera_ids = [camera_ids]
         from datetime import datetime, timedelta, timezone
@@ -4575,8 +4598,9 @@ def _register_services(hass: HomeAssistant) -> None:
             }
             for cid in camera_ids
         ]
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 try:
@@ -4593,19 +4617,21 @@ def _register_services(hass: HomeAssistant) -> None:
                                 )
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Share camera failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Share camera", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Share camera error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Share camera", "error": str(err)}) from err
                 break
 
     async def handle_get_privacy_masks(call: ServiceCall) -> None:
         """Read current privacy masks and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            _LOGGER.warning("get_privacy_masks: camera_id is required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
@@ -4630,16 +4656,18 @@ def _register_services(hass: HomeAssistant) -> None:
                                 )
                             elif resp.status == 443:
                                 msg = "Privacy-Masken nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
-                                _LOGGER.warning("Get privacy masks: %s", msg)
                                 await hass.services.async_call(
                                     "persistent_notification", "create",
                                     {"title": "Privacy-Masken", "message": msg, "notification_id": "bosch_privacy_masks"},
                                 )
+                                raise HomeAssistantError(msg)
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Get privacy masks failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Get privacy masks", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Get privacy masks error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Get privacy masks", "error": str(err)}) from err
                 break
 
     async def handle_set_privacy_masks(call: ServiceCall) -> None:
@@ -4647,18 +4675,16 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         masks = call.data.get("masks", [])
         if not cam_id:
-            _LOGGER.warning("set_privacy_masks: camera_id is required")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
         if not isinstance(masks, list):
-            _LOGGER.warning("set_privacy_masks: masks must be a list of {x, y, w, h}")
-            return
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_must_be_list", translation_placeholders={"argument": "masks"})
         for i, m in enumerate(masks):
             for key in ("x", "y", "w", "h"):
                 if key not in m:
-                    _LOGGER.warning("set_privacy_masks: mask %d missing '%s'", i, key)
-                    return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="missing_field", translation_placeholders={"kind": "mask", "index": str(i), "field": key})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 try:
@@ -4671,12 +4697,14 @@ def _register_services(hass: HomeAssistant) -> None:
                                 _LOGGER.info("Privacy masks set for %s (%d masks)", cam_id[:8], len(masks))
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
-                                _LOGGER.warning("Set privacy masks: not available (HTTP 443) — Privacy mode may be active")
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="privacy_blocked", translation_placeholders={"action": "Set privacy masks"})
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Set privacy masks failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Set privacy masks", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Set privacy masks error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Set privacy masks", "error": str(err)}) from err
                 break
 
     async def handle_delete_motion_zone(call: ServiceCall) -> None:
@@ -4684,10 +4712,10 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         zone_index = call.data.get("zone_index", -1)
         if not cam_id or zone_index < 0:
-            _LOGGER.warning("delete_motion_zone: camera_id and zone_index are required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and zone_index"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 # Fetch current zones, remove the one at index, re-POST
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
@@ -4698,12 +4726,10 @@ def _register_services(hass: HomeAssistant) -> None:
                             headers=headers,
                         ) as resp:
                             if resp.status != 200:
-                                _LOGGER.warning("delete_motion_zone: fetch failed HTTP %d", resp.status)
-                                return
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "delete_motion_zone fetch", "status": str(resp.status)})
                             zones = await resp.json()
                     if zone_index >= len(zones):
-                        _LOGGER.warning("delete_motion_zone: index %d out of range (have %d zones)", zone_index, len(zones))
-                        return
+                        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="index_out_of_range", translation_placeholders={"index": str(zone_index), "count": str(len(zones))})
                     removed = zones.pop(zone_index)
                     _LOGGER.info("Removing zone %d: %s", zone_index, removed)
                     async with asyncio.timeout(10):
@@ -4715,19 +4741,21 @@ def _register_services(hass: HomeAssistant) -> None:
                                 _LOGGER.info("Zone %d deleted, %d zones remaining", zone_index, len(zones))
                                 await coord.async_request_refresh()
                             else:
-                                _LOGGER.warning("delete_motion_zone: POST failed HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "delete_motion_zone POST", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("delete_motion_zone error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "delete_motion_zone", "error": str(err)}) from err
                 break
 
     async def handle_get_lighting_schedule(call: ServiceCall) -> None:
         """Read the full lighting schedule and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            _LOGGER.warning("get_lighting_schedule: camera_id is required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 try:
                     cached = getattr(coord, "_lighting_options_cache", {}).get(cam_id)
                     if cached:
@@ -4743,8 +4771,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                 if resp.status == 200:
                                     data = await resp.json()
                                 else:
-                                    _LOGGER.warning("get_lighting_schedule: HTTP %d", resp.status)
-                                    return
+                                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "get_lighting_schedule", "status": str(resp.status)})
                     sched = data.get("scheduleStatus", "?")
                     on_time = data.get("generalLightOnTime", "?")
                     off_time = data.get("generalLightOffTime", "?")
@@ -4767,8 +4794,10 @@ def _register_services(hass: HomeAssistant) -> None:
                         "persistent_notification", "create",
                         {"title": "Licht-Zeitplan", "message": msg, "notification_id": "bosch_lighting"},
                     )
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.error("get_lighting_schedule error: %s", err, exc_info=True)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "get_lighting_schedule", "error": str(err)}) from err
                 break
 
     async def handle_rename_camera(call: ServiceCall) -> None:
@@ -4776,10 +4805,10 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         new_name = call.data.get("new_name", "")
         if not cam_id or not new_name:
-            _LOGGER.warning("rename_camera: camera_id and new_name are required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and new_name"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 try:
@@ -4793,19 +4822,21 @@ def _register_services(hass: HomeAssistant) -> None:
                                 _LOGGER.info("Camera %s renamed to '%s'", cam_id[:8], new_name)
                                 await coord.async_request_refresh()
                             else:
-                                _LOGGER.warning("Rename failed: HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Rename", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Rename error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Rename", "error": str(err)}) from err
                 break
 
     async def handle_invite_friend(call: ServiceCall) -> None:
         """Invite a friend for camera sharing."""
         email = call.data.get("email", "")
         if not email:
-            _LOGGER.warning("invite_friend: email is required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "email"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
                 try:
@@ -4824,15 +4855,18 @@ def _register_services(hass: HomeAssistant) -> None:
                                 )
                             else:
                                 body = await resp.text()
-                                _LOGGER.warning("Invite failed: HTTP %d — %s", resp.status, body[:200])
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Invite", "status": str(resp.status), "body": body[:200]})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Invite error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Invite", "error": str(err)}) from err
                 break
 
     async def handle_list_friends(call: ServiceCall) -> None:
         """List all friends and camera shares."""
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
@@ -4857,19 +4891,21 @@ def _register_services(hass: HomeAssistant) -> None:
                                     {"title": "Kamera-Freigaben", "message": msg, "notification_id": "bosch_friends_list"},
                                 )
                             else:
-                                _LOGGER.warning("List friends failed: HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "List friends", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("List friends error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "List friends", "error": str(err)}) from err
                 break
 
     async def handle_remove_friend(call: ServiceCall) -> None:
         """Remove a friend and revoke camera shares."""
         friend_id = call.data.get("friend_id", "")
         if not friend_id:
-            _LOGGER.warning("remove_friend: friend_id is required")
-            return
-        for edata in hass.data.get(DOMAIN, {}).values():
-            if coord := edata.get("coordinator"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "friend_id"})
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
@@ -4880,9 +4916,11 @@ def _register_services(hass: HomeAssistant) -> None:
                             if resp.status in (200, 204):
                                 _LOGGER.info("Friend %s removed", friend_id)
                             else:
-                                _LOGGER.warning("Remove friend failed: HTTP %d", resp.status)
+                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Remove friend", "status": str(resp.status)})
+                except HomeAssistantError:
+                    raise
                 except Exception as err:
-                    _LOGGER.warning("Remove friend error: %s", err)
+                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Remove friend", "error": str(err)}) from err
                 break
 
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):

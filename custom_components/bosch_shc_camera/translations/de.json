@@ -25,6 +25,11 @@
         "title": "Bosch Smart Home Camera erneut anmelden",
         "description": "Dein Bosch Cloud-Token ist abgelaufen und kann nicht automatisch erneuert werden. Das passiert meist, wenn der Refresh-Token auf der Bosch-Seite ungültig wurde.\n\nKlicke auf **Absenden**, um die Bosch SingleKey ID Anmeldung im Browser zu öffnen. Nach dem Login wirst du automatisch zu Home Assistant zurückgeleitet — deine bestehende Konfiguration (Entitäten, Automationen, Optionen) bleibt erhalten.",
         "submit": "Absenden"
+      },
+      "reconfigure": {
+        "title": "Bosch Smart Home Camera neu konfigurieren",
+        "description": "Führe die OAuth-Anmeldung erneut aus, um deine Zugangsdaten zu aktualisieren — ohne die Integration zu entfernen. Alle bestehenden Entitäten, Automationen und Optionen bleiben erhalten.",
+        "submit": "Absenden"
       }
     },
     "error": {
@@ -505,6 +510,29 @@
           "description": "Cloud-UUID der Kamera (in den Entity-Attributen zu finden)"
         }
       }
+    }
+  },
+  "exceptions": {
+    "argument_required": {"message": "{argument} ist erforderlich"},
+    "argument_must_be_list": {"message": "{argument} muss eine Liste sein"},
+    "missing_field": {"message": "{kind} {index}: Feld {field} fehlt"},
+    "value_out_of_range": {"message": "{kind} {index} {field}={value} außerhalb des erlaubten Bereichs 0.0–1.0"},
+    "index_out_of_range": {"message": "Index {index} außerhalb des Bereichs (vorhanden: {count})"},
+    "not_found": {"message": "{kind} {id} nicht gefunden"},
+    "live_connection_failed": {"message": "Live-Verbindung für Kamera {cam_id_prefix} konnte nicht aufgebaut werden — siehe Log für mitmproxy-Anweisungen"},
+    "http_error": {"message": "{action} fehlgeschlagen: HTTP {status}"},
+    "http_error_with_body": {"message": "{action} fehlgeschlagen: HTTP {status} — {body}"},
+    "privacy_blocked": {"message": "{action}: nicht verfügbar bei aktivem Privacy-Mode"},
+    "unexpected_error": {"message": "{action} fehlgeschlagen: {error}"}
+  },
+  "issues": {
+    "token_expired": {
+      "title": "Bosch Kamera — Token abgelaufen",
+      "description": "Der Bearer-Token konnte nicht erneuert werden.\n\n{message}\n\nKlicke **Reconfigure** auf der Integrations-Karte (Einstellungen → Geräte & Dienste → Bosch Smart Home Camera), um dich neu anzumelden. Bestehende Entitäten und Automationen bleiben erhalten."
+    },
+    "auth_server_outage": {
+      "title": "Bosch Kamera — Auth-Server Störung",
+      "description": "Der Bosch-Authentifizierungsserver antwortet aktuell mit HTTP {error}. Das ist ein Problem auf Bosch-Seite, kein Fehler bei dir.\n\nDie Integration versucht automatisch weiter (Exponential Backoff bis 10 Minuten). Entitäten sind bis zur Wiederherstellung nicht verfügbar — kein Handlungsbedarf."
     }
   }
 }

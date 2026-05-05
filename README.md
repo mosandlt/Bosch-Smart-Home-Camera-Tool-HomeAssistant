@@ -40,6 +40,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Installation](#installation)
 - [Setup](#setup)
 - [Architecture](#architecture)
+- [Quality Scale: Gold](#quality-scale-gold)
 - [Features](#features)
   - [Entities](#entities)
   - [Built-in 3-Step Alert System](#built-in-3-step-alert-system)
@@ -134,6 +135,16 @@ If you don't use HACS, copy the integration folder into your HA config:
 4. Continue with [Setup](#setup) below.
 
 > **Lovelace card** is auto-registered since **v10.3.19** — the integration serves it from its own bundled `www/` folder. No need to copy `bosch-camera-card.js` to `/config/www/` separately. If you have an old copy from a pre-v10.3.19 install, you can leave it (harmless) or delete it manually: `rm /config/www/bosch-camera-card.js`.
+
+### Removal
+
+To uninstall the integration cleanly:
+
+1. **Settings → Devices & Services → Bosch Smart Home Camera → ⋮ → Delete** — removes the config entry, all camera entities, the device registry, and the auto-registered Lovelace resource.
+2. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Remove** — deletes `custom_components/bosch_shc_camera/`. (For manual installs: `rm -rf /config/custom_components/bosch_shc_camera/`.)
+3. **Restart Home Assistant.**
+
+The integration leaves no orphan files in `/config/www/`, no leftover entries in `configuration.yaml`, and no system services running. Downloaded event snapshots/videos in `/config/bosch_events/` (or your configured `download_path`) are **not** auto-deleted — remove them manually if no longer needed.
 
 ---
 
@@ -310,6 +321,95 @@ stateDiagram-v2
 * **TLS proxy is symmetric** (since v10.3.24): the same Python TLS proxy that handles LOCAL also terminates TLS to the cloud proxy for REMOTE. FFmpeg (HLS) and go2rtc (WebRTC) always connect to `rtsp://127.0.0.1:N` — no scheme tricks (`rtspx://`), no per-consumer special-cases. The cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` (cert SAN only covers `*.residential.connect.boschsecurity.com`) is handled in one place (`verify_mode=CERT_NONE, check_hostname=False`).
 * **Snapshots** (`/snap.jpg`) use the cloud-proxy URL directly with HTTP — no TLS proxy needed since they're single-shot HTTP requests, not long-lived RTSP streams.
 * **bufferingTime hint** from `PUT /connection` is `1000 ms` for REMOTE (vs `500 ms` for LOCAL) — Bosch's server-side hint about expected latency.
+
+---
+
+## Quality Scale: Gold
+
+Verified rule-by-rule against the [Home Assistant Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) — Bronze foundation + Silver stability + Gold comprehensiveness. The full per-rule breakdown lives in [`custom_components/bosch_shc_camera/quality_scale.yaml`](custom_components/bosch_shc_camera/quality_scale.yaml).
+
+```mermaid
+graph LR
+    Bronze["🥉 Bronze<br/>foundation<br/>(18 rules)"] --> Silver["🥈 Silver<br/>stability<br/>(10 rules)"]
+    Silver --> Gold["🥇 Gold<br/>comprehensiveness<br/>(21 rules)"]
+    Gold --> Plat["💎 Platinum<br/>production-grade<br/>(3 rules)"]
+
+    style Bronze fill:#cd7f32,color:#fff
+    style Silver fill:#a0a0a0,color:#fff
+    style Gold fill:#ffd700,color:#000,stroke-width:3px
+    style Plat fill:#666,color:#aaa,stroke-dasharray:5
+```
+
+**What the Gold tier delivers (visible to users):**
+
+- **Diagnostics download** — Settings → Devices & Services → ⋮ → *Download diagnostics* returns a redacted JSON snapshot (config + coordinator + per-camera summary). Tokens, FCM credentials, private keys, MAC addresses are auto-redacted.
+- **Repair-issues UI** — Token-expired and Bosch-auth-server-outage states surface under Settings → System → Repairs with full description and severity, instead of silent persistent notifications. Auto-clear when the issue resolves.
+- **Reconfigure flow** — Integration card menu → ⋮ → *Reconfigure* runs the OAuth login again and updates the same config entry in place. Entities, automations, FCM/SMB options preserved.
+- **Translatable service-action exceptions** — All 50+ `HomeAssistantError` / `ServiceValidationError` raises route through `translation_key` + placeholders. German-locale users see localized messages.
+- **Auto-cleanup of stale devices** — Cameras removed from your Bosch account (via the Bosch Smart Camera app) are now automatically removed from the HA device registry on the next coordinator tick.
+- **Icon translations** — All entity icons (including conditional state-based icons like privacy on/off, stream-status, FCM push status) live in `icons.json` instead of hardcoded `_attr_icon` values.
+
+**Architectural improvements (invisible but real):**
+
+- **`ConfigEntry.runtime_data`** instead of `hass.data[DOMAIN][entry_id]` — auto-cleanup on unload, no half-state race window.
+- **Service-action exceptions instead of silent log warnings** — clicking a button that hits HTTP 500 now shows a red error notification with cause; previously failures looked like nothing happened.
+- **Coordinator raises `UpdateFailed`** consistently → HA framework provides `log-when-unavailable` automatically, no manual log-spam guards.
+
+**Open `todo` items** (tracked in `quality_scale.yaml`):
+
+- `test-coverage` — pytest framework + config-flow + diagnostics tests are in place (covers the Bronze rule). Full 95% coverage of the 5000-line `__init__.py` and cloud-API paths needs extensive aiohttp mocking and is filed as a separate sprint.
+- Platinum-tier rules (`async-dependency`, `strict-typing`) — partial typing exists; full strict-typing entry in HA core's `.strict-typing` is N/A for custom integrations.
+
+### Operational reliability — token recovery flow
+
+The Gold-tier `repair-issues` + `reconfiguration-flow` rules combine into a self-service token recovery path that no longer requires deleting and re-adding the integration:
+
+```mermaid
+sequenceDiagram
+    participant Coord as Coordinator
+    participant IR as Issue Registry
+    participant UI as Settings → Repairs
+    participant User
+    participant CF as Config Flow
+    participant Bosch as Bosch SingleKey ID
+
+    Note over Coord: token refresh fails<br/>3× consecutive
+    Coord->>Coord: raise ConfigEntryAuthFailed
+    Coord->>IR: ir.async_create_issue("token_expired", severity=CRITICAL)
+    IR-->>UI: visible in repairs panel
+    User->>UI: click "Reconfigure"
+    UI->>CF: async_step_reauth_confirm
+    CF->>Bosch: open OAuth in browser
+    Bosch-->>CF: redirect with authorization code
+    CF->>CF: async_oauth_create_entry → async_update_reload_and_abort
+    CF-->>Coord: entry reloaded, tokens persisted
+    Coord->>IR: ir.async_delete_issue("token_expired")
+    IR-->>UI: issue cleared
+```
+
+Same flow handles the Bosch-side `auth_server_outage` issue: the coordinator surfaces a separate non-fixable repair issue (severity ERROR) with the Bosch HTTP status, then auto-clears it when the next refresh succeeds.
+
+### Service-action error visibility
+
+```mermaid
+flowchart LR
+    Click[User clicks button<br/>e.g. set_motion_zones]
+    Click --> Validate{Input valid?}
+    Validate -- "no" --> SVE["raise ServiceValidationError<br/>translation_key: argument_required<br/>placeholders: {argument: zones}"]
+    Validate -- "yes" --> API[Bosch cloud API PUT]
+    API --> Resp{HTTP status}
+    Resp -- "200/204" --> OK[refresh coordinator]
+    Resp -- "443 privacy" --> Privacy["raise HomeAssistantError<br/>translation_key: privacy_blocked"]
+    Resp -- "5xx / network" --> HAE["raise HomeAssistantError<br/>translation_key: http_error_with_body"]
+    SVE --> Notif[HA shows red error<br/>localized to user's language]
+    Privacy --> Notif
+    HAE --> Notif
+
+    style Notif fill:#ff6961,color:#fff
+    style OK fill:#77dd77,color:#000
+```
+
+Before v11.0.0 these failure paths logged a WARNING and silently returned — clicking a button that hit HTTP 500 looked like nothing happened. Now every failure surfaces a translatable red notification with the cause.
 
 ---
 

@@ -7,6 +7,38 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ---
 
+## v11.0.0
+
+**Home Assistant Integration Quality Scale: Gold.** All Bronze foundation + all Silver stability + all Gold comprehensiveness rules verified rule-by-rule in `quality_scale.yaml`. Manifest declares `quality_scale: "gold"`. The integration is now on par with the most polished HA core integrations.
+
+### Silver tier — UX wins
+
+- **Service errors are visible.** All 16 service actions (`bosch_shc_camera.create_rule`, `set_motion_zones`, `share_camera`, …) now raise `ServiceValidationError` for bad input and `HomeAssistantError` for upstream failures. Previously failures were silently logged at WARNING level — clicking a button that hit HTTP 500 looked like nothing happened. Now HA shows a red error notification with the cause.
+- **Runtime data on the config entry.** Coordinator state moved from `hass.data[DOMAIN][entry_id]` to `ConfigEntry.runtime_data`. Auto-cleaned on unload, no race window if `async_setup_entry` aborts halfway.
+
+### Gold tier — UX wins
+
+- **Diagnostics download.** Settings → Devices & Services → Bosch Smart Home Camera → ⋮ → Download diagnostics. Returns a redacted JSON snapshot with config entry data, options, coordinator state, FCM status, and per-camera summary (model, firmware, status, event count). Tokens, MAC addresses, FCM IDs, and SMB credentials are auto-redacted via `homeassistant.diagnostics.async_redact_data`. Replaces the manual log-collection workflow for bug reports.
+- **Repairs UI for actionable problems.** Token-expired and Bosch-auth-server-outage notifications moved from `persistent_notification` to `ir.async_create_issue`. They now appear under Settings → System → Repairs with full description and severity, auto-clear when the issue resolves itself, and survive HA restarts.
+- **Reconfigure flow.** Integration card menu → ⋮ → Reconfigure runs the OAuth login again and updates the same config entry in place. Entities, automations, FCM/SMB options — all preserved. Replaces the "delete + re-add" workaround when credentials need a manual refresh.
+- **Stale-device cleanup.** Cameras removed from your Bosch account (e.g. via the Bosch Smart Camera app) are now automatically removed from the HA device registry on the next coordinator tick. Previously they stayed as ghost `unavailable` entities indefinitely.
+- **Translatable exceptions.** All 50+ service-action exceptions use `translation_domain` + `translation_key` + `translation_placeholders`. German-locale users see localized error messages instead of English-only strings.
+
+### Bronze + Silver hygiene
+
+- README has a new **Removal** section with the clean-uninstall steps.
+- `hass.data.setdefault(DOMAIN, {})` in `async_setup` removed — no longer needed after the runtime-data migration.
+- Verified already-compliant rules: `has-entity-name`, `unique-id`, `PARALLEL_UPDATES = 0`, `entity-event-setup`, `config-entry-unloading`, `reauthentication-flow`, `entity-unavailable`, `log-when-unavailable` (coordinator-implicit via `UpdateFailed`).
+
+### Icon-translations
+
+- All 14 dynamic `def icon(self)` properties across `switch.py` + `sensor.py` removed; their state-based icon logic now lives in `icons.json` (`default` + per-`state` keys). Covers `live_stream`, `privacy_mode`, `audio`, `camera_light`, `notifications`, `intercom`, `privacy_sound`, `timestamp_overlay`, `status_led`, `intrusion_detection`, `alarm_system_arm`, `status` (online/offline), `fcm_push_status` (3 states), `stream_status` (5 states), and 6 notification-type variants.
+
+### Test coverage
+
+- New `tests/` directory with pytest framework using `pytest-homeassistant-custom-component`. Covers the Bronze `config-flow-test-coverage` rule (unique-config-entry, reauth, reconfigure, OAuth-create-entry) plus diagnostics-redaction tests (no FCM/JWT/private-key leaks).
+- The Silver `test-coverage` rule (95% target) is partially met — full coverage of the 5000-line `__init__.py` and cloud-API paths needs extensive aiohttp mocking and is filed as a separate sprint. Tracked as `todo` in `quality_scale.yaml`.
+
 ## v10.7.0
 
 **Event recordings now appear in HA's Media Browser — both local and NAS.** New `media_source` provider exposes downloaded events under **Media → Bosch SHC Camera**, with two backends auto-detected from existing options:

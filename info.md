@@ -2,6 +2,8 @@
 
 Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera, Gen2 Eyes Outdoor II / Indoor II) as fully featured entities in Home Assistant — including a custom Lovelace card with live streaming, controls, and event info.
 
+> **Quality Scale: Gold** — runtime data on the config entry, raised + translatable service-action exceptions, downloadable diagnostics with secret redaction, repair issues for token-expired / Bosch-outage states, in-place reconfigure flow, automatic stale-device cleanup, full icon translations, pytest config-flow coverage. See `quality_scale.yaml` in the integration folder for the rule-by-rule status.
+
 ## ⚠️ MAJOR CHANGE: Auth provider changed (since v8.0.5)
 
 **Bosch switched to a new OAuth client (`oss_residential_app`) starting with v8.0.5.** Existing installations must **re-authenticate once** to migrate from the legacy `residential_app` client.

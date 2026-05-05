@@ -45,7 +45,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: BoschCameraCoordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
+    coordinator: BoschCameraCoordinator = config_entry.runtime_data
     entities = []
     for cam_id in coordinator.data:
         entities.append(BoschVideoQualitySelect(coordinator, cam_id, config_entry))
