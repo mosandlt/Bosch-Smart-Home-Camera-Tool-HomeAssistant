@@ -7,7 +7,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## v11.0.1
 
-**578 tests across 35 files. 3 bugs fixed by writing the tests.**
+**643 tests across 38 files. 3 bugs fixed by writing the tests.**
 
 ### Bugs fixed
 

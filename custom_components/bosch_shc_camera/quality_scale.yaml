@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      578 tests across 35 files covering: all entity platforms (camera, switch,
+      643 tests across 38 files covering: all entity platforms (camera, switch,
       sensor, binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
       transport rewriting, circuit breaker, start/stop lifecycle), diagnostics,
