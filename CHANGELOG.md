@@ -154,6 +154,131 @@ python3 -m venv .venv-tests
 .venv-tests/bin/pytest tests/ -v
 ```
 
+## v11.0.1
+
+**Pragmatic test-coverage layer + 2 real bugs found by writing tests.** 120 pytest cases across 7 files; the test work surfaced two race conditions that the production code never logged, both now fixed.
+
+### Bugs fixed
+
+- **PRIVACY_REVERT race** (`shc.py:async_update_shc_states`) — first OFF-toggle of the privacy switch visibly reverted to ON for ~1-2 s, then settled. Root cause: the SHC fetcher overwrote `_shc_state_cache[cam_id]["privacy_mode"]` on every poll without honoring the `_privacy_set_at` write-lock that the cloud-fetcher path already respected. Within the cloud's eventual-consistency window (~10-30 s after a write), a stale ENABLED reading from the SHC clobbered the user's freshly-set OFF. Fixed by adding the same write-lock check the cloud path already uses. Confirmed by reproducing the bug in `tests/test_privacy_race.py::test_user_off_toggle_survives_stale_shc_poll` — the test would have failed pre-fix.
+- **camera_light cache race** (same function, same shape) — discovered while writing the privacy regression test. The `entry["camera_light"] = (val.upper() == "ON")` assignment had the same unguarded write pattern. A user-toggle of the camera light was vulnerable to the same flip-back when the SHC poll hit within the eventual-consistency window. Fixed by extending the write-lock check to also cover `_light_set_at`. Regression guard: `tests/test_privacy_race.py::test_user_light_off_survives_stale_shc_poll`.
+
+Both were already-known about in the codebase as A/B-Diag debug logs (CLAUDE.md TODO `PRIVACY_REVERT 2026-04-27`) — but the FORCE-RULE fix the comment promised was never applied. The privacy-race test reproduced the bug in <100 lines without any HA fixtures, then the camera_light bug was found by code inspection while looking at the same function.
+
+### New tests under `tests/`
+
+- **`test_service_validation.py`** (19 tests) — every service-handler input-validation path raises `ServiceValidationError` with the right `translation_key` + `translation_placeholders`. Covers `set_motion_zones`, `set_privacy_masks`, `share_camera`, `invite_friend`, `remove_friend`, `delete_motion_zone`, `update_rule`, `rename_camera`, etc. No aiohttp mocks — these tests fire BEFORE the network call.
+- **`test_translations.py`** (8 tests) — strings.json + de.json + en.json all parse, exception keys match across all three files, every translation key matches Hassfest's `[a-z0-9_-]+` rule, no placeholders sit inside single quotes (the bug that bit the v11.0.0 squash), all `ir.async_create_issue` keys + state-based icon keys exist.
+- **`test_quality_scale.py`** (5 tests) — manifest tier matches `quality_scale.yaml` rule statuses; no unknown rules (typo guard); every `exempt` and `todo` rule has a `comment`.
+- **`test_models.py`** (24 tests) — every documented hardwareVersion resolves to a real `CameraModelConfig`, Gen2 Outdoor heartbeat stays at 3600 (regression guard for the rotating-Digest-cred bug), `@dataclass(frozen=True)` immutability holds, display-name inference for unknown hardware works.
+- **`test_security_helpers.py`** (29 tests) — `_is_safe_bosch_url` SSRF allowlist (rejects internal IPs, localhost, AWS metadata host, homoglyph domains, non-HTTPS), `_redact_creds` redacts ephemeral Digest passwords without mutating the source dict, `get_options` merges `DEFAULT_OPTIONS` with entry options.
+- **`test_coordinator_helpers.py`** (16 tests) — pure-state coordinator queries (`is_camera_online`, `is_session_stale`, `token`, `refresh_token`, `options`, `debug`) called from every entity's `available` property. ONLINE/OFFLINE/UPDATING_REGULAR/missing all handled correctly; in-memory token override prefers fresh value over stale entry.data.
+- **`test_privacy_race.py`** (7 tests) — the regression guards described above + the symmetric camera_light coverage.
+
+Plus pre-existing tests (`test_config_flow.py`, `test_diagnostics.py` extended with 5 more cases) — **120 total tests, all passing**.
+
+### Entity-class test pass — switches / sensors / numbers / lights / etc.
+
+Followed up the initial layer with stub-coordinator tests for every entity platform:
+
+- `test_switches.py` (28) — `BoschLiveStreamSwitch` is_on/available/extra_attrs incl. privacy gate and stale-session gate; `BoschPrivacyModeSwitch` cloud-only-availability + cooldown logic + RCP cross-validation attribute; `BoschAudioSwitch`, `BoschTimestampSwitch`, `BoschPrivacySoundSwitch`, `BoschStatusLedSwitch`, `BoschNotificationsSwitch` (incl. all 3 cloud states).
+- `test_sensors.py` (16) — `BoschCameraStatusSensor` + commissioned/firmware attrs, `BoschFcmPushStatusSensor` 3-state matrix (disabled/fcm_push/polling), `BoschCameraEventsTodaySensor`, `BoschFirmwareVersionSensor`, etc.
+- `test_binary_sensors.py` (16) — motion / audio_alarm / person event sensors. Verifies the 90-second active window, malformed-timestamp handling, type-isolation (audio event must NOT trigger motion sensor).
+- `test_buttons.py` (6), `test_numbers.py` (13) — incl. `BoschPanNumber` 180°-rotation sign-inversion logic for ceiling-mounted cameras.
+- `test_light.py` (9) — Gen2 RGB light cache, brightness scaling 0-100 ↔ 0-255, last_color persistence even when off, invalid-hex graceful degradation.
+- `test_select.py` (7) — video quality, FCM push mode, stream mode, motion sensitivity.
+- `test_update.py` (12) — firmware update entity (installed/latest version, in_progress, attrs).
+
+### Coverage (`pytest --cov`)
+
+```
+diagnostics.py    100%
+const.py          100%
+models.py         100%
+update.py          90%
+binary_sensor.py   85%
+button.py          69%
+sensor.py          50%
+number.py          50%
+select.py          47%
+light.py           44%
+switch.py          40%
+config_flow.py     34%
+shc.py             14%
+__init__.py        10%
+TOTAL              23% (228 tests)
+```
+
+Full 95% Silver `test-coverage` remains tracked as `todo` in `quality_scale.yaml`. The remaining 77% is the coordinator's async hot paths — every cloud-API call site, the stream lifecycle, FCM listener, SHC fetcher state machine — all of which need extensive aiohttp/firebase mocks. Filed as a separate sprint.
+
+### `_alert_sent_ids` cache eviction starvation
+
+Eviction was gated behind `if len(_sent) > 32` — if 4 cams burst-fired motion events all within the 120 s window, the cache grew past 32 but every entry was still < 120 s old, so the eviction loop ran but evicted nothing. Cache could grow without bound until the burst ended. Fix: drop the size gate, run plain age-based cleanup on every push (`if _sent:` truthy → loop). O(len) cost is fine; len stays small.
+
+Regression guards in `tests/test_theoretical_bugs.py::TestAlertSentIdsEviction`. Plus pinning of FCM watchdog state-clearing invariants and stream-fallback timing constants in the same file.
+
+### Binary sensor timezone bug — never fired in non-UTC timezones
+
+User report (geotie, simon42 forum post #8): "Motion-Sensor wird oft nicht ausgelöst" — second component of the same complaint, found by reproducing the bug in a stub-coordinator script.
+
+Root cause in `binary_sensor.py:_event_within_window`: Bosch `/v11/events` returns timestamps in UTC (`"2026-05-05T10:30:00.000Z"`). The function stripped the `Z` suffix and replaced the naive datetime's `tzinfo` with the user's local timezone — so a UTC event from 30 s ago appeared as `(local-offset)` hours old. In summer-time Europe/Berlin (`UTC+02:00`) that's 2 h 30 s, far outside the 90 s `EVENT_ACTIVE_WINDOW`. Result: motion / audio_alarm / person binary sensors never fired in any non-UTC user timezone — i.e. ~every German user.
+
+Fix: parse the naive datetime as explicit UTC (`replace(tzinfo=timezone.utc)`) and compare both sides in UTC.
+
+Combined with the polling-only `_last_event_ids` bootstrap fix below, this closes geotie's complaint completely. Regression guards in `tests/test_binary_sensors.py::TestEventWindow::test_utc_event_in_berlin_timezone_fires` (and three siblings).
+
+### Polling-only mode never fired alerts after restart
+
+User report (geotie, simon42 forum post #8): "Die obige Automation funktioniert, wird aber oft nicht ausgelöst." Found by mapping every forum issue to a regression test (CLAUDE.md `TEST_EVERY_BUG` rule).
+
+Root cause: in `BoschCameraCoordinator._async_update_data`, the first-tick branch (`if prev_id is None:`) marked unread events as read but never set `_last_event_ids[cam_id]`. Without the seed, `prev_id` stayed `None` forever; the alert-chain `elif newest_id and newest_id != prev_id:` was never reached; `bosch_shc_camera_motion`, `_audio_alarm`, `_person` events never fired in polling-only mode (FCM disabled or unhealthy) after a restart.
+
+Fix: bootstrap `self._last_event_ids[cam_id] = newest_id` at the end of the `prev_id is None` branch. Subsequent ticks now have `prev_id != None` and proceed to the alert chain on the next new event.
+
+The FCM path already had its own bootstrap (`fcm.py:546-547`); only the polling path was broken. Most users have FCM enabled by default so the bug was masked, but anyone running with `enable_fcm_push=False` or whose FCM listener died (`_fcm_healthy=False`) hit this consistently.
+
+Regression guard: `tests/test_forum_issues.py::TestIssue5_BinarySensorMissesEvents::test_polling_seeds_last_event_ids_on_first_tick`. Plus a new file `tests/test_forum_issues.py` with one `TestIssue<N>_…` class per forum-reported issue, enforced by `TestMeta::test_eight_forum_issues_have_test_classes`.
+
+### Media Browser appears immediately after enabling auto-download
+
+User report: "v10.7.1 → v11.0.0 installed, Media Browser stays empty." Root cause: `_enabled_sources` in `media_source.py` only added the Local backend if `download_path` already existed on disk. The v10.7.1 fix set a default path (`/config/bosch_events`) but didn't create the directory — so until the first event arrived and `sync_download` created it via `os.makedirs(folder)`, the Media Browser entry was hidden. Fixed: `_enabled_sources` now calls `Path(base).mkdir(parents=True, exist_ok=True)` before the `is_dir()` check, so the entry appears the moment auto-download is enabled. Regression guard: `tests/test_media_source_helpers.py::TestEnabledSources::test_auto_download_creates_missing_directory`.
+
+### Generalized HTTP-201 acceptance across all cloud setters
+
+After fixing the pan-setter HTTP-204 bug (below), grepped the codebase for similar patterns. Found 9 more places that accepted only `(200, 204)` instead of the standard `(200, 201, 204)` set Bosch can return:
+
+- `BoschCameraCoordinator.async_put_camera` (the generic helper used by every switch entity)
+- 6 service-action handlers in `__init__.py` (rule-update, motion-zones-set, share-camera, privacy-masks-set, delete-motion-zone, remove-friend)
+- 2 intercom on/off PUTs in `switch.py`
+- The number-entity audio-alarm setter
+
+Bosch returns 201 Created on POSTs that create new resources (e.g. friend-share). Without 201 in the success set, the code logged a warning and returned False even though the camera/cloud had accepted the write. Single replace_all fix; no behavior change for the 200/204 happy paths.
+
+### Pan setter HTTP-204 fix
+
+`async_cloud_set_pan` only treated HTTP 200 as success — 201 and 204 (which Bosch can return on some firmware revisions or on indoor 360 cams) were misclassified as failures. Logged a misleading WARNING (`cloud_set_pan: HTTP 204`) and returned `False` even though the camera had accepted the position. Fixed to accept the same `(200, 201, 204)` set every other cloud setter uses; for 204 (no body) the requested position is used as the cache value. Surfaced by the new `tests/test_shc_setters.py::TestCloudSetPan::test_success` aiohttp-mock test.
+
+### Generic write-lock helper — closes 4 more cache races
+
+Initially filed as follow-up, but fixed in this release after all. Same bug shape as PRIVACY_REVERT, on four more caches: `_privacy_sound_cache`, `_timestamp_cache`, `_ledlights_cache`, `_arming_cache`. The user-toggle path wrote the cache optimistically on PUT success but didn't record a write timestamp; a coordinator slow-tier poll within the cloud's eventual-consistency window could revert the cache to the stale value.
+
+Fix is a single `BoschCameraCoordinator._is_write_locked(cam_id, set_at_dict)` helper that all five guards (privacy + light + privacy_sound + timestamp + ledlights + arming + audioAlarm) now share. Each user-write site sets `_<field>_set_at[cam_id] = time.monotonic()` after a successful PUT; the coordinator's slow-tier handler calls the helper before overwriting. New `_set_at` dicts: `_privacy_sound_set_at`, `_timestamp_set_at`, `_ledlights_set_at`, `_arming_set_at`, `_audio_alarm_set_at`. Regression guards in `tests/test_cache_races.py`.
+
+Net effect on real safety: the alarm-system arm state can no longer briefly flicker back to the previous value after the user toggled it. UX impact for the other three switches is more subtle (visual flicker only) but the same fix removes them.
+
+### Tooling
+
+- `pytest.ini` adds `asyncio_mode = auto` so the `pytest-homeassistant-custom-component` autouse fixtures work with pytest 9.
+- `.venv-tests/`, `.coverage`, `.pytest_cache/`, `htmlcov/` added to `.gitignore`.
+
+### Run the tests
+
+```bash
+python3 -m venv .venv-tests
+.venv-tests/bin/pip install pytest pytest-asyncio pytest-homeassistant-custom-component home-assistant-frontend
+.venv-tests/bin/pytest tests/ -v
+```
+
 ## v11.0.0
 
 **Home Assistant Integration Quality Scale: Gold.** All Bronze foundation + all Silver stability + all Gold comprehensiveness rules verified rule-by-rule in `quality_scale.yaml`. Manifest declares `quality_scale: "gold"`. The integration is now on par with the most polished HA core integrations.
