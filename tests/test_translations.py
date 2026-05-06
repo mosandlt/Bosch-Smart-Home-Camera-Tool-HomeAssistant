@@ -174,3 +174,58 @@ def test_state_based_icons_have_default(icons) -> None:
                     f"without 'default' — entities will render with no "
                     f"icon when their state isn't in the state map"
                 )
+
+
+# ── Hassfest placeholder rule (CI fail-safe) ─────────────────────────────────
+
+
+_PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
+_VALID_PLACEHOLDER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _walk_string_values(node, path):
+    """Yield (path, string_value) for every JSON string leaf."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _walk_string_values(v, path + [str(k)])
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _walk_string_values(v, path + [str(i)])
+    elif isinstance(node, str):
+        yield ".".join(path), node
+
+
+@pytest.mark.parametrize(
+    "fixture_name", ["strings", "de", "en"]
+)
+def test_no_invalid_placeholders_in_translations(fixture_name, request):
+    """Every `{...}` placeholder in translation strings must be a valid
+    Python identifier (`[a-zA-Z_][a-zA-Z0-9_]*`). Hassfest enforces
+    this and fails the GitHub-Action `Validate` workflow if violated.
+
+    Reason this test exists: in v11.0.5 the description for the new
+    `nvr_base_path` option contained `{base}/{Camera}/{YYYY-MM-DD}` —
+    looks like a layout hint to a human, but Hassfest interpreted each
+    `{...}` token as a placeholder reference and rejected `{YYYY-MM-DD}`
+    (hyphens are not valid in identifiers). Fix: replaced curly braces
+    with `<...>` angle brackets in the layout description. Pinned here
+    so a future docs-style description with `{date}` or `{name}` etc.
+    that's NOT actually a runtime placeholder gets flagged locally
+    BEFORE the push. Saves a CI round-trip + a hot-fix release.
+    """
+    data = request.getfixturevalue(fixture_name)
+    bad: list[tuple[str, str, str]] = []
+    for path, value in _walk_string_values(data, []):
+        for ph in _PLACEHOLDER_RE.findall(value):
+            if not _VALID_PLACEHOLDER_RE.match(ph):
+                bad.append((path, ph, value[:120]))
+    assert not bad, (
+        f"\n{fixture_name}.json has {len(bad)} invalid Hassfest placeholder(s):\n"
+        + "\n".join(
+            f"  {p}: {{{ph}}}\n    in: {snippet}"
+            for p, ph, snippet in bad
+        )
+        + "\n\nFix: replace `{name-with-hyphens}` and other non-identifier "
+        "tokens with `<name-with-hyphens>` (angle brackets) — readers still "
+        "understand it as a placeholder, but Hassfest stops complaining."
+    )

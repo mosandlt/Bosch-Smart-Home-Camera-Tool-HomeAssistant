@@ -129,7 +129,7 @@
           "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
           "enable_nvr": "Continuously record each camera's LOCAL stream to disk in 5-minute MP4 segments. LAN-only — recording pauses if the camera is on the cloud relay. Adds a recording switch per camera (disabled by default; enable each camera individually). Requires ffmpeg.",
           "nvr_storage_target": "Where the finalized NVR segments end up. **Local**: stays under the storage folder below. **SMB / FTP**: ffmpeg still writes locally first (staging), then a watcher uploads each segment to the same NAS configured in the events-storage section, under a separate subfolder. Default: Local.",
-          "nvr_base_path": "Folder for NVR segments. Layout: {base}/{Camera}/{YYYY-MM-DD}/HH-MM.mp4. Default: /config/bosch_nvr. Use a NAS mount for >1 day retention — at 5 Mbps a single camera writes ~54 GB/day.",
+          "nvr_base_path": "Folder for NVR segments. Layout: <base>/<Camera>/<date>/HH-MM.mp4. Default: /config/bosch_nvr. Use a NAS mount for >1 day retention — at 5 Mbps a single camera writes ~54 GB/day.",
           "nvr_smb_subpath": "Subfolder under the SMB / FTP base path used exclusively for NVR segments. Default: NVR. Keeps the NVR tree separate from cloud-event uploads.",
           "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day.",
           "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use.",
