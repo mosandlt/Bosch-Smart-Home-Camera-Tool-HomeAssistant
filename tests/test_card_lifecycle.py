@@ -171,6 +171,82 @@ def test_banner_uses_high_contrast_white(card_source: str) -> None:
     )
 
 
+def test_remote_skip_webrtc_includes_mobile_browser(card_source: str) -> None:
+    """Mobile-browser-on-cellular fix (2026-05-06).
+
+    Original ``_extCompanion`` gate skipped WebRTC only for the HA Companion
+    App over an external endpoint. Safari iOS / Chrome Android opened by
+    URL over the same Cloudflare-Tunnel / Nabu-Casa endpoint fell through
+    the gate and tried WebRTC — which always fails on cellular networks
+    because carrier-grade NAT strips/proxies UDP. ICE timed out after ~5 s
+    and the card surfaced a "stream konnte nicht geladen werden" toast
+    before HLS would have taken over.
+
+    User reported (Thomas, iPhone Safari): popup only on mobile data, never
+    on foreign WiFi-through-tunnel. Web research (2026-05-06) confirmed
+    cellular CGNAT + carrier UDP-blocking as the root cause — symmetric
+    behaviour vs the documented Companion-App-over-tunnel case.
+
+    Fix: rename the gate to ``_remoteSkipWebRTC`` and have it fire for
+    ``(Companion OR mobile browser) AND external endpoint``. iOS detection
+    must cover iPhone/iPod literally + iPadOS-13+ Safari (Mac UA + touch).
+    Android detection via the literal ``Android`` token. Desktop browsers
+    over external still get to attempt WebRTC.
+    """
+    # The new combined gate name must exist (replaces old _extCompanion).
+    assert "_remoteSkipWebRTC" in card_source, (
+        "_remoteSkipWebRTC gate missing — mobile-browser-cellular users "
+        "will hit the WebRTC popup again. Re-add the IIFE in the constructor."
+    )
+    # Old name must be gone — leftover references would split the logic.
+    assert "_extCompanion" not in card_source, (
+        "_extCompanion still referenced — rename to _remoteSkipWebRTC "
+        "everywhere or the banner / skip path will desync."
+    )
+    # Locate the IIFE body.
+    gate_idx = card_source.find("this._remoteSkipWebRTC = (() =>")
+    assert gate_idx > 0, "_remoteSkipWebRTC IIFE assignment not found"
+    gate_body = card_source[gate_idx : gate_idx + 1500]
+    # Mobile-browser detection coverage.
+    assert "iPhone|iPod" in gate_body, (
+        "iPhone/iPod detection missing — Thomas' original repro case "
+        "(iPhone Safari over mobile data) would regress."
+    )
+    assert "Macintosh" in gate_body and "maxTouchPoints" in gate_body, (
+        "iPadOS-13+ Safari masquerades as Mac UA — must be detected via "
+        "(Macintosh + maxTouchPoints>1) or iPad users on cellular regress."
+    )
+    assert "Android" in gate_body, (
+        "Android detection missing — Android-Chrome over cellular has the "
+        "same CGNAT/UDP failure mode as iOS."
+    )
+    # Companion detection still present (must keep the original behavior).
+    assert "Home" in gate_body and "Assistant" in gate_body, (
+        "Companion-App detection (UA contains 'HomeAssistant') dropped — "
+        "would regress the v10.5.1 fix for HA-Companion-over-tunnel."
+    )
+
+
+def test_remote_skip_webrtc_excludes_lan(card_source: str) -> None:
+    """LAN clients must continue to attempt WebRTC for the lower latency.
+
+    The gate's hostname check rejects RFC1918 ranges, ``.local`` mDNS,
+    and localhost so a phone on home WiFi keeps using WebRTC. Pinned
+    here so a future refactor can't accidentally widen the skip path
+    to LAN and break the desktop-LAN low-latency case.
+    """
+    gate_idx = card_source.find("this._remoteSkipWebRTC = (() =>")
+    assert gate_idx > 0
+    gate_body = card_source[gate_idx : gate_idx + 1500]
+    # All LAN-exclusion patterns must be present (regex-escaped form in source).
+    assert "127.0.0.1" in gate_body, "localhost exclusion missing"
+    assert ".local" in gate_body, "mDNS .local exclusion missing"
+    assert r"192\.168\." in gate_body, "RFC1918 192.168/16 exclusion missing"
+    assert r"^10\." in gate_body, "RFC1918 10/8 exclusion missing"
+    assert r"172\." in gate_body, "RFC1918 172.16/12 exclusion missing"
+    assert "fe80" in gate_body, "IPv6 link-local fe80::/10 exclusion missing"
+
+
 def test_card_version_matches_const_py() -> None:
     """`CARD_VERSION` must be in lock-step between `const.py` and the
     card source so the auto-registered Lovelace resource URL changes

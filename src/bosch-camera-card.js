@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.5";
+const CARD_VERSION = "2.11.6";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -186,12 +186,27 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
-    // Skip WebRTC + show HLS banner only when the HA Companion App is reaching
-    // us through an external endpoint (Cloudflare Tunnel etc.). Browser-on-LAN
-    // and external desktop browsers continue to attempt WebRTC normally.
-    this._extCompanion = (() => {
-      const isCompanion = /Home\s?Assistant/i.test(navigator.userAgent || "");
-      if (!isCompanion) return false;
+    // Skip WebRTC + show HLS banner when:
+    //   (a) HA Companion App reaches us through an external endpoint
+    //       (Cloudflare Tunnel / Nabu Casa) — UDP can't ride the tunnel,
+    //       ICE always times out after ~5 s.
+    //   (b) Mobile browser (iOS Safari, Android Chrome) over an external
+    //       endpoint — cellular networks deploy carrier-grade NAT and often
+    //       proxy/strip UDP, so STUN returns unusable candidates and ICE
+    //       fails. Same 5 s wait + visible "stream failed" toast.
+    // Desktop browsers external and any client on LAN/.local continue to
+    // attempt WebRTC normally.
+    this._remoteSkipWebRTC = (() => {
+      const ua = navigator.userAgent || "";
+      const isCompanion = /Home\s?Assistant/i.test(ua);
+      // iPhone/iPod always identify; iPadOS 13+ Safari masquerades as Mac
+      // but exposes touch via maxTouchPoints>1. Android phones/tablets
+      // carry "Android" in the UA reliably.
+      const isIOS = /iPhone|iPod/i.test(ua) ||
+                    (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+      const isAndroid = /Android/i.test(ua);
+      const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
+      if (!isCompanion && !isMobileBrowser) return false;
       const h = (location.hostname || "").toLowerCase();
       if (!h) return false;
       if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
@@ -2130,8 +2145,9 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
-      // Show HLS-fallback banner when streaming starts on Companion App + external
-      if (this._extCompanion) {
+      // Show HLS-fallback banner when streaming starts on a remote-skip path
+      // (Companion+external or mobile-browser+external — see _remoteSkipWebRTC).
+      if (this._remoteSkipWebRTC) {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) banner.classList.add("visible");
       }
@@ -2205,14 +2221,18 @@ class BoschCameraCard extends HTMLElement {
     // WebRTC` from `require_webrtc_support` decorator), the catch block
     // takes over within ~100 ms, and HLS startup is unaffected.
     //
-    // Companion-App-external exception: WebRTC over Cloudflare Tunnel requires
-    // UDP which the tunnel cannot carry — ICE always fails after 5s timeout,
-    // wasting time before HLS starts. When the HA Companion App reaches us
-    // through an external host (not RFC1918/.local) skip WebRTC entirely and
-    // go straight to HLS. Browser-on-LAN and desktop-external still try WebRTC.
-    const _skipWebRTC = this._extCompanion;
+    // Remote-no-WebRTC exception: WebRTC media needs UDP, which neither
+    // Cloudflare-Tunnel/Nabu-Casa (Companion App) nor cellular carrier-grade
+    // NAT (mobile browser) can carry reliably — ICE times out after ~5 s,
+    // wasting startup time and triggering a visible "stream failed" toast
+    // before HLS would have taken over. When the client is the HA Companion
+    // App OR a mobile browser (iOS/Android) AND reaches us through an
+    // external host (not RFC1918/.local), skip WebRTC entirely and go
+    // straight to HLS. Browser-on-LAN and desktop-browser-external still
+    // try WebRTC.
+    const _skipWebRTC = this._remoteSkipWebRTC;
     if (_skipWebRTC) {
-      console.debug("bosch-camera-card: Companion App + external endpoint — skipping WebRTC, using HLS");
+      console.debug("bosch-camera-card: remote endpoint + Companion/mobile-browser — skipping WebRTC, using HLS");
     }
     if (!_skipWebRTC) try {
       try {
@@ -2651,8 +2671,9 @@ class BoschCameraCard extends HTMLElement {
     const hass = this._hass;
     const ents = this._entities;
 
-    // Sync HLS-fallback banner visibility with live video state (Companion+ext only)
-    if (this._extCompanion) {
+    // Sync HLS-fallback banner visibility with live video state — only on
+    // the remote-skip-WebRTC paths (Companion+ext or mobile-browser+ext).
+    if (this._remoteSkipWebRTC) {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
     }

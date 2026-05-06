@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.11.5";
+const CARD_VERSION = "2.11.6";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -60,9 +60,13 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive = false;
     this._startingLiveVideo = false;
     this._hls = null;
-    this._extCompanion = (() => {
-      const isCompanion = /Home\s?Assistant/i.test(navigator.userAgent || "");
-      if (!isCompanion) return false;
+    this._remoteSkipWebRTC = (() => {
+      const ua = navigator.userAgent || "";
+      const isCompanion = /Home\s?Assistant/i.test(ua);
+      const isIOS = /iPhone|iPod/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+      const isAndroid = /Android/i.test(ua);
+      const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
+      if (!isCompanion && !isMobileBrowser) return false;
       const h = (location.hostname || "").toLowerCase();
       if (!h) return false;
       if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
@@ -788,7 +792,7 @@ class BoschCameraCard extends HTMLElement {
       video.style.display = "block";
       this._liveVideoActive = true;
       this._startingLiveVideo = false;
-      if (this._extCompanion) {
+      if (this._remoteSkipWebRTC) {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) banner.classList.add("visible");
       }
@@ -841,9 +845,9 @@ class BoschCameraCard extends HTMLElement {
         lastTime = video.currentTime;
       }, 5e3);
     };
-    const _skipWebRTC = this._extCompanion;
+    const _skipWebRTC = this._remoteSkipWebRTC;
     if (_skipWebRTC) {
-      console.debug("bosch-camera-card: Companion App + external endpoint — skipping WebRTC, using HLS");
+      console.debug("bosch-camera-card: remote endpoint + Companion/mobile-browser — skipping WebRTC, using HLS");
     }
     if (!_skipWebRTC) try {
       try {
@@ -1220,7 +1224,7 @@ class BoschCameraCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     const hass = this._hass;
     const ents = this._entities;
-    if (this._extCompanion) {
+    if (this._remoteSkipWebRTC) {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
     }

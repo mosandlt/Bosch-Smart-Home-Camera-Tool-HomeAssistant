@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.7
+
+**Card v2.11.6** — kill the WebRTC popup on cellular.
+
+### Card improvements
+
+- **No more "stream konnte nicht geladen werden" toast on mobile data.** The original `_extCompanion` gate skipped WebRTC only for the HA Companion App over an external endpoint. Safari iOS / Chrome Android opened by URL over the same Cloudflare-Tunnel / Nabu-Casa endpoint fell through and tried WebRTC — which always fails on cellular networks because carrier-grade NAT (CGNAT) strips/proxies UDP. ICE timed out after ~5 s and the card surfaced the popup before HLS could take over. Reproduced by Thomas on iPhone Safari over mobile data, never on foreign WiFi-through-tunnel; web research (Kindgeek, HA community, go2rtc#554) confirmed cellular CGNAT + carrier UDP-blocking as the documented root cause. Fix: rename the gate to `_remoteSkipWebRTC` and fire it for `(Companion OR mobile browser) AND external endpoint`. iOS detection covers iPhone/iPod literally + iPadOS-13+ Safari (Mac UA + `maxTouchPoints>1`); Android via the literal `Android` UA token. Desktop browsers external still try WebRTC for the lower latency. Regression guards: `tests/test_card_lifecycle.py::test_remote_skip_webrtc_includes_mobile_browser`, `::test_remote_skip_webrtc_excludes_lan`.
+
 ## v11.0.6
 
 **Card v2.11.5** — mobile-readability + stale-state polish.
