@@ -5,6 +5,19 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.4
+
+**Card v2.11.4** — overview-card UX polish, big test-coverage round.
+
+### Card improvements
+
+- **Active-stream cameras jump to position 1 in the overview card.** While watching one camera live, its tile stays at the top of the grid even if other tier-0 cams sort earlier alphabetically / by Bosch priority. Detected via `switch.<base>_live_stream` state (reacts instantly when the user flips the toggle). Regression guard: `tests/test_card_lifecycle.py::test_overview_sort_promotes_active_stream`.
+- **Phones in landscape now render a single column.** The previous `(max-width: 640px)` rule missed phones in landscape (iPhone Pro Max ≈ 932×430), so the grid stayed at 2 columns and each tile collapsed to ~12 lines tall. Added `(pointer: coarse) and (max-width: 1024px)` + `(orientation: landscape) and (max-height: 500px)` rules — desktops resized narrow keep their multi-column layout. Regression guard: `tests/test_card_lifecycle.py::test_overview_grid_single_column_on_mobile_landscape`.
+
+### Test coverage
+
+**+227 tests across 7 new files** — covers stream lifecycle, mobile-reload teardown, FTP/SMB path generation, FCM push handler, switch turn_on/off contracts, coordinator pure-state helpers (write-lock, JWT, RCP cache, quality, warming), select-entity option-key constants. Total now **815 tests / 37 % line coverage** (was 588 / 34 %). Per-file deltas: `switch.py` 42 → 51 % · `smb.py` 6 → 15 % · `__init__.py` 12 → 15 % · `select.py` 53 → 61 %.
+
 ## v11.0.2
 
 **Card v2.11.2** — mobile reload fix.

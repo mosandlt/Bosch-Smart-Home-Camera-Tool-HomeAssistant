@@ -68,6 +68,60 @@ def test_pagehide_calls_stop_live_video(card_source: str) -> None:
     )
 
 
+def test_overview_sort_promotes_active_stream(card_source: str) -> None:
+    """Overview-card must surface the camera whose live stream is ON
+    at position 1 within its tier.
+
+    Reason: while watching a single camera live, the user wants that
+    tile to stay in the top-left of the grid even if other tier-0
+    cams sort earlier alphabetically / by Bosch priority. Detected
+    via `switch.<base>_live_stream` state (NOT the camera attribute,
+    which lags one coordinator tick).
+    """
+    assert "_live_stream`]" in card_source, (
+        "Overview discover() must inspect switch.<base>_live_stream to "
+        "detect active streams. If the entity name changes, update both "
+        "the loop and this test."
+    )
+    assert "streamingOn !== b.streamingOn" in card_source, (
+        "Sort comparator must include streamingOn so an active live "
+        "camera moves to position 1 within its tier. Removing this "
+        "comparison would silently revert the user-requested behavior."
+    )
+    assert 'streamingOn ? "S"' in card_source or "streamingOn?'S'" in card_source, (
+        "_lastSig must include the streaming flag — otherwise "
+        "_update() short-circuits the DOM reorder when only the "
+        "stream toggle flipped, and the active camera stays where it was."
+    )
+
+
+def test_overview_grid_single_column_on_mobile_landscape(card_source: str) -> None:
+    """Overview grid must collapse to a single column on phone-class
+    devices in landscape (where viewport > 640px but rows collapse).
+
+    Reason: phones in landscape (iPhone Plus/Pro Max ≈ 932×430) blow
+    past the 640px max-width rule, so the original `(max-width: 640px)`
+    breakpoint silently leaves a 2-column grid. With viewport height
+    ~430px each tile renders ~12 lines tall — unusable. Fix layered
+    on top of the existing portrait rule, never replacing it.
+    """
+    # Original portrait rule must still be present.
+    assert "max-width: 640px" in card_source, (
+        "Portrait single-column rule disappeared — that breaks small "
+        "phones in portrait mode."
+    )
+    # Touch-device rule must catch landscape phones up to ~1024px.
+    assert "(pointer: coarse) and (max-width: 1024px)" in card_source, (
+        "Touch-device single-column rule missing — phones in landscape "
+        "(e.g. iPhone Pro Max 932×430) will render 2 cramped columns."
+    )
+    # Short-landscape rule covers any device whose height collapses below 500px.
+    assert "(orientation: landscape) and (max-height: 500px)" in card_source, (
+        "Short-landscape rule missing — guarantees 1-column on any "
+        "device whose landscape height < 500px regardless of pointer type."
+    )
+
+
 def test_card_version_matches_const_py() -> None:
     """`CARD_VERSION` must be in lock-step between `const.py` and the
     card source so the auto-registered Lovelace resource URL changes

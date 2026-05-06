@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.11.2";
+const CARD_VERSION = "2.11.4";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -2363,7 +2363,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     return this._hass;
   }
   _renderShell() {
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
     this._grid = this.shadowRoot.getElementById("bco-grid");
     this._countEl = this.shadowRoot.getElementById("bco-count");
     this._rendered = true;
@@ -2394,6 +2394,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       const base = eid.replace(/^camera\./, "");
       const privState = states[`switch.${base}_privacy_mode`];
       const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
+      const swState = states[`switch.${base}_live_stream`];
+      const streamingOn = !!(swState && String(swState.state).toLowerCase() === "on");
       const tier = !online ? 2 : privacyOn ? 1 : 0;
       const rawPrio = a.bosch_priority;
       const priority = typeof rawPrio === "number" && isFinite(rawPrio) ? rawPrio : null;
@@ -2402,6 +2404,7 @@ class BoschCameraOverviewCard extends HTMLElement {
         name: a.friendly_name || eid,
         online: online,
         privacyOn: privacyOn,
+        streamingOn: streamingOn,
         tier: tier,
         priority: priority,
         status: status || "UNKNOWN",
@@ -2411,6 +2414,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     const useBosch = this._config.use_bosch_sort;
     list.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.streamingOn !== b.streamingOn) return a.streamingOn ? -1 : 1;
       if (useBosch) {
         const aHas = a.priority !== null;
         const bHas = b.priority !== null;
@@ -2426,7 +2430,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     if (!this._rendered) this._renderShell();
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
-    const sig = cams.map(c => `${c.entity_id}:${c.tier}`).join("|");
+    const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
     const needsReorder = sig !== this._lastSig;
     this._lastSig = sig;
     const keep = new Set(cams.map(c => c.entity_id));

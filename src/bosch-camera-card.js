@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.2";
+const CARD_VERSION = "2.11.4";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -4031,6 +4031,19 @@ class BoschCameraOverviewCard extends HTMLElement {
         @media (max-width: 640px) {
           .bco-grid { grid-template-columns: 1fr !important; }
         }
+        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider
+           than 640px but the viewport height collapses below ~500px — at
+           that aspect a 2-column tile grid leaves each tile ~12 lines tall
+           which is unusable. Force single column when any of:
+             - touch device up to small-tablet width (1024px), or
+             - landscape with very short viewport (any device).
+           Desktop browsers resized narrow keep their multi-column layout. */
+        @media (pointer: coarse) and (max-width: 1024px) {
+          .bco-grid { grid-template-columns: 1fr !important; }
+        }
+        @media (orientation: landscape) and (max-height: 500px) {
+          .bco-grid { grid-template-columns: 1fr !important; }
+        }
         .bco-cell {
           min-width: 0;
           position: relative;
@@ -4108,6 +4121,11 @@ class BoschCameraOverviewCard extends HTMLElement {
       const base   = eid.replace(/^camera\./, "");
       const privState = states[`switch.${base}_privacy_mode`];
       const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
+      // Active live stream → push to position 1 within its tier. Read the
+      // switch state directly so we react instantly when the user flips
+      // it (camera entity state.streaming attribute lags ~1 coordinator tick).
+      const swState = states[`switch.${base}_live_stream`];
+      const streamingOn = !!(swState && String(swState.state).toLowerCase() === "on");
       // tier: 0 = online active (privacy off), 1 = online but privacy on, 2 = offline
       const tier = !online ? 2 : (privacyOn ? 1 : 0);
       const rawPrio = a.bosch_priority;
@@ -4117,6 +4135,7 @@ class BoschCameraOverviewCard extends HTMLElement {
         name:   a.friendly_name || eid,
         online,
         privacyOn,
+        streamingOn,
         tier,
         priority,
         status: status || "UNKNOWN",
@@ -4127,6 +4146,11 @@ class BoschCameraOverviewCard extends HTMLElement {
     const useBosch = this._config.use_bosch_sort;
     list.sort((a, b) => {
       if (a.tier !== b.tier) return a.tier - b.tier;
+      // Within the same tier: a camera whose live stream is currently ON
+      // jumps to position 1. Common case: while watching one camera live,
+      // its tile stays at the top of the grid even if the other tier-0
+      // cams sort earlier alphabetically / by Bosch priority.
+      if (a.streamingOn !== b.streamingOn) return a.streamingOn ? -1 : 1;
       if (useBosch) {
         // Bosch-app order. Cams without a priority value sort after
         // those with one inside the same tier; alphabetic fallback below.
@@ -4147,7 +4171,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);
 
-    const sig = cams.map((c) => `${c.entity_id}:${c.tier}`).join("|");
+    const sig = cams.map((c) => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
     const needsReorder = sig !== this._lastSig;
     this._lastSig = sig;
 
