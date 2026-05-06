@@ -121,3 +121,45 @@ class TestFirmwareUpdate:
         info = u.device_info
         assert info["manufacturer"] == "Bosch"
         assert "Außenkamera" in info["model"]
+
+    def test_latest_version_falls_back_when_fw_cache_empty(self, stub_coord, stub_entry):
+        """Empty fw cache → latest_version delegates to installed_version (line 80)."""
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert stub_coord._firmware_cache == {}
+        assert u.latest_version == "9.40.25"
+
+
+class TestSetupEntry:
+    """async_setup_entry creates one BoschFirmwareUpdate per cam in coordinator.data."""
+
+    @pytest.mark.asyncio
+    async def test_setup_entry_creates_one_entity_per_cam(self):
+        from custom_components.bosch_shc_camera.update import async_setup_entry, BoschFirmwareUpdate
+        coord = SimpleNamespace(
+            data={
+                CAM_ID: {"info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}},
+                "20E053B5-OTHER": {"info": {"title": "Innen", "hardwareVersion": "CAMERA_360"}},
+            },
+            _firmware_cache={},
+            last_update_success=True,
+        )
+        entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={}, runtime_data=coord)
+        captured: list = []
+
+        def add_entities(entities, update_before_add=False):
+            captured.extend(entities)
+
+        await async_setup_entry(hass=None, config_entry=entry, async_add_entities=add_entities)
+        assert len(captured) == 2
+        assert all(isinstance(e, BoschFirmwareUpdate) for e in captured)
+
+    @pytest.mark.asyncio
+    async def test_setup_entry_empty_data_yields_no_entities(self):
+        from custom_components.bosch_shc_camera.update import async_setup_entry
+        coord = SimpleNamespace(data={}, _firmware_cache={}, last_update_success=True)
+        entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={}, runtime_data=coord)
+        captured: list = []
+        await async_setup_entry(hass=None, config_entry=entry,
+                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        assert captured == []
