@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1301 tests across 59 files. Total line-coverage 48% with key resilience
+      1326 tests across 61 files. Total line-coverage 50% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -100,7 +100,24 @@ rules:
       in resolve); _format_event_title; _entry_title both branches; _node
       defaults + playable-leaf + thumbnail; BoschCameraMediaSource
       async_resolve_media (root unresolvable, mime guess, octet-stream
-      fallback).
+      fallback). Round-4 (2026-05-06): media_source.py 41%→60% adding
+      BoschCameraMediaSource._browse dispatch tree (no-sources empty
+      root, single-entry-single-backend skips chooser straight to cameras,
+      camera-level lists dates, date-level groups jpg+mp4 with thumbnail
+      URLs, too-deep path → Unresolvable, multi-entry shows entry titles
+      at root, unknown entry → Unresolvable, NVR backend tree
+      (cameras/dates/segments with HH:MM labels, too-deep), multi-source-
+      single-entry shows source chooser + L/N kind dispatch, unknown kind
+      → Unresolvable, async_browse_media wraps Unresolvable as
+      BrowseError + executes via executor). switch.py 52%→56% adding
+      BoschLiveStreamSwitch._stream_health_watchdog v10.4.0 (healthy →
+      record_stream_success exit, no_consumer = no Stream object exits
+      silently, no camera entity treated as no_consumer, user-turned-off-
+      mid-watchdog short-circuit, already-REMOTE short-circuit, first
+      unhealthy → record_stream_error + restart with try_live_connection,
+      second consecutive unhealthy → saturate _stream_error_count to
+      max_stream_errors forcing REMOTE on next attempt, REMOTE-after-
+      first-restart exits cleanly).
 
   # Gold
   devices: done
