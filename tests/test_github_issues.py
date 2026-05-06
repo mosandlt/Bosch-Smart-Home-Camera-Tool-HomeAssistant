@@ -223,8 +223,11 @@ class TestGH6_StreamPipeline:
         assert hasattr(switch_mod, "BoschLiveStreamSwitch")
 
     def test_live_connections_dict_drives_supported_features(self):
-        """Camera supports STREAM only when a live session is active —
-        prevents HA's stream component from logging noise on idle cams."""
+        """Camera always advertises STREAM so HA's stream component registers
+        the entity — live_connections drives stream_source() content, not the
+        feature flag. (HA requires STREAM to be set statically at entity
+        registration time; toggling it dynamically would cause the entity to
+        deregister and re-register on every stream start/stop.)"""
         from types import SimpleNamespace as _SN
         from custom_components.bosch_shc_camera.camera import BoschSHCCamera
         from homeassistant.components.camera import CameraEntityFeature
@@ -237,11 +240,14 @@ class TestGH6_StreamPipeline:
         )
         entry = _SN(entry_id="01", data={"bearer_token": "x"}, options={})
         cam = BoschSHCCamera(coord, CAM_ID, entry)
-        # Idle → no STREAM advertised
-        assert cam.supported_features == CameraEntityFeature(0)
-        # Active → STREAM advertised
+        # STREAM must always be advertised (static attribute, not dynamic)
+        assert CameraEntityFeature.STREAM in cam.supported_features, (
+            "Camera must always advertise STREAM — HA registers the stream "
+            "component at entity setup time based on this flag"
+        )
+        # The flag must not change when live_connections is populated
         coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
-        assert cam.supported_features == CameraEntityFeature.STREAM
+        assert CameraEntityFeature.STREAM in cam.supported_features
 
     def test_session_stale_blocks_live_stream_switch(self):
         """When `_session_stale` is set for a cam, the live_stream switch

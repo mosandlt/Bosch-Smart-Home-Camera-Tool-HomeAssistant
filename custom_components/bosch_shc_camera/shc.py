@@ -390,10 +390,14 @@ async def async_cloud_set_privacy_mode(
                         except Exception:
                             pass  # fall through to SHC
                     if resp.status in (200, 201, 204):
+                        # Stamp the write-lock BEFORE updating the cache so the
+                        # SHC background tick can never see a window where the
+                        # cache was changed but _privacy_set_at is still unset
+                        # (the race that caused the first OFF-toggle to revert).
+                        coordinator._privacy_set_at[cam_id] = time.monotonic()
                         coordinator._shc_state_cache.setdefault(cam_id, {})[
                             "privacy_mode"
                         ] = enabled
-                        coordinator._privacy_set_at[cam_id] = time.monotonic()
                         coordinator.async_update_listeners()
                         _LOGGER.debug(
                             "cloud_set_privacy_mode: %s -> %s (HTTP %d)",
@@ -414,12 +418,12 @@ async def async_cloud_set_privacy_mode(
                                 url, json=body, headers=headers
                             ) as resp2:
                                 if resp2.status in (200, 201, 204):
-                                    coordinator._shc_state_cache.setdefault(
-                                        cam_id, {}
-                                    )["privacy_mode"] = enabled
                                     coordinator._privacy_set_at[
                                         cam_id
                                     ] = time.monotonic()
+                                    coordinator._shc_state_cache.setdefault(
+                                        cam_id, {}
+                                    )["privacy_mode"] = enabled
                                     coordinator.async_update_listeners()
                                     coordinator.hass.async_create_task(
                                         coordinator.async_request_refresh()
@@ -449,10 +453,10 @@ async def async_cloud_set_privacy_mode(
                     "cloud_set_privacy_mode: cloud failed, Gen2 LOCAL RCP succeeded for %s",
                     cam_id,
                 )
+                coordinator._privacy_set_at[cam_id] = time.monotonic()
                 coordinator._shc_state_cache.setdefault(cam_id, {})[
                     "privacy_mode"
                 ] = enabled
-                coordinator._privacy_set_at[cam_id] = time.monotonic()
                 coordinator.async_update_listeners()
                 return True
             _LOGGER.debug(

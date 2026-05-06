@@ -95,18 +95,22 @@ class TestIsStreaming:
         cam = BoschSHCCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.is_streaming is True
 
-    def test_supported_features_only_advertises_stream_when_active(
+    def test_supported_features_always_advertises_stream(
         self, stub_coord, stub_entry,
     ):
-        """Without an active live session, supported_features must be 0
-        — otherwise HA's stream component sees STREAM advertised on a
-        camera with no source and logs noise."""
+        """STREAM must always be advertised regardless of live-session state.
+        Previously STREAM was hidden when the switch was OFF, causing HA-Core
+        to reject play_stream WebSocket calls with "does not support play stream
+        service" (reported via homeassistant.components.camera logger, 8 hits
+        at 20:46 2026-05-05). Fix: _attr_supported_features = STREAM always;
+        stream_source() returns None when no session is active, which HA
+        handles gracefully."""
         from custom_components.bosch_shc_camera.camera import BoschSHCCamera
         from homeassistant.components.camera import CameraEntityFeature
         cam = BoschSHCCamera(stub_coord, CAM_ID, stub_entry)
-        # No live session → STREAM not advertised
-        assert cam.supported_features == CameraEntityFeature(0)
-        # With live session → STREAM advertised
+        # No live session → STREAM still advertised (stream_source returns None)
+        assert cam.supported_features == CameraEntityFeature.STREAM
+        # With live session → still STREAM
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         assert cam.supported_features == CameraEntityFeature.STREAM
 
