@@ -32,20 +32,29 @@ rules:
   test-coverage:
     status: done
     comment: |
-      645 tests across 38 files covering: all entity platforms (camera, switch,
-      sensor, binary_sensor, light, number, select, button, update), config flow,
+      1094 tests across 53 files. Total line-coverage 43% with key resilience
+      paths fully covered: all entity platforms (camera, switch, sensor,
+      binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
-      transport rewriting, circuit breaker, start/stop lifecycle), diagnostics,
-      service validation, token refresh, stream lifecycle, FCM helpers, SMB helpers,
-      media source, coordinator logic, models, security helpers, cache races,
-      privacy race conditions, forum-reported issues, GitHub issues, theoretical
-      bugs, cf_unbuffer (playlist Content-Type rewrite + segment chunked re-emit +
-      idempotency), local_rcp (_parse_rcp_xml all type codes + error paths),
-      shc helpers (shc_configured, shc_ready, mark_success/failure,
-      _schedule_privacy_off_snapshot indoor 5s vs outdoor 0.5s delay),
-      bughunt-2026-05 (FCM dedup continue drops data, go2rtc unregister missing
-      port 11984, _stream_warming lazy-init, privacy_set_at race). Bug-finding
-      test suite found 15 production bugs (12 prior + 3 fixed in 2026-05 round).
+      transport rewriting, circuit breaker, start/stop lifecycle, RTSP
+      keepalive + pre_warm async paths), diagnostics, service validation,
+      token refresh, stream lifecycle, FCM helpers, SMB helpers, media
+      source, coordinator logic, models, security helpers, cache races,
+      privacy race conditions, forum-reported issues, GitHub issues,
+      theoretical bugs, cf_unbuffer (playlist Content-Type rewrite + segment
+      chunked re-emit + idempotency), local_rcp (_parse_rcp_xml all type
+      codes + error paths), shc helpers (shc_configured, shc_ready,
+      mark_success/failure, _schedule_privacy_off_snapshot indoor 5s vs
+      outdoor 0.5s delay), bughunt-2026-05 (FCM dedup continue drops data,
+      go2rtc unregister missing port 11984, _stream_warming lazy-init,
+      privacy_set_at race), v10.4.10 resilience hooks (_StreamSupportNoiseFilter
+      rate-limit + 32-entity prune, _StreamWorkerErrorListener routing +
+      exception swallow, _FCMNoiseFilter trace-strip + 60s dedup,
+      _refresh_local_creds_from_heartbeat URL rebuild + Stream.update_source
+      + NVR sidecar restart + recover paths), SSRF guard (_is_safe_bosch_url
+      lookalike + RFC1918 + http:// rejection), credential redaction.
+      Bug-finding test suite found 15 production bugs (12 prior + 3 fixed
+      in 2026-05 round).
 
   # Gold
   devices: done
