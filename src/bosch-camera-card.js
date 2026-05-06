@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.4";
+const CARD_VERSION = "2.11.5";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -372,6 +372,11 @@ class BoschCameraCard extends HTMLElement {
         this._setLoadingOverlay(true, "Aktualisiere…");
       }
       this._triggerFreshSnapshot();
+      // CARD_STALE_APP fix: pull authoritative entity states on mount so the
+      // stream badge / switches reflect the backend immediately instead of
+      // waiting for the WS push (which can lag a few seconds when HA's
+      // Companion App resumes from background).
+      this._pullFreshSwitchStates();
     }
   }
 
@@ -451,7 +456,15 @@ class BoschCameraCard extends HTMLElement {
 
   async _pullFreshSwitchStates() {
     if (!this._hass) return;
+    // Include the camera entity so the stream badge reflects the
+    // authoritative backend state. CARD_STALE_APP (2026-04-27): when the
+    // card mounts after the HA-Companion-App resumes from background,
+    // hass.states[camera.<base>] can lag the WS push by a few seconds.
+    // The badge then shows yellow ("connecting") despite the backend
+    // already streaming. Pulling the camera entity via REST closes the
+    // gap inside ~200 ms instead of waiting on the next WS frame.
     const ids = [
+      this._entities.camera,
       this._entities.switch,
       this._entities.privacy,
       this._entities.audio,
@@ -551,22 +564,25 @@ class BoschCameraCard extends HTMLElement {
         .stream-badge.connecting .dot { background: #ff9f0a; animation: pulse 0.8s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-        /* iOS HLS info banner */
+        /* iOS HLS info banner — sits absolutely at the top of the camera
+           area so it stays readable over the video frame, never on the
+           letterbox bars (which are pure black and gave 0 contrast). */
         .ios-hls-banner {
           display: none;
-          align-items: center; justify-content: space-between;
-          gap: 8px; padding: 6px 10px;
-          background: rgba(0,122,255,.1); border-top: 1px solid rgba(0,122,255,.2);
-          font-size: 11px; color: #0a84ff;
+          position: absolute; top: 8px; left: 8px; right: 8px;
+          z-index: 5;
+          align-items: center; justify-content: center;
+          gap: 6px; padding: 5px 10px;
+          background: rgba(0,0,0,.6); backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          border: 1px solid rgba(255,255,255,.15);
+          border-radius: 8px;
+          font-size: 12px; font-weight: 500; color: #fff;
+          pointer-events: none;
+          text-shadow: 0 1px 2px rgba(0,0,0,.5);
         }
         .ios-hls-banner.visible { display: flex; }
-        .ios-hls-banner span { flex: 1; }
-        .ios-hls-banner button {
-          background: rgba(0,122,255,.15); border: 1px solid rgba(0,122,255,.3);
-          color: #0a84ff; border-radius: 6px; padding: 3px 8px;
-          font-size: 11px; cursor: pointer; white-space: nowrap;
-        }
-        .ios-hls-banner button:active { background: rgba(0,122,255,.3); }
+        .ios-hls-banner span { white-space: nowrap; }
 
         /* Push status badge */
         .push-badge {
@@ -991,8 +1007,7 @@ class BoschCameraCard extends HTMLElement {
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
           <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
           <div class="ios-hls-banner" id="ios-hls-banner">
-            <span>ℹ Externer Zugriff – HLS-Stream aktiv</span>
-            <span style="opacity:0.7">WebRTC über Tunnel nicht möglich</span>
+            <span>ℹ HLS-Modus (kein WebRTC über Tunnel)</span>
           </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
