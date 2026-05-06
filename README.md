@@ -608,16 +608,15 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
 
 ### Media Browser
 
-Once events are being saved — either to the local download folder (`enable_auto_download`) or to a NAS via SMB upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; the integration auto-detects which backends have data.
+Once events are being saved — either to the local save folder or to a NAS via SMB upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; the integration auto-detects which backends have data.
 
 **To enable the local backend:**
 
 1. Settings → Devices & Services → **Bosch Smart Home Camera** → ⚙ **Configure** (NOT *Reconfigure* — that's for re-OAuth only).
-2. Scroll to the **SMB / NAS Upload** section — **directly above** it you'll find the toggle labeled **"Events automatisch herunterladen"** (English: *"Auto-download events (JPEG + MP4)"*). Enable it.
-3. The default download path is `/config/bosch_events`; the directory is created automatically the moment you enable the switch (since v11.0.6 — earlier versions waited for the first event to arrive). You don't need to type a path unless you want a different location.
-4. **Submit**. The Media Browser entry appears immediately, empty, and fills as events arrive.
+2. Scroll to the **Events & Storage** section and enter a path in the **"Local save folder"** field, e.g. `/config/bosch_events`.
+3. **Submit**. From this point on, new events are saved to that folder each time an FCM push arrives. The directory is created automatically.
 
-If you upgraded from v10.7.x and the Media Browser stayed empty: enable `enable_auto_download` once via the steps above. v11.0.6 fixes a regression where the directory had to already exist on disk for the entry to show up.
+> **Note:** Only events that arrive *after* configuring the path are saved — there is no bulk download of historical clips.
 
 **Tree shape**
 - *Local backend:* `Camera → Date → Event`
@@ -1250,8 +1249,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.7** — see the GitHub release page for full notes:
-[**v11.0.7 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.7)
+Latest stable: **v11.0.8** — see the GitHub release page for full notes:
+[**v11.0.8 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.8)
 
 | | |
 |---|---|

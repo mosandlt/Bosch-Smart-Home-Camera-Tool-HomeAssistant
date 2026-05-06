@@ -2,7 +2,7 @@
 
 Exposes downloaded events under HA's "Media" browser. Two backends:
 
-* **Local** (``options['enable_auto_download'] + download_path``)
+* **Local** (``options['download_path']``, FCM-triggered saves)
   Files on HA's filesystem. Layout: ``{download_path}/{camera}/{stem}.{ext}``.
 
 * **SMB / NAS** (``options['enable_smb_upload'] + smb_*``)
@@ -338,7 +338,7 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
             continue
         show_local = filt in ("auto", "local")
         show_smb = filt in ("auto", "smb")
-        if show_local and opts.get("enable_auto_download"):
+        if show_local and opts.get("download_path"):
             base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
             try:
                 base_path = Path(base)

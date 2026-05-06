@@ -30,7 +30,6 @@ def _hass_with_local_dir(tmp_path: Path, options: dict | None = None):
     """Build a fake `hass` whose `_enabled_sources` will return one
     `_LocalBackend` pointed at `tmp_path`."""
     opts = {
-        "enable_auto_download": True,
         "download_path": str(tmp_path),
         "media_browser_source": "auto",
     }

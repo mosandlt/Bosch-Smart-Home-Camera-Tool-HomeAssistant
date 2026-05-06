@@ -624,7 +624,7 @@ async def async_send_alert(
     Step 2: Download snapshot from Bosch cloud (after 5s), send with image
     Step 3: Download video clip (after 15s total), send as attachment
     """
-    from .smb import sync_smb_upload
+    from .smb import sync_smb_upload, sync_local_save
 
     opts = coordinator.options
 
@@ -896,6 +896,29 @@ async def async_send_alert(
             _LOGGER.warning("Alert: SMB upload timed out after 30s for %s", cam_name)
         except Exception as err:
             _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
+
+    # -- Local save (FCM-triggered, alongside SMB) -------------------------
+    if opts.get("download_path") and cam_id:
+        try:
+            ev_id = coordinator._last_event_ids.get(cam_id, "unknown")
+            ev_data = {
+                "timestamp": timestamp,
+                "eventType": event_type,
+                "id": ev_id,
+                "imageUrl": image_url,
+                "videoClipUrl": found_clip_url if found_clip_url else "",
+                "videoClipUploadStatus": "Done" if found_clip_url else "",
+            }
+            await asyncio.wait_for(
+                coordinator.hass.async_add_executor_job(
+                    sync_local_save, coordinator, ev_data, coordinator.token, cam_name
+                ),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Alert: local save timed out after 30s for %s", cam_name)
+        except Exception as err:
+            _LOGGER.warning("Alert: local save failed for %s: %s", cam_name, err)
 
     # -- Cleanup local files -----------------------------------------------
     if delete_after and files_to_cleanup:

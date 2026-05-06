@@ -37,50 +37,59 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^\w\-. ]", "_", name.replace("..", "_"))[:64]
 
 
-# ── Auto-download (runs in executor thread) ───────────────────────────────────
+# ── Local save (FCM-triggered, runs in executor thread) ───────────────────────
 
-def sync_download(coordinator, data: dict, token: str, download_path: str) -> None:
-    """Download new event files to download_path/{camera_name}/."""
+def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
+    """Save a single event's image/clip to the local download_path on FCM trigger.
+
+    Filename format matches _FILE_RE in media_source.py:
+    {camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID8}.{ext}
+    """
     import requests
     import urllib3
     urllib3.disable_warnings()
 
+    download_path = (coordinator.options.get("download_path") or "").strip()
+    if not download_path:
+        return
+
+    ts = ev.get("timestamp", "")
+    if not ts or len(ts) < 19:
+        return
+
+    cam_safe = _safe_name(cam_name)
+    folder = os.path.join(download_path, cam_safe)
+    os.makedirs(folder, exist_ok=True)
+
+    date_str = ts[:10]
+    time_str = ts[11:19].replace(":", "-")
+    etype = ev.get("eventType", "EVENT")
+    ev_id = (ev.get("id") or "")[:8].upper()
+    stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
+
     session = requests.Session()
     session.headers["Authorization"] = f"Bearer {token}"
-    # Bosch Cloud uses a private CA (Video CA 2A) not in the system trust store.
     session.verify = False
 
-    for cam_id, cam_data in data.items():
-        cam_name = cam_data["info"].get("title", cam_id)
-        folder = os.path.join(download_path, cam_name)
-        os.makedirs(folder, exist_ok=True)
-
-        for ev in cam_data.get("events", []):
-            _download_one(session, ev, folder, "jpg", ev.get("imageUrl"))
-            if ev.get("videoClipUploadStatus") == "Done":
-                _download_one(session, ev, folder, "mp4", ev.get("videoClipUrl"))
-
-
-def _download_one(
-    session, ev: dict, folder: str, ext: str, url: str | None
-) -> None:
-    if not url:
-        return
-    ts = ev.get("timestamp", "")[:19].replace(":", "-").replace("T", "_")
-    etype = ev.get("eventType", "EVENT")
-    ev_id = ev.get("id", "")[:8]
-    path = os.path.join(folder, f"{ts}_{etype}_{ev_id}.{ext}")
-    if os.path.exists(path):
-        return
-    try:
-        r = session.get(url, timeout=60, stream=True)
-        if r.status_code == 200:
-            with open(path, "wb") as f:
-                for chunk in r.iter_content(65536):
-                    f.write(chunk)
-            _LOGGER.debug("Downloaded: %s", os.path.basename(path))
-    except Exception as err:
-        _LOGGER.warning("Download failed for %s: %s", os.path.basename(path), err)
+    for ext, url in [("jpg", ev.get("imageUrl")), ("mp4", ev.get("videoClipUrl"))]:
+        if not url:
+            continue
+        if ext == "mp4" and ev.get("videoClipUploadStatus") != "Done":
+            continue
+        if not _is_safe_bosch_url(url):
+            continue
+        path = os.path.join(folder, f"{stem}.{ext}")
+        if os.path.exists(path):
+            continue
+        try:
+            r = session.get(url, timeout=60, stream=True)
+            if r.status_code == 200:
+                with open(path, "wb") as f:
+                    for chunk in r.iter_content(65536):
+                        f.write(chunk)
+                _LOGGER.debug("Local save: %s", os.path.basename(path))
+        except Exception as err:
+            _LOGGER.warning("Local save failed for %s: %s", os.path.basename(path), err)
 
 
 # ── SMB/NAS upload (runs in executor thread) ──────────────────────────────────

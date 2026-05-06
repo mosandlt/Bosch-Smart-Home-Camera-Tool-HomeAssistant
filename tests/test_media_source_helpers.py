@@ -171,11 +171,10 @@ class TestEnabledSources:
         hass = self._build_hass([])
         assert _enabled_sources(hass) == []
 
-    def test_auto_download_with_existing_dir_adds_local(self, tmp_path):
-        """Real path + enable_auto_download=True → Local backend appears."""
+    def test_download_path_set_adds_local_backend(self, tmp_path):
+        """download_path set → Local backend appears (no extra checkbox needed since v11.0.8)."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(tmp_path),
             "media_browser_source": "auto",
         })])
@@ -185,43 +184,41 @@ class TestEnabledSources:
         assert src.kind == "L"
         assert src.label == "Lokal"
 
-    def test_auto_download_creates_missing_directory(self, tmp_path):
-        """v11.0.1 fix: enable_auto_download with non-existent dir → dir is created.
+    def test_empty_download_path_hides_local_backend(self, tmp_path):
+        """v11.0.8: empty download_path → no local backend (disables FCM local save)."""
+        from custom_components.bosch_shc_camera.media_source import _enabled_sources
+        hass = self._build_hass([self._entry(options={
+            "download_path": "",
+            "media_browser_source": "auto",
+        })])
+        assert _enabled_sources(hass) == []
 
-        User-reported issue: after upgrading v10.7.1 → v11.0.0 with auto-download
-        enabled, Media Browser stayed empty until the first event arrived. Root
-        cause: `_enabled_sources` only added the Local backend if the directory
-        already existed on disk; the v10.7.1 fix set a default path but did not
-        create the directory. v11.0.1 creates it on first call so the Media
-        Browser entry appears immediately, empty but usable, ready for the
-        first event download.
+    def test_download_path_creates_missing_directory(self, tmp_path):
+        """download_path pointing to non-existent dir → dir is created on first browse.
+
+        Regression: before v11.0.1 the Media Browser stayed empty until the
+        first event arrived because the directory had to pre-exist. Since v11.0.1
+        _enabled_sources creates it on first call so the entry appears immediately.
         """
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         new_dir = tmp_path / "bosch_events_fresh"
         assert not new_dir.exists()
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(new_dir),
             "media_browser_source": "auto",
         })])
         sources = _enabled_sources(hass)
-        # Directory was created
-        assert new_dir.is_dir(), "auto-download enabled must create download_path"
-        # Media Browser entry appears
+        assert new_dir.is_dir(), "download_path must be created on first browse"
         assert len(sources) == 1
         assert sources[0][0].kind == "L"
 
-    def test_auto_download_directory_creation_failure_skipped(self):
+    def test_download_path_creation_failure_skipped(self):
         """If the directory can't be created (perms, read-only fs), gracefully skip."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
-        # Use a path that mkdir() can't create — under /proc on Linux,
-        # or an invalid drive path everywhere.
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": "/proc/cannot_create_here_12345",
             "media_browser_source": "auto",
         })])
-        # Must not raise — gracefully returns empty
         result = _enabled_sources(hass)
         assert result == []
 
@@ -229,7 +226,6 @@ class TestEnabledSources:
         """`media_browser_source=none` short-circuits — even with valid local data."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(tmp_path),
             "media_browser_source": "none",
         })])
@@ -239,7 +235,6 @@ class TestEnabledSources:
         """`media_browser_source=local` hides SMB even if SMB upload is enabled."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(tmp_path),
             "enable_smb_upload": True,
             "smb_server": "192.168.1.1",
@@ -249,26 +244,22 @@ class TestEnabledSources:
             "media_browser_source": "local",
         })])
         sources = _enabled_sources(hass)
-        # Only the Local backend; SMB is filtered
         assert len(sources) == 1
         assert sources[0][0].kind == "L"
 
     def test_media_browser_source_smb_filters_local(self, tmp_path):
-        """`media_browser_source=smb` hides Local even if auto-download is enabled."""
+        """`media_browser_source=smb` hides Local even if download_path is set."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(tmp_path),
             "media_browser_source": "smb",
         })])
-        # No SMB configured → returns empty; Local is filtered
         assert _enabled_sources(hass) == []
 
     def test_default_filter_is_auto(self, tmp_path):
         """Missing `media_browser_source` option → default 'auto' shows everything."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
-            "enable_auto_download": True,
             "download_path": str(tmp_path),
             # NO media_browser_source key
         })])

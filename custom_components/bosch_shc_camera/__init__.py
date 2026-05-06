@@ -58,7 +58,6 @@ from .fcm import (
     _write_file as _fcm_write_file,
 )
 from .smb import (
-    sync_download,
     sync_smb_upload,
     sync_smb_cleanup,
     sync_smb_disk_check,
@@ -2110,32 +2109,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     await self._async_update_shc_states(data)
                 except Exception as err:
                     _LOGGER.debug("SHC state update error: %s", err)
-
-            # ── 6. Auto-download new event files ──────────────────────────────
-            if do_events and opts.get("enable_auto_download") and opts.get("download_path"):
-                try:
-                    await asyncio.wait_for(
-                        self.hass.async_add_executor_job(
-                            sync_download, self, data, token, opts["download_path"]
-                        ),
-                        timeout=30.0,
-                    )
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("Auto-download timed out after 30s — skipping this tick")
-                # Mark all downloaded events as read
-                dl_event_ids = []
-                for cam_id_dl, cam_data_dl in data.items():
-                    for ev_dl in cam_data_dl.get("events", []):
-                        eid = ev_dl.get("id")
-                        if eid:
-                            dl_event_ids.append(eid)
-                if dl_event_ids and self.options.get("mark_events_read", False):
-                    try:
-                        await self.async_mark_events_read(dl_event_ids)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as err:
-                        _LOGGER.debug("Mark-read (auto-download) failed: %s", err)
 
             # ── 7. SMB/NAS upload — triggered by FCM push only (not coordinator) ──
             # Removed from coordinator tick: the full event scan took ~90s on
