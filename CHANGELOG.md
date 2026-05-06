@@ -5,6 +5,15 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.6
+
+**Card v2.11.5** — mobile-readability + stale-state polish.
+
+### Card improvements
+
+- **HLS info-banner readable on mobile.** Previously two dark-blue spans on a 10 %-blue tint sat on the black letterbox bars in fullscreen — effectively unreadable (screenshot 2026-05-06). Replaced with a single white-on-translucent-black "pille" overlay (`backdrop-filter: blur(6px)`, `border-radius: 8px`) absolutely positioned over the video, no longer sitting in the letterbox. Text consolidated to one line: "ℹ HLS-Modus (kein WebRTC über Tunnel)" — the previous redundant "WebRTC über Tunnel nicht möglich" span dropped. Regression guard: `tests/test_card_lifecycle.py::test_banner_uses_high_contrast_white`.
+- **Stream badge no longer stale on mount** (CARD_STALE_APP, 2026-04-27). When the HA Companion App resumed from background, the card mounted with a stale `hass.states[camera]` snapshot — badge stuck "connecting" yellow despite backend already streaming. Fix: `_pullFreshSwitchStates()` now includes the camera entity, and the pull also fires on first-hass mount (previously only on `visibilitychange`). Closes the gap inside ~200 ms instead of waiting on the next WS frame. Regression guard: `tests/test_card_lifecycle.py::test_pull_fresh_states_includes_camera_entity`.
+
 ## v11.0.5
 
 **Mini-NVR Phase 2** — local-only continuous recording goes opt-in production. OptionsFlow gets collapsible sections.

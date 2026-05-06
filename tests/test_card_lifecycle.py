@@ -122,6 +122,55 @@ def test_overview_grid_single_column_on_mobile_landscape(card_source: str) -> No
     )
 
 
+def test_pull_fresh_states_includes_camera_entity(card_source: str) -> None:
+    """CARD_STALE_APP fix (2026-04-27): on mount the card must pull
+    the camera entity state via REST so the badge color (idle / connecting /
+    streaming / warming_up) reflects the backend immediately. Without
+    this, the WS-pushed camera state can lag 2-5 s after the
+    HA-Companion-App resumes from background, leaving the badge stuck
+    yellow despite backend=streaming. Pinned by source-grep so a
+    refactor of `_pullFreshSwitchStates` can't silently drop the
+    camera entity from the pull list.
+    """
+    pull_idx = card_source.find("_pullFreshSwitchStates() {")
+    assert pull_idx > 0, "_pullFreshSwitchStates method missing"
+    # Cover the body of the method (≈600 chars window) to find the ids list
+    pull_body = card_source[pull_idx : pull_idx + 1200]
+    assert "this._entities.camera" in pull_body, (
+        "_pullFreshSwitchStates ids list must include camera — drop it "
+        "and the badge stays stale on Companion-App-resume."
+    )
+    # First-hass code path must trigger the pull.
+    first_hass_idx = card_source.find("if (firstHass)")
+    assert first_hass_idx > 0
+    first_hass_body = card_source[first_hass_idx : first_hass_idx + 800]
+    assert "_pullFreshSwitchStates" in first_hass_body, (
+        "firstHass branch in `set hass()` must call _pullFreshSwitchStates "
+        "so the initial mount has authoritative state — otherwise the "
+        "stream badge can render with stale data on the first paint."
+    )
+
+
+def test_banner_uses_high_contrast_white(card_source: str) -> None:
+    """The HLS-fallback info banner sits over the video and must stay
+    readable. Earlier rev used dark blue text on a 10 %-blue tint
+    (effectively unreadable on the black letterbox bars). White text
+    on a dark semi-transparent backdrop is the iOS-style we settled
+    on; pin it so a future style refactor can't silently regress."""
+    css_idx = card_source.find(".ios-hls-banner {")
+    assert css_idx > 0
+    css_block = card_source[css_idx : css_idx + 800]
+    assert "color: #fff" in css_block, (
+        "Banner text must be white. Dark-blue-on-black gave 0 contrast "
+        "on Cloudflare-tunnel mobile users (screenshot 2026-05-06)."
+    )
+    assert "position: absolute" in css_block, (
+        "Banner must be absolute-positioned over the video, not in the "
+        "natural flow — otherwise it lands on the fullscreen letterbox "
+        "bars where the dark backdrop disappears entirely."
+    )
+
+
 def test_card_version_matches_const_py() -> None:
     """`CARD_VERSION` must be in lock-step between `const.py` and the
     card source so the auto-registered Lovelace resource URL changes
