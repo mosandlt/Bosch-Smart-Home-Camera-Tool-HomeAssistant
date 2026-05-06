@@ -230,6 +230,10 @@ async def async_setup_entry(
         # (for Gen1 360) the pan slider sign is inverted.
         if hw_version in _INDOOR_HW:
             entities.append(BoschImageRotation180Switch(coordinator, cam_id, config_entry))
+        # Mini-NVR recording switch — opt-in via integration option `enable_nvr`.
+        # Disabled by default; user enables in options, then toggles per camera.
+        if opts.get("enable_nvr", False):
+            entities.append(BoschNvrRecordingSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1696,3 +1700,108 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):
         self.coordinator._image_rotation_180[self._cam_id] = False
         self.async_write_ha_state()
         self.coordinator.async_update_listeners()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):
+    """Switch: ON = continuously record this camera's LOCAL stream to disk.
+
+    Phase 1 MVP of the Mini-NVR feature (see `docs/mini-nvr-concept.md`).
+
+    The switch reflects USER INTENT (the persisted state). Whether ffmpeg is
+    actually writing files at any given moment also depends on the LAN-only
+    gate — when the camera is on the cloud relay or OFFLINE, the switch is
+    `available=False` (yellow/grey in the UI) so the user knows recording is
+    paused. This is preferred over silently no-op'ing per concept §2.
+
+    LAN-only is a hard line: if the live session falls back to REMOTE the
+    recorder stops cleanly. It restarts automatically when the camera is back
+    on LOCAL — user does not have to toggle the switch.
+
+    State persists across HA restarts via `RestoreEntity` (mirror of
+    `BoschImageRotation180Switch`).
+    """
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name            = f"Bosch {self._cam_title} Mini-NVR"
+        self._attr_unique_id       = f"bosch_shc_nvr_recording_{cam_id.lower()}"
+        self._attr_icon            = "mdi:record-rec"
+        self._attr_translation_key = "nvr_recording"
+        self._attr_entity_category = EntityCategory.CONFIG
+        # Opt-in feature — hide from "default-enabled" entity list. User adds
+        # the entity manually from the device page if they want it on a card.
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def is_on(self) -> bool:
+        """User intent — True after `async_turn_on`, False after `async_turn_off`.
+
+        Survives HA restarts via RestoreEntity (see `async_added_to_hass`).
+        """
+        return bool(self.coordinator._nvr_user_intent.get(self._cam_id, False))
+
+    @property
+    def available(self) -> bool:
+        """Available only when LAN recording is actually possible.
+
+        Guard rail: surfaces "yellow/grey" in the UI when the camera is on the
+        cloud relay or OFFLINE so the user can see at a glance that recording
+        is paused (concept §2 — visible state beats silent no-op).
+        """
+        if not self.coordinator.last_update_success:
+            return False
+        if not self.coordinator.is_camera_online(self._cam_id):
+            return False
+        live = self.coordinator._live_connections.get(self._cam_id, {})
+        return live.get("_connection_type") == "LOCAL"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Diagnostic visibility: surface ffmpeg state + last error."""
+        proc = self.coordinator._nvr_processes.get(self._cam_id)
+        live = self.coordinator._live_connections.get(self._cam_id, {})
+        return {
+            "ffmpeg_running": proc is not None and proc.returncode is None,
+            "connection_type": live.get("_connection_type", "(none)"),
+            "last_error": self.coordinator._nvr_error_state.get(self._cam_id, ""),
+            "base_path": (
+                self.coordinator.options.get("nvr_base_path") or "/config/bosch_nvr"
+            ),
+            "retention_days": int(
+                self.coordinator.options.get("nvr_retention_days", 3)
+            ),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self.coordinator._nvr_user_intent[self._cam_id] = True
+            _LOGGER.debug(
+                "NVR: restored ON for %s from previous state",
+                self._cam_id[:8],
+            )
+            # If the LAN session is already up at this point, kick off the
+            # recorder immediately. Otherwise the LOCAL-stream-up hook in
+            # try_live_connection will start it as soon as a session opens.
+            if (
+                self.coordinator.last_update_success
+                and self.coordinator.is_camera_online(self._cam_id)
+                and self.coordinator._live_connections.get(self._cam_id, {})
+                    .get("_connection_type") == "LOCAL"
+            ):
+                self.hass.async_create_task(
+                    self.coordinator.start_recorder(self._cam_id),
+                    name=f"bosch_nvr_resume_{self._cam_id[:8]}",
+                )
+
+    async def async_turn_on(self, **kwargs) -> None:
+        _LOGGER.info("NVR ON for %s", self._cam_title)
+        await self.coordinator.start_recorder(self._cam_id)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        _LOGGER.info("NVR OFF for %s", self._cam_title)
+        await self.coordinator.stop_recorder(self._cam_id)
+        self.async_write_ha_state()

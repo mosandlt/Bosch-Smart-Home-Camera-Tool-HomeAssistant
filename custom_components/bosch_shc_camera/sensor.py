@@ -93,6 +93,12 @@ async def async_setup_entry(
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
         entities.append(BoschFcmPushStatusSensor(coordinator, first_cam_id, config_entry))
+    # Mini-NVR diagnostic sensor — surfaces drain-watcher state per camera so
+    # users can answer "is recording reaching the target?". Disabled by
+    # default; enable via the entity registry. One per camera.
+    if opts.get("enable_nvr", False):
+        for cam_id in coordinator.data:
+            entities.append(BoschNvrStateSensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1262,4 +1268,67 @@ class BoschStreamStatusSensor(_BoschSensorBase):
             "connection_type": live.get("_connection_type", ""),
             "stream_errors":   self.coordinator._stream_error_count.get(self._cam_id, 0),
             "fell_back":       self.coordinator._stream_fell_back.get(self._cam_id, False),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschNvrStateSensor(_BoschSensorBase):
+    """Diagnostic sensor surfacing the Mini-NVR drain-watcher state per camera.
+
+    Helps users answer "is recording actually reaching the target?". Reads
+    from ``coordinator._nvr_drain_state`` (populated by
+    ``recorder.sync_drain_tick``) and ``coordinator._nvr_user_intent`` /
+    ``coordinator._nvr_processes`` (populated by the recorder lifecycle
+    plumbing). Pure properties — no I/O. Disabled by default in the entity
+    registry to avoid surprise entities.
+
+    States:
+      * ``recording`` — ffmpeg child is alive AND user-intent flag is set
+      * ``idle``      — no recorder is running for this camera
+      * ``error``     — the crash-loop guard tripped
+
+    Attributes:
+      * ``target``             — current ``nvr_storage_target`` (local/smb/ftp)
+      * ``pending_uploads``    — files in the staging tree not yet finalized
+      * ``failed_uploads``     — failed-this-tick upload count
+      * ``last_segment_age_s`` — seconds since last seen segment for this cam
+    """
+
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id       = f"bosch_shc_nvr_state_{cam_id.lower()}"
+        self._attr_translation_key = "nvr_state"
+        self._attr_icon            = "mdi:record-rec"
+        self._attr_options         = ["idle", "recording", "error"]
+        self._attr_device_class    = SensorDeviceClass.ENUM
+
+    @property
+    def native_value(self) -> str:
+        if self.coordinator._nvr_error_state.get(self._cam_id):
+            return "error"
+        proc = self.coordinator._nvr_processes.get(self._cam_id)
+        if proc is not None and self.coordinator._nvr_user_intent.get(self._cam_id):
+            return "recording"
+        return "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        state = getattr(self.coordinator, "_nvr_drain_state", {}) or {}
+        # Camera title is used as the staging-folder key (sanitized via
+        # _safe_name in recorder._staging_dir). Read with the same sanitization
+        # so the per-camera age lookup stays consistent.
+        from .smb import _safe_name
+        info = self.coordinator.data.get(self._cam_id, {}).get("info", {})
+        cam_key = _safe_name(info.get("title", self._cam_id))
+        last_age = (state.get("last_age_by_cam") or {}).get(cam_key)
+        return {
+            "target":             state.get("target", "local"),
+            "pending_uploads":    int(state.get("pending", 0)),
+            "failed_uploads":     int(state.get("failed", 0)),
+            "last_segment_age_s": float(last_age) if last_age is not None else None,
+            "last_tick_ts":       state.get("last_tick_ts"),
+            "user_intent":        bool(self.coordinator._nvr_user_intent.get(self._cam_id, False)),
+            "error":              self.coordinator._nvr_error_state.get(self._cam_id, ""),
         }

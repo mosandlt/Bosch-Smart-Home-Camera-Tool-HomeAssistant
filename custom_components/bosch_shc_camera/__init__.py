@@ -64,6 +64,7 @@ from .smb import (
     sync_smb_disk_check,
     async_smb_disk_alert,
 )
+from . import recorder as nvr_recorder
 from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy, stop_all_proxies
 from . import shc as shc_mod
 from .rcp import async_update_rcp_data, get_cached_rcp_session
@@ -553,6 +554,31 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # no-op, leaving the entity badge stuck on "warming" after stream start.
         self._stream_warming: set[str] = set()
         self._stream_warming_started: dict[str, float] = {}
+        # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
+        # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
+        # _nvr_user_intent: persisted switch state (True = user wants to record).
+        # _nvr_error_state: cam_id → human-readable error after crash-loop guard.
+        # _nvr_recent_crash: monotonic ts of last ffmpeg exit (crash-window math).
+        # _last_nvr_cleanup: last daily retention purge (monotonic).
+        # The recorder is a third consumer of the existing TLS proxy — it does
+        # NOT open a new RTSP session against the camera (Bosch caps concurrent
+        # sessions at 2-3). LAN-only: only runs when _connection_type=LOCAL +
+        # camera ONLINE. See `docs/mini-nvr-concept.md` §2.
+        self._nvr_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._nvr_user_intent: dict[str, bool] = {}
+        self._nvr_error_state: dict[str, str] = {}
+        self._nvr_recent_crash: dict[str, float] = {}
+        self._last_nvr_cleanup: float = 0.0
+        # Drain watcher state — populated by recorder.sync_drain_tick. Used by
+        # BoschNvrStateSensor to render `target` / `pending_uploads` /
+        # `failed_uploads` / `last_segment_age_s` attributes without coupling
+        # the sensor to the watcher.
+        self._nvr_drain_state: dict = {}
+        self._nvr_drain_failures: dict[str, int] = {}
+        # Per-coordinator drain watcher task. Started in async_setup_entry,
+        # cancelled in async_unload_entry. NOT per-camera — one watcher serves
+        # the entire integration.
+        self._nvr_drain_task: asyncio.Task | None = None
 
     @property
     def debug(self) -> bool:
@@ -675,6 +701,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         "Heartbeat: Stream.update_source for %s failed (will heal at next worker restart): %s",
                         cam_id[:8], err,
                     )
+            # NVR sidecar: ffmpeg holds the OLD creds — once the camera rotates
+            # them out (~60 s grace per Bosch session), reconnects 401 and the
+            # recording dies. Re-spawning ffmpeg now (with the new URL) costs
+            # one ~1-2 s gap in the recording per heartbeat, which is the
+            # tradeoff documented in `docs/mini-nvr-concept.md` §3.3.
+            if cam_id in self._nvr_processes and self._nvr_user_intent.get(cam_id):
+                self.hass.async_create_task(
+                    self._restart_recorder_if_active(cam_id),
+                    name=f"bosch_nvr_restart_{cam_id[:8]}",
+                )
             if self.debug:
                 _LOGGER.debug(
                     "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
@@ -755,6 +791,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         task = self._renewal_tasks.pop(cam_id, None)
         if task and not task.done():
             task.cancel()
+        # Stop the NVR sidecar before the proxy goes away so ffmpeg gets a
+        # chance to flush MP4 cleanly. Keep user-intent set so the recorder
+        # auto-restarts when the LAN session comes back. Concept §2.
+        if cam_id in self._nvr_processes:
+            await self.stop_recorder(cam_id, clear_intent=False)
         self._live_connections.pop(cam_id, None)
         self._live_opened_at.pop(cam_id, None)
         self._stream_error_count.pop(cam_id, None)
@@ -2118,6 +2159,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     "bosch_shc_camera_smb_cleanup",
                 )
 
+            # ── 8b. NVR daily retention purge ─────────────────────────────────
+            _NVR_CLEANUP_INTERVAL = 86400  # once per day
+            if (
+                opts.get("enable_nvr", False)
+                and int(opts.get("nvr_retention_days", 3)) > 0
+                and (time.monotonic() - self._last_nvr_cleanup) >= _NVR_CLEANUP_INTERVAL
+            ):
+                self._last_nvr_cleanup = time.monotonic()
+                self.hass.async_create_background_task(
+                    self._run_nvr_cleanup_bg(),
+                    "bosch_shc_camera_nvr_cleanup",
+                )
+
             # ── 9. SMB disk-free check (hourly) ───────────────────────────────
             _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
             if (
@@ -2739,6 +2793,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # No-op silently on failure; fallback paths (SHC + cloud
                         # /v11/video_inputs) keep their primacy.
                         self.hass.async_create_task(self._refresh_rcp_state(cam_id))
+                        # ── NVR sidecar reaction ─────────────────────────
+                        # The recorder follows the live-session connection
+                        # type. On a fresh LOCAL session, start (or re-start
+                        # with new creds) ffmpeg if user-intent is set. On a
+                        # REMOTE session, stop any running recorder cleanly —
+                        # LAN-only is a hard line per concept §2.
+                        if self._nvr_user_intent.get(cam_id):
+                            if type_val == "LOCAL":
+                                self.hass.async_create_task(
+                                    nvr_recorder.start_recorder(self, cam_id),
+                                    name=f"bosch_nvr_start_{cam_id[:8]}",
+                                )
+                            elif type_val == "REMOTE" and cam_id in self._nvr_processes:
+                                self.hass.async_create_task(
+                                    nvr_recorder.stop_recorder(self, cam_id),
+                                    name=f"bosch_nvr_stop_{cam_id[:8]}",
+                                )
                         return result
                     elif resp.status == 401:
                         _LOGGER.warning(
@@ -2766,6 +2837,59 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             await self.hass.async_add_executor_job(sync_smb_cleanup, self)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("SMB cleanup background task error: %s", err)
+
+    # ── Mini-NVR plumbing (delegate to recorder.py) ──────────────────────────
+    async def start_recorder(self, cam_id: str) -> None:
+        """Spawn the per-camera ffmpeg recorder if the LAN-only gate is open.
+
+        Called by `BoschNvrRecordingSwitch.async_turn_on` and from the
+        connection-type/cred-rotation hooks below. Idempotent — replaces an
+        existing recorder so a fresh URL is picked up.
+        """
+        # User-intent flag (consulted by the watcher's respawn check).
+        self._nvr_user_intent[cam_id] = True
+        if not nvr_recorder.should_record(self, cam_id, switch_on=True):
+            _LOGGER.debug(
+                "NVR start_recorder skipped for %s — gate closed (LOCAL=%s online=%s)",
+                cam_id[:8],
+                self._live_connections.get(cam_id, {}).get("_connection_type"),
+                self.is_camera_online(cam_id),
+            )
+            return
+        await nvr_recorder.start_recorder(self, cam_id)
+
+    async def stop_recorder(self, cam_id: str, *, clear_intent: bool = True) -> None:
+        """Stop the per-camera ffmpeg recorder.
+
+        ``clear_intent=False`` is used when the LAN drops out: we stop the
+        running ffmpeg but keep the user-intent flag so the recorder restarts
+        automatically when the LAN comes back.
+        """
+        if clear_intent:
+            self._nvr_user_intent.pop(cam_id, None)
+        await nvr_recorder.stop_recorder(self, cam_id)
+
+    async def _run_nvr_cleanup_bg(self) -> None:
+        """Run NVR retention purge in an executor thread (called once per day)."""
+        try:
+            await self.hass.async_add_executor_job(nvr_recorder.sync_nvr_cleanup, self)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("NVR cleanup background task error: %s", err)
+
+    async def _restart_recorder_if_active(self, cam_id: str) -> None:
+        """Restart the recorder if it was running — used by cred-rotation hook.
+
+        Called after `_refresh_local_creds_from_heartbeat` updates the proxy
+        URL. The freshly-rotated digest creds need a new ffmpeg process —
+        the running one will start hitting 401 within ~60 s as the camera
+        rotates the per-session creds out from under it.
+        """
+        if cam_id not in self._nvr_processes:
+            return
+        if not self._nvr_user_intent.get(cam_id):
+            return
+        _LOGGER.debug("NVR restarting recorder for %s after cred rotation", cam_id[:8])
+        await nvr_recorder.start_recorder(self, cam_id)
 
     # ── go2rtc integration ────────────────────────────────────────────────────
     async def async_fetch_live_snapshot(self, cam_id: str) -> bytes | None:
@@ -4294,6 +4418,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if opts.get("enable_fcm_push", False):
         hass.async_create_task(coordinator.async_start_fcm_push())
 
+    # Mini-NVR drain watcher — promotes finalized staging segments to the
+    # configured storage target (local / smb / ftp). One watcher per
+    # coordinator; serves all cameras. Cancelled in async_unload_entry.
+    if opts.get("enable_nvr", False):
+        coordinator._nvr_drain_task = hass.async_create_background_task(
+            nvr_recorder._drain_staging_to_remote(coordinator),
+            "bosch_nvr_drain_watcher",
+        )
+
     return True
 
 
@@ -4336,6 +4469,24 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     if bg:
         await asyncio.gather(*bg, return_exceptions=True)
     coord._bg_tasks.clear()
+    # Stop the NVR drain watcher BEFORE the recorders. The watcher is a
+    # long-running coroutine; cancelling it is the supported stop path.
+    drain_task = getattr(coord, "_nvr_drain_task", None)
+    if drain_task is not None and not drain_task.done():
+        drain_task.cancel()
+        try:
+            await drain_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        coord._nvr_drain_task = None
+    # Stop all NVR recorders BEFORE the TLS proxies — once the proxies are
+    # gone the ffmpeg children would die anyway, but we want a clean SIGTERM
+    # so the trailing MP4 moov atom is flushed and the in-progress segment
+    # stays playable.
+    try:
+        await nvr_recorder.stop_all(coord)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("NVR stop_all on unload raised: %s", err)
     # Stop all TLS proxies (closes server sockets, terminates threads).
     stop_all_proxies(coord._tls_proxy_ports)
     # Remove the stream-worker log listener so the handler doesn't outlive

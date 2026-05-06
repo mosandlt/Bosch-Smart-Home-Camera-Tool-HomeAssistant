@@ -53,6 +53,9 @@ _FILE_RE = re.compile(
 )
 _DATE_DIR_RE = re.compile(r"^\d{2}$")  # YY-style two-digit dir name (year/month/day)
 _YEAR_RE = re.compile(r"^\d{4}$")
+# NVR segment files: "HH-MM.mp4" (5-min wall-aligned segments).
+_NVR_SEG_RE = re.compile(r"^(?P<time>\d{2}-\d{2})\.mp4$")
+_NVR_DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CHUNK = 256 * 1024
 
 
@@ -258,9 +261,71 @@ class _SmbBackend:
         return open_file(path, mode="rb"), st.st_size
 
 
+class _NvrBackend:
+    """Read continuous-recording segments from the local NVR base path.
+
+    Layout: ``{base}/{Camera}/{YYYY-MM-DD}/HH-MM.mp4`` (Phase 1 MVP).
+    """
+
+    def __init__(self, base: str) -> None:
+        self.base = Path(base)
+
+    def list_cameras(self) -> list[str]:
+        if not self.base.is_dir():
+            return []
+        return sorted(
+            (p.name for p in self.base.iterdir() if p.is_dir() and not _is_macos_junk(p.name)),
+            key=str.casefold,
+        )
+
+    def list_dates(self, camera: str) -> list[str]:
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None or not cam_dir.is_dir():
+            return []
+        return sorted(
+            (
+                d.name for d in cam_dir.iterdir()
+                if d.is_dir() and _NVR_DATE_DIR_RE.match(d.name)
+            ),
+            reverse=True,
+        )
+
+    def list_segments(self, camera: str, date: str) -> list[tuple[str, str]]:
+        """Return [(filename, label_HH:MM)] for one (camera, date)."""
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None:
+            return []
+        date_dir = _safe_join(cam_dir, date)
+        if date_dir is None or not date_dir.is_dir():
+            return []
+        out: list[tuple[str, str]] = []
+        for f in date_dir.iterdir():
+            if not f.is_file() or _is_macos_junk(f.name):
+                continue
+            m = _NVR_SEG_RE.match(f.name)
+            if not m:
+                continue
+            label = m.group("time").replace("-", ":")
+            out.append((f.name, label))
+        out.sort(reverse=True)
+        return out
+
+    def resolve(self, camera: str, date: str, filename: str) -> Path | None:
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None:
+            return None
+        date_dir = _safe_join(cam_dir, date)
+        if date_dir is None:
+            return None
+        if not _NVR_DATE_DIR_RE.match(date) or not _NVR_SEG_RE.match(filename):
+            return None
+        target = _safe_join(date_dir, filename)
+        return target if target is not None and target.is_file() else None
+
+
 # ── source registry ──────────────────────────────────────────────────────────
-def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend | _SmbBackend]]:
-    out: list[tuple[_Source, _LocalBackend | _SmbBackend]] = []
+def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend | _SmbBackend | _NvrBackend]]:
+    out: list[tuple[_Source, _LocalBackend | _SmbBackend | _NvrBackend]] = []
     for entry in hass.config_entries.async_loaded_entries(DOMAIN):
         coord = getattr(entry, "runtime_data", None)
         if coord is None:
@@ -293,6 +358,17 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
             smb = _SmbBackend(hass, opts)
             if smb.configured:
                 out.append((_Source(entry_id, "S", smb.label), smb))
+        # Mini-NVR continuous recording — always shown when enabled (filt
+        # `auto`/`local` only, NAS-only filter hides it). Backend lives on the
+        # local FS even though it might be a NAS bind-mount.
+        if show_local and opts.get("enable_nvr"):
+            base = (opts.get("nvr_base_path") or "/config/bosch_nvr").strip()
+            try:
+                base_path = Path(base)
+                if base_path.is_dir():
+                    out.append((_Source(entry_id, "N", "Aufnahmen"), _NvrBackend(base)))
+            except OSError:
+                pass
     return out
 
 
@@ -395,10 +471,10 @@ class BoschCameraMediaSource(MediaSource):
 
         # Identifiers under a single-source entry omit the source token (the
         # tree skips the chooser level), so parts[1] is already a tree segment
-        # (year for SMB / camera for local). Detect that case and pick the
-        # source implicitly from the entry's only backend.
+        # (year for SMB / camera for local / camera for NVR). Detect that case
+        # and pick the source implicitly from the entry's only backend.
         single_source = len(by_entry[entry_id]) == 1
-        if single_source and parts[1] not in ("L", "S"):
+        if single_source and parts[1] not in ("L", "S", "N"):
             src, backend = by_entry[entry_id][0]
             rest = parts[1:]
         else:
@@ -411,6 +487,8 @@ class BoschCameraMediaSource(MediaSource):
 
         if isinstance(backend, _LocalBackend):
             return self._browse_local(src, backend, rest, single_source=single_source)
+        if isinstance(backend, _NvrBackend):
+            return self._browse_nvr(src, backend, rest, single_source=single_source)
         return self._browse_smb(src, backend, rest, single_source=single_source)
 
     def _browse_entry_root(
@@ -424,6 +502,8 @@ class BoschCameraMediaSource(MediaSource):
             src, backend = sources_for_entry[0]
             if isinstance(backend, _LocalBackend):
                 return self._browse_local(src, backend, [], single_source=True, root=root)
+            if isinstance(backend, _NvrBackend):
+                return self._browse_nvr(src, backend, [], single_source=True, root=root)
             return self._browse_smb(src, backend, [], single_source=True, root=root)
 
         children = [
@@ -491,6 +571,60 @@ class BoschCameraMediaSource(MediaSource):
                     can_play=True,
                     can_expand=False,
                     thumbnail=thumb,
+                ))
+            return _node(
+                identifier=ident(camera, date),
+                title=date,
+                children=children,
+                children_media_class=MediaClass.VIDEO,
+            )
+
+        raise Unresolvable(f"Cannot browse: {'/'.join(rest)}")
+
+    # ── nvr backend tree (camera/date/segment) ──────────────────────────────
+    def _browse_nvr(
+        self,
+        src: _Source,
+        backend: _NvrBackend,
+        rest: list[str],
+        *,
+        single_source: bool,
+        root: bool = False,
+    ) -> BrowseMediaSource:
+        prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
+        ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+
+        if not rest:
+            children = [
+                _node(identifier=ident(cam), title=cam) for cam in backend.list_cameras()
+            ]
+            title = self.name if root else (
+                _entry_title(self.hass, src.entry_id) if single_source else src.label
+            )
+            return _node(
+                identifier="" if root else prefix,
+                title=title,
+                children=children,
+            )
+
+        camera = rest[0]
+        if len(rest) == 1:
+            children = [
+                _node(identifier=ident(camera, d), title=d) for d in backend.list_dates(camera)
+            ]
+            return _node(identifier=ident(camera), title=camera, children=children)
+
+        if len(rest) == 2:
+            date = rest[1]
+            children = []
+            for fname, label in backend.list_segments(camera, date):
+                children.append(_node(
+                    identifier=ident(camera, date, fname),
+                    title=label,
+                    media_class=MediaClass.VIDEO,
+                    media_content_type="video/mp4",
+                    can_play=True,
+                    can_expand=False,
                 ))
             return _node(
                 identifier=ident(camera, date),
@@ -585,16 +719,22 @@ class BoschCameraMediaView(HomeAssistantView):
             raise web.HTTPNotFound
 
         # Identifier shapes (with optional source token):
-        #   {entry_id}/L/{camera}/{filename}      (local, multi-source entry)
-        #   {entry_id}/{camera}/{filename}        (local, single-source entry)
-        #   {entry_id}/S/{Y}/{M}/{D}/{filename}   (smb, multi-source entry)
-        #   {entry_id}/{Y}/{M}/{D}/{filename}     (smb, single-source entry)
+        #   {entry_id}/L/{camera}/{filename}              (local, multi-source)
+        #   {entry_id}/{camera}/{filename}                (local, single-source)
+        #   {entry_id}/S/{Y}/{M}/{D}/{filename}           (smb, multi-source)
+        #   {entry_id}/{Y}/{M}/{D}/{filename}             (smb, single-source)
+        #   {entry_id}/N/{camera}/{YYYY-MM-DD}/{file}.mp4 (nvr, multi-source)
+        #   {entry_id}/{camera}/{YYYY-MM-DD}/{file}.mp4   (nvr, single-source)
         head = parts[0]
-        if head in ("L", "S"):
+        if head in ("L", "S", "N"):
             kind = head
             tail = parts[1:]
         elif _YEAR_RE.match(head):
             kind = "S"
+            tail = parts
+        elif len(parts) >= 3 and _NVR_DATE_DIR_RE.match(parts[1]):
+            # camera/YYYY-MM-DD/HH-MM.mp4 → NVR single-source.
+            kind = "N"
             tail = parts
         else:
             kind = "L"
@@ -610,6 +750,12 @@ class BoschCameraMediaView(HomeAssistantView):
                 raise web.HTTPNotFound
             camera, filename = tail
             return await self._serve_local(request, backend, camera, filename)
+
+        if isinstance(backend, _NvrBackend):
+            if len(tail) != 3:
+                raise web.HTTPNotFound
+            camera, date, filename = tail
+            return await self._serve_nvr(request, backend, camera, date, filename)
 
         if len(tail) != 4:
             raise web.HTTPNotFound
@@ -627,6 +773,20 @@ class BoschCameraMediaView(HomeAssistantView):
             raise web.HTTPNotFound
         mime, _ = mimetypes.guess_type(str(path))
         if mime not in ("image/jpeg", "video/mp4"):
+            raise web.HTTPNotFound
+        return web.FileResponse(path)
+
+    # nvr path → web.FileResponse handles Range natively (mp4 only)
+    async def _serve_nvr(
+        self, request: web.Request, backend: _NvrBackend,
+        camera: str, date: str, filename: str,
+    ) -> web.StreamResponse:
+        if not _NVR_DATE_DIR_RE.match(date) or not _NVR_SEG_RE.match(filename):
+            raise web.HTTPNotFound
+        path = await self.hass.async_add_executor_job(
+            backend.resolve, camera, date, filename,
+        )
+        if path is None:
             raise web.HTTPNotFound
         return web.FileResponse(path)
 

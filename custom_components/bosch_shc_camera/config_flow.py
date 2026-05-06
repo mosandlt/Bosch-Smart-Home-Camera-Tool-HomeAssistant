@@ -30,6 +30,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
@@ -40,6 +41,112 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 from homeassistant.helpers.selector import (
     SelectSelector, SelectSelectorConfig, SelectSelectorMode, SelectOptionDict,
 )
+
+
+# ── Section layout (single source of truth) ───────────────────────────────────
+# Sectioned options-flow groups the ~50 fields into collapsible blocks so the
+# UI is browseable. The mapping below is consumed both by the section-aware
+# schema builder in BoschSHCCameraOptionsFlow.async_step_init AND by
+# `_flatten_sections` (round-trip on submit). Adding a field here automatically
+# wires it into the right section + flattens correctly on save.
+#
+# DO NOT add a key to two sections — `_flatten_sections` enforces no-collision.
+OPTIONS_SECTIONS: dict[str, list[str]] = {
+    "polling": [
+        "scan_interval", "interval_status", "interval_events", "snapshot_interval",
+    ],
+    "features": [
+        "enable_snapshots", "enable_sensors", "enable_binary_sensors",
+        "enable_snapshot_button", "audio_default_on", "enable_intercom",
+        "high_quality_video",
+    ],
+    "stream": [
+        "stream_connection_type", "live_buffer_mode", "enable_go2rtc",
+    ],
+    "fcm": [
+        "enable_fcm_push", "fcm_push_mode", "mark_events_read",
+        "alert_save_snapshots", "alert_delete_after_send",
+        "alert_notify_service", "alert_notify_information",
+        "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
+    ],
+    "events_storage": [
+        # Cloud-event JPEG/MP4 download (pre-existing — not the NVR tree).
+        "enable_auto_download", "download_path", "media_browser_source",
+        "enable_smb_upload", "upload_protocol",
+        "smb_server", "smb_share", "smb_username", "smb_password",
+        "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
+        "smb_retention_days", "smb_disk_warn_mb",
+    ],
+    "nvr": [
+        "enable_nvr", "nvr_storage_target", "nvr_base_path",
+        "nvr_smb_subpath", "nvr_retention_days",
+    ],
+    "shc": [
+        "shc_ip", "shc_cert_path", "shc_key_path",
+    ],
+    "auth": [
+        "force_relogin", "migrate_to_oss_client",
+    ],
+    "debug": [
+        "debug_logging",
+    ],
+}
+
+
+def _flatten_sections(user_input: dict) -> dict:
+    """Flatten a section-grouped submit dict back into a single flat dict.
+
+    Home Assistant's ``data_entry_flow.section`` helper returns sectioned input
+    in the shape ``{section_key: {field: value, ...}, ...}``. The rest of the
+    integration expects the legacy flat shape (one dict, all keys). This helper
+    walks ``OPTIONS_SECTIONS`` and lifts every nested field up to the top
+    level.
+
+    Behaviour:
+        * Non-sectioned keys (typed in directly at the top level — e.g. older
+          unit tests) pass through unchanged.
+        * If a section key is missing from ``user_input`` (HA may omit empty
+          sections), it is treated as an empty dict rather than raising.
+        * Duplicate keys across sections are caught and raise ``ValueError`` —
+          a defensive guard so future ``OPTIONS_SECTIONS`` edits cannot
+          silently overwrite an existing field.
+        * ``user_input`` itself is never mutated.
+
+    Pure helper, fully tested in ``tests/test_config_flow_sections.py``.
+    """
+    flat: dict = {}
+    seen_section_keys: set[str] = set()
+
+    for section_key, fields in OPTIONS_SECTIONS.items():
+        seen_section_keys.add(section_key)
+        sec_payload = user_input.get(section_key)
+        if sec_payload is None:
+            continue
+        if not isinstance(sec_payload, dict):
+            # Defensive — never expected from HA but keeps tests honest.
+            continue
+        for field, value in sec_payload.items():
+            if field in flat:
+                raise ValueError(
+                    f"_flatten_sections: duplicate key {field!r} from "
+                    f"section {section_key!r} — already set by another "
+                    "section. Fix OPTIONS_SECTIONS."
+                )
+            flat[field] = value
+
+    # Anything top-level that is NOT a section key passes through (legacy /
+    # tests / programmatic options updates).
+    for key, value in user_input.items():
+        if key in seen_section_keys:
+            continue
+        if key in flat:
+            raise ValueError(
+                f"_flatten_sections: duplicate key {key!r} at top level "
+                "and inside a section — fix caller."
+            )
+        flat[key] = value
+
+    return flat
 
 from . import DOMAIN, DEFAULT_OPTIONS
 
@@ -393,6 +500,10 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
         is_legacy_client = current_client == "residential_app"
 
         if user_input is not None:
+            # HA's section() helper nests fields under the section key; flatten
+            # back to the legacy single-dict shape before any further handling.
+            user_input = _flatten_sections(user_input)
+
             force_relogin = user_input.pop("force_relogin", False)
             migrate_to_oss = user_input.pop("migrate_to_oss_client", False)
 
@@ -404,6 +515,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                       "audio_default_on",
                       "enable_intercom",
                       "enable_smb_upload",
+                      "enable_nvr",
                       "enable_go2rtc",
                       "debug_logging"]:
                 if k in user_input:
@@ -433,9 +545,16 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         has_refresh = bool(self._config_entry.data.get("refresh_token", ""))
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema({
+
+        # Build per-section voluptuous schemas. The schema for each block is
+        # picked from `_field_schema_for(opts, key)` so a single source of
+        # truth (OPTIONS_SECTIONS + this helper) controls both layout AND
+        # field-level types.
+        sectioned_schema: dict = {}
+
+        # Polling intervals — open by default (most-touched group).
+        sectioned_schema[vol.Required("polling")] = section(
+            vol.Schema({
                 vol.Optional(
                     "scan_interval",
                     default=int(opts.get("scan_interval", 60)),
@@ -452,6 +571,12 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "snapshot_interval",
                     default=int(opts.get("snapshot_interval", 1800)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
+            }),
+            {"collapsed": False},
+        )
+
+        sectioned_schema[vol.Required("features")] = section(
+            vol.Schema({
                 vol.Optional(
                     "enable_snapshots",
                     default=bool(opts.get("enable_snapshots", True)),
@@ -461,46 +586,31 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("enable_sensors", True)),
                 ): bool,
                 vol.Optional(
+                    "enable_binary_sensors",
+                    default=bool(opts.get("enable_binary_sensors", True)),
+                ): bool,
+                vol.Optional(
                     "enable_snapshot_button",
                     default=bool(opts.get("enable_snapshot_button", True)),
                 ): bool,
                 vol.Optional(
-                    "enable_auto_download",
-                    default=bool(opts.get("enable_auto_download", False)),
+                    "audio_default_on",
+                    default=bool(opts.get("audio_default_on", True)),
                 ): bool,
                 vol.Optional(
-                    "download_path",
-                    description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
-                ): str,
-                vol.Optional(
-                    "media_browser_source",
-                    default=str(opts.get("media_browser_source", "auto")),
-                ): SelectSelector(SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value="auto",  label="Auto (alles Aktive anzeigen)"),
-                        SelectOptionDict(value="local", label="Nur Lokal (download_path)"),
-                        SelectOptionDict(value="smb",   label="Nur NAS (SMB-Upload)"),
-                        SelectOptionDict(value="none",  label="Provider deaktivieren"),
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )),
-                # SHC local API — camera light + privacy mode
-                vol.Optional(
-                    "shc_ip",
-                    description={"suggested_value": opts.get("shc_ip", "")},
-                ): str,
-                vol.Optional(
-                    "shc_cert_path",
-                    description={"suggested_value": opts.get("shc_cert_path", "")},
-                ): str,
-                vol.Optional(
-                    "shc_key_path",
-                    description={"suggested_value": opts.get("shc_key_path", "")},
-                ): str,
+                    "enable_intercom",
+                    default=bool(opts.get("enable_intercom", False)),
+                ): bool,
                 vol.Optional(
                     "high_quality_video",
                     default=bool(opts.get("high_quality_video", False)),
                 ): bool,
+            }),
+            {"collapsed": False},
+        )
+
+        sectioned_schema[vol.Required("stream")] = section(
+            vol.Schema({
                 vol.Optional(
                     "stream_connection_type",
                     default=str(opts.get("stream_connection_type", "auto")),
@@ -524,20 +634,38 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )),
                 vol.Optional(
-                    "enable_binary_sensors",
-                    default=bool(opts.get("enable_binary_sensors", True)),
+                    "enable_go2rtc",
+                    default=bool(opts.get("enable_go2rtc", True)),
                 ): bool,
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("fcm")] = section(
+            vol.Schema({
                 vol.Optional(
                     "enable_fcm_push",
                     default=bool(opts.get("enable_fcm_push", False)),
                 ): bool,
                 vol.Optional(
+                    "fcm_push_mode",
+                    default=str(opts.get("fcm_push_mode", "auto")),
+                ): vol.In(["auto", "android", "ios", "polling"]),
+                vol.Optional(
+                    "mark_events_read",
+                    default=bool(opts.get("mark_events_read", False)),
+                ): bool,
+                vol.Optional(
+                    "alert_save_snapshots",
+                    default=bool(opts.get("alert_save_snapshots", False)),
+                ): bool,
+                vol.Optional(
+                    "alert_delete_after_send",
+                    default=bool(opts.get("alert_delete_after_send", True)),
+                ): bool,
+                vol.Optional(
                     "alert_notify_service",
                     description={"suggested_value": opts.get("alert_notify_service", "")},
-                ): str,
-                vol.Optional(
-                    "alert_notify_system",
-                    description={"suggested_value": opts.get("alert_notify_system", "")},
                 ): str,
                 vol.Optional(
                     "alert_notify_information",
@@ -552,29 +680,35 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     description={"suggested_value": opts.get("alert_notify_video", "")},
                 ): str,
                 vol.Optional(
-                    "alert_save_snapshots",
-                    default=bool(opts.get("alert_save_snapshots", False)),
+                    "alert_notify_system",
+                    description={"suggested_value": opts.get("alert_notify_system", "")},
+                ): str,
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("events_storage")] = section(
+            vol.Schema({
+                vol.Optional(
+                    "enable_auto_download",
+                    default=bool(opts.get("enable_auto_download", False)),
                 ): bool,
                 vol.Optional(
-                    "alert_delete_after_send",
-                    default=bool(opts.get("alert_delete_after_send", True)),
-                ): bool,
+                    "download_path",
+                    description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
+                ): str,
                 vol.Optional(
-                    "mark_events_read",
-                    default=bool(opts.get("mark_events_read", False)),
-                ): bool,
-                vol.Optional(
-                    "fcm_push_mode",
-                    default=str(opts.get("fcm_push_mode", "auto")),
-                ): vol.In(["auto", "android", "ios", "polling"]),
-                vol.Optional(
-                    "audio_default_on",
-                    default=bool(opts.get("audio_default_on", True)),
-                ): bool,
-                vol.Optional(
-                    "enable_intercom",
-                    default=bool(opts.get("enable_intercom", False)),
-                ): bool,
+                    "media_browser_source",
+                    default=str(opts.get("media_browser_source", "auto")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="auto",  label="Auto (alles Aktive anzeigen)"),
+                        SelectOptionDict(value="local", label="Nur Lokal (download_path)"),
+                        SelectOptionDict(value="smb",   label="Nur NAS (SMB-Upload)"),
+                        SelectOptionDict(value="none",  label="Provider deaktivieren"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
                 vol.Optional(
                     "enable_smb_upload",
                     default=bool(opts.get("enable_smb_upload", False)),
@@ -625,19 +759,84 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
                     "smb_disk_warn_mb",
                     default=int(opts.get("smb_disk_warn_mb", 5120)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("nvr")] = section(
+            vol.Schema({
                 vol.Optional(
-                    "enable_go2rtc",
-                    default=bool(opts.get("enable_go2rtc", True)),
+                    "enable_nvr",
+                    default=bool(opts.get("enable_nvr", False)),
                 ): bool,
+                vol.Optional(
+                    "nvr_storage_target",
+                    default=str(opts.get("nvr_storage_target", "local")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="local", label="Lokal (NVR-Ordner)"),
+                        SelectOptionDict(value="smb",   label="SMB / CIFS"),
+                        SelectOptionDict(value="ftp",   label="FTP"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
+                vol.Optional(
+                    "nvr_base_path",
+                    description={"suggested_value": opts.get("nvr_base_path", "/config/bosch_nvr")},
+                ): str,
+                vol.Optional(
+                    "nvr_smb_subpath",
+                    description={"suggested_value": opts.get("nvr_smb_subpath", "NVR")},
+                ): str,
+                vol.Optional(
+                    "nvr_retention_days",
+                    default=int(opts.get("nvr_retention_days", 3)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("shc")] = section(
+            vol.Schema({
+                vol.Optional(
+                    "shc_ip",
+                    description={"suggested_value": opts.get("shc_ip", "")},
+                ): str,
+                vol.Optional(
+                    "shc_cert_path",
+                    description={"suggested_value": opts.get("shc_cert_path", "")},
+                ): str,
+                vol.Optional(
+                    "shc_key_path",
+                    description={"suggested_value": opts.get("shc_key_path", "")},
+                ): str,
+            }),
+            {"collapsed": True},
+        )
+
+        auth_inner: dict = {
+            vol.Optional("force_relogin", default=False): bool,
+        }
+        if is_legacy_client:
+            auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
+        sectioned_schema[vol.Required("auth")] = section(
+            vol.Schema(auth_inner),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("debug")] = section(
+            vol.Schema({
                 vol.Optional(
                     "debug_logging",
                     default=bool(opts.get("debug_logging", False)),
                 ): bool,
-                vol.Optional("force_relogin", default=False): bool,
-                **({
-                    vol.Optional("migrate_to_oss_client", default=False): bool,
-                } if is_legacy_client else {}),
             }),
+            {"collapsed": True},
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(sectioned_schema),
             description_placeholders={
                 "token_status": "active (auto-renews)" if has_refresh else "no refresh token",
             },
