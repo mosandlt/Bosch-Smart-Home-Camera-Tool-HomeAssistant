@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1326 tests across 61 files. Total line-coverage 50% with key resilience
+      1430 tests across 64 files. Total line-coverage 52% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -117,7 +117,20 @@ rules:
       unhealthy → record_stream_error + restart with try_live_connection,
       second consecutive unhealthy → saturate _stream_error_count to
       max_stream_errors forcing REMOTE on next attempt, REMOTE-after-
-      first-restart exits cleanly).
+      first-restart exits cleanly). Round-5 (2026-05-06): sensor.py
+      52%→65% (BoschWifi/LedDimmer/ClockOffset/MotionSensitivity/
+      AudioAlarm/MovementToday/AudioToday/UnreadEvents/Commissioned/
+      RulesCount sensors). light.py 44%→68% (_BoschLightBase
+      extra_state_attributes / async_added_to_hass RestoreState round-
+      trip / _load_state_from_cache / _get_current_state / _put_lighting_switch
+      always-3-groups + cache-update / _put_switch_endpoint;
+      _BoschRgbLedLight rgb_color decode + _sync_wallwasher_cache).
+      fcm.py 16%→25% (get_alert_services system-fallback + screenshot/
+      video opt-in pin; build_notify_data mobile_app/telegram/signal/
+      email shapes; _write_file; register_fcm_with_bosch device-type
+      + status branches; async_stop_fcm_push state cleanup +
+      CancelledError propagation; _async_persist_fcm_creds; _on_fcm_push
+      running=False drop + healthy stamping).
 
   # Gold
   devices: done
