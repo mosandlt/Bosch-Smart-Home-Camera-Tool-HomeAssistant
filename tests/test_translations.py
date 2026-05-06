@@ -181,6 +181,10 @@ def test_state_based_icons_have_default(icons) -> None:
 
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
 _VALID_PLACEHOLDER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+# Hassfest also rejects HTML-looking tokens. Catch the obvious shape
+# (`<word>` or `</word>`) so we don't try to "fix" a placeholder by
+# swapping `{x}` for `<x>` and trip a different validation rule.
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*\s*/?>")
 
 
 def _walk_string_values(node, path):
@@ -214,18 +218,29 @@ def test_no_invalid_placeholders_in_translations(fixture_name, request):
     BEFORE the push. Saves a CI round-trip + a hot-fix release.
     """
     data = request.getfixturevalue(fixture_name)
-    bad: list[tuple[str, str, str]] = []
+    bad_placeholders: list[tuple[str, str, str]] = []
+    bad_html: list[tuple[str, str, str]] = []
     for path, value in _walk_string_values(data, []):
         for ph in _PLACEHOLDER_RE.findall(value):
             if not _VALID_PLACEHOLDER_RE.match(ph):
-                bad.append((path, ph, value[:120]))
-    assert not bad, (
-        f"\n{fixture_name}.json has {len(bad)} invalid Hassfest placeholder(s):\n"
+                bad_placeholders.append((path, ph, value[:120]))
+        for tag in _HTML_TAG_RE.findall(value):
+            bad_html.append((path, tag, value[:120]))
+    assert not bad_placeholders, (
+        f"\n{fixture_name}.json has {len(bad_placeholders)} invalid Hassfest placeholder(s):\n"
         + "\n".join(
             f"  {p}: {{{ph}}}\n    in: {snippet}"
-            for p, ph, snippet in bad
+            for p, ph, snippet in bad_placeholders
         )
-        + "\n\nFix: replace `{name-with-hyphens}` and other non-identifier "
-        "tokens with `<name-with-hyphens>` (angle brackets) — readers still "
-        "understand it as a placeholder, but Hassfest stops complaining."
+        + "\n\nFix: rephrase in plain prose — DO NOT use `<...>` either, "
+        "Hassfest also rejects HTML-looking tokens."
+    )
+    assert not bad_html, (
+        f"\n{fixture_name}.json has {len(bad_html)} HTML-looking token(s) — "
+        f"Hassfest rejects these as 'string should not contain HTML':\n"
+        + "\n".join(
+            f"  {p}: {tag}\n    in: {snippet}"
+            for p, tag, snippet in bad_html
+        )
+        + "\n\nFix: rephrase in plain prose, avoid `<word>` / `</word>` shapes."
     )
