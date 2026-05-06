@@ -70,8 +70,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
     ],
     "events_storage": [
-        # Cloud-event JPEG/MP4 download (pre-existing — not the NVR tree).
-        "enable_auto_download", "download_path", "media_browser_source",
+        "download_path", "media_browser_source",
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
         "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
@@ -508,7 +507,7 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
             migrate_to_oss = user_input.pop("migrate_to_oss_client", False)
 
             for k in ["enable_snapshots", "enable_sensors",
-                      "enable_snapshot_button", "enable_auto_download",
+                      "enable_snapshot_button",
                       "high_quality_video", "enable_binary_sensors",
                       "enable_fcm_push", "alert_save_snapshots",
                       "alert_delete_after_send", "mark_events_read",
@@ -689,10 +688,6 @@ class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
 
         sectioned_schema[vol.Required("events_storage")] = section(
             vol.Schema({
-                vol.Optional(
-                    "enable_auto_download",
-                    default=bool(opts.get("enable_auto_download", False)),
-                ): bool,
                 vol.Optional(
                     "download_path",
                     description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},

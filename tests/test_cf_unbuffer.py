@@ -274,3 +274,214 @@ class TestStructuralContract:
         assert _FLUSH_PREFIX.startswith("text/event-stream"), (
             "_FLUSH_PREFIX must start with 'text/event-stream' for cloudflared to flush"
         )
+
+
+class TestWrapperInvocation:
+    """Invoke the wrapped coroutines so the inner await branches are exercised."""
+
+    @pytest.mark.asyncio
+    async def test_playlist_wrapper_invokes_orig_and_rewrites_ct(self):
+        """Calling the wrapper must run orig_handle then pass result through _wrap_playlist_response."""
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_playlist_wrapper
+
+        captured_args: list = []
+
+        async def fake_handle(self, *args, **kwargs):
+            captured_args.append((args, kwargs))
+            resp = MagicMock()
+            resp.headers = {"Content-Type": "application/vnd.apple.mpegurl"}
+            return resp
+
+        wrapped = _make_playlist_wrapper(fake_handle)
+        result = await wrapped(MagicMock(), "request_arg")
+        assert captured_args, "orig_handle must be awaited inside the wrapper"
+        ct = result.headers["Content-Type"]
+        assert ct.startswith("text/event-stream")
+
+    @pytest.mark.asyncio
+    async def test_segment_wrapper_invokes_orig_and_rewrites_to_chunked(self):
+        """Wrapper happy path: aiohttp.web.Response with a body → re-emitted as StreamResponse."""
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        from aiohttp import web
+
+        async def fake_handle(self, request, *a, **kw):
+            return web.Response(body=b"\x00" * 32, headers={"Content-Type": "video/mp4"})
+
+        wrapped = _make_segment_wrapper(fake_handle)
+
+        request = MagicMock()
+        stream_resp = MagicMock(spec=web.StreamResponse)
+        stream_resp.prepare = AsyncMock()
+        stream_resp.write = AsyncMock()
+        stream_resp.write_eof = AsyncMock()
+        stream_resp.headers = {}
+
+        with patch("custom_components.bosch_shc_camera.cf_unbuffer.web") as mock_web:
+            mock_web.StreamResponse.return_value = stream_resp
+            mock_web.Response = web.Response
+            await wrapped(MagicMock(), request)
+
+        assert stream_resp.prepare.called
+        assert stream_resp.write.called
+
+    @pytest.mark.asyncio
+    async def test_segment_wrapper_passes_through_non_response(self):
+        """If orig_handle returns something that's not a web.Response (e.g. StreamResponse) → pass through."""
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+
+        sentinel = object()
+
+        async def fake_handle(self, request, *a, **kw):
+            return sentinel
+
+        wrapped = _make_segment_wrapper(fake_handle)
+        result = await wrapped(MagicMock(), MagicMock())
+        assert result is sentinel
+
+    @pytest.mark.asyncio
+    async def test_segment_wrapper_passes_through_none(self):
+        """orig_handle returning None → wrapper returns None (no chunked re-emit attempt)."""
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+
+        async def fake_handle(self, request, *a, **kw):
+            return None
+
+        wrapped = _make_segment_wrapper(fake_handle)
+        assert await wrapped(MagicMock(), MagicMock()) is None
+
+    @pytest.mark.asyncio
+    async def test_segment_wrapper_swallows_emit_exception(self):
+        """If chunked re-emit raises, wrapper logs at DEBUG and returns the original response."""
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        from aiohttp import web
+
+        original = web.Response(body=b"x" * 16, headers={"Content-Type": "video/mp4"})
+
+        async def fake_handle(self, request, *a, **kw):
+            return original
+
+        async def boom(*a, **kw):
+            raise RuntimeError("simulated chunked emit failure")
+
+        wrapped = _make_segment_wrapper(fake_handle)
+        with patch("custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked", side_effect=boom):
+            result = await wrapped(MagicMock(), MagicMock())
+        assert result is original, "On emit failure the original Response must be returned unchanged"
+
+
+class TestRegisterEdgeBranches:
+    """Cover the inner-loop short-circuits (orig_handle is None / already wrapped) and outer-try failure."""
+
+    def test_register_skips_views_with_no_handle_attribute(self):
+        """A view class without a `handle` method must be skipped (continue branch)."""
+        import types
+        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+
+        original_patched = mod._PATCHED
+        mod._PATCHED = False
+
+        fake_hls = types.ModuleType("homeassistant.components.stream.hls")
+
+        # Two playlist view classes: one without handle, one with — must not crash and must wrap the second
+        class NoHandlePlaylist:
+            pass
+
+        class GoodPlaylist:
+            async def handle(self, *a, **kw):
+                return None
+
+        fake_hls.HlsMasterPlaylistView = NoHandlePlaylist
+        fake_hls.HlsPlaylistView = GoodPlaylist
+
+        # Segment classes — one with no handle, one good
+        class NoHandleSegment:
+            pass
+
+        class GoodSegment:
+            async def handle(self, request, *a, **kw):
+                return None
+
+        fake_hls.HlsInitView = NoHandleSegment
+        fake_hls.HlsPartView = GoodSegment
+        fake_hls.HlsSegmentView = GoodSegment
+
+        stream_pkg = types.ModuleType("homeassistant.components.stream")
+        stream_pkg.hls = fake_hls
+
+        with patch.dict("sys.modules", {
+            "homeassistant.components.stream": stream_pkg,
+            "homeassistant.components.stream.hls": fake_hls,
+        }):
+            mod.register(MagicMock())
+
+        assert mod._PATCHED is True
+        # GoodPlaylist.handle must be wrapped, NoHandlePlaylist untouched
+        assert getattr(GoodPlaylist.handle, "_cf_wrapped", False) is True
+        assert not hasattr(NoHandlePlaylist, "handle")
+
+        mod._PATCHED = original_patched
+
+    def test_register_skips_already_wrapped_handles(self):
+        """If a handle already carries _cf_wrapped, the wrapper must not be applied a second time."""
+        import types
+        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+
+        original_patched = mod._PATCHED
+        mod._PATCHED = False
+
+        fake_hls = types.ModuleType("homeassistant.components.stream.hls")
+
+        async def already_wrapped_playlist(self, *a, **kw):
+            return None
+        already_wrapped_playlist._cf_wrapped = True  # type: ignore[attr-defined]
+
+        async def already_wrapped_segment(self, request, *a, **kw):
+            return None
+        already_wrapped_segment._cf_wrapped = True  # type: ignore[attr-defined]
+
+        for cls_name in ("HlsMasterPlaylistView", "HlsPlaylistView"):
+            setattr(fake_hls, cls_name, type(cls_name, (), {"handle": already_wrapped_playlist}))
+        for cls_name in ("HlsInitView", "HlsPartView", "HlsSegmentView"):
+            setattr(fake_hls, cls_name, type(cls_name, (), {"handle": already_wrapped_segment}))
+
+        stream_pkg = types.ModuleType("homeassistant.components.stream")
+        stream_pkg.hls = fake_hls
+
+        with patch.dict("sys.modules", {
+            "homeassistant.components.stream": stream_pkg,
+            "homeassistant.components.stream.hls": fake_hls,
+        }):
+            mod.register(MagicMock())
+
+        assert mod._PATCHED is True
+        # Handle reference must be unchanged (no re-wrap)
+        assert fake_hls.HlsMasterPlaylistView.handle is already_wrapped_playlist
+        assert fake_hls.HlsInitView.handle is already_wrapped_segment
+
+        mod._PATCHED = original_patched
+
+    def test_register_swallows_outer_exception(self):
+        """If the import of homeassistant.components.stream.hls raises, register() logs at WARNING and returns."""
+        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+
+        original_patched = mod._PATCHED
+        mod._PATCHED = False
+
+        # Force the inner `from homeassistant.components.stream import hls` to raise
+        # by monkey-patching the import inside the try-block via the builtins import hook.
+        real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+        def boom_import(name, *a, **kw):
+            if name == "homeassistant.components.stream" and a and len(a) >= 3 and "hls" in a[2]:
+                raise ImportError("simulated stream.hls import failure")
+            return real_import(name, *a, **kw)
+
+        with patch("builtins.__import__", side_effect=boom_import):
+            try:
+                mod.register(MagicMock())
+            except Exception as exc:
+                pytest.fail(f"register() must swallow ImportError, got: {exc}")
+
+        # _PATCHED must remain False because the patch never completed
+        assert mod._PATCHED is False
+        mod._PATCHED = original_patched
