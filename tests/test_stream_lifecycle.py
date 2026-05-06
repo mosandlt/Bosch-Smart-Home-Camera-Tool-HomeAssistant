@@ -40,6 +40,11 @@ def _make_coord(stream_obj=None):
         _camera_entities={CAM_ID: cam_entity},
         _stop_tls_proxy=AsyncMock(),
         _unregister_go2rtc_stream=AsyncMock(),
+        # Mini-NVR Phase 1 — _tear_down_live_stream stops the recorder before
+        # the proxy goes away. Empty dict = no recorder running, branch skipped.
+        _nvr_processes={},
+        _nvr_user_intent={},
+        stop_recorder=AsyncMock(),
     ), cam_entity
 
 

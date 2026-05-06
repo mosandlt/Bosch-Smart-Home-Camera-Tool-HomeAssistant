@@ -72,6 +72,21 @@ DEFAULT_OPTIONS = {
     "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     "smb_retention_days": 180,
     "smb_disk_warn_mb": 5120,
+    # ── Mini-NVR (continuous LAN-only recording) — Phase 1 MVP ──────────────
+    # Disabled by default; opt-in via integration options. See
+    # `docs/mini-nvr-concept.md` for the full design.
+    "enable_nvr": False,
+    "nvr_base_path": "/config/bosch_nvr",
+    "nvr_retention_days": 3,
+    # NVR storage target: "local" (default — segments stay under nvr_base_path),
+    # "smb" (drain finalized segments to the same SMB share used for events),
+    # "ffp" / "ftp" (drain to FTP server). ffmpeg ALWAYS writes to a local
+    # staging dir first; the watcher in recorder._drain_staging_to_remote moves
+    # finalized files to the remote target.
+    "nvr_storage_target": "local",
+    # Subfolder under smb_base_path / FTP base_path to keep NVR segments
+    # separate from the cloud-event upload tree. Default "NVR".
+    "nvr_smb_subpath": "NVR",
     "debug_logging": False,
     "enable_go2rtc": True,
 }

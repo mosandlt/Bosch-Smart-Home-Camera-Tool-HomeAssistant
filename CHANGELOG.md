@@ -5,6 +5,28 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.5
+
+**Mini-NVR Phase 2** — local-only continuous recording goes opt-in production. OptionsFlow gets collapsible sections.
+
+### Mini-NVR (LAN-only continuous recording)
+
+- **New per-camera switch `switch.<cam>_nvr_recording`** + state sensor `sensor.<cam>_nvr_state`. Both opt-in via the new integration option `enable_nvr` (default OFF). Switches the recorder on/off; sensor exposes `target` / `pending_uploads` / `failed_uploads` / `last_segment_age_s` for diagnostics.
+- **Hard prerequisite:** the camera's live-stream switch must be ON. Recording reuses the existing TLS proxy; if no live session is open, no recording. Privacy mode → live-stream blocks → no recording. LAN-only — REMOTE/cloud sessions never record.
+- **Storage targets `local` / `smb` / `ftp`** — `nvr_storage_target` option. ffmpeg always writes locally to `_staging/` first (defends against partial-writes during segment rotation). A per-coordinator drain watcher promotes finalized segments (mtime > 60 s, size > 10 KB) to the chosen target every 30 s. SMB and FTP reuse the existing `smb_*` connection options + a new `nvr_smb_subpath` (default `NVR`). Failed uploads quarantined to `_failed/` after 5 retries + persistent_notification.
+- **5-min wall-aligned MP4 segments** via `ffmpeg -c copy -segment_atclocktime 1`. No transcoding (0 % CPU overhead). `+faststart` so segments are browser-playable while still being written.
+- **Lifecycle reactivity:** recorder restarts on Bosch credential rotation (~1 s gap, every ~333 s on Gen2 Outdoor); auto-stops on LOCAL→REMOTE fallback or privacy-on; auto-clean on integration unload / HA stop. Crash-loop guard: two crashes within 30 s → give up, surface error state.
+- **Daily retention purge** (configurable `nvr_retention_days`, default 3) walks the configured target and deletes files older than cutoff. Empty date folders pruned afterwards.
+- **Media Browser** — new "Recordings" branch alongside the existing event-clips path. Browse: Recordings → Camera → Date → Segment.
+
+### OptionsFlow — collapsible sections
+
+The integration's options dialog now groups its ~50 fields into 8 sections via HA's `data_entry_flow.section()`: Polling intervals · Features · Live stream · Push notifications · Storage (SMB/FTP) · Mini-NVR · Authentication · Debug. The first two default-open; the rest collapsed. `min_ha_version` raised to `2024.8.0` (section selectors require it). All existing options preserved — just rearranged.
+
+### Test coverage
+
+**+428 tests** session-total (588 → 1016). Total line coverage 34 % → **41 %**. New file `recorder.py` lands at **99 %** covered. Per-file deltas this round: `shc.py` 53 → **74 %** · `config_flow.py` 55 → **73 %** · `switch.py` 42 → **52 %** · `sensor.py` 50 → **52 %**. New test files: `test_recorder.py`, `test_recorder_async.py`, `test_recorder_drain.py`, `test_nvr_state_sensor.py`, `test_config_flow_sections.py`, `test_shc_light_component.py`.
+
 ## v11.0.4
 
 **Card v2.11.4** — overview-card UX polish, big test-coverage round.
