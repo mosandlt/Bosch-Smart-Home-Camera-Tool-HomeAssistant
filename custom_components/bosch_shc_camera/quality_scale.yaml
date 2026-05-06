@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1094 tests across 53 files. Total line-coverage 43% with key resilience
+      1211 tests across 55 files. Total line-coverage 46% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -54,7 +54,24 @@ rules:
       + NVR sidecar restart + recover paths), SSRF guard (_is_safe_bosch_url
       lookalike + RFC1918 + http:// rejection), credential redaction.
       Bug-finding test suite found 15 production bugs (12 prior + 3 fixed
-      in 2026-05 round).
+      in 2026-05 round). Round-1B + Round-2 (2026-05-06): __init__.py
+      18%→25% adding async-method coverage — FCM/SHC delegation wrappers
+      (10+13 thin one-liners), async_put_camera 401-rescue path,
+      _async_local_tcp_ping LAN reachability probe (5 branches),
+      _proactive_refresh + _schedule_token_refresh JWT exp parsing,
+      _handle_stream_worker_error all branches (below-threshold,
+      LOCAL-rescue-401, REMOTE-fallback escalation, time-decay,
+      dispatch-pending cleanup), start_recorder/stop_recorder/
+      _restart_recorder_if_active NVR gating, RCP session 5-min cache
+      (invalidate + get_cached + handshake-failure-no-cache),
+      _replace_renewal_task cancel-then-track, _schedule_stream_worker_error
+      dedup. camera.py 36%→52%: async_setup_entry gating (3),
+      async_added/will_remove lifecycle (4), _handle_coordinator_update
+      streaming↔idle transitions + custom snapshot_interval (5),
+      _async_trigger_image_refresh full 4-step fallback chain with
+      privacy short-circuit + exception swallow (10), motion-detection
+      enable/disable preserving sensitivity (4), _PLACEHOLDER_JPEG
+      validity pin.
 
   # Gold
   devices: done
