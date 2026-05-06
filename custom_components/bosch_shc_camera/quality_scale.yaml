@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1211 tests across 55 files. Total line-coverage 46% with key resilience
+      1301 tests across 59 files. Total line-coverage 48% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -71,7 +71,36 @@ rules:
       _async_trigger_image_refresh full 4-step fallback chain with
       privacy short-circuit + exception swallow (10), motion-detection
       enable/disable preserving sensitivity (4), _PLACEHOLDER_JPEG
-      validity pin.
+      validity pin. Round-1B-Big + Round-2-Big + Round-3 (2026-05-06):
+      __init__.py 25%→31% adding _refresh_token_locked all branches (token-
+      still-valid early return, outage cooldown, missing refresh token,
+      RefreshTokenInvalidError → reauth, AuthServerOutageError exponential
+      back-off + 3-outage repair-issue gate + 600s cap, successful refresh
+      persistence + outage-state cleanup + 3-fail reauth threshold);
+      _async_token_failure_alert (idempotent issue + notify-service-missing
+      skip + service-call exception swallow); _register_go2rtc_stream
+      (entity_id naming, rtsps→rtspx rewrite, legacy fallback, yaml-persist
+      400 soft-success, all-endpoints-fail graceful); _unregister_go2rtc_stream
+      (DELETE shape, ClientError swallow); _check_and_recover_webrtc (no-cam-
+      entity, no-stream-feature, WEB_RTC-already-present, capability-probe-
+      exception, direct-refresh recovery, throttled reload); _refresh_rcp_state
+      empty-cache and existing-cache stamping; _create_ssl_ctx + _start_tls_proxy
+      lazy-init + cached-context. camera.py 52%→58% adding async_camera_image
+      wrapper (impl-result, None→placeholder, exception→cached or placeholder,
+      CancelledError propagate, 180° rotation hook for indoor cams, skip on
+      placeholder); _async_camera_image_impl LOCAL Digest path (success
+      caches + last-fetch ts, timeout returns cached, executor-None returns
+      cached). media_source.py 25%→41% adding _LocalBackend list_cameras/dates/
+      events/resolve (empty dir, missing dir, alphabetic case-insensitive sort,
+      macOS junk filter, jpg+mp4 grouping prefers video, image-only / video-
+      only events, date filter, newest-first sort, traversal blocked, dir-
+      not-file target rejected); _NvrBackend list_cameras/dates/segments/
+      resolve (YYYY-MM-DD-only date dirs excluding _staging/_failed,
+      HH-MM.mp4 segment regex, HH:MM label format, date+filename validation
+      in resolve); _format_event_title; _entry_title both branches; _node
+      defaults + playable-leaf + thumbnail; BoschCameraMediaSource
+      async_resolve_media (root unresolvable, mime guess, octet-stream
+      fallback).
 
   # Gold
   devices: done
