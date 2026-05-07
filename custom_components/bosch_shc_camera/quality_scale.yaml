@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      2211 tests across 71 files. Total line-coverage 78% with key resilience
+      2682 tests across 101 files. Total line-coverage 85% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -194,7 +194,24 @@ rules:
       recurse, quit-finally). v11.0.10 (2026-05-07): fixed camera friendly_name
       doubling (_attr_name=None, _display_name for logging/device); fixed
       media_source _FILE_RE making camera-name prefix optional for backward
-      compatibility with v10.x filenames.
+      compatibility with v10.x filenames. Sprint-J (2026-05-07):
+      __init__.py 56%→62% adding coordinator helper branches (_integration_
+      version fallback, _refresh_local_creds_from_heartbeat debug log,
+      record_stream_error threshold+repeat, _tear_down_live_stream stop
+      timeout+exception, _ensure_valid_token concurrent lock, _schedule_
+      token_refresh AttributeError/RuntimeError, _get_stream_lock creation);
+      try_live_connection privacy guard + skip-when-locked branches; webrtc
+      watchdog (_check_and_recover_webrtc all branches, _ensure_go2rtc_schemes_
+      fresh full flow including ImportError + provider iteration);
+      _register_go2rtc_stream (Unix socket OSError fallback, verify GET
+      exception, non-success HTTP, rtsps→rtspx rewrite, entity_id naming);
+      _run_smb/nvr_cleanup_bg exception paths; async_fetch_live_snapshot
+      lock creation + proxy-cache eviction; _fetch_digest closure 200/non-200/
+      wrong-Content-Type/exception branches; service handlers (cancel_coordinator_
+      tasks, handle_trigger_snapshot, create/delete/update_rule, get/set_motion_
+      zones, share_camera, get/set_privacy_masks, delete_motion_zone, get_lighting_
+      schedule cache-hit, rename_camera, invite/list/remove_friend exception paths).
+      local_rcp.py 90%→100%.
 
   # Gold
   devices: done
