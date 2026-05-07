@@ -61,6 +61,7 @@ def _stub_entity(**overrides):
         _cam_id=CAM_ID,
         _entry=entry,
         _attr_name=f"Bosch Terrasse",
+        _display_name=f"Bosch Terrasse",
         _cam_title="Terrasse",
         _model="HOME_Eyes_Outdoor",
         _model_name="Eyes Outdoor II",
