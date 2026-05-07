@@ -227,6 +227,27 @@ rules:
       PUT 200 LOCAL creds-cache+TLS-proxy+RTSP-URL, PUT 200 REMOTE urls/hash
       proxyUrl+rtspsUrl via proxy, PUT 401/404/500/timeout/ClientError, session.close
       in finally, all-fail→None). Total: 85%→91%, 2682→2776 tests, 101→105 files.
+      Sprint-L (2026-05-07): __init__.py 83%→91% adding _auto_renew_local_session
+      (stale-gen/stream-off/non-LOCAL break guards, full-renewal success+stale-
+      clear+failure+exception+3-fail-stale-mark, heartbeat PUT 200+cred-refresh+
+      non-200+exception, 3-consecutive-fail force-renewal, CancelledError,
+      finally _renewal_tasks.pop); _promote_to_local (not-REMOTE early-return,
+      renewal None/LOCAL/other result paths, exception warning); _remote_session_
+      terminator (stale-gen/stream-off/not-REMOTE early-returns, teardown+refresh,
+      CancelledError, finally); event processing edges (cam-list retry non-200
+      UpdateFailed, feature-flags CancelledError re-raise, protocol-check non-200+
+      exception, gather exception continue, startup mark-events-read+exception,
+      new-event PERSON-tag upgrade, AUDIO_ALARM/PERSON bus fire, mark-read
+      exception); Gen2 lighting/switch cache, notifications_status, pan fetch+
+      exception; slow-tier skip-offline, _fetch exception, autofollow/timestamp/
+      notifications/rules/ledlights/lens_elevation/audio/unread_events-numeric/
+      privacy_sound/motion_sensitive_areas/privacy_masks/lighting_options/
+      alarm_settings/alarmStatus-arming/iconLedBrightness caches; cleanup_stale_
+      devices, NVR daily purge, SMB disk check timeout; _try_live_connection_inner
+      REMOTE inst=4→2, LOCAL creds-split exception, stale-stream stop timeout+
+      exception, no-proxy prewarm=False, LOCAL prewarm fail→REMOTE fallback,
+      min_wait sleep, stream.update_source exception, NVR sidecar LOCAL+REMOTE.
+      Total: 91%→93%, 2776→2863 tests, 105→108 files.
 
   # Gold
   devices: done

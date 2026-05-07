@@ -103,8 +103,8 @@ def _make_coord(**overrides):
         # Timestamps — set _last_slow to now so do_slow=False by default,
         # preventing the slow-tier loop from running (requires many extra caches).
         # Individual tests that want do_slow=True can override with _last_slow=-86400.0.
-        _last_status=0.0,
-        _last_events=0.0,
+        _last_status=float("-inf"),
+        _last_events=float("-inf"),
         _last_slow=time.monotonic(),           # not stale → do_slow=False
         _last_smb_cleanup=time.monotonic(),    # far future → skip SMB cleanup
         _last_smb_disk_check=time.monotonic(),

@@ -298,7 +298,7 @@ class TestEventProcessing:
         # Mark as already sent 10 seconds ago → within the 60s dedup window
         coord = _make_coord_full(
             _cached_events={},
-            _last_events=0.0,  # force do_events=True
+            _last_events=float("-inf"),  # force do_events=True
             _last_event_ids={CAM_A: "PREV-DIFFERENT"},  # triggers new-event branch
             _alert_sent_ids={event_id: time_mod.monotonic() - 10.0},  # recently sent
         )
