@@ -234,6 +234,10 @@ def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
     srv = _proxy_servers.pop(cam_id, None)
     if srv is not None:
         try:
+            srv.shutdown(socket.SHUT_RDWR)  # interrupt any blocking accept() before close
+        except OSError:
+            pass
+        try:
             srv.close()
             _LOGGER.debug("TLS proxy for %s: server socket closed", cam_id[:8])
         except Exception:

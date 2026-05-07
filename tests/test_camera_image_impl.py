@@ -55,7 +55,8 @@ def _make_camera(coord=None, **camera_overrides):
     cam.coordinator = coord
     cam._cam_id = CAM_ID
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
-    cam._attr_name = "Bosch Terrasse"
+    cam._attr_name    = "Bosch Terrasse"
+    cam._display_name = "Bosch Terrasse"
     cam._cached_image = None
     cam._force_image_refresh = False
     cam._last_image_fetch = 0.0

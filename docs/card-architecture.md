@@ -1,8 +1,10 @@
 # Bosch Camera Card — Architecture & Developer Notes
 
-This document contains the architectural notes, section markers, and design rationale extracted from `www/bosch-camera-card.js`. The JS file itself is stripped of comments to reduce the wire payload served to every browser that loads a camera dashboard.
+This document contains the architectural notes, section markers, and design rationale extracted from `src/bosch-camera-card.js`. The deployed `www/bosch-camera-card.js` is stripped of comments to reduce the wire payload.
 
-**Source file:** [`www/bosch-camera-card.js`](../www/bosch-camera-card.js)
+**Source file:** [`src/bosch-camera-card.js`](../src/bosch-camera-card.js)
+
+> **Note:** Section markers and line numbers below were last extracted at v2.8.1. The card structure is unchanged but line numbers have drifted. Use `grep` on `src/bosch-camera-card.js` for exact positions. Current card version: **v2.11.7**.
 
 ---
 
@@ -28,7 +30,7 @@ This document contains the architectural notes, section markers, and design rati
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.8.1
+ * Version: 2.11.7  (changelog entries below are from v2.8.1 extraction)
  *
  * Changes vs 2.7.0:
  *   - Gen2 polygon zone overlay: renders polygon zones (from GET /zones) on camera image

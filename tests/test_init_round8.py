@@ -50,8 +50,8 @@ def _stub_coord(**kwargs):
         _session_stale={},
         _renewal_tasks={},
         _auto_renew_tasks={},
-        _last_schemes_refresh=0.0,
-        _last_go2rtc_reload=0.0,
+        _last_schemes_refresh=float('-inf'),
+        _last_go2rtc_reload=float('-inf'),
         _proxy_url_cache={},
         _options_snapshot={},
     )
@@ -225,7 +225,7 @@ class TestCheckAndRecoverWebrtc:
 
         coord = self._bind(_stub_coord(
             _camera_entities={CAM_ID: cam_entity},
-            _last_go2rtc_reload=0.0,
+            _last_go2rtc_reload=float('-inf'),
         ))
         coord.hass.config_entries.async_entries.return_value = [go2rtc_entry]
         coord.hass.config_entries.async_reload = AsyncMock()

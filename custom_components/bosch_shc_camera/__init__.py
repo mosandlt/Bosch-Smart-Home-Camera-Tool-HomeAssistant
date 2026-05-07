@@ -1495,7 +1495,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             # actively running on REMOTE-fallback.
                             live = self._live_connections.get(cam_id, {})
                             if live.get("_connection_type") == "REMOTE":
-                                last_promote = self._local_promote_at.get(cam_id, 0)
+                                last_promote = self._local_promote_at.get(cam_id, float('-inf'))
                                 _LOCAL_PROMOTE_COOLDOWN_S = 300
                                 if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
                                     self._local_promote_at[cam_id] = now
@@ -3297,7 +3297,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # usually does the job (the schemes are already populated, the cams
         # just need to re-query the providers).
         try:
-            self._last_schemes_refresh = 0.0  # force refresh past the 600s throttle
+            self._last_schemes_refresh = float('-inf')  # force next _ensure_go2rtc_schemes_fresh past the 600s throttle
             await self._ensure_go2rtc_schemes_fresh()
             cam_entity._invalidate_camera_capabilities_cache()  # noqa: SLF001
             caps2 = cam_entity.camera_capabilities
@@ -3311,7 +3311,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("webrtc-watchdog: direct refresh failed: %s", err)
         now = time.monotonic()
         if not hasattr(self, "_last_go2rtc_reload"):
-            self._last_go2rtc_reload = 0.0
+            self._last_go2rtc_reload = float('-inf')
         if now - self._last_go2rtc_reload < 3600:
             return  # already reloaded recently — don't spam
         from homeassistant.config_entries import ConfigEntryState
@@ -3364,7 +3364,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         current scheme list now that go2rtc is ready.
         """
         if not hasattr(self, "_last_schemes_refresh"):
-            self._last_schemes_refresh = 0.0
+            self._last_schemes_refresh = float('-inf')
         now = time.monotonic()
         if now - self._last_schemes_refresh < 600:
             return

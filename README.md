@@ -15,6 +15,8 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 [![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
 
 [![Community Forum][forum-shield]][forum]
+[![GitHub Stars][stars-shield]][stars]
+![AI-Assisted](https://img.shields.io/badge/AI--Assisted-blue?style=for-the-badge)
 
 [releases-shield]: https://img.shields.io/github/release/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
 [releases]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases
@@ -29,6 +31,8 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 [buymecoffee]: https://buymeacoffee.com/mosandlts
 [forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
 [forum]: https://community.home-assistant.io/
+[stars-shield]: https://img.shields.io/github/stars/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge&color=yellow
+[stars]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/stargazers
 
 ---
 
@@ -357,7 +361,7 @@ graph LR
 
 **Open `todo` items** (tracked in `quality_scale.yaml`):
 
-- `test-coverage` — pytest framework + config-flow + diagnostics tests are in place (covers the Bronze rule). Full 95% coverage of the 5000-line `__init__.py` and cloud-API paths needs extensive aiohttp mocking and is filed as a separate sprint.
+- `test-coverage` — **95 % total line coverage** across 111 test files / 2978 tests. Covers all coordinator methods, entity turn_on/off paths, token refresh, stream lifecycle, FCM alerts, SMB/NVR helpers, and cloud-API paths via aiohttp mocking. Remaining 5 % is HA-framework-bound (`async_setup_entry` lifecycle requires a live `hass` runtime).
 - Platinum-tier rules (`async-dependency`, `strict-typing`) — partial typing exists; full strict-typing entry in HA core's `.strict-typing` is N/A for custom integrations.
 
 ### Operational reliability — token recovery flow
@@ -1249,8 +1253,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.10** — see the GitHub release page for full notes:
-[**v11.0.10 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.10)
+Latest stable: **v11.0.11** — see the GitHub release page for full notes:
+[**v11.0.11 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.11)
 
 | | |
 |---|---|

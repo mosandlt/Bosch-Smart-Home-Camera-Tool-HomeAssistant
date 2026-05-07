@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1430 tests across 64 files. Total line-coverage 52% with key resilience
+      2776 tests across 105 files. Total line-coverage 91% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -53,8 +53,9 @@ rules:
       _refresh_local_creds_from_heartbeat URL rebuild + Stream.update_source
       + NVR sidecar restart + recover paths), SSRF guard (_is_safe_bosch_url
       lookalike + RFC1918 + http:// rejection), credential redaction.
-      Bug-finding test suite found 15 production bugs (12 prior + 3 fixed
-      in 2026-05 round). Round-1B + Round-2 (2026-05-06): __init__.py
+      Bug-finding test suite found 17 production bugs (12 prior + 3 fixed
+      in 2026-05 round + 2 in v11.0.10: camera friendly_name doubling,
+      media_source _FILE_RE rejecting v10.x filenames). Round-1B + Round-2 (2026-05-06): __init__.py
       18%→25% adding async-method coverage — FCM/SHC delegation wrappers
       (10+13 thin one-liners), async_put_camera 401-rescue path,
       _async_local_tcp_ping LAN reachability probe (5 branches),
@@ -177,6 +178,89 @@ rules:
       routing, step2 imageUrl retry loop 3-attempt, snapshot download/empty-body,
       clip direct/poll/size-guard, mark_events_read gate, smb/local_save executor
       gate, file cleanup alert_save_snapshots).
+      Sprint-G (2026-05-07):
+      2074→2211 tests across 71 files, 75%→78% total. tls_proxy.py 58%→93%
+      (_proxy_thread/_pipe closures via real socket pair: circuit-breaker
+      5-consecutive-failures closes server, <5 failures leave server alive,
+      pipe bidirectional data relay). smb.py 67%→85% (sync_smb_upload:
+      session-failure, HTTP-200 image write, mp4-status-not-Done skip,
+      short-ts skip, FTP delegation; _smb_makedirs: each-segment, existing-
+      dir-swallow, stat-success-skip; sync_smb_cleanup: FTP delegation,
+      no-server, zero-retention, import-error, walk+delete old/recent/
+      subdirectory; sync_smb_disk_check: FTP early-exit, no-statvfs,
+      below-threshold alert, above-threshold silent; _sync_ftp_upload:
+      no-server, login-fail, storbinary, mp4-status-skip, quit-finally;
+      _sync_ftp_cleanup: no-server, zero-retention, walk+delete old/recent/
+      recurse, quit-finally). v11.0.10 (2026-05-07): fixed camera friendly_name
+      doubling (_attr_name=None, _display_name for logging/device); fixed
+      media_source _FILE_RE making camera-name prefix optional for backward
+      compatibility with v10.x filenames. Sprint-J (2026-05-07):
+      __init__.py 56%→62% adding coordinator helper branches (_integration_
+      version fallback, _refresh_local_creds_from_heartbeat debug log,
+      record_stream_error threshold+repeat, _tear_down_live_stream stop
+      timeout+exception, _ensure_valid_token concurrent lock, _schedule_
+      token_refresh AttributeError/RuntimeError, _get_stream_lock creation);
+      try_live_connection privacy guard + skip-when-locked branches; webrtc
+      watchdog (_check_and_recover_webrtc all branches, _ensure_go2rtc_schemes_
+      fresh full flow including ImportError + provider iteration);
+      _register_go2rtc_stream (Unix socket OSError fallback, verify GET
+      exception, non-success HTTP, rtsps→rtspx rewrite, entity_id naming);
+      _run_smb/nvr_cleanup_bg exception paths; async_fetch_live_snapshot
+      lock creation + proxy-cache eviction; _fetch_digest closure 200/non-200/
+      wrong-Content-Type/exception branches; service handlers (cancel_coordinator_
+      tasks, handle_trigger_snapshot, create/delete/update_rule, get/set_motion_
+      zones, share_camera, get/set_privacy_masks, delete_motion_zone, get_lighting_
+      schedule cache-hit, rename_camera, invite/list/remove_friend exception paths).
+      local_rcp.py 90%→100%.
+      Sprint-K (2026-05-07): __init__.py 62%→83% adding _async_update_data
+      (no-token guard, first-tick skip, FCM watchdog dead-client path, camera-
+      list 200/401-retry/non-200, feature-flags fetch+timeout, protocol-version
+      check SUPPORTED/NOT-SUPPORTED, _check_status TCP-ping-hit ONLINE+fallback-
+      clear+active-LOCAL-promotion, TCP-miss cloud-/ping 200/444/UPDATING,
+      /commissioned fallback connected/configured/444, offline tracking set+clear,
+      gather exception swallowed, _fetch_events same-ID optimization, full-fetch,
+      timeout swallowed, do_events=False skip, event dedup+bus-fire, privacy
+      external-toggle tear-down, write-lock guard, _wifiinfo_cache slow-tier,
+      shc_ready gate, outer TimeoutError/ClientError UpdateFailed);
+      _try_live_connection_inner (no-token, LOCAL/REMOTE/auto candidate selection
+      with error-counter+time-decay+wifi-threshold, TCP pre-check cache+miss+hit,
+      PUT 200 LOCAL creds-cache+TLS-proxy+RTSP-URL, PUT 200 REMOTE urls/hash
+      proxyUrl+rtspsUrl via proxy, PUT 401/404/500/timeout/ClientError, session.close
+      in finally, all-fail→None). Total: 85%→91%, 2682→2776 tests, 101→105 files.
+      Sprint-L (2026-05-07): __init__.py 83%→91% adding _auto_renew_local_session
+      (stale-gen/stream-off/non-LOCAL break guards, full-renewal success+stale-
+      clear+failure+exception+3-fail-stale-mark, heartbeat PUT 200+cred-refresh+
+      non-200+exception, 3-consecutive-fail force-renewal, CancelledError,
+      finally _renewal_tasks.pop); _promote_to_local (not-REMOTE early-return,
+      renewal None/LOCAL/other result paths, exception warning); _remote_session_
+      terminator (stale-gen/stream-off/not-REMOTE early-returns, teardown+refresh,
+      CancelledError, finally); event processing edges (cam-list retry non-200
+      UpdateFailed, feature-flags CancelledError re-raise, protocol-check non-200+
+      exception, gather exception continue, startup mark-events-read+exception,
+      new-event PERSON-tag upgrade, AUDIO_ALARM/PERSON bus fire, mark-read
+      exception); Gen2 lighting/switch cache, notifications_status, pan fetch+
+      exception; slow-tier skip-offline, _fetch exception, autofollow/timestamp/
+      notifications/rules/ledlights/lens_elevation/audio/unread_events-numeric/
+      privacy_sound/motion_sensitive_areas/privacy_masks/lighting_options/
+      alarm_settings/alarmStatus-arming/iconLedBrightness caches; cleanup_stale_
+      devices, NVR daily purge, SMB disk check timeout; _try_live_connection_inner
+      REMOTE inst=4→2, LOCAL creds-split exception, stale-stream stop timeout+
+      exception, no-proxy prewarm=False, LOCAL prewarm fail→REMOTE fallback,
+      min_wait sleep, stream.update_source exception, NVR sidecar LOCAL+REMOTE.
+      Total: 91%→93%, 2776→2863 tests, 105→108 files.
+      Sprint-M (2026-05-07): switch.py 81%→97% (async_setup_entry + all entity
+      turn_on/off paths: BoschLiveStreamSwitch privacy+cooldown guards,
+      BoschAudioSwitch turn_on/off+_apply_audio_change, BoschCameraLightSwitch/
+      FrontLight/Wallwasher, BoschMotionEnabled/Intercom/StatusLed/MotionLight/
+      AmbientLight/SoftLightFading/IntrusionDetection/AudioAlarm, BoschNvr-
+      RecordingSwitch async_added_to_hass restore state); fcm.py 84%→87%
+      (fetch_firebase_config, async_start_fcm_push early exits, async_send_alert
+      step1/2/3 exception paths, SMB/local-save exceptions); __init__.py 91%→92%
+      (fix Lc misses: privacyMode gate for RCP-via-cloud, SMB cleanup float-inf
+      fix, lighting/motion for-loop body, fetch_live_snapshot RCP paths,
+      iconLedBrightness TypeError, stream.update_source success, _INTEGRATION_
+      VERSION fallback, ValueError swallow, CancelledError re-raise, delegation).
+      Total: 93%→95%, 2863→2978 tests, 108→111 files. HA Gold-tier (>95%) reached.
 
   # Gold
   devices: done
