@@ -617,10 +617,12 @@ Once events are being saved — either to the local save folder or to a NAS via 
 **To enable the local backend:**
 
 1. Settings → Devices & Services → **Bosch Smart Home Camera** → ⚙ **Configure** (NOT *Reconfigure* — that's for re-OAuth only).
-2. Scroll to the **Events & Storage** section and enter a path in the **"Local save folder"** field, e.g. `/config/bosch_events`.
-3. **Submit**. From this point on, new events are saved to that folder each time an FCM push arrives. The directory is created automatically.
+2. Scroll to the **Events & Storage** section.
+3. Enable **"Save events locally (snapshots + video clips)"**.
+4. Set the **"Local save folder"** path, e.g. `/config/bosch_events` (pre-filled by default).
+5. **Submit**. From this point on, new events are saved to that folder each time an event is detected. The directory is created automatically.
 
-> **Note:** Only events that arrive *after* configuring the path are saved — there is no bulk download of historical clips.
+> **Note:** Local saving is **disabled by default** and must be explicitly enabled. Only events that arrive *after* enabling are saved — there is no bulk download of historical clips.
 
 **Tree shape**
 - *Local backend:* `Camera → Date → Event`
