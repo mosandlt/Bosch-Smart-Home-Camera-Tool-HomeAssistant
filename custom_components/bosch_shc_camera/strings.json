@@ -34,134 +34,162 @@
       "init": {
         "title": "Bosch Camera — Settings",
         "description": "**Token:** {token_status}",
-        "data": {
-          "scan_interval": "Polling interval (seconds)",
-          "interval_status": "Status check interval (seconds)",
-          "interval_events": "Event check interval (seconds)",
-          "snapshot_interval": "Snapshot refresh interval (seconds)",
-          "enable_snapshots": "Camera snapshots",
-          "enable_sensors": "Sensors (Status, WiFi, Firmware, Events)",
-          "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
-          "enable_binary_sensors": "Motion / Audio alarm sensors",
-          "enable_local_save": "Save events locally",
-          "download_path": "Local save folder",
-          "media_browser_source": "Media Browser source",
-          "enable_fcm_push": "FCM Push — instant event detection (~2s)",
-          "alert_notify_service": "Alert services — default fallback (comma-separated)",
-          "alert_notify_system": "System alerts (token failure, disk warning)",
-          "alert_notify_information": "Step 1 — text notification",
-          "alert_notify_screenshot": "Step 2 — snapshot image",
-          "alert_notify_video": "Step 3 — video clip",
-          "alert_save_snapshots": "Save alert images/videos locally",
-          "alert_delete_after_send": "Delete files after sending",
-          "mark_events_read": "Mark Bosch cloud events as read",
-          "high_quality_video": "High quality video (30 Mbps)",
-          "stream_connection_type": "Stream connection type",
-          "live_buffer_mode": "Player buffer profile (HLS)",
-          "fcm_push_mode": "FCM Push Mode (auto / android / ios / polling)",
-          "audio_default_on": "Audio on by default",
-          "enable_intercom": "Intercom (two-way audio)",
-          "enable_go2rtc": "go2rtc WebRTC (low-latency streaming ~2s)",
-          "enable_smb_upload": "Upload to SMB/NAS (e.g. FRITZ!Box)",
-          "upload_protocol": "Upload protocol (SMB or FTP)",
-          "smb_server": "Server (IP or hostname)",
-          "smb_share": "SMB share name",
-          "smb_username": "SMB username",
-          "smb_password": "SMB password",
-          "smb_base_path": "Base folder on share",
-          "smb_folder_pattern": "Subfolder pattern",
-          "smb_file_pattern": "File name pattern",
-          "smb_retention_days": "Retention period (days, 0 = keep forever)",
-          "smb_disk_warn_mb": "Low disk warning threshold (MB, 0 = disabled)",
-          "enable_nvr": "Mini-NVR — continuous LAN recording (experimental)",
-          "nvr_storage_target": "NVR storage target",
-          "nvr_base_path": "NVR storage folder",
-          "nvr_smb_subpath": "NVR subfolder on NAS / FTP",
-          "nvr_retention_days": "NVR retention (days)",
-          "debug_logging": "Debug logging (verbose TLS proxy & stream logs)",
-          "force_relogin": "Re-authenticate (browser login)",
-          "migrate_to_oss_client": "Switch to OSS OAuth client"
-        },
-        "data_description": {
-          "scan_interval": "How often the integration fetches data from the Bosch cloud. Lower = faster, more API calls. Default: 60",
-          "interval_status": "How often cameras are pinged for ONLINE/OFFLINE. Default: 300 (5 min)",
-          "interval_events": "How often to check for new motion/audio events. With FCM Push this is only a fallback. Default: 300 (5 min)",
-          "snapshot_interval": "How often to proactively refresh camera snapshots. Range: 300–86400. Default: 1800 (30 min)",
-          "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
-          "enable_sensors": "Create sensor entities for camera status, WiFi signal, firmware, events today, last event, etc.",
-          "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
-          "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
-          "enable_local_save": "Save every new motion/audio event as JPEG + MP4 to the folder below. **Off by default** — turn on to activate local saving.",
-          "download_path": "Where to store event files. Example: /config/bosch_events. Only active when 'Save events locally' is on.",
-          "media_browser_source": "Filters which backend the Media Browser entry **Bosch Camera** shows.\n• **Auto** (default): show every backend that has data — local save folder and/or NAS upload.\n• **Local only**: hide the NAS even if SMB upload is active.\n• **NAS only**: hide local files even if local save is configured.\n• **Disabled**: do not expose the Media Browser entry at all.",
-          "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
-          "alert_notify_service": "Default fallback: used when the per-type fields below are empty. Comma-separated. Examples: notify.signal_messenger, notify.mobile_app_xxx. Leave empty to disable alerts.",
-          "alert_notify_system": "Services for system alerts (token expired, disk full). Empty = uses default fallback above.",
-          "alert_notify_information": "Services for step 1 — instant text notification. Empty = default fallback. e.g.: notify.signal_messenger, notify.mobile_app_xxx.",
-          "alert_notify_screenshot": "Services for step 2 — snapshot image. Empty = skip this step (no fallback). Mobile apps (mobile_app_xxx) receive the image inline; others as file attachment.",
-          "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
-          "alert_save_snapshots": "Keep downloaded event images and videos in www/bosch_alerts/ (inside the HA config dir). If OFF, files are deleted within seconds after sending.",
-          "alert_delete_after_send": "Delete notification files from www/bosch_alerts/ after the notify service receives them. When OFF, files are kept for reference.",
-          "mark_events_read": "When OFF (default), new motion/audio events stay flagged as unread in the Bosch app — even after HA processes them — so the app keeps highlighting them as new. Turn ON to make the integration mark events as read on the Bosch cloud after processing (the previous behaviour, useful when you treat HA as the primary client and don't want the app to show stale 'new event' badges).",
-          "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity.",
-          "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
-          "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
-          "fcm_push_mode": "Choose push mode. Auto tries iOS first, then Android, then falls back to polling. Polling uses standard API calls only (no FCM).",
-          "audio_default_on": "When ON: audio switch starts enabled (stream with sound). When OFF: audio starts muted. Can be toggled anytime in the dashboard.",
-          "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker.",
-          "enable_go2rtc": "Automatically register live streams with HA's bundled go2rtc for WebRTC playback (~2 s latency vs. ~10 s HLS). Recommended. Disable only if you run a custom go2rtc setup.",
-          "enable_smb_upload": "Upload event snapshots and video clips to an SMB/CIFS or FTP network share (e.g. FRITZ!Box NAS, Synology, any Windows share). SMB requires the smbprotocol package; FTP uses Python's built-in ftplib.",
-          "upload_protocol": "Transfer protocol. **SMB** (default) is the typical Windows/macOS share. **FTP** is significantly faster on many NAS devices (e.g. FRITZ!Box) for lots of small files and sidesteps the known macOS-Sequoia SMB-rename hang. With FTP the share-name field is ignored; the base path is relative to the FTP root (e.g. `FILES/Bosch-Kameras` instead of just `Bosch-Kameras`).",
-          "smb_server": "IP address or hostname. Example: 192.168.1.1 (FRITZ!Box), nas.local or fritz.box",
-          "smb_share": "Name of the SMB share (SMB only). Example: FRITZ.NAS",
-          "smb_username": "SMB login username",
-          "smb_password": "SMB login password",
-          "smb_base_path": "Base folder on the share where files are stored. Default: Bosch-Kameras",
-          "smb_folder_pattern": "Subfolder pattern. Available variables: {year}, {month}, {day}, {camera}, {type}. Default: {year}/{month}/{day}",
-          "smb_file_pattern": "File name pattern (without extension). Variables: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Default: {camera}_{date}_{time}_{type}_{id}",
-          "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
-          "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification.",
-          "enable_nvr": "Continuously record each camera's LOCAL stream to disk in 5-minute MP4 segments. LAN-only — recording pauses if the camera is on the cloud relay. Adds a recording switch per camera (disabled by default; enable each camera individually). Requires ffmpeg.",
-          "nvr_storage_target": "Where the finalized NVR segments end up. **Local**: stays under the storage folder below. **SMB / FTP**: ffmpeg still writes locally first (staging), then a watcher uploads each segment to the same NAS configured in the events-storage section, under a separate subfolder. Default: Local.",
-          "nvr_base_path": "Folder for NVR segments. Each camera gets one subfolder, then one subfolder per day, with 5-minute MP4 segments named HH-MM.mp4 inside. Default: /config/bosch_nvr. Use a NAS mount for >1 day retention — at 5 Mbps a single camera writes ~54 GB/day.",
-          "nvr_smb_subpath": "Subfolder under the SMB / FTP base path used exclusively for NVR segments. Default: NVR. Keeps the NVR tree separate from cloud-event uploads.",
-          "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day.",
-          "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use.",
-          "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
-          "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
-        },
         "sections": {
           "polling": {
             "name": "Polling intervals",
-            "description": "How often the integration talks to the Bosch cloud."
+            "description": "How often the integration talks to the Bosch cloud.",
+            "data": {
+              "scan_interval": "Polling interval (seconds)",
+              "interval_status": "Status check interval (seconds)",
+              "interval_events": "Event check interval (seconds)",
+              "snapshot_interval": "Snapshot refresh interval (seconds)"
+            },
+            "data_description": {
+              "scan_interval": "How often the integration fetches data from the Bosch cloud. Lower = faster, more API calls. Default: 60",
+              "interval_status": "How often cameras are pinged for ONLINE/OFFLINE. Default: 300 (5 min)",
+              "interval_events": "How often to check for new motion/audio events. With FCM Push this is only a fallback. Default: 300 (5 min)",
+              "snapshot_interval": "How often to proactively refresh camera snapshots. Range: 300–86400. Default: 1800 (30 min)"
+            }
           },
           "features": {
             "name": "Features",
-            "description": "Toggle the entity types the integration creates."
+            "description": "Toggle the entity types the integration creates.",
+            "data": {
+              "enable_snapshots": "Camera snapshots",
+              "enable_sensors": "Sensors (Status, WiFi, Firmware, Events)",
+              "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
+              "enable_binary_sensors": "Motion / Audio alarm sensors",
+              "audio_default_on": "Audio on by default",
+              "enable_intercom": "Intercom (two-way audio)",
+              "high_quality_video": "High quality video (30 Mbps)"
+            },
+            "data_description": {
+              "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
+              "enable_sensors": "Create sensor entities for camera status, WiFi signal, firmware, events today, last event, etc.",
+              "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
+              "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
+              "audio_default_on": "When ON: audio switch starts enabled (stream with sound). When OFF: audio starts muted. Can be toggled anytime in the dashboard.",
+              "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker.",
+              "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity."
+            }
           },
           "stream": {
             "name": "Live stream",
-            "description": "Connection mode and player buffering for live video."
+            "description": "Connection mode and player buffering for live video.",
+            "data": {
+              "stream_connection_type": "Stream connection type",
+              "live_buffer_mode": "Player buffer profile (HLS)",
+              "enable_go2rtc": "go2rtc WebRTC (low-latency streaming ~2s)"
+            },
+            "data_description": {
+              "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
+              "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
+              "enable_go2rtc": "Automatically register live streams with HA's bundled go2rtc for WebRTC playback (~2 s latency vs. ~10 s HLS). Recommended. Disable only if you run a custom go2rtc setup."
+            }
           },
           "fcm": {
             "name": "Push notifications",
-            "description": "Real-time event delivery via FCM and per-step notify services."
+            "description": "Real-time event delivery via FCM and per-step notify services.",
+            "data": {
+              "enable_fcm_push": "FCM Push — instant event detection (~2s)",
+              "fcm_push_mode": "FCM Push Mode (auto / android / ios / polling)",
+              "mark_events_read": "Mark Bosch cloud events as read",
+              "alert_save_snapshots": "Save alert images/videos locally",
+              "alert_delete_after_send": "Delete files after sending",
+              "alert_notify_service": "Alert services — default fallback (comma-separated)",
+              "alert_notify_information": "Step 1 — text notification",
+              "alert_notify_screenshot": "Step 2 — snapshot image",
+              "alert_notify_video": "Step 3 — video clip",
+              "alert_notify_system": "System alerts (token failure, disk warning)"
+            },
+            "data_description": {
+              "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
+              "fcm_push_mode": "Choose push mode. Auto tries iOS first, then Android, then falls back to polling. Polling uses standard API calls only (no FCM).",
+              "mark_events_read": "When OFF (default), new motion/audio events stay flagged as unread in the Bosch app — even after HA processes them — so the app keeps highlighting them as new. Turn ON to make the integration mark events as read on the Bosch cloud after processing (the previous behaviour, useful when you treat HA as the primary client and don't want the app to show stale 'new event' badges).",
+              "alert_save_snapshots": "Keep downloaded event images and videos in www/bosch_alerts/ (inside the HA config dir). If OFF, files are deleted within seconds after sending.",
+              "alert_delete_after_send": "Delete notification files from www/bosch_alerts/ after the notify service receives them. When OFF, files are kept for reference.",
+              "alert_notify_service": "Default fallback: used when the per-type fields below are empty. Comma-separated. Examples: notify.signal_messenger, notify.mobile_app_xxx. Leave empty to disable alerts.",
+              "alert_notify_information": "Services for step 1 — instant text notification. Empty = default fallback. e.g.: notify.signal_messenger, notify.mobile_app_xxx.",
+              "alert_notify_screenshot": "Services for step 2 — snapshot image. Empty = skip this step (no fallback). Mobile apps (mobile_app_xxx) receive the image inline; others as file attachment.",
+              "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
+              "alert_notify_system": "Services for system alerts (token expired, disk full). Empty = uses default fallback above."
+            }
           },
           "events_storage": {
             "name": "Event storage (download / SMB / FTP)",
-            "description": "Save Bosch cloud event JPEGs and MP4 clips locally or on a NAS share."
+            "description": "Save Bosch cloud event JPEGs and MP4 clips locally or on a NAS share.",
+            "data": {
+              "enable_local_save": "Save events locally",
+              "download_path": "Local save folder",
+              "media_browser_source": "Media Browser source",
+              "enable_smb_upload": "Upload to SMB/NAS (e.g. FRITZ!Box)",
+              "upload_protocol": "Upload protocol (SMB or FTP)",
+              "smb_server": "Server (IP or hostname)",
+              "smb_share": "SMB share name",
+              "smb_username": "SMB username",
+              "smb_password": "SMB password",
+              "smb_base_path": "Base folder on share",
+              "smb_folder_pattern": "Subfolder pattern",
+              "smb_file_pattern": "File name pattern",
+              "smb_retention_days": "Retention period (days, 0 = keep forever)",
+              "smb_disk_warn_mb": "Low disk warning threshold (MB, 0 = disabled)"
+            },
+            "data_description": {
+              "enable_local_save": "Save every new motion/audio event as JPEG + MP4 to the folder below. **Off by default** — turn on to activate local saving.",
+              "download_path": "Where to store event files. Example: /config/bosch_events. Only active when 'Save events locally' is on.",
+              "media_browser_source": "Filters which backend the Media Browser entry **Bosch Camera** shows.\n• **Auto** (default): show every backend that has data — local save folder and/or NAS upload.\n• **Local only**: hide the NAS even if SMB upload is active.\n• **NAS only**: hide local files even if local save is configured.\n• **Disabled**: do not expose the Media Browser entry at all.",
+              "enable_smb_upload": "Upload event snapshots and video clips to an SMB/CIFS or FTP network share (e.g. FRITZ!Box NAS, Synology, any Windows share). SMB requires the smbprotocol package; FTP uses Python's built-in ftplib.",
+              "upload_protocol": "Transfer protocol. **SMB** (default) is the typical Windows/macOS share. **FTP** is significantly faster on many NAS devices (e.g. FRITZ!Box) for lots of small files and sidesteps the known macOS-Sequoia SMB-rename hang. With FTP the share-name field is ignored; the base path is relative to the FTP root (e.g. `FILES/Bosch-Kameras` instead of just `Bosch-Kameras`).",
+              "smb_server": "IP address or hostname. Example: 192.168.1.1 (FRITZ!Box), nas.local or fritz.box",
+              "smb_share": "Name of the SMB share (SMB only). Example: FRITZ.NAS",
+              "smb_username": "SMB login username",
+              "smb_password": "SMB login password",
+              "smb_base_path": "Base folder on the share where files are stored. Default: Bosch-Kameras",
+              "smb_folder_pattern": "Subfolder pattern. Available variables: {year}, {month}, {day}, {camera}, {type}. Default: {year}/{month}/{day}",
+              "smb_file_pattern": "File name pattern (without extension). Variables: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Default: {camera}_{date}_{time}_{type}_{id}",
+              "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
+              "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification."
+            }
           },
           "nvr": {
             "name": "Mini-NVR",
-            "description": "Continuous LAN-only recording. Optional drain to SMB or FTP."
+            "description": "Continuous LAN-only recording. Optional drain to SMB or FTP.",
+            "data": {
+              "enable_nvr": "Mini-NVR — continuous LAN recording (experimental)",
+              "nvr_storage_target": "NVR storage target",
+              "nvr_base_path": "NVR storage folder",
+              "nvr_smb_subpath": "NVR subfolder on NAS / FTP",
+              "nvr_retention_days": "NVR retention (days)"
+            },
+            "data_description": {
+              "enable_nvr": "Continuously record each camera's LOCAL stream to disk in 5-minute MP4 segments. LAN-only — recording pauses if the camera is on the cloud relay. Adds a recording switch per camera (disabled by default; enable each camera individually). Requires ffmpeg.",
+              "nvr_storage_target": "Where the finalized NVR segments end up. **Local**: stays under the storage folder below. **SMB / FTP**: ffmpeg still writes locally first (staging), then a watcher uploads each segment to the same NAS configured in the events-storage section, under a separate subfolder. Default: Local.",
+              "nvr_base_path": "Folder for NVR segments. Each camera gets one subfolder, then one subfolder per day, with 5-minute MP4 segments named HH-MM.mp4 inside. Default: /config/bosch_nvr. Use a NAS mount for >1 day retention — at 5 Mbps a single camera writes ~54 GB/day.",
+              "nvr_smb_subpath": "Subfolder under the SMB / FTP base path used exclusively for NVR segments. Default: NVR. Keeps the NVR tree separate from cloud-event uploads.",
+              "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day."
+            }
           },
           "auth": {
             "name": "Authentication",
-            "description": "Force a fresh browser login or migrate to the OSS OAuth client."
+            "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
+            "data": {
+              "force_relogin": "Re-authenticate (browser login)",
+              "migrate_to_oss_client": "Switch to OSS OAuth client"
+            },
+            "data_description": {
+              "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
+              "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
+            }
           },
           "debug": {
             "name": "Debug",
-            "description": "Verbose logging for troubleshooting."
+            "description": "Verbose logging for troubleshooting.",
+            "data": {
+              "debug_logging": "Debug logging (verbose TLS proxy & stream logs)"
+            },
+            "data_description": {
+              "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use."
+            }
           }
         }
       },
