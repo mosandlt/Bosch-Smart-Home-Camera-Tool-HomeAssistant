@@ -48,7 +48,7 @@ SMB_SESSION_KEY = f"{DOMAIN}_smb_sessions"  # set of (server, username) already 
 
 # Filename pattern: "{Camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID}.ext"
 _FILE_RE = re.compile(
-    r"^(?P<camera>.+?)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_(?P<etype>[A-Z_]+)_[0-9A-F]+\.(?P<ext>jpg|jpeg|mp4)$",
+    r"^(?:(?P<camera>.+?)_)?(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_(?P<etype>[A-Z_]+)_[0-9A-F]+\.(?P<ext>jpg|jpeg|mp4)$",
     re.IGNORECASE,
 )
 _DATE_DIR_RE = re.compile(r"^\d{2}$")  # YY-style two-digit dir name (year/month/day)
@@ -84,7 +84,9 @@ def _parse_filename(name: str) -> dict[str, str] | None:
 
 
 def _format_event_title(parsed: dict[str, str]) -> str:
-    return f"{parsed['time'].replace('-', ':')} — {parsed['etype']}  ({parsed['camera']})"
+    cam = parsed.get("camera") or ""
+    suffix = f"  ({cam})" if cam else ""
+    return f"{parsed['time'].replace('-', ':')} — {parsed['etype']}{suffix}"
 
 
 def _entry_title(hass: HomeAssistant, entry_id: str) -> str:
