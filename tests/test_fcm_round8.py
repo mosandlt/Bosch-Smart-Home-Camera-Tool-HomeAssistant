@@ -889,3 +889,68 @@ class TestHandlePushEmptyPrevId:
 
         # last event ID recorded (even without firing an alert, prev_id was None)
         assert coord._last_event_ids.get(CAM_ID) == "first-evt"
+
+
+# ── 20. async_send_alert — local save without notification service ────────────
+
+class TestLocalSaveWithoutNotifyService:
+    """Regression: sync_local_save must fire even with no alert_notify_service.
+
+    Bug: async_send_alert returned early at the info_svcs guard (line ~635)
+    when no notification service was configured, so sync_local_save was never
+    reached. Fresh installs default to no notify service → bosch_events/ stayed
+    empty permanently.
+    Reported by Andreas74 (simon42 forum, 2026-05-07).
+    """
+
+    @pytest.mark.asyncio
+    async def test_local_save_fires_without_notify_service(self):
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "",
+            "download_path": "/tmp/bosch_test_events",
+        })
+        coord.hass.async_add_executor_job = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Terrasse", "MOVEMENT",
+                            "2026-05-07T10:00:00.000Z",
+                            "", "", "",
+                        )
+
+        executor_calls = coord.hass.async_add_executor_job.call_args_list
+        assert any(c.args[0] is mock_save for c in executor_calls), (
+            f"sync_local_save must be queued via async_add_executor_job when "
+            f"download_path is set, even with no notify service. "
+            f"executor calls: {[getattr(c.args[0], '__name__', repr(c.args[0])) for c in executor_calls]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_early_return_when_truly_nothing_configured(self):
+        """No notify service + no download_path + no SMB → immediate return, no work done."""
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "",
+            "download_path": "",
+            "enable_smb_upload": False,
+        })
+        coord.hass.async_add_executor_job = AsyncMock()
+
+        session = MagicMock()
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    from custom_components.bosch_shc_camera.fcm import async_send_alert
+                    await async_send_alert(
+                        coord, "Terrasse", "MOVEMENT",
+                        "2026-05-07T10:00:00.000Z",
+                        "", "", "",
+                    )
+
+        coord.hass.async_add_executor_job.assert_not_called()
