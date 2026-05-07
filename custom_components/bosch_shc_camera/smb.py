@@ -43,14 +43,15 @@ def _safe_name(name: str) -> str:
 def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
     """Save a single event's image/clip to the local download_path on FCM trigger.
 
-    Filename format matches _FILE_RE in media_source.py:
-    {camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID8}.{ext}
+    Folder structure follows folder_pattern option (default: {camera}/{year}/{month}/{day}).
+    Filename follows file_pattern option (default: {camera}_{date}_{time}_{type}_{id}).
     """
     import requests
     import urllib3
     urllib3.disable_warnings()
 
-    download_path = (coordinator.options.get("download_path") or "").strip()
+    opts = coordinator.options
+    download_path = (opts.get("download_path") or "").strip()
     if not download_path:
         return
 
@@ -77,14 +78,28 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
             pass
 
     cam_safe = _safe_name(cam_name)
-    folder = os.path.join(download_path, cam_safe)
-    os.makedirs(folder, exist_ok=True)
-
     date_str = ts[:10]
     time_str = ts[11:19].replace(":", "-")
     etype = ev.get("eventType", "EVENT")
     ev_id = (ev.get("id") or "")[:8].upper()
-    stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
+
+    year, month, day = date_str[:4], date_str[5:7], date_str[8:10]
+    folder_pattern = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip().strip("/")
+    file_pattern = (opts.get("file_pattern") or "{camera}_{date}_{time}_{type}_{id}").strip()
+
+    try:
+        sub = folder_pattern.format(camera=cam_safe, year=year, month=month, day=day,
+                                    date=date_str, time=time_str, type=etype)
+    except (KeyError, ValueError):
+        sub = cam_safe
+
+    folder = os.path.join(download_path, sub.replace("/", os.sep))
+
+    try:
+        stem = file_pattern.format(camera=cam_safe, date=date_str, time=time_str,
+                                   type=etype, id=ev_id, year=year, month=month, day=day)
+    except (KeyError, ValueError):
+        stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
 
     session = requests.Session()
     session.headers["Authorization"] = f"Bearer {token}"
@@ -103,6 +118,7 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
         try:
             r = session.get(url, timeout=60, stream=True)
             if r.status_code == 200:
+                os.makedirs(folder, exist_ok=True)
                 with open(path, "wb") as f:
                     for chunk in r.iter_content(65536):
                         f.write(chunk)
@@ -116,7 +132,7 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
 def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     """Upload new event files to SMB or FTP.
 
-    Folder structure: {smb_base_path}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
+    Folder structure: {smb_base_path}/{camera}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
     Backend selected via ``upload_protocol`` option ("smb" default, or "ftp").
     """
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
@@ -133,8 +149,8 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
-    file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
+    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
     if not server or not share:
         return
@@ -334,96 +350,41 @@ def sync_smb_cleanup(coordinator) -> None:
             "SMB cleanup: deleted %d file(s) older than %d days from %s",
             deleted, retention_days, root,
         )
+        _fire_cleanup_alert(coordinator, deleted, retention_days, root)
 
 
-# ── SMB disk-free check (runs in executor thread, once per hour) ──────────────
+# ── Cleanup alert (fires after age-based retention deletes files) ─────────────
 
-def sync_smb_disk_check(coordinator) -> None:
-    """Check free space on the SMB share and fire an HA alert if low."""
-    protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
-    if protocol == "ftp":
-        # FTP has no portable disk-free RPC across servers; skip silently.
-        return
-    try:
-        from smbclient import register_session
-        import smbclient._io as _smb_io  # noqa: F401 — ensure smbclient loaded
-    except ImportError:
-        return
-
+def _fire_cleanup_alert(coordinator, deleted: int, retention_days: int, location: str) -> None:
+    """Schedule a cleanup summary notification on the HA event loop (thread-safe)."""
     opts = coordinator.options
-    server = opts.get("smb_server", "").strip()
-    share = opts.get("smb_share", "").strip()
-    username = opts.get("smb_username", "").strip()
-    password = opts.get("smb_password", "")
-    warn_mb = int(opts.get("smb_disk_warn_mb", 500))
-    # Use system services for disk alerts (falls back to alert_notify_service if empty)
     system_raw = opts.get("alert_notify_system", "").strip()
     notify_service = system_raw or opts.get("alert_notify_service", "").strip()
-
-    if not server or not share or warn_mb <= 0:
+    if not notify_service:
         return
-
-    try:
-        socket.setdefaulttimeout(10)
-        try:
-            register_session(server, username=username, password=password)
-        finally:
-            socket.setdefaulttimeout(None)
-    except Exception as err:
-        _LOGGER.warning("SMB disk check: session to %s failed: %s", server, err)
-        return
-
-    # Use smbclient's statvfs to get free space (not available in all smbclient versions)
-    try:
-        import smbclient
-        if not hasattr(smbclient, "statvfs"):
-            # smbclient package installed on this HA does not expose statvfs —
-            # the disk-free check is unsupported. Skip silently.
-            return
-        vfs = smbclient.statvfs(f"\\\\{server}\\{share}")
-        free_mb = (vfs.f_bavail * vfs.f_frsize) // (1024 * 1024)
-    except Exception as err:
-        _LOGGER.debug("SMB disk check: statvfs failed: %s", err)
-        return
-
-    if free_mb < warn_mb:
-        msg = (
-            f"Bosch Camera NAS: Wenig Speicherplatz auf \\\\{server}\\{share} — "
-            f"noch {free_mb} MB frei (Warnschwelle: {warn_mb} MB)"
-        )
-        _LOGGER.warning(msg)
-        # Fire alert via HA event loop
-        coordinator.hass.loop.call_soon_threadsafe(
-            coordinator.hass.async_create_task,
-            async_smb_disk_alert(coordinator, msg, notify_service),
-        )
+    msg = (
+        f"Bosch Kamera NAS: {deleted} Datei(en) älter als {retention_days} Tage "
+        f"automatisch gelöscht ({location})"
+    )
+    coordinator.hass.loop.call_soon_threadsafe(
+        coordinator.hass.async_create_task,
+        _async_cleanup_alert(coordinator, msg, notify_service),
+    )
 
 
-async def async_smb_disk_alert(coordinator, message: str, notify_service: str) -> None:
-    """Send disk-full warning via notify service or HA persistent notification."""
-    services = [s.strip() for s in notify_service.split(",") if s.strip()]
-    sent = False
-    for svc in services:
+async def _async_cleanup_alert(coordinator, message: str, notify_service: str) -> None:
+    """Send NAS retention summary via configured notify service."""
+    for svc in [s.strip() for s in notify_service.split(",") if s.strip()]:
         domain, _, name = svc.partition(".")
         if coordinator.hass.services.has_service(domain, name):
             try:
                 await coordinator.hass.services.async_call(
                     domain, name,
-                    {"message": message, "title": "Bosch Kamera — Speicherwarnung"},
+                    {"message": message, "title": "Bosch Kamera — NAS-Bereinigung"},
                 )
-                sent = True
+                return
             except Exception as err:
-                _LOGGER.debug("SMB disk alert via %s failed: %s", svc, err)
-    if not sent:
-        # Fall back to HA persistent notification
-        await coordinator.hass.services.async_call(
-            "persistent_notification", "create",
-            {
-                "title": "Bosch Kamera — Speicherwarnung",
-                "message": message,
-                "notification_id": "bosch_smb_disk_warn",
-            },
-        )
+                _LOGGER.debug("Cleanup alert via %s failed: %s", svc, err)
 
 
 # ── FTP backend (FRITZ.NAS, plain FTP servers) ────────────────────────────────
@@ -477,8 +438,8 @@ def _sync_ftp_upload(coordinator, data: dict, token: str) -> None:
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
-    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
-    file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
+    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
     if not server:
         return
@@ -653,7 +614,9 @@ def _sync_ftp_cleanup(coordinator) -> None:
             pass
 
     if deleted:
+        root_label = f"{server}/{base_path}"
         _LOGGER.info(
             "FTP cleanup: deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, f"{server}/{base_path}",
+            deleted, retention_days, root_label,
         )
+        _fire_cleanup_alert(coordinator, deleted, retention_days, root_label)

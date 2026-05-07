@@ -137,7 +137,6 @@ def _make_coord(**overrides):
         _last_slow=time.monotonic(),   # recent → skip slow tier
         _last_smb_cleanup=time.monotonic(),
         _last_nvr_cleanup=time.monotonic(),
-        _last_smb_disk_check=time.monotonic(),
 
         # ── camera caches ────────────────────────────────────────────────────
         _hw_version={},

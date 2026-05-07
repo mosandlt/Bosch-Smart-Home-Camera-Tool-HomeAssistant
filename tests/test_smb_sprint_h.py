@@ -7,9 +7,6 @@ Target lines:
   - 235-252: video clip upload — stat exists→skip, stat OSError→upload (200 OK), clip non-200
   - 295: sync_smb_cleanup FTP early return (protocol=="ftp")
   - 315-316: _walk_and_delete dir recursion
-  - 364: sync_smb_disk_check FTP early return
-  - 382: sync_smb_disk_check no `statvfs` attribute → return
-  - 385-387: statvfs below threshold → async alert fire
   - 541-543: FTP snapshot download non-200 → warning
   - 549-562: FTP clip upload — exists skip, 200 upload, non-200 warning
   - 566-570: FTP quit/close in finally
@@ -82,8 +79,8 @@ def _smb_upload_coord():
         "smb_username": "user",
         "smb_password": "pass",
         "smb_base_path": "Bosch",
-        "smb_folder_pattern": "{year}/{month}/{day}",
-        "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+        "folder_pattern": "{year}/{month}/{day}",
+        "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     })
 
 
@@ -370,100 +367,6 @@ class TestWalkAndDeleteRecurse:
         fake_smb.remove.assert_called_once()
 
 
-# ── sync_smb_disk_check FTP early return ────────────────────────────────────
-
-
-class TestSyncSmbDiskCheckFtpReturn:
-    """Covers line 364: protocol=='ftp' → return immediately (no SMB statvfs)."""
-
-    def test_ftp_protocol_returns_immediately(self):
-        """upload_protocol=ftp → function returns without touching smbclient."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "upload_protocol": "ftp",
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-        })
-
-        fake_smb = _fake_smb()
-        with patch.dict(sys.modules, {"smbclient": fake_smb}):
-            sync_smb_disk_check(coord)
-
-        # register_session must NOT be called — returned before SMB path
-        fake_smb.register_session.assert_not_called()
-
-
-# ── sync_smb_disk_check no statvfs ──────────────────────────────────────────
-
-
-class TestSyncSmbDiskCheckNoStatvfs:
-    """Covers line 382: smbclient has no statvfs attribute → return silently."""
-
-    def test_no_statvfs_returns_silently(self):
-        """smbclient without statvfs → function returns, no alert fired."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-            "smb_disk_warn_mb": "500",
-        })
-
-        fake_smb = _fake_smb()
-        # Explicitly remove statvfs attribute
-        if hasattr(fake_smb, "statvfs"):
-            del fake_smb.statvfs
-
-        # Patch _smb_io import inside the function
-        fake_smb_io = MagicMock()
-
-        with patch.dict(sys.modules, {
-            "smbclient": fake_smb,
-            "smbclient._io": fake_smb_io,
-        }), patch(f"{MODULE}.socket"):
-            sync_smb_disk_check(coord)
-
-        # hass.loop.call_soon_threadsafe must NOT have been called
-        coord.hass.loop.call_soon_threadsafe.assert_not_called()
-
-
-# ── sync_smb_disk_check statvfs below threshold ──────────────────────────────
-
-
-class TestSyncSmbDiskCheckAlert:
-    """Covers lines 385-387: free_mb < warn_mb → async alert task created."""
-
-    def test_low_disk_fires_alert(self):
-        """statvfs returns low free space → call_soon_threadsafe called."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-            "smb_disk_warn_mb": "500",
-            "alert_notify_service": "notify.test",
-        })
-        coord.hass = MagicMock()
-
-        fake_smb = _fake_smb()
-        vfs = MagicMock()
-        vfs.f_bavail = 100       # 100 blocks
-        vfs.f_frsize = 1024 * 1024  # 1 MB/block → 100 MB free
-        fake_smb.statvfs = MagicMock(return_value=vfs)
-
-        fake_smb_io = MagicMock()
-
-        with patch.dict(sys.modules, {
-            "smbclient": fake_smb,
-            "smbclient._io": fake_smb_io,
-        }), patch(f"{MODULE}.socket"):
-            sync_smb_disk_check(coord)
-
-        # call_soon_threadsafe must have been invoked (alert scheduling)
-        coord.hass.loop.call_soon_threadsafe.assert_called_once()
-
-
 # ── FTP snapshot non-200 → warning ──────────────────────────────────────────
 
 
@@ -479,8 +382,8 @@ class TestFtpSnapshotNon200:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -523,8 +426,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -551,8 +454,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -580,8 +483,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -934,8 +837,8 @@ class TestFtpSafeUrlGuard:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()

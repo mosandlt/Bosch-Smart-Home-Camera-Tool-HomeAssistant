@@ -266,7 +266,8 @@ class TestLocalSaveFilenaming:
         assert cam_dir.is_dir(), (
             f"Camera subfolder {cam_safe!r} must be created under download_path"
         )
-        files = list(cam_dir.iterdir())
+        # With folder_pattern={camera}/{year}/{month}/{day} files are in subfolders
+        files = list(cam_dir.rglob("*.*"))
         assert files, "At least one file must be saved"
         for f in files:
             assert f.name.startswith(cam_safe + "_"), (

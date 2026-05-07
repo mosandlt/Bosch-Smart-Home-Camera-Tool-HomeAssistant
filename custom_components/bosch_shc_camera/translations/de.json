@@ -114,7 +114,7 @@
               "alert_notify_information": "Stufe 1 — Text-Benachrichtigung",
               "alert_notify_screenshot": "Stufe 2 — Snapshot-Bild",
               "alert_notify_video": "Stufe 3 — Videoclip",
-              "alert_notify_system": "System-Alerts (Token-Fehler, Speicherwarnung)"
+              "alert_notify_system": "System-Alerts (Token-Fehler, NAS-Bereinigung)"
             },
             "data_description": {
               "enable_fcm_push": "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
@@ -135,23 +135,20 @@
             "data": {
               "enable_local_save": "Events lokal speichern",
               "download_path": "Lokaler Speicher-Ordner",
-              "media_browser_source": "Quelle des Media Browsers",
-              "enable_smb_upload": "Upload auf SMB/NAS (z.B. FRITZ!Box)",
+              "enable_smb_upload": "Upload auf NAS (SMB oder FTP)",
               "upload_protocol": "Upload-Protokoll (SMB oder FTP)",
               "smb_server": "Server (IP oder Hostname)",
               "smb_share": "SMB-Freigabename",
               "smb_username": "SMB-Benutzername",
               "smb_password": "SMB-Passwort",
               "smb_base_path": "Basisordner auf der Freigabe",
-              "smb_folder_pattern": "Unterordner-Muster",
-              "smb_file_pattern": "Dateiname-Muster",
-              "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)",
-              "smb_disk_warn_mb": "Speicherwarnung unter (MB, 0 = deaktiviert)"
+              "folder_pattern": "Unterordner-Muster",
+              "file_pattern": "Dateiname-Muster",
+              "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)"
             },
             "data_description": {
               "enable_local_save": "Jedes neue Bewegungs-/Audio-Event als JPEG + MP4 im Ordner unten speichern. **Standardmäßig aus** — hier einschalten um lokales Speichern zu aktivieren.",
               "download_path": "Wo die Event-Dateien gespeichert werden. Beispiel: /config/bosch_events. Nur aktiv wenn 'Events lokal speichern' eingeschaltet ist.",
-              "media_browser_source": "Filtert, welches Backend der Media Browser unter **Bosch Camera** anzeigt.\n• **Auto** (Standard): zeigt jedes Backend mit Daten — lokaler Speicher-Ordner und/oder NAS-Upload.\n• **Nur Lokal**: blendet die NAS aus, auch wenn SMB-Upload aktiv ist.\n• **Nur NAS**: blendet lokale Dateien aus, auch wenn lokaler Speicher konfiguriert ist.\n• **Deaktiviert**: blendet den Media-Browser-Eintrag komplett aus.",
               "enable_smb_upload": "Ereignis-Snapshots und Videoclips auf eine SMB/CIFS- oder FTP-Netzwerkfreigabe hochladen (z.B. FRITZ!Box NAS, Synology, Windows-Freigabe). SMB benötigt das smbprotocol-Paket; FTP nutzt Python-Bordmittel.",
               "upload_protocol": "Übertragungsprotokoll. **SMB** (Standard) ist die typische Windows-/macOS-Freigabe. **FTP** ist auf vielen NAS-Geräten (z.B. FRITZ!Box) deutlich schneller bei vielen kleinen Files und umgeht den bekannten macOS-Sequoia-SMB-Hänger. Bei FTP wird der Freigabename-Eintrag ignoriert; der Basisordner ist relativ zum FTP-Wurzelverzeichnis (z.B. `FILES/Bosch-Kameras` statt nur `Bosch-Kameras`).",
               "smb_server": "IP-Adresse oder Hostname. Beispiel: 192.168.1.1 (FRITZ!Box), nas.local oder fritz.box",
@@ -159,10 +156,9 @@
               "smb_username": "SMB-Anmeldename",
               "smb_password": "SMB-Anmeldepasswort",
               "smb_base_path": "Basisordner auf der Freigabe. Standard: Bosch-Kameras",
-              "smb_folder_pattern": "Unterordner-Muster. Variablen: {year}, {month}, {day}, {camera}, {type}. Standard: {year}/{month}/{day}",
-              "smb_file_pattern": "Dateiname-Muster (ohne Endung). Variablen: {camera}, {date}, {time}, {type}, {id}, {year}, {month}, {day}. Standard: {camera}_{date}_{time}_{type}_{id}",
-              "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich.",
-              "smb_disk_warn_mb": "Alert senden wenn der freie Speicher auf dem NAS unter diesen Schwellwert fällt (in MB). 0 = deaktiviert. Standard: 5120 MB (5 GB). Nutzt konfigurierten Notify-Dienst, Fallback auf HA-Benachrichtigung."
+              "folder_pattern": "Unterordner-Muster. Variablen: `{camera}`, `{year}`, `{month}`, `{day}`, `{type}`. Standard: `{camera}/{year}/{month}/{day}`",
+              "file_pattern": "Dateiname-Muster (ohne Endung). Variablen: `{camera}`, `{date}`, `{time}`, `{type}`, `{id}`, `{year}`, `{month}`, `{day}`. Standard: `{camera}_{date}_{time}_{type}_{id}`",
+              "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich."
             }
           },
           "nvr": {

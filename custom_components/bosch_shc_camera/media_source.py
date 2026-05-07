@@ -7,8 +7,8 @@ Exposes downloaded events under HA's "Media" browser. Two backends:
 
 * **SMB / NAS** (``options['enable_smb_upload'] + smb_*``)
   Files on a remote SMB share. Layout follows the configured patterns; the
-  default is ``{base_path}/{YYYY}/{MM}/{DD}/{camera}_{date}_{time}_{type}_{id}.{ext}``
-  with all cameras sharing a day-folder.
+  default is ``{base_path}/{camera}/{YYYY}/{MM}/{DD}/{camera}_{date}_{time}_{type}_{id}.{ext}``
+  with one folder per camera at the top level.
 
 Both backends are read-only and are served through ``/api/bosch_shc_camera/event/…``,
 an authenticated ``HomeAssistantView`` with HTTP Range support so video clips can
@@ -103,10 +103,22 @@ class _Source:
 
 
 class _LocalBackend:
-    """Read events from a local directory."""
+    """Read events from a local directory.
 
-    def __init__(self, base: str) -> None:
+    Two tree modes driven by folder_pattern (same option as NAS uploads):
+    - camera_first=True  (default, pattern starts with {camera}):
+        camera / year / month / day / events  — matches new save structure
+    - camera_first=False (legacy flat, pattern starts with {year}):
+        camera / date-from-filename / events  — old single-folder-per-camera
+    """
+
+    def __init__(self, base: str, folder_pattern: str = "{camera}/{year}/{month}/{day}") -> None:
         self.base = Path(base)
+        self.folder_pattern = folder_pattern.strip()
+
+    @property
+    def camera_first(self) -> bool:
+        return self.folder_pattern.lstrip("/").startswith("{camera}")
 
     def list_cameras(self) -> list[str]:
         if not self.base.is_dir():
@@ -116,6 +128,54 @@ class _LocalBackend:
             key=str.casefold,
         )
 
+    # ── camera-first methods (year/month/day subfolders) ──────────────────────
+    def list_years(self, camera: str) -> list[str]:
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None or not cam_dir.is_dir():
+            return []
+        return sorted(
+            (p.name for p in cam_dir.iterdir() if p.is_dir() and _YEAR_RE.match(p.name)),
+            reverse=True,
+        )
+
+    def list_months(self, camera: str, year: str) -> list[str]:
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None:
+            return []
+        year_dir = _safe_join(cam_dir, year)
+        if year_dir is None or not year_dir.is_dir():
+            return []
+        return sorted(
+            (p.name for p in year_dir.iterdir() if p.is_dir() and _DATE_DIR_RE.match(p.name)),
+            reverse=True,
+        )
+
+    def list_days(self, camera: str, year: str, month: str) -> list[str]:
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None:
+            return []
+        month_dir = _safe_join(cam_dir, year)
+        if month_dir is None:
+            return []
+        month_dir = _safe_join(month_dir, month)
+        if month_dir is None or not month_dir.is_dir():
+            return []
+        return sorted(
+            (p.name for p in month_dir.iterdir() if p.is_dir() and _DATE_DIR_RE.match(p.name)),
+            reverse=True,
+        )
+
+    def list_events_dated(self, camera: str, year: str, month: str, day: str) -> list[tuple[str, str | None, dict[str, str]]]:
+        """Events from camera/year/month/day/ subfolder."""
+        cam_dir = _safe_join(self.base, camera)
+        if cam_dir is None:
+            return []
+        day_dir = cam_dir / year / month / day
+        if not day_dir.is_dir():
+            return []
+        return self._collect_events(day_dir)
+
+    # ── legacy flat methods (files directly in camera/ folder) ───────────────
     def list_dates(self, camera: str) -> list[str]:
         cam_dir = _safe_join(self.base, camera)
         if cam_dir is None or not cam_dir.is_dir():
@@ -130,9 +190,9 @@ class _LocalBackend:
         return sorted(dates, reverse=True)
 
     def list_events(self, camera: str, date: str) -> list[tuple[str, str | None, dict[str, str]]]:
-        """Return [(stem, image_filename_or_none, parsed)] for one (camera, date)."""
+        """Events from flat camera/ folder, filtered by date."""
         cam_dir = _safe_join(self.base, camera)
-        if cam_dir is None:
+        if cam_dir is None or not cam_dir.is_dir():
             return []
         groups: dict[str, dict[str, Any]] = {}
         for f in cam_dir.iterdir():
@@ -145,6 +205,24 @@ class _LocalBackend:
             ext = f.suffix.lower().lstrip(".")
             slot = groups.setdefault(stem, {"parsed": parsed, "files": {}})
             slot["files"][ext] = f.name
+        return self._groups_to_events(groups)
+
+    # ── shared helpers ────────────────────────────────────────────────────────
+    def _collect_events(self, directory: Path) -> list[tuple[str, str | None, dict[str, str]]]:
+        groups: dict[str, dict[str, Any]] = {}
+        for f in directory.iterdir():
+            if not f.is_file() or _is_macos_junk(f.name):
+                continue
+            parsed = _parse_filename(f.name)
+            if not parsed:
+                continue
+            stem = f.stem
+            ext = f.suffix.lower().lstrip(".")
+            slot = groups.setdefault(stem, {"parsed": parsed, "files": {}})
+            slot["files"][ext] = f.name
+        return self._groups_to_events(groups)
+
+    def _groups_to_events(self, groups: dict) -> list[tuple[str, str | None, dict[str, str]]]:
         out: list[tuple[str, str | None, dict[str, str]]] = []
         for stem in sorted(groups, reverse=True):
             files = groups[stem]["files"]
@@ -174,8 +252,15 @@ class _SmbBackend:
         self.share = (opts.get("smb_share") or "").strip()
         self.username = (opts.get("smb_username") or "").strip()
         self.password = opts.get("smb_password") or ""
+        self.protocol = (opts.get("upload_protocol") or "smb").upper()
         base = (opts.get("smb_base_path") or "").strip().strip("/")
         self.base_parts: tuple[str, ...] = tuple(p for p in base.split("/") if p)
+        self.folder_pattern: str = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip()
+
+    @property
+    def camera_first(self) -> bool:
+        """True when folder_pattern starts with {camera} → Camera/Year/Month/Day tree."""
+        return self.folder_pattern.lstrip("/").startswith("{camera}")
 
     @property
     def configured(self) -> bool:
@@ -183,7 +268,9 @@ class _SmbBackend:
 
     @property
     def label(self) -> str:
-        return f"NAS \\\\{self.server}\\{self.share}"
+        base = "\\".join(self.base_parts)
+        path = f"\\{self.share}\\{base}" if base else f"\\{self.share}"
+        return f"{self.protocol}:\\\\{self.server}{path}"
 
     def _ensure_session(self) -> None:
         sessions = self.hass.data.setdefault(SMB_SESSION_KEY, set())
@@ -210,29 +297,35 @@ class _SmbBackend:
             elif not want_dirs and e.is_file():
                 yield e.name
 
-    # tree (date-first, matches storage layout)
-    def list_years(self) -> list[str]:
+    # tree (camera-first: camera/year/month/day)
+    def list_cameras(self) -> list[str]:
         return sorted(
-            (n for n in self._scandir_filtered(want_dirs=True) if _YEAR_RE.match(n)),
+            (n for n in self._scandir_filtered(want_dirs=True)),
+            key=str.casefold,
+        )
+
+    def list_years(self, camera: str) -> list[str]:
+        return sorted(
+            (n for n in self._scandir_filtered(camera, want_dirs=True) if _YEAR_RE.match(n)),
             reverse=True,
         )
 
-    def list_months(self, year: str) -> list[str]:
+    def list_months(self, camera: str, year: str) -> list[str]:
         return sorted(
-            (n for n in self._scandir_filtered(year, want_dirs=True) if _DATE_DIR_RE.match(n)),
+            (n for n in self._scandir_filtered(camera, year, want_dirs=True) if _DATE_DIR_RE.match(n)),
             reverse=True,
         )
 
-    def list_days(self, year: str, month: str) -> list[str]:
+    def list_days(self, camera: str, year: str, month: str) -> list[str]:
         return sorted(
-            (n for n in self._scandir_filtered(year, month, want_dirs=True) if _DATE_DIR_RE.match(n)),
+            (n for n in self._scandir_filtered(camera, year, month, want_dirs=True) if _DATE_DIR_RE.match(n)),
             reverse=True,
         )
 
-    def list_events(self, year: str, month: str, day: str) -> list[tuple[str, str | None, dict[str, str]]]:
+    def list_events(self, camera: str, year: str, month: str, day: str) -> list[tuple[str, str | None, dict[str, str]]]:
         """Return [(preferred_filename, image_filename_or_none, parsed)]."""
         groups: dict[str, dict[str, Any]] = {}
-        for name in self._scandir_filtered(year, month, day, want_dirs=False):
+        for name in self._scandir_filtered(camera, year, month, day, want_dirs=False):
             parsed = _parse_filename(name)
             if not parsed:
                 continue
@@ -249,7 +342,7 @@ class _SmbBackend:
                 out.append((preferred, image, groups[stem]["parsed"]))
         return out
 
-    def open_file(self, year: str, month: str, day: str, filename: str):
+    def open_file(self, camera: str, year: str, month: str, day: str, filename: str):
         """Return (file-like, size). Caller closes the file-like."""
         from smbclient import open_file, stat as smb_stat
         self._ensure_session()
@@ -258,7 +351,7 @@ class _SmbBackend:
             raise FileNotFoundError(filename)
         if not _parse_filename(filename):
             raise FileNotFoundError(filename)
-        path = self._path(year, month, day, filename)
+        path = self._path(camera, year, month, day, filename)
         st = smb_stat(path)
         return open_file(path, mode="rb"), st.st_size
 
@@ -334,36 +427,33 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
             continue
         entry_id = entry.entry_id
         opts = coord.options
-        # Per-entry filter: auto / local / smb / none
-        filt = (opts.get("media_browser_source") or "auto").lower()
-        if filt == "none":
-            continue
-        show_local = filt in ("auto", "local")
-        show_smb = filt in ("auto", "smb")
-        if show_local and opts.get("download_path"):
+
+        # Local events — show whenever a download_path is configured (regardless
+        # of enable_local_save so already-saved files stay browseable even after
+        # the option is toggled off).
+        if opts.get("download_path"):
             base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
+            fp = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip()
             try:
                 base_path = Path(base)
-                # Create the directory on first access so the Media Browser
-                # entry appears immediately after the user enables auto-download
-                # — even before the first event has been downloaded. Without
-                # this, the entry stayed hidden until the first poll cycle
-                # actually wrote a file (the v10.7.1 fix only set the default
-                # path; the directory still had to exist on disk).
                 if not base_path.exists():
                     base_path.mkdir(parents=True, exist_ok=True)
                 if base_path.is_dir():
-                    out.append((_Source(entry_id, "L", "Lokal"), _LocalBackend(base)))
+                    out.append((_Source(entry_id, "L", "Lokal"), _LocalBackend(base, fp)))
             except OSError:
                 pass
-        if show_smb and opts.get("enable_smb_upload") and (opts.get("upload_protocol") or "smb").lower() == "smb":
+
+        # NAS — show whenever SMB upload is enabled and credentials are present.
+        # Decoupled from upload_protocol: files uploaded via FTP land on the same
+        # NAS share and are readable via SMB, so we browse via SMB regardless of
+        # how they were uploaded.
+        if opts.get("enable_smb_upload"):
             smb = _SmbBackend(hass, opts)
             if smb.configured:
                 out.append((_Source(entry_id, "S", smb.label), smb))
-        # Mini-NVR continuous recording — always shown when enabled (filt
-        # `auto`/`local` only, NAS-only filter hides it). Backend lives on the
-        # local FS even though it might be a NAS bind-mount.
-        if show_local and opts.get("enable_nvr"):
+
+        # Mini-NVR continuous recording segments.
+        if opts.get("enable_nvr"):
             base = (opts.get("nvr_base_path") or "/config/bosch_nvr").strip()
             try:
                 base_path = Path(base)
@@ -418,7 +508,7 @@ def _node(
 
 
 class BoschCameraMediaSource(MediaSource):
-    name = "Bosch SHC Camera"
+    name = "Bosch Camera"
 
     def __init__(self, hass: HomeAssistant) -> None:
         super().__init__(DOMAIN)
@@ -528,6 +618,9 @@ class BoschCameraMediaSource(MediaSource):
         )
 
     # ── local backend tree ──────────────────────────────────────────────────
+    # camera_first=True  → camera / year / month / day / events  (5 levels)
+    # camera_first=False → camera / date / events                (3 levels, legacy)
+    # Driven by backend.folder_pattern (same option as NAS uploads).
     def _browse_local(
         self,
         src: _Source,
@@ -539,52 +632,80 @@ class BoschCameraMediaSource(MediaSource):
     ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
         ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+        title_root = self.name if root else (
+            _entry_title(self.hass, src.entry_id) if single_source else src.label
+        )
 
+        # cameras level (shared by both modes)
         if not rest:
-            children = [
-                _node(identifier=ident(cam), title=cam) for cam in backend.list_cameras()
-            ]
-            title = self.name if root else (
-                _entry_title(self.hass, src.entry_id) if single_source else src.label
-            )
-            return _node(
-                identifier="" if root else prefix,
-                title=title,
-                children=children,
-            )
+            children = [_node(identifier=ident(cam), title=cam) for cam in backend.list_cameras()]
+            return _node(identifier="" if root else prefix, title=title_root, children=children)
 
         camera = rest[0]
-        if len(rest) == 1:
-            children = [
-                _node(identifier=ident(camera, d), title=d) for d in backend.list_dates(camera)
-            ]
-            return _node(identifier=ident(camera), title=camera, children=children)
 
-        if len(rest) == 2:
-            date = rest[1]
-            children = []
-            for fname, image, parsed in backend.list_events(camera, date):
-                ext = fname.rsplit(".", 1)[-1].lower()
-                mime = "video/mp4" if ext == "mp4" else "image/jpeg"
-                mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
-                thumb = (
-                    f"{URL_PREFIX}/{ident(camera, image)}" if image else None
+        if backend.camera_first:
+            if len(rest) == 1:  # years
+                children = [_node(identifier=ident(camera, y), title=y) for y in backend.list_years(camera)]
+                return _node(identifier=ident(camera), title=camera, children=children)
+            if len(rest) == 2:  # months
+                year = rest[1]
+                children = [
+                    _node(identifier=ident(camera, year, m), title=f"{year}-{m}")
+                    for m in backend.list_months(camera, year)
+                ]
+                return _node(identifier=ident(camera, year), title=year, children=children)
+            if len(rest) == 3:  # days
+                year, month = rest[1], rest[2]
+                children = [
+                    _node(identifier=ident(camera, year, month, d), title=f"{year}-{month}-{d}")
+                    for d in backend.list_days(camera, year, month)
+                ]
+                return _node(identifier=ident(camera, year, month), title=f"{year}-{month}", children=children)
+            if len(rest) == 4:  # events
+                year, month, day = rest[1], rest[2], rest[3]
+                children = []
+                for fname, image, parsed in backend.list_events_dated(camera, year, month, day):
+                    ext = fname.rsplit(".", 1)[-1].lower()
+                    mime = "video/mp4" if ext == "mp4" else "image/jpeg"
+                    mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
+                    thumb = f"{URL_PREFIX}/{ident(camera, year, month, day, image)}" if image else None
+                    children.append(_node(
+                        identifier=ident(camera, year, month, day, fname),
+                        title=_format_event_title(parsed),
+                        media_class=mc, media_content_type=mime,
+                        can_play=True, can_expand=False, thumbnail=thumb,
+                    ))
+                return _node(
+                    identifier=ident(camera, year, month, day),
+                    title=f"{year}-{month}-{day}",
+                    children=children, children_media_class=MediaClass.VIDEO,
                 )
-                children.append(_node(
-                    identifier=ident(camera, fname),
-                    title=_format_event_title(parsed),
-                    media_class=mc,
-                    media_content_type=mime,
-                    can_play=True,
-                    can_expand=False,
-                    thumbnail=thumb,
-                ))
-            return _node(
-                identifier=ident(camera, date),
-                title=date,
-                children=children,
-                children_media_class=MediaClass.VIDEO,
-            )
+        else:
+            # legacy flat: camera → date → events
+            if len(rest) == 1:
+                children = [
+                    _node(identifier=ident(camera, d), title=d) for d in backend.list_dates(camera)
+                ]
+                return _node(identifier=ident(camera), title=camera, children=children)
+            if len(rest) == 2:
+                date = rest[1]
+                children = []
+                for fname, image, parsed in backend.list_events(camera, date):
+                    ext = fname.rsplit(".", 1)[-1].lower()
+                    mime = "video/mp4" if ext == "mp4" else "image/jpeg"
+                    mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
+                    thumb = f"{URL_PREFIX}/{ident(camera, image)}" if image else None
+                    children.append(_node(
+                        identifier=ident(camera, fname),
+                        title=_format_event_title(parsed),
+                        media_class=mc, media_content_type=mime,
+                        can_play=True, can_expand=False, thumbnail=thumb,
+                    ))
+                return _node(
+                    identifier=ident(camera, date),
+                    title=date,
+                    children=children, children_media_class=MediaClass.VIDEO,
+                )
 
         raise Unresolvable(f"Cannot browse: {'/'.join(rest)}")
 
@@ -642,7 +763,10 @@ class BoschCameraMediaSource(MediaSource):
 
         raise Unresolvable(f"Cannot browse: {'/'.join(rest)}")
 
-    # ── smb backend tree (date-first: year/month/day/event) ─────────────────
+    # ── smb backend tree ────────────────────────────────────────────────────────
+    # camera_first=True  → camera / year / month / day / event  (5 levels)
+    # camera_first=False → year / month / day / event           (4 levels, legacy)
+    # Determined by backend.folder_pattern (read from options: folder_pattern).
     def _browse_smb(
         self,
         src: _Source,
@@ -654,56 +778,91 @@ class BoschCameraMediaSource(MediaSource):
     ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
         ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+        title_root = self.name if root else (
+            _entry_title(self.hass, src.entry_id) if single_source else src.label
+        )
 
-        if not rest:  # years
-            children = [_node(identifier=ident(y), title=y) for y in backend.list_years()]
-            title = self.name if root else (
-                _entry_title(self.hass, src.entry_id) if single_source else src.label
-            )
-            return _node(
-                identifier="" if root else prefix,
-                title=title,
-                children=children,
-            )
-
-        if len(rest) == 1:  # months
-            year = rest[0]
-            children = [_node(identifier=ident(year, m), title=m) for m in backend.list_months(year)]
-            return _node(identifier=ident(year), title=year, children=children)
-
-        if len(rest) == 2:  # days
-            year, month = rest
-            children = [
-                _node(identifier=ident(year, month, d), title=f"{year}-{month}-{d}")
-                for d in backend.list_days(year, month)
-            ]
-            return _node(identifier=ident(year, month), title=f"{year}-{month}", children=children)
-
-        if len(rest) == 3:  # events
-            year, month, day = rest
-            children = []
-            for fname, image, parsed in backend.list_events(year, month, day):
-                ext = fname.rsplit(".", 1)[-1].lower()
-                mime = "video/mp4" if ext == "mp4" else "image/jpeg"
-                mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
-                thumb = (
-                    f"{URL_PREFIX}/{ident(year, month, day, image)}" if image else None
+        if backend.camera_first:
+            # ── camera-first: root → cameras ──
+            if not rest:
+                children = [_node(identifier=ident(cam), title=cam) for cam in backend.list_cameras()]
+                return _node(identifier="" if root else prefix, title=title_root, children=children)
+            if len(rest) == 1:  # years
+                camera = rest[0]
+                children = [_node(identifier=ident(camera, y), title=y) for y in backend.list_years(camera)]
+                return _node(identifier=ident(camera), title=camera, children=children)
+            if len(rest) == 2:  # months
+                camera, year = rest
+                children = [
+                    _node(identifier=ident(camera, year, m), title=f"{year}-{m}")
+                    for m in backend.list_months(camera, year)
+                ]
+                return _node(identifier=ident(camera, year), title=year, children=children)
+            if len(rest) == 3:  # days
+                camera, year, month = rest
+                children = [
+                    _node(identifier=ident(camera, year, month, d), title=f"{year}-{month}-{d}")
+                    for d in backend.list_days(camera, year, month)
+                ]
+                return _node(identifier=ident(camera, year, month), title=f"{year}-{month}", children=children)
+            if len(rest) == 4:  # events
+                camera, year, month, day = rest
+                children = []
+                for fname, image, parsed in backend.list_events(camera, year, month, day):
+                    ext = fname.rsplit(".", 1)[-1].lower()
+                    mime = "video/mp4" if ext == "mp4" else "image/jpeg"
+                    mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
+                    thumb = f"{URL_PREFIX}/{ident(camera, year, month, day, image)}" if image else None
+                    children.append(_node(
+                        identifier=ident(camera, year, month, day, fname),
+                        title=_format_event_title(parsed),
+                        media_class=mc, media_content_type=mime,
+                        can_play=True, can_expand=False, thumbnail=thumb,
+                    ))
+                return _node(
+                    identifier=ident(camera, year, month, day),
+                    title=f"{year}-{month}-{day}",
+                    children=children, children_media_class=MediaClass.VIDEO,
                 )
-                children.append(_node(
-                    identifier=ident(year, month, day, fname),
-                    title=_format_event_title(parsed),
-                    media_class=mc,
-                    media_content_type=mime,
-                    can_play=True,
-                    can_expand=False,
-                    thumbnail=thumb,
-                ))
-            return _node(
-                identifier=ident(year, month, day),
-                title=f"{year}-{month}-{day}",
-                children=children,
-                children_media_class=MediaClass.VIDEO,
-            )
+        else:
+            # ── date-first (legacy): root → years ──
+            # camera arg is "" (filtered by _path so path traversal is correct)
+            if not rest:
+                children = [_node(identifier=ident(y), title=y) for y in backend.list_years("")]
+                return _node(identifier="" if root else prefix, title=title_root, children=children)
+            if len(rest) == 1:  # months
+                year = rest[0]
+                children = [
+                    _node(identifier=ident(year, m), title=m)
+                    for m in backend.list_months("", year)
+                ]
+                return _node(identifier=ident(year), title=year, children=children)
+            if len(rest) == 2:  # days
+                year, month = rest
+                children = [
+                    _node(identifier=ident(year, month, d), title=f"{year}-{month}-{d}")
+                    for d in backend.list_days("", year, month)
+                ]
+                return _node(identifier=ident(year, month), title=f"{year}-{month}", children=children)
+            if len(rest) == 3:  # events
+                year, month, day = rest
+                children = []
+                for fname, image, parsed in backend.list_events("", year, month, day):
+                    ext = fname.rsplit(".", 1)[-1].lower()
+                    mime = "video/mp4" if ext == "mp4" else "image/jpeg"
+                    mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
+                    thumb = f"{URL_PREFIX}/{ident(year, month, day, image)}" if image else None
+                    children.append(_node(
+                        identifier=ident(year, month, day, fname),
+                        title=_format_event_title(parsed),
+                        media_class=mc, media_content_type=mime,
+                        can_play=True, can_expand=False, thumbnail=thumb,
+                    ))
+                return _node(
+                    identifier=ident(year, month, day),
+                    title=f"{year}-{month}-{day}",
+                    children=children, children_media_class=MediaClass.VIDEO,
+                )
 
         raise Unresolvable(f"Cannot browse: {'/'.join(rest)}")
 
@@ -726,17 +885,22 @@ class BoschCameraMediaView(HomeAssistantView):
             raise web.HTTPNotFound
 
         # Identifier shapes (with optional source token):
-        #   {entry_id}/L/{camera}/{filename}              (local, multi-source)
-        #   {entry_id}/{camera}/{filename}                (local, single-source)
-        #   {entry_id}/S/{Y}/{M}/{D}/{filename}           (smb, multi-source)
-        #   {entry_id}/{Y}/{M}/{D}/{filename}             (smb, single-source)
-        #   {entry_id}/N/{camera}/{YYYY-MM-DD}/{file}.mp4 (nvr, multi-source)
-        #   {entry_id}/{camera}/{YYYY-MM-DD}/{file}.mp4   (nvr, single-source)
+        #   {entry_id}/L/{camera}/{filename}                       (local, multi-source)
+        #   {entry_id}/{camera}/{filename}                         (local, single-source)
+        #   {entry_id}/S/{camera}/{Y}/{M}/{D}/{filename}           (smb, multi-source)
+        #   {entry_id}/{camera}/{Y}/{M}/{D}/{filename}             (smb, single-source)
+        #   {entry_id}/N/{camera}/{YYYY-MM-DD}/{file}.mp4          (nvr, multi-source)
+        #   {entry_id}/{camera}/{YYYY-MM-DD}/{file}.mp4            (nvr, single-source)
         head = parts[0]
         if head in ("L", "S", "N"):
             kind = head
             tail = parts[1:]
         elif _YEAR_RE.match(head):
+            # year/month/day/filename → SMB date-first single-source
+            kind = "S"
+            tail = parts
+        elif len(parts) >= 2 and _YEAR_RE.match(parts[1]):
+            # camera/year/month/day/filename → SMB camera-first single-source
             kind = "S"
             tail = parts
         elif len(parts) >= 3 and _NVR_DATE_DIR_RE.match(parts[1]):
@@ -753,10 +917,9 @@ class BoschCameraMediaView(HomeAssistantView):
         _src, backend = match
 
         if isinstance(backend, _LocalBackend):
-            if len(tail) != 2:
+            if len(tail) not in (2, 5):
                 raise web.HTTPNotFound
-            camera, filename = tail
-            return await self._serve_local(request, backend, camera, filename)
+            return await self._serve_local(request, backend, *tail)
 
         if isinstance(backend, _NvrBackend):
             if len(tail) != 3:
@@ -764,18 +927,25 @@ class BoschCameraMediaView(HomeAssistantView):
             camera, date, filename = tail
             return await self._serve_nvr(request, backend, camera, date, filename)
 
-        if len(tail) != 4:
+        if len(tail) == 5:
+            camera, year, month, day, filename = tail
+        elif len(tail) == 4:
+            # date-first single-source or legacy URLs
+            year, month, day, filename = tail
+            camera = ""
+        else:
             raise web.HTTPNotFound
-        year, month, day, filename = tail
-        return await self._serve_smb(request, backend, year, month, day, filename)
+        return await self._serve_smb(request, backend, camera, year, month, day, filename)
 
     # local path → web.FileResponse handles Range natively
+    # segments: (camera, filename) for flat mode or (camera, year, month, day, filename) for camera-first
     async def _serve_local(
-        self, request: web.Request, backend: _LocalBackend, camera: str, filename: str
+        self, request: web.Request, backend: _LocalBackend, *segments: str
     ) -> web.StreamResponse:
+        filename = segments[-1]
         if not _parse_filename(filename):
             raise web.HTTPNotFound
-        path = await self.hass.async_add_executor_job(backend.resolve, camera, filename)
+        path = await self.hass.async_add_executor_job(backend.resolve, *segments)
         if path is None:
             raise web.HTTPNotFound
         mime, _ = mimetypes.guess_type(str(path))
@@ -802,6 +972,7 @@ class BoschCameraMediaView(HomeAssistantView):
         self,
         request: web.Request,
         backend: _SmbBackend,
+        camera: str,
         year: str,
         month: str,
         day: str,
@@ -811,12 +982,12 @@ class BoschCameraMediaView(HomeAssistantView):
             raise web.HTTPNotFound
         try:
             fobj, size = await self.hass.async_add_executor_job(
-                backend.open_file, year, month, day, filename
+                backend.open_file, camera, year, month, day, filename
             )
         except FileNotFoundError as err:
             raise web.HTTPNotFound from err
         except OSError as err:
-            _LOGGER.warning("SMB open failed for %s/%s/%s/%s: %s", year, month, day, filename, err)
+            _LOGGER.warning("SMB open failed for %s/%s/%s/%s/%s: %s", camera, year, month, day, filename, err)
             raise web.HTTPNotFound from err
 
         try:

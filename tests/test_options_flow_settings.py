@@ -304,17 +304,15 @@ class TestEventsStorageSection:
                 "smb_username": "user",
                 "smb_password": "secret",
                 "smb_base_path": "Bosch",
-                "smb_folder_pattern": "{year}/{month}",
-                "smb_file_pattern": "{camera}_{id}",
+                "folder_pattern": "{year}/{month}",
+                "file_pattern": "{camera}_{id}",
                 "smb_retention_days": 90,
-                "smb_disk_warn_mb": 2048,
             },
         })
         assert data["enable_smb_upload"] is True
         assert data["upload_protocol"] == "ftp"
         assert data["smb_server"] == "192.168.1.100"
         assert data["smb_retention_days"] == 90
-        assert data["smb_disk_warn_mb"] == 2048
 
     def test_smb_retention_days_range(self):
         schema_inner = _get_section_schema("events_storage")
@@ -326,15 +324,6 @@ class TestEventsStorageSection:
         schema_inner = _get_section_schema("events_storage")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"smb_retention_days": 3651})
-
-    @pytest.mark.asyncio
-    async def test_media_browser_source_values(self):
-        flow = BoschCameraOptionsFlow(_make_entry())
-        for val in ["auto", "local", "smb", "none"]:
-            data = await _submit(flow, {
-                "events_storage": {"media_browser_source": val},
-            })
-            assert data["media_browser_source"] == val
 
     def test_default_download_path(self):
         assert DEFAULT_OPTIONS["download_path"] == "/config/bosch_events"
@@ -495,12 +484,12 @@ class TestFullRoundTrip:
                     "alert_notify_screenshot": "", "alert_notify_video": "notify.video",
                     "alert_notify_system": ""},
             "events_storage": {"enable_local_save": True, "download_path": "/config/bosch_events",
-                                "media_browser_source": "local", "enable_smb_upload": False,
+                                "enable_smb_upload": False,
                                 "upload_protocol": "smb", "smb_server": "", "smb_share": "",
                                 "smb_username": "", "smb_password": "", "smb_base_path": "Bosch-Kameras",
-                                "smb_folder_pattern": "{year}/{month}/{day}",
-                                "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
-                                "smb_retention_days": 180, "smb_disk_warn_mb": 5120},
+                                "folder_pattern": "{year}/{month}/{day}",
+                                "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+                                "smb_retention_days": 180},
             "nvr": {"enable_nvr": False, "nvr_storage_target": "local",
                     "nvr_base_path": "/config/bosch_nvr", "nvr_smb_subpath": "NVR",
                     "nvr_retention_days": 3},
@@ -562,7 +551,7 @@ class TestDefaultOptionsCompleteness:
             "alert_notify_service", "alert_notify_information",
             "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
             "smb_server", "smb_share", "smb_username", "smb_password",
-            "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
+            "smb_base_path", "folder_pattern", "file_pattern",
             "nvr_base_path", "nvr_smb_subpath", "download_path",
             # auth actions — not persistent state
             "force_relogin", "migrate_to_oss_client",

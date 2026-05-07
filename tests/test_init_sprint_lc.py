@@ -147,7 +147,6 @@ def _make_coord_for_update_data(**overrides):
         _last_events=float("-inf"),
         _last_slow=float("-inf"),            # ancient → do_slow=True
         _last_smb_cleanup=time_mod.monotonic(),
-        _last_smb_disk_check=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
         # FCM
         _fcm_lock=__import__("threading").Lock(),
@@ -857,50 +856,6 @@ class TestNvrCleanupTriggeredDaily:
             f"NVR cleanup task name must appear in background task calls, got: {all_call_str}"
         )
 
-
-class TestSmbDiskCheckTimeout:
-    """Lines 2159-2166: SMB disk check runs, raises TimeoutError → warning logged."""
-
-    @pytest.mark.asyncio
-    async def test_smb_disk_check_timeout(self, caplog):
-        """SMB disk check enabled, async_add_executor_job raises TimeoutError → WARNING logged."""
-        import logging
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_for_update_data(
-            _last_slow=time_mod.monotonic(),         # skip slow tier
-            _last_smb_disk_check=float("-inf"),               # ancient → interval elapsed
-            _cached_status={CAM_A: "ONLINE"},
-        )
-        coord._entry.options = {
-            "enable_smb_upload": True,
-            "smb_server": "nas.local",
-            "smb_disk_warn_mb": 500,
-        }
-        coord.options = coord._entry.options
-
-        # Make the executor job stall so asyncio.wait_for times out
-        async def _hang(*args, **kwargs):
-            await asyncio.sleep(9999)
-
-        coord.hass.async_add_executor_job = MagicMock(side_effect=lambda fn, *a: _hang())
-
-        routes = {
-            "v11/video_inputs": _make_resp(200, [CAM_GEN2_INDOOR]),
-            f"{CAM_A}/ping": _make_resp(200, {}, text_data="ONLINE"),
-            f"{CAM_A}/lighting/switch": _make_resp(200, {}),
-        }
-        session = _make_session_fn(routes)
-
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"), \
-             patch(_PATCH_SESSION, return_value=session), \
-             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
-            await BoschCameraCoordinator._async_update_data(coord)
-
-        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        assert any("SMB disk check" in m or "timed out" in m for m in warning_msgs), (
-            f"WARNING about SMB disk check timeout must be logged, got: {warning_msgs}"
-        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

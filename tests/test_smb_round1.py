@@ -1,5 +1,5 @@
 """Sprint E: smb.py — sync_local_save, sync_smb_upload, sync_smb_cleanup,
-sync_smb_disk_check, async_smb_disk_alert, _sync_ftp_upload, _sync_ftp_cleanup.
+_sync_ftp_upload, _sync_ftp_cleanup.
 
 Covers missing lines: 58, 91-92, 103-233, 238-252, 261, 267-314, 324-377,
 396-397, 451-551, 556-637.
@@ -126,7 +126,7 @@ class TestSyncLocalSaveUncovered:
         with patch.dict(sys.modules, {"requests": fake_requests, "urllib3": MagicMock()}):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
-        written = list((tmp_path / "Terrasse").glob("*.jpg"))
+        written = list((tmp_path / "Terrasse").rglob("*.jpg"))
         assert len(written) == 1, "Image download must write one .jpg file"
 
 
@@ -227,140 +227,6 @@ class TestSyncSmbCleanupEarlyExits:
                 sync_smb_cleanup(coord)  # must not raise
 
 
-# ── sync_smb_disk_check — early exits ────────────────────────────────────────
-
-
-class TestSyncSmbDiskCheckEarlyExits:
-    def test_ftp_protocol_returns_early(self):
-        """upload_protocol='ftp' → silently return (FTP has no portable statvfs)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"upload_protocol": "ftp"})
-        sync_smb_disk_check(coord)  # must not raise
-
-    def test_no_server_returns_early(self):
-        """Empty smb_server → return before any SMB calls."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"smb_server": "", "smb_share": "SHARE"})
-        sync_smb_disk_check(coord)
-
-    def test_warn_mb_zero_returns_early(self):
-        """smb_disk_warn_mb=0 → disk check disabled → return."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_disk_warn_mb": 0})
-        sync_smb_disk_check(coord)
-
-    def test_session_failure_returns_gracefully(self):
-        """register_session raising → log warning and return."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_disk_warn_mb": 500})
-
-        fake_smb = MagicMock()
-        fake_smb.register_session.side_effect = Exception("auth error")
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)  # must not raise
-
-    def test_statvfs_not_present_returns_gracefully(self):
-        """smbclient without statvfs attribute → skip silently."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_disk_warn_mb": 500})
-
-        fake_smb = MagicMock(spec=[])  # no attributes — statvfs absent
-        fake_smb.register_session = MagicMock()
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)  # must not raise
-
-    def test_low_disk_fires_alert(self):
-        """Free space below warn_mb → call_soon_threadsafe to schedule disk alert."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_disk_warn_mb": 500,
-                        "alert_notify_system": "notify.signal"})
-
-        fake_smb = MagicMock()
-        fake_smb.register_session = MagicMock()
-        # statvfs returns 100 MB free (below 500 MB threshold)
-        fake_vfs = MagicMock()
-        fake_vfs.f_bavail = 100
-        fake_vfs.f_frsize = 1024 * 1024
-        fake_smb.statvfs.return_value = fake_vfs
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)
-
-        coord.hass.loop.call_soon_threadsafe.assert_called_once()
-
-
-# ── async_smb_disk_alert — persistent_notification fallback ──────────────────
-
-
-class TestAsyncSmbDiskAlertFallback:
-    @pytest.mark.asyncio
-    async def test_service_not_found_falls_back_to_persistent_notification(self):
-        """No matching notify service → fall back to persistent_notification."""
-        from custom_components.bosch_shc_camera.smb import async_smb_disk_alert
-        coord = _coord()
-        coord.hass.services.has_service = MagicMock(return_value=False)
-        coord.hass.services.async_call = AsyncMock()
-
-        await async_smb_disk_alert(coord, "Low disk space!", "notify.nonexistent")
-
-        # Must have called persistent_notification.create
-        calls = coord.hass.services.async_call.call_args_list
-        assert any(c[0][0] == "persistent_notification" for c in calls), \
-            "No notify service found → must fall back to persistent_notification"
-
-    @pytest.mark.asyncio
-    async def test_empty_notify_service_falls_back(self):
-        """Empty notify service string → no services to try → persistent_notification."""
-        from custom_components.bosch_shc_camera.smb import async_smb_disk_alert
-        coord = _coord()
-        coord.hass.services.has_service = MagicMock(return_value=False)
-        coord.hass.services.async_call = AsyncMock()
-
-        await async_smb_disk_alert(coord, "Low!", "")
-
-        calls = coord.hass.services.async_call.call_args_list
-        assert any(c[0][0] == "persistent_notification" for c in calls)
-
-    @pytest.mark.asyncio
-    async def test_service_found_no_fallback(self):
-        """notify service exists → call it, skip persistent_notification."""
-        from custom_components.bosch_shc_camera.smb import async_smb_disk_alert
-        coord = _coord()
-        coord.hass.services.has_service = MagicMock(return_value=True)
-        coord.hass.services.async_call = AsyncMock()
-
-        await async_smb_disk_alert(coord, "Low!", "notify.signal")
-
-        calls = coord.hass.services.async_call.call_args_list
-        assert not any(c[0][0] == "persistent_notification" for c in calls), \
-            "If notify service found, persistent_notification must not be called"
-
-    @pytest.mark.asyncio
-    async def test_service_exception_falls_back(self):
-        """notify service raises → exception swallowed → fall back to persistent_notification."""
-        from custom_components.bosch_shc_camera.smb import async_smb_disk_alert
-        coord = _coord()
-        coord.hass.services.has_service = MagicMock(return_value=True)
-        # First call (notify.signal) raises; second call (persistent_notification) succeeds
-        coord.hass.services.async_call = AsyncMock(
-            side_effect=[Exception("signal down"), None]
-        )
-
-        await async_smb_disk_alert(coord, "Low!", "notify.signal")
-
-        calls = coord.hass.services.async_call.call_args_list
-        assert any(c[0][0] == "persistent_notification" for c in calls), \
-            "Failed notify service must fall back to persistent_notification"
-
 
 # ── _sync_ftp_upload ──────────────────────────────────────────────────────────
 
@@ -420,8 +286,8 @@ class TestSyncFtpUpload:
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
         coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
                         "smb_password": "p", "smb_base_path": "Bosch",
-                        "smb_folder_pattern": "{year}/{month}",
-                        "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}"})
+                        "folder_pattern": "{year}/{month}",
+                        "file_pattern": "{camera}_{date}_{time}_{type}_{id}"})
 
         fake_ftp = MagicMock()
         fake_response = MagicMock()
@@ -617,3 +483,51 @@ class TestSyncFtpCleanup:
                 pass  # acceptable — just must not hang
 
         fake_ftp.quit.assert_called()
+
+
+# ── _fire_cleanup_alert / _async_cleanup_alert ────────────────────────────────
+
+
+class TestCleanupAlert:
+    """_fire_cleanup_alert fires a notify after age-based retention deletes files."""
+
+    def test_no_notify_service_skips_alert(self):
+        """No alert_notify_system and no alert_notify_service → call_soon_threadsafe not called."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({})
+        _fire_cleanup_alert(coord, 5, 180, "\\\\nas\\share\\Bosch-Kameras")
+        coord.hass.loop.call_soon_threadsafe.assert_not_called()
+
+    def test_system_service_schedules_alert(self):
+        """alert_notify_system set → call_soon_threadsafe called once."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({"alert_notify_system": "notify.test_user"})
+        _fire_cleanup_alert(coord, 3, 90, "\\\\nas\\share\\Bosch")
+        coord.hass.loop.call_soon_threadsafe.assert_called_once()
+
+    def test_fallback_to_alert_notify_service(self):
+        """No system service configured → falls back to alert_notify_service."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({"alert_notify_service": "notify.signal"})
+        _fire_cleanup_alert(coord, 1, 180, "nas/Bosch")
+        coord.hass.loop.call_soon_threadsafe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_alert_calls_service(self):
+        """_async_cleanup_alert calls the notify service when it exists."""
+        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        coord = _coord()
+        coord.hass.services.has_service = MagicMock(return_value=True)
+        coord.hass.services.async_call = AsyncMock()
+        await _async_cleanup_alert(coord, "5 Dateien gelöscht", "notify.test_user")
+        coord.hass.services.async_call.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_alert_no_service_no_call(self):
+        """_async_cleanup_alert: service not registered → no call, no exception."""
+        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        coord = _coord()
+        coord.hass.services.has_service = MagicMock(return_value=False)
+        coord.hass.services.async_call = AsyncMock()
+        await _async_cleanup_alert(coord, "msg", "notify.nonexistent")
+        coord.hass.services.async_call.assert_not_called()

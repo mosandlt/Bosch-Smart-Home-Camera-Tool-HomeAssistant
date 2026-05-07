@@ -34,10 +34,6 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_local_save":      False,
     "download_path":          "/config/bosch_events",
-    # Filter for the Media Browser provider (separate from upload/download).
-    # auto = show every backend that has data; local/smb = show only that one;
-    # none = hide the provider entirely.
-    "media_browser_source":   "auto",
     "high_quality_video": False,
     "stream_connection_type": "auto",
     # HLS player buffer profile applied by the Lovelace card (hls.js).
@@ -65,10 +61,9 @@ DEFAULT_OPTIONS = {
     "smb_username": "",
     "smb_password": "",
     "smb_base_path": "Bosch-Kameras",
-    "smb_folder_pattern": "{year}/{month}/{day}",
-    "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+    "folder_pattern": "{camera}/{year}/{month}/{day}",
+    "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     "smb_retention_days": 180,
-    "smb_disk_warn_mb": 5120,
     # ── Mini-NVR (continuous LAN-only recording) — Phase 1 MVP ──────────────
     # Disabled by default; opt-in via integration options. See
     # `docs/mini-nvr-concept.md` for the full design.
