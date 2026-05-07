@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      2682 tests across 101 files. Total line-coverage 85% with key resilience
+      2776 tests across 105 files. Total line-coverage 91% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -212,6 +212,21 @@ rules:
       zones, share_camera, get/set_privacy_masks, delete_motion_zone, get_lighting_
       schedule cache-hit, rename_camera, invite/list/remove_friend exception paths).
       local_rcp.py 90%→100%.
+      Sprint-K (2026-05-07): __init__.py 62%→83% adding _async_update_data
+      (no-token guard, first-tick skip, FCM watchdog dead-client path, camera-
+      list 200/401-retry/non-200, feature-flags fetch+timeout, protocol-version
+      check SUPPORTED/NOT-SUPPORTED, _check_status TCP-ping-hit ONLINE+fallback-
+      clear+active-LOCAL-promotion, TCP-miss cloud-/ping 200/444/UPDATING,
+      /commissioned fallback connected/configured/444, offline tracking set+clear,
+      gather exception swallowed, _fetch_events same-ID optimization, full-fetch,
+      timeout swallowed, do_events=False skip, event dedup+bus-fire, privacy
+      external-toggle tear-down, write-lock guard, _wifiinfo_cache slow-tier,
+      shc_ready gate, outer TimeoutError/ClientError UpdateFailed);
+      _try_live_connection_inner (no-token, LOCAL/REMOTE/auto candidate selection
+      with error-counter+time-decay+wifi-threshold, TCP pre-check cache+miss+hit,
+      PUT 200 LOCAL creds-cache+TLS-proxy+RTSP-URL, PUT 200 REMOTE urls/hash
+      proxyUrl+rtspsUrl via proxy, PUT 401/404/500/timeout/ClientError, session.close
+      in finally, all-fail→None). Total: 85%→91%, 2682→2776 tests, 101→105 files.
 
   # Gold
   devices: done
