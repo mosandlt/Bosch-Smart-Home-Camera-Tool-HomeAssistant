@@ -70,7 +70,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
     ],
     "events_storage": [
-        "download_path", "media_browser_source",
+        "enable_local_save", "download_path", "media_browser_source",
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
         "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
@@ -688,6 +688,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
 
         sectioned_schema[vol.Required("events_storage")] = section(
             vol.Schema({
+                vol.Optional(
+                    "enable_local_save",
+                    default=bool(opts.get("enable_local_save", False)),
+                ): bool,
                 vol.Optional(
                     "download_path",
                     description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
