@@ -1,4 +1,5 @@
 pytest-homeassistant-custom-component==0.13.327
+home-assistant-frontend==20260429.2
 PyTurboJPEG==2.2.0
 pytest-cov==7.1.0
 pytest-timeout==2.4.0

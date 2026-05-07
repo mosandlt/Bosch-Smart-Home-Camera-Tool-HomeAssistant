@@ -300,7 +300,7 @@ class TestCheckAndRecoverWebrtc:
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         coord = _make_coord(_camera_entities={CAM_A: cam_ent})
-        coord._last_go2rtc_reload = 0.0  # pre-set to allow reload
+        coord._last_go2rtc_reload = float('-inf')  # never reloaded — ensure throttle does not fire
 
         go2rtc_entry = MagicMock()
         go2rtc_entry.state = ConfigEntryState.LOADED
@@ -332,7 +332,7 @@ class TestCheckAndRecoverWebrtc:
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         cam_ent.async_refresh_providers = AsyncMock(side_effect=Exception("rp boom"))
         coord = _make_coord(_camera_entities={CAM_A: cam_ent})
-        coord._last_go2rtc_reload = 0.0
+        coord._last_go2rtc_reload = float('-inf')
 
         go2rtc_entry = MagicMock()
         go2rtc_entry.state = ConfigEntryState.LOADED
@@ -489,7 +489,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float('-inf')
 
         bare_provider = MagicMock(spec=[])  # no _rest_client, no _supported_schemes
 
@@ -515,7 +515,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float('-inf')
 
         fresh_schemes = {"rtsp", "rtsps"}
         provider = MagicMock()
@@ -553,7 +553,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float('-inf')
 
         fresh_schemes = {"rtsp"}
         provider = MagicMock()
