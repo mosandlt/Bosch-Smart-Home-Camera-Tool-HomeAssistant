@@ -248,6 +248,19 @@ rules:
       exception, no-proxy prewarm=False, LOCAL prewarm fail→REMOTE fallback,
       min_wait sleep, stream.update_source exception, NVR sidecar LOCAL+REMOTE.
       Total: 91%→93%, 2776→2863 tests, 105→108 files.
+      Sprint-M (2026-05-07): switch.py 81%→97% (async_setup_entry + all entity
+      turn_on/off paths: BoschLiveStreamSwitch privacy+cooldown guards,
+      BoschAudioSwitch turn_on/off+_apply_audio_change, BoschCameraLightSwitch/
+      FrontLight/Wallwasher, BoschMotionEnabled/Intercom/StatusLed/MotionLight/
+      AmbientLight/SoftLightFading/IntrusionDetection/AudioAlarm, BoschNvr-
+      RecordingSwitch async_added_to_hass restore state); fcm.py 84%→87%
+      (fetch_firebase_config, async_start_fcm_push early exits, async_send_alert
+      step1/2/3 exception paths, SMB/local-save exceptions); __init__.py 91%→92%
+      (fix Lc misses: privacyMode gate for RCP-via-cloud, SMB cleanup float-inf
+      fix, lighting/motion for-loop body, fetch_live_snapshot RCP paths,
+      iconLedBrightness TypeError, stream.update_source success, _INTEGRATION_
+      VERSION fallback, ValueError swallow, CancelledError re-raise, delegation).
+      Total: 93%→95%, 2863→2978 tests, 108→111 files. HA Gold-tier (>95%) reached.
 
   # Gold
   devices: done
