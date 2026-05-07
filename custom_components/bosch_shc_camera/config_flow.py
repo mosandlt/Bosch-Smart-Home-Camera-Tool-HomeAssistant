@@ -634,7 +634,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("enable_go2rtc", True)),
                 ): bool,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("fcm")] = section(
@@ -680,7 +680,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     description={"suggested_value": opts.get("alert_notify_system", "")},
                 ): str,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("events_storage")] = section(
@@ -756,7 +756,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("smb_disk_warn_mb", 5120)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("nvr")] = section(
@@ -789,7 +789,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("nvr_retention_days", 3)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         auth_inner: dict = {
@@ -799,7 +799,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
         sectioned_schema[vol.Required("auth")] = section(
             vol.Schema(auth_inner),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("debug")] = section(
@@ -809,7 +809,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("debug_logging", False)),
                 ): bool,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         return self.async_show_form(
