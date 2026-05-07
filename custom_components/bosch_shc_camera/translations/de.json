@@ -156,8 +156,8 @@
               "smb_username": "SMB-Anmeldename",
               "smb_password": "SMB-Anmeldepasswort",
               "smb_base_path": "Basisordner auf der Freigabe. Standard: Bosch-Kameras",
-              "folder_pattern": "Unterordner-Muster. Variablen: '{camera}', '{year}', '{month}', '{day}', '{type}'. Standard: '{camera}/{year}/{month}/{day}'",
-              "file_pattern": "Dateiname-Muster (ohne Endung). Variablen: '{camera}', '{date}', '{time}', '{type}', '{id}', '{year}', '{month}', '{day}'. Standard: '{camera}_{date}_{time}_{type}_{id}'",
+              "folder_pattern": "Unterordner-Muster. Variablen: `{camera}`, `{year}`, `{month}`, `{day}`, `{type}`. Standard: `{camera}/{year}/{month}/{day}`",
+              "file_pattern": "Dateiname-Muster (ohne Endung). Variablen: `{camera}`, `{date}`, `{time}`, `{type}`, `{id}`, `{year}`, `{month}`, `{day}`. Standard: `{camera}_{date}_{time}_{type}_{id}`",
               "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich."
             }
           },

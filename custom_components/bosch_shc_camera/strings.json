@@ -142,8 +142,8 @@
               "smb_username": "SMB login username",
               "smb_password": "SMB login password",
               "smb_base_path": "Base folder on the share where files are stored. Default: Bosch-Kameras",
-              "folder_pattern": "Subfolder pattern. Available variables: '{camera}', '{year}', '{month}', '{day}', '{type}'. Default: '{camera}/{year}/{month}/{day}'",
-              "file_pattern": "File name pattern (without extension). Variables: '{camera}', '{date}', '{time}', '{type}', '{id}', '{year}', '{month}', '{day}'. Default: '{camera}_{date}_{time}_{type}_{id}'",
+              "folder_pattern": "Subfolder pattern. Available variables: `{camera}`, `{year}`, `{month}`, `{day}`, `{type}`. Default: `{camera}/{year}/{month}/{day}`",
+              "file_pattern": "File name pattern (without extension). Variables: `{camera}`, `{date}`, `{time}`, `{type}`, `{id}`, `{year}`, `{month}`, `{day}`. Default: `{camera}_{date}_{time}_{type}_{id}`",
               "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day."
             }
           },
