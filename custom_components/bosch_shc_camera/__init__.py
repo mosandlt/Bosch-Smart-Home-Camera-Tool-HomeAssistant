@@ -1495,7 +1495,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                             # actively running on REMOTE-fallback.
                             live = self._live_connections.get(cam_id, {})
                             if live.get("_connection_type") == "REMOTE":
-                                last_promote = self._local_promote_at.get(cam_id, 0)
+                                last_promote = self._local_promote_at.get(cam_id, float('-inf'))
                                 _LOCAL_PROMOTE_COOLDOWN_S = 300
                                 if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
                                     self._local_promote_at[cam_id] = now

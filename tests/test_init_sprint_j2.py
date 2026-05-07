@@ -290,7 +290,7 @@ class TestCheckAndRecoverWebrtc:
         ), patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
-        assert coord._last_go2rtc_reload == 0.0
+        assert coord._last_go2rtc_reload == float('-inf')
 
     @pytest.mark.asyncio
     async def test_go2rtc_reload_exception_does_not_raise(self):
@@ -424,7 +424,7 @@ class TestEnsureGo2rtcSchemesFresh:
             coord.hass.data = {fake_providers_key: set()}
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
 
-        assert coord._last_schemes_refresh == 0.0
+        assert coord._last_schemes_refresh == float('-inf')
 
     @pytest.mark.asyncio
     async def test_throttle_returns_early_within_600s(self):

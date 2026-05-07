@@ -132,8 +132,8 @@ def _make_coord(**overrides):
         _fcm_client=None,
 
         # ── timing (stale → run status+events; recent _last_slow → skip slow) ─
-        _last_status=0.0,
-        _last_events=0.0,
+        _last_status=float('-inf'),
+        _last_events=float('-inf'),
         _last_slow=time.monotonic(),   # recent → skip slow tier
         _last_smb_cleanup=time.monotonic(),
         _last_nvr_cleanup=time.monotonic(),
