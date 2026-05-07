@@ -483,3 +483,51 @@ class TestSyncFtpCleanup:
                 pass  # acceptable — just must not hang
 
         fake_ftp.quit.assert_called()
+
+
+# ── _fire_cleanup_alert / _async_cleanup_alert ────────────────────────────────
+
+
+class TestCleanupAlert:
+    """_fire_cleanup_alert fires a notify after age-based retention deletes files."""
+
+    def test_no_notify_service_skips_alert(self):
+        """No alert_notify_system and no alert_notify_service → call_soon_threadsafe not called."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({})
+        _fire_cleanup_alert(coord, 5, 180, "\\\\nas\\share\\Bosch-Kameras")
+        coord.hass.loop.call_soon_threadsafe.assert_not_called()
+
+    def test_system_service_schedules_alert(self):
+        """alert_notify_system set → call_soon_threadsafe called once."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({"alert_notify_system": "notify.test_user"})
+        _fire_cleanup_alert(coord, 3, 90, "\\\\nas\\share\\Bosch")
+        coord.hass.loop.call_soon_threadsafe.assert_called_once()
+
+    def test_fallback_to_alert_notify_service(self):
+        """No system service configured → falls back to alert_notify_service."""
+        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        coord = _coord({"alert_notify_service": "notify.signal"})
+        _fire_cleanup_alert(coord, 1, 180, "nas/Bosch")
+        coord.hass.loop.call_soon_threadsafe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_alert_calls_service(self):
+        """_async_cleanup_alert calls the notify service when it exists."""
+        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        coord = _coord()
+        coord.hass.services.has_service = MagicMock(return_value=True)
+        coord.hass.services.async_call = AsyncMock()
+        await _async_cleanup_alert(coord, "5 Dateien gelöscht", "notify.test_user")
+        coord.hass.services.async_call.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_alert_no_service_no_call(self):
+        """_async_cleanup_alert: service not registered → no call, no exception."""
+        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        coord = _coord()
+        coord.hass.services.has_service = MagicMock(return_value=False)
+        coord.hass.services.async_call = AsyncMock()
+        await _async_cleanup_alert(coord, "msg", "notify.nonexistent")
+        coord.hass.services.async_call.assert_not_called()

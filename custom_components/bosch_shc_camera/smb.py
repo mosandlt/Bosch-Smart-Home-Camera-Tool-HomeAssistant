@@ -350,6 +350,41 @@ def sync_smb_cleanup(coordinator) -> None:
             "SMB cleanup: deleted %d file(s) older than %d days from %s",
             deleted, retention_days, root,
         )
+        _fire_cleanup_alert(coordinator, deleted, retention_days, root)
+
+
+# ── Cleanup alert (fires after age-based retention deletes files) ─────────────
+
+def _fire_cleanup_alert(coordinator, deleted: int, retention_days: int, location: str) -> None:
+    """Schedule a cleanup summary notification on the HA event loop (thread-safe)."""
+    opts = coordinator.options
+    system_raw = opts.get("alert_notify_system", "").strip()
+    notify_service = system_raw or opts.get("alert_notify_service", "").strip()
+    if not notify_service:
+        return
+    msg = (
+        f"Bosch Kamera NAS: {deleted} Datei(en) älter als {retention_days} Tage "
+        f"automatisch gelöscht ({location})"
+    )
+    coordinator.hass.loop.call_soon_threadsafe(
+        coordinator.hass.async_create_task,
+        _async_cleanup_alert(coordinator, msg, notify_service),
+    )
+
+
+async def _async_cleanup_alert(coordinator, message: str, notify_service: str) -> None:
+    """Send NAS retention summary via configured notify service."""
+    for svc in [s.strip() for s in notify_service.split(",") if s.strip()]:
+        domain, _, name = svc.partition(".")
+        if coordinator.hass.services.has_service(domain, name):
+            try:
+                await coordinator.hass.services.async_call(
+                    domain, name,
+                    {"message": message, "title": "Bosch Kamera — NAS-Bereinigung"},
+                )
+                return
+            except Exception as err:
+                _LOGGER.debug("Cleanup alert via %s failed: %s", svc, err)
 
 
 # ── FTP backend (FRITZ.NAS, plain FTP servers) ────────────────────────────────
@@ -579,7 +614,9 @@ def _sync_ftp_cleanup(coordinator) -> None:
             pass
 
     if deleted:
+        root_label = f"{server}/{base_path}"
         _LOGGER.info(
             "FTP cleanup: deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, f"{server}/{base_path}",
+            deleted, retention_days, root_label,
         )
+        _fire_cleanup_alert(coordinator, deleted, retention_days, root_label)

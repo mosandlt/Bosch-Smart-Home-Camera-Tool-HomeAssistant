@@ -114,7 +114,7 @@
               "alert_notify_information": "Stufe 1 — Text-Benachrichtigung",
               "alert_notify_screenshot": "Stufe 2 — Snapshot-Bild",
               "alert_notify_video": "Stufe 3 — Videoclip",
-              "alert_notify_system": "System-Alerts (Token-Fehler)"
+              "alert_notify_system": "System-Alerts (Token-Fehler, NAS-Bereinigung)"
             },
             "data_description": {
               "enable_fcm_push": "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",

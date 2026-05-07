@@ -114,7 +114,7 @@
               "alert_notify_information": "Step 1 — text notification",
               "alert_notify_screenshot": "Step 2 — snapshot image",
               "alert_notify_video": "Step 3 — video clip",
-              "alert_notify_system": "System alerts (token failure)"
+              "alert_notify_system": "System alerts (token failure, NAS cleanup)"
             },
             "data_description": {
               "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",

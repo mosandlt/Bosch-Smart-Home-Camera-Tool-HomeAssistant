@@ -383,7 +383,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
-        self._last_smb_cleanup: float = 0.0     # last daily cleanup run
+        self._last_smb_cleanup: float = float("-inf")  # float('-inf') → runs on first tick
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False     # True after first alert sent
         self._token_fail_count: int = 0          # consecutive refresh failures
