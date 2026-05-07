@@ -2,9 +2,9 @@
 
 Pytest suite for the Bosch Smart Home Camera HA integration.
 
-**Current state (v11.0.9):** 2775 tests across 71 files, ≥75% total line-coverage.
+**Current state (v11.0.10):** 2978 tests across 111 files, **95% total line-coverage** — HA Gold-tier threshold met.
 
-Covers the HA Quality-Scale rules `config-flow-test-coverage` (Bronze) and `test-coverage` (Silver).
+Covers the HA Quality-Scale rules `config-flow-test-coverage` (Bronze), `test-coverage` (Gold).
 
 ## CI
 
@@ -48,7 +48,7 @@ pytest tests/test_init_sprint_kc.py -v
 | `test_media_source*.py` | LocalBackend, SmbBackend, NvrBackend, _browse tree, _FILE_RE |
 | `test_smb*.py` | sync_local_save, SMB upload/cleanup/disk-check, FTP upload/cleanup |
 | `test_tls_proxy*.py` | TLS proxy daemon threads, circuit breaker, pipe relay |
-| `test_init_*.py` | coordinator methods, token refresh, go2rtc registration, RCP cache |
+| `test_init_sprint_*.py` | coordinator methods: _async_update_data, _try_live_connection_inner, _auto_renew_local_session, token refresh, go2rtc, RCP cache |
 | `test_fcm*.py` | FCM push handling, dedup, alerts, send_alert step1/step2 |
 | `test_rcp*.py` | RCP session, XML parsing, all type codes |
 | `test_buttons.py` | button entity press → coordinator refresh |

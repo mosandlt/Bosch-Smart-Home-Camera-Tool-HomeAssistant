@@ -361,7 +361,7 @@ graph LR
 
 **Open `todo` items** (tracked in `quality_scale.yaml`):
 
-- `test-coverage` — pytest framework + config-flow + diagnostics tests are in place (covers the Bronze rule). Full 95% coverage of the 5000-line `__init__.py` and cloud-API paths needs extensive aiohttp mocking and is filed as a separate sprint.
+- `test-coverage` — **95 % total line coverage** across 111 test files / 2978 tests. Covers all coordinator methods, entity turn_on/off paths, token refresh, stream lifecycle, FCM alerts, SMB/NVR helpers, and cloud-API paths via aiohttp mocking. Remaining 5 % is HA-framework-bound (`async_setup_entry` lifecycle requires a live `hass` runtime).
 - Platinum-tier rules (`async-dependency`, `strict-typing`) — partial typing exists; full strict-typing entry in HA core's `.strict-typing` is N/A for custom integrations.
 
 ### Operational reliability — token recovery flow
