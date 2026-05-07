@@ -175,17 +175,17 @@ class TestGH5_ReauthFlow:
     def test_reauth_step_exists(self):
         """`async_step_reauth` + `async_step_reauth_confirm` must be present."""
         from custom_components.bosch_shc_camera.config_flow import (
-            BoschSHCCameraConfigFlow,
+            BoschCameraConfigFlow,
         )
-        assert hasattr(BoschSHCCameraConfigFlow, "async_step_reauth")
-        assert hasattr(BoschSHCCameraConfigFlow, "async_step_reauth_confirm")
+        assert hasattr(BoschCameraConfigFlow, "async_step_reauth")
+        assert hasattr(BoschCameraConfigFlow, "async_step_reauth_confirm")
 
     def test_reconfigure_step_exists(self):
         """v11.0.0 reconfiguration-flow must exist (Quality-Scale Gold)."""
         from custom_components.bosch_shc_camera.config_flow import (
-            BoschSHCCameraConfigFlow,
+            BoschCameraConfigFlow,
         )
-        assert hasattr(BoschSHCCameraConfigFlow, "async_step_reconfigure"), (
+        assert hasattr(BoschCameraConfigFlow, "async_step_reconfigure"), (
             "v11.0.0 added explicit 'Reconfigure' menu item to fix "
             "the dziko83 404 issue — the flow must keep existing"
         )
@@ -229,7 +229,7 @@ class TestGH6_StreamPipeline:
         registration time; toggling it dynamically would cause the entity to
         deregister and re-register on every stream start/stop.)"""
         from types import SimpleNamespace as _SN
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         from homeassistant.components.camera import CameraEntityFeature
         coord = _SN(
             data={CAM_ID: {"info": {"title": "x", "hardwareVersion": "X",
@@ -239,7 +239,7 @@ class TestGH6_StreamPipeline:
             last_update_success=True,
         )
         entry = _SN(entry_id="01", data={"bearer_token": "x"}, options={})
-        cam = BoschSHCCamera(coord, CAM_ID, entry)
+        cam = BoschCamera(coord, CAM_ID, entry)
         # STREAM must always be advertised (static attribute, not dynamic)
         assert CameraEntityFeature.STREAM in cam.supported_features, (
             "Camera must always advertise STREAM — HA registers the stream "

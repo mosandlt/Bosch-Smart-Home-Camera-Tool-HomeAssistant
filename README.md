@@ -1095,7 +1095,7 @@ type: custom:bosch-camera-overview-card
 title: Kameras                  # optional header
 online_offline_view: true       # default true; false = hide offline tier
 columns: auto                   # "auto" | 1 | 2 | 3 | 4   (default "auto")
-min_width: 360px                # cell min-width when columns: auto (default 360px)
+min_width: 650px                # cell min-width when columns: auto (default 650px)
 gap: 12px                       # grid gap (default 12px)
 use_bosch_sort: true            # default false; true = follow Bosch-app priority
 minimal: false                  # default false; true = compact tiles for the whole grid
@@ -1249,8 +1249,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.8** — see the GitHub release page for full notes:
-[**v11.0.8 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.8)
+Latest stable: **v11.0.9** — see the GitHub release page for full notes:
+[**v11.0.9 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.9)
 
 | | |
 |---|---|

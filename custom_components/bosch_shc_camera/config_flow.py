@@ -46,7 +46,7 @@ from homeassistant.helpers.selector import (
 # ── Section layout (single source of truth) ───────────────────────────────────
 # Sectioned options-flow groups the ~50 fields into collapsible blocks so the
 # UI is browseable. The mapping below is consumed both by the section-aware
-# schema builder in BoschSHCCameraOptionsFlow.async_step_init AND by
+# schema builder in BoschCameraOptionsFlow.async_step_init AND by
 # `_flatten_sections` (round-trip on submit). Adding a field here automatically
 # wires it into the right section + flattens correctly on save.
 #
@@ -388,7 +388,7 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
+class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     """Handle the initial setup flow — automatic OAuth2 PKCE browser login."""
 
     DOMAIN = DOMAIN
@@ -476,11 +476,11 @@ class BoschSHCCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return BoschSHCCameraOptionsFlow(config_entry)
+        return BoschCameraOptionsFlow(config_entry)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschSHCCameraOptionsFlow(config_entries.OptionsFlow):
+class BoschCameraOptionsFlow(config_entries.OptionsFlow):
     """Handle options: feature toggles + optional re-login."""
 
     def __init__(self, config_entry) -> None:

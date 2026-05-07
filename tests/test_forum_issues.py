@@ -240,7 +240,6 @@ class TestIssue8_MediaBrowserEmpty:
                 async_loaded_entries=lambda d: [SimpleNamespace(
                     entry_id="01ENTRY",
                     runtime_data=SimpleNamespace(options={
-                        "enable_auto_download": True,
                         "download_path": str(new_dir),
                         "media_browser_source": "auto",
                     }),
@@ -254,16 +253,22 @@ class TestIssue8_MediaBrowserEmpty:
         )
 
     def test_readme_documents_auto_download_path(self):
-        """README must explain WHERE the auto-download checkbox is."""
+        """README must explain WHERE the local save folder option is.
+
+        enable_auto_download was removed — local saving is now controlled solely
+        by the download_path field (non-empty = active). The UI label is
+        'Local save folder' / 'Lokaler Speicher-Ordner'. The README must
+        document the Configure path so users can find it.
+        """
         from pathlib import Path
         readme = (
             Path(__file__).parent.parent / "README.md"
         )
         text = readme.read_text()
-        # The German label users actually see in the UI
-        assert "Events automatisch herunterladen" in text, (
-            "README must mention the German UI label so users find "
-            "the option in Configure"
+        # The field that controls local saving (filling it in = enable)
+        assert "Local save folder" in text or "download_path" in text, (
+            "README must document the local save folder so users know how to "
+            "enable Media Browser (non-empty path = active, no separate toggle)"
         )
         # The Reconfigure-vs-Configure UX confusion must be addressed
         assert "Reconfigure" in text and "Configure" in text, (

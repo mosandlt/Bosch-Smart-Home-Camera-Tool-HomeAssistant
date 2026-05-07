@@ -4,12 +4,12 @@ Covers missing branches from the 73% baseline:
   - BoschOAuth2Implementation.__init__ + async_generate_authorize_url
   - async_resolve_external_data + _async_refresh_token
   - _exchange_code (all branches)
-  - BoschSHCCameraConfigFlow: logger property, async_step_user,
+  - BoschCameraConfigFlow: logger property, async_step_user,
     async_step_reauth_confirm (user_input path),
     async_step_reconfigure (user_input path),
     async_oauth_create_entry (all 3 branches),
     async_get_options_flow
-  - BoschSHCCameraOptionsFlow: async_step_relogin_show (None branch),
+  - BoschCameraOptionsFlow: async_step_relogin_show (None branch),
     async_step_relogin_paste (all branches)
 """
 
@@ -190,15 +190,15 @@ class TestExchangeCode:
         assert result is None
 
 
-# ── BoschSHCCameraConfigFlow ──────────────────────────────────────────────────
+# ── BoschCameraConfigFlow ──────────────────────────────────────────────────
 
 
 class TestConfigFlowSteps:
     def _make_flow(self, source="user"):
         """Create a flow instance bypassing HA's config-flow framework."""
-        from custom_components.bosch_shc_camera.config_flow import BoschSHCCameraConfigFlow
+        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
         from homeassistant import config_entries
-        flow = BoschSHCCameraConfigFlow.__new__(BoschSHCCameraConfigFlow)
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         flow.hass = MagicMock()
         # source is a read-only property backed by context dict
         flow.context = {"source": source}
@@ -212,14 +212,14 @@ class TestConfigFlowSteps:
         return flow
 
     def test_logger_property_returns_module_logger(self):
-        from custom_components.bosch_shc_camera.config_flow import BoschSHCCameraConfigFlow
+        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
         import logging
-        flow = BoschSHCCameraConfigFlow.__new__(BoschSHCCameraConfigFlow)
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         assert isinstance(flow.logger, logging.Logger)
 
     @pytest.mark.asyncio
     async def test_async_step_user_registers_implementation(self):
-        from custom_components.bosch_shc_camera.config_flow import BoschSHCCameraConfigFlow
+        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
         from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
         flow = self._make_flow(source="user")
         with patch(f"{MODULE}.async_register_implementation") as mock_reg, \
@@ -276,24 +276,24 @@ class TestConfigFlowSteps:
         flow.async_update_reload_and_abort.assert_called_once()
 
     def test_async_get_options_flow_returns_options_flow_instance(self):
-        """async_get_options_flow must return a BoschSHCCameraOptionsFlow (line 480)."""
+        """async_get_options_flow must return a BoschCameraOptionsFlow (line 480)."""
         from custom_components.bosch_shc_camera.config_flow import (
-            BoschSHCCameraConfigFlow, BoschSHCCameraOptionsFlow,
+            BoschCameraConfigFlow, BoschCameraOptionsFlow,
         )
         entry = MagicMock()
         entry.options = {}
         entry.data = {}
-        result = BoschSHCCameraConfigFlow.async_get_options_flow(entry)
-        assert isinstance(result, BoschSHCCameraOptionsFlow)
+        result = BoschCameraConfigFlow.async_get_options_flow(entry)
+        assert isinstance(result, BoschCameraOptionsFlow)
 
 
-# ── BoschSHCCameraOptionsFlow — relogin steps ────────────────────────────────
+# ── BoschCameraOptionsFlow — relogin steps ────────────────────────────────
 
 
 class TestOptionsFlowReloginSteps:
     def _make_options_flow(self):
-        from custom_components.bosch_shc_camera.config_flow import BoschSHCCameraOptionsFlow
-        flow = BoschSHCCameraOptionsFlow.__new__(BoschSHCCameraOptionsFlow)
+        from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+        flow = BoschCameraOptionsFlow.__new__(BoschCameraOptionsFlow)
         flow._verifier = "pkce_verifier"
         flow._auth_url = "https://id.bosch.com/auth?client_id=x"
         flow._pending_options = {"enable_snapshots": True}

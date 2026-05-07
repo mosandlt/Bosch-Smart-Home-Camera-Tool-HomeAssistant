@@ -136,7 +136,7 @@ from types import SimpleNamespace
 import asyncio
 
 from custom_components.bosch_shc_camera.config_flow import (
-    BoschSHCCameraOptionsFlow,
+    BoschCameraOptionsFlow,
 )
 
 
@@ -154,7 +154,7 @@ class TestOptionsStepInitRender:
 
     @pytest.mark.asyncio
     async def test_render_returns_form_with_sections(self):
-        flow = BoschSHCCameraOptionsFlow(_make_entry())
+        flow = BoschCameraOptionsFlow(_make_entry())
         # async_show_form / hass aren't actually needed for the helper
         # because the OptionsFlow base class composes the result dict — but
         # we patch async_show_form to capture the schema.
@@ -185,7 +185,7 @@ class TestOptionsStepInitRender:
         ).rstrip(b"=").decode()
         token = f"{header}.{body}.x"
 
-        flow = BoschSHCCameraOptionsFlow(_make_entry(bearer_token=token))
+        flow = BoschCameraOptionsFlow(_make_entry(bearer_token=token))
         flow.async_show_form = MagicMock(return_value={"type": "form"})
         await flow.async_step_init(user_input=None)
         flow.async_show_form.assert_called_once()
@@ -196,7 +196,7 @@ class TestOptionsStepInitSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_plain_save_creates_entry(self):
-        flow = BoschSHCCameraOptionsFlow(_make_entry())
+        flow = BoschCameraOptionsFlow(_make_entry())
         flow.async_create_entry = MagicMock(
             return_value={"type": "create_entry"}
         )
@@ -211,7 +211,7 @@ class TestOptionsStepInitSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_with_force_relogin_branches(self):
-        flow = BoschSHCCameraOptionsFlow(_make_entry())
+        flow = BoschCameraOptionsFlow(_make_entry())
         # Stub the relogin step
         flow.async_step_relogin_show = AsyncMock(
             return_value={"type": "form", "step_id": "relogin_show"},
@@ -223,7 +223,7 @@ class TestOptionsStepInitSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_with_migrate_starts_reauth(self):
-        flow = BoschSHCCameraOptionsFlow(_make_entry())
+        flow = BoschCameraOptionsFlow(_make_entry())
         flow.hass = MagicMock()
         flow.hass.config_entries = MagicMock()
         flow.hass.config_entries.async_update_entry = MagicMock()
@@ -239,7 +239,7 @@ class TestOptionsStepInitSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_normalizes_booleans(self):
-        flow = BoschSHCCameraOptionsFlow(_make_entry())
+        flow = BoschCameraOptionsFlow(_make_entry())
         captured = {}
         flow.async_create_entry = MagicMock(
             side_effect=lambda **kw: captured.update(kw) or {"type": "create_entry"},

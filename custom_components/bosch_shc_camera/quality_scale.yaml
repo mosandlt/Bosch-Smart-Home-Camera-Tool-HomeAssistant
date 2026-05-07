@@ -130,7 +130,53 @@ rules:
       email shapes; _write_file; register_fcm_with_bosch device-type
       + status branches; async_stop_fcm_push state cleanup +
       CancelledError propagation; _async_persist_fcm_creds; _on_fcm_push
-      running=False drop + healthy stamping).
+      running=False drop + healthy stamping). Sprint-C (2026-05-07):
+      1677→1860 tests across 64 files, 60%→66% total line-coverage.
+      switch.py 56%→75% (18 new switch classes: PrivacySound, Timestamp,
+      NotificationType, AlarmSystemArm, AlarmSettingsBase, AudioAlarm,
+      ImageRotation180, NvrRecording, MotionLight, SoftLightFading,
+      IntrusionDetection; helper fns _is_gen2_indoor, _warn_if_privacy_on).
+      sensor.py 65%→85% (setup gating, AlarmCatalog, TlsCert ISO date,
+      NetworkServices, AmbientLightSchedule, AlarmState, StreamStatus).
+      number.py 50%→74% (setup gating, AudioThreshold, FrontLightIntensity,
+      LensElevation, MicrophoneLevel, WhiteBalance).
+      camera.py 58% (stream_source NULL+URL+TCP+REMOTE+audio+no-url,
+      _yuv422_to_jpeg wrong-size, extra_state_attributes all 6 branches,
+      motion_detection_enabled, frame_interval all 3 modes).
+      light.py 68%→98% (setup gating Gen2/Gen1/no-light, color_temp↔Kelvin
+      bidirectional -1.0→6500K/1.0→2000K, turn_on/off, TopLed RGB hex,
+      available+brightness guards). README: corrected enable_auto_download
+      dead-key → download_path-based activation. Sprint-D (2026-05-07):
+      1860→1932 tests across 66 files, 66%→69% total. __init__.py 46%→56%:
+      all remaining service handler bodies (update_rule cache-miss+overlay,
+      set/get_motion_zones+privacy_masks coord-validation+HTTP-branches,
+      share_camera timedelta, delete_motion_zone OOB+fetch+repost,
+      get_lighting_schedule cache-hit+API+notification, rename_camera,
+      invite_friend 201+notify, list_friends empty/non-empty, remove_friend
+      204/404/exception); async_put_camera 8 branches (200→True, 401→
+      refresh+retry→True/False, exception→False); get_quality 4 branches,
+      set_quality cache-evict, get_quality_params high/low/auto;
+      _async_update_rcp_data delegation. Sprint-E (2026-05-07):
+      1932→2016 tests across 68 files, 69%→72% total. fcm.py 25%→46%
+      (async_handle_fcm_push dedup+eviction+PERSON-upgrade+notify-switch-gate,
+      async_mark_events_read empty/partial/full, _install_fcm_noise_filter
+      idempotency, async_start_fcm_push early-exits). smb.py 15%→67%
+      (sync_local_save short/empty timestamp + mp4-status-not-Done + exception
+      swallow + image-write; sync_smb_upload/cleanup early-exits + FTP-delegation
+      + session-failure; sync_smb_disk_check all 6 branches; async_smb_disk_alert
+      service-not-found/empty/found/exception-fallback; _sync_ftp_upload
+      no-server/connect-fail/empty/short-ts/upload/exists-skip/quit-finally;
+      _sync_ftp_cleanup no-server/retention-0/connect-fail/empty-dir/
+      old-file-deleted-via-retrlines+MDTM/recent-file-not-deleted).
+      Sprint-F (2026-05-07):
+      2016→2074 tests across 70 files, 72%→75% total. camera.py 58%→88%
+      (_async_camera_image_impl REMOTE proxy 200/404/401+403/TimeoutError,
+      _async_rcp_thumbnail 7 branches, idle cloud snapshot cold/prefer_small/
+      stale/both-fail, event imageUrl last-resort SSRF-guard/401/no-events).
+      fcm.py 46%→75% (async_send_alert early-exits, step1 text MOVEMENT/TROUBLE
+      routing, step2 imageUrl retry loop 3-attempt, snapshot download/empty-body,
+      clip direct/poll/size-guard, mark_events_read gate, smb/local_save executor
+      gate, file cleanup alert_save_snapshots).
 
   # Gold
   devices: done

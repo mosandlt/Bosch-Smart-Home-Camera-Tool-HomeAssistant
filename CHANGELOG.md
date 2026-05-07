@@ -5,6 +5,35 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.9
+
+**Card v2.11.7** — overview card visual editor + wider tile default.
+
+### Card improvements
+
+- **Visual card editor for bosch-camera-overview-card.** The overview card now exposes a UI editor in the Lovelace card picker: a Columns dropdown (Auto / 1 / 2 / 3 / 4) and — when Auto is selected — a Breakpoint field that controls the min-width at which the grid switches from 1 to 2 columns. Previously only configurable via YAML.
+- **Default tile width increased.** `min_width` default changed from 360 px to 650 px (Auto mode). On a typical 1280 px-wide HA panel this keeps tiles full-width; set a lower value or switch to `columns: 2` to force a 2-column layout.
+
+### Bug fixes
+
+- **Fix: German translation placeholder mismatch on startup.** `de.json` had `{basis}/{Kamera}/{YYYY-MM-DD}` in `nvr_base_path` where HA's translation validator expected `{base}/{Camera}/{YYYY-MM-DD}` — logging `ERROR` on every HA startup. Fixed by aligning the German file. Regression test: `tests/test_translation_placeholders.py`.
+
+### Internal
+
+- Renamed 3 Python classes to drop the legacy `SHC` prefix: `BoschSHCCamera` → `BoschCamera`, `BoschSHCCameraConfigFlow` → `BoschCameraConfigFlow`, `BoschSHCCameraOptionsFlow` → `BoschCameraOptionsFlow`. Entity IDs and unique IDs unchanged — no user impact.
+
+## v11.0.8
+
+No card changes.
+
+### Improvements
+
+- **FCM-triggered local save replaces `enable_auto_download`.** Removes the polling-based auto-download toggle. Events are now saved to `download_path` immediately when an FCM push fires (same latency as SMB upload). The Media Browser local backend activates automatically when `download_path` is non-empty — no extra checkbox needed.
+
+### Bug fixes
+
+- **Fix: Media Browser showed empty dates.** `_download_one` omitted the camera-ID prefix in filenames, so `_FILE_RE` never matched and all dates appeared empty.
+
 ## v11.0.7
 
 **Card v2.11.6** — kill the WebRTC popup on cellular.
