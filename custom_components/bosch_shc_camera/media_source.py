@@ -174,6 +174,7 @@ class _SmbBackend:
         self.share = (opts.get("smb_share") or "").strip()
         self.username = (opts.get("smb_username") or "").strip()
         self.password = opts.get("smb_password") or ""
+        self.protocol = (opts.get("upload_protocol") or "smb").upper()
         base = (opts.get("smb_base_path") or "").strip().strip("/")
         self.base_parts: tuple[str, ...] = tuple(p for p in base.split("/") if p)
 
@@ -183,7 +184,9 @@ class _SmbBackend:
 
     @property
     def label(self) -> str:
-        return f"NAS \\\\{self.server}\\{self.share}"
+        base = "\\".join(self.base_parts)
+        path = f"\\{self.share}\\{base}" if base else f"\\{self.share}"
+        return f"{self.protocol}:\\\\{self.server}{path}"
 
     def _ensure_session(self) -> None:
         sessions = self.hass.data.setdefault(SMB_SESSION_KEY, set())
@@ -414,7 +417,7 @@ def _node(
 
 
 class BoschCameraMediaSource(MediaSource):
-    name = "Bosch SHC Camera"
+    name = "Bosch Camera"
 
     def __init__(self, hass: HomeAssistant) -> None:
         super().__init__(DOMAIN)

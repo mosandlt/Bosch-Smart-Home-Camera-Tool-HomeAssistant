@@ -612,36 +612,33 @@ Set **Low disk warning threshold (MB)** to receive an alert when the NAS runs lo
 
 ### Media Browser
 
-Once events are being saved — either to the local save folder or to a NAS via SMB upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; the integration auto-detects which backends have data.
+Once events are being saved — either to the local save folder or to a NAS via SMB/FTP upload — they appear under **Media → Bosch SHC Camera** in HA's built-in media browser. No extra setup needed; all configured backends are shown automatically.
 
 **To enable the local backend:**
 
 1. Settings → Devices & Services → **Bosch Smart Home Camera** → ⚙ **Configure** (NOT *Reconfigure* — that's for re-OAuth only).
 2. Scroll to the **Events & Storage** section.
-3. Enable **"Save events locally (snapshots + video clips)"**.
+3. Enable **"Save events locally"**.
 4. Set the **"Local save folder"** path, e.g. `/config/bosch_events` (pre-filled by default).
-5. **Submit**. From this point on, new events are saved to that folder each time an event is detected. The directory is created automatically.
+5. **Submit**. New events are saved to that folder automatically. The directory is created on first use.
 
 > **Note:** Local saving is **disabled by default** and must be explicitly enabled. Only events that arrive *after* enabling are saved — there is no bulk download of historical clips.
 
+**What the Media Browser shows**
+
+All configured backends appear side by side — no filter option needed:
+
+| Backend | When shown |
+|---------|-----------|
+| **Lokal** | `Local save folder` is set (even if local saving is currently off — already-saved files remain visible) |
+| **NAS** | `Upload to NAS` is enabled and server + share are configured (works with both SMB and FTP upload protocols) |
+| **Aufnahmen** (NVR) | `Mini-NVR` is enabled |
+
 **Tree shape**
-- *Local backend:* `Camera → Date → Event`
-- *NAS backend:* `Year → Month → Day → Event` (matches the on-disk layout, all cameras share a day folder)
+- *Local / NVR:* `Camera → Date → Event`
+- *NAS:* `Year → Month → Day → Event` (all cameras share a day folder)
 
-Each event title is `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garten)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. macOS resource-fork files (`._*`) are filtered out — relevant for FRITZ.NAS / Time Machine targets.
-
-When only one backend is configured the source-chooser is hidden and the tree opens straight at the meaningful content. With both backends enabled the entry root shows *Lokal* and *NAS \\server\share* as siblings.
-
-**Manual filter — `Media Browser source` option**
-
-Settings → Devices & Services → Bosch SHC Camera → Configure → **Quelle des Media Browsers**:
-
-| Value | Effect |
-|-------|--------|
-| Auto (default) | Show every backend that has data |
-| Nur Lokal | Hide the NAS even if SMB upload is active |
-| Nur NAS | Hide local files even if auto-download is active |
-| Deaktiviert | Hide the Media Browser entry entirely |
+Each event shows `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garten)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. If only a JPEG exists for an event (no video clip), the image is shown directly. macOS resource-fork files (`._*`) are filtered out.
 
 Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; path-traversal is blocked, only `image/jpeg` and `video/mp4` are returned. NAS files are streamed on demand via `smbprotocol` — no local cache, no HA disk usage.
 
@@ -1255,8 +1252,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.12** — see the GitHub release page for full notes:
-[**v11.0.12 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.12)
+Latest stable: **v11.0.13** — see the GitHub release page for full notes:
+[**v11.0.13 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.13)
 
 | | |
 |---|---|
