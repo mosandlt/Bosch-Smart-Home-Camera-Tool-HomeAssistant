@@ -117,7 +117,7 @@ class TestOptionsSectionsLayout:
         drop a section the strings.json relies on."""
         required = {
             "polling", "features", "stream", "fcm",
-            "events_storage", "nvr", "shc", "auth", "debug",
+            "events_storage", "nvr", "auth", "debug",
         }
         assert required <= set(OPTIONS_SECTIONS.keys())
 
