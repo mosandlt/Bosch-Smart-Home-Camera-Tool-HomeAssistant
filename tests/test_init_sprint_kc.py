@@ -257,7 +257,7 @@ class TestEventProcessing:
         cam_entry = _make_cam_entry(CAM_A)
 
         coord = _make_coord_full(
-            _last_events=0.0,    # force do_events=True
+            _last_events=float('-inf'),    # force do_events=True
             _cached_events={},
             _last_event_ids={CAM_A: "OLD-ID"},  # different from EVT-001 → new event
             _alert_sent_ids={},
@@ -361,7 +361,7 @@ class TestEventProcessing:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_entry = _make_cam_entry(CAM_A)
-        initial_last_events = 0.0
+        initial_last_events = float('-inf')
 
         coord = _make_coord_full(
             _last_events=initial_last_events,  # stale → do_events=True
@@ -592,7 +592,7 @@ class TestSlowTier:
         wifiinfo_data = {"signalStrength": -55, "ssid": "my-network"}
 
         coord = _make_coord_full(
-            _last_slow=0.0,           # stale → do_slow=True
+            _last_slow=float('-inf'),  # stale → do_slow=True
             _last_events=time_mod.monotonic(),   # recent → skip events
             _cached_events={CAM_A: []},
             _cached_status={CAM_A: "ONLINE"},
