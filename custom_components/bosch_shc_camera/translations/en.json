@@ -69,11 +69,11 @@
           "alert_save_snapshots": "Save alert images/videos locally",
           "alert_delete_after_send": "Delete files after sending",
           "mark_events_read": "Mark Bosch cloud events as read",
-          "high_quality_video": "High quality video (30 Mbps) — default for stream quality",
+          "high_quality_video": "High quality video (30 Mbps)",
           "stream_connection_type": "Stream connection type",
           "live_buffer_mode": "Player buffer profile (HLS)",
           "fcm_push_mode": "FCM Push Mode (auto / android / ios / polling)",
-          "audio_default_on": "Audio ON by default when starting stream",
+          "audio_default_on": "Audio on by default",
           "enable_intercom": "Intercom (two-way audio)",
           "enable_go2rtc": "go2rtc WebRTC (low-latency streaming ~2s)",
           "enable_smb_upload": "Upload to SMB/NAS (e.g. FRITZ!Box)",
@@ -93,8 +93,8 @@
           "nvr_smb_subpath": "NVR subfolder on NAS / FTP",
           "nvr_retention_days": "NVR retention (days)",
           "debug_logging": "Debug logging (verbose TLS proxy & stream logs)",
-          "force_relogin": "Force new browser login",
-          "migrate_to_oss_client": "Migrate to new OAuth client (oss_residential_app)"
+          "force_relogin": "Re-authenticate (browser login)",
+          "migrate_to_oss_client": "Switch to OSS OAuth client"
         },
         "data_description": {
           "scan_interval": "How often the integration fetches data from the Bosch cloud. Lower = faster, more API calls. Default: 60",
@@ -115,7 +115,7 @@
           "alert_notify_screenshot": "Services for step 2 — snapshot image. Empty = skip this step (no fallback). Mobile apps (mobile_app_xxx) receive the image inline; others as file attachment.",
           "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
           "alert_save_snapshots": "Keep downloaded event images and videos in www/bosch_alerts/ (inside the HA config dir). If OFF, files are deleted within seconds after sending.",
-          "alert_delete_after_send": "Remove local files after the notification service has received them. Only applies when 'Save locally' is OFF.",
+          "alert_delete_after_send": "Delete notification files from www/bosch_alerts/ after the notify service receives them. When OFF, files are kept for reference.",
           "mark_events_read": "When OFF (default), new motion/audio events stay flagged as unread in the Bosch app — even after HA processes them — so the app keeps highlighting them as new. Turn ON to make the integration mark events as read on the Bosch cloud after processing (the previous behaviour, useful when you treat HA as the primary client and don't want the app to show stale 'new event' badges).",
           "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity.",
           "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
