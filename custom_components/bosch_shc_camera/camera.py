@@ -84,13 +84,13 @@ async def async_setup_entry(
 
     coordinator = config_entry.runtime_data
     entities = [
-        BoschSHCCamera(coordinator, cam_id, config_entry)
+        BoschCamera(coordinator, cam_id, config_entry)
         for cam_id in coordinator.data
     ]
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschSHCCamera(CoordinatorEntity, Camera):
+class BoschCamera(CoordinatorEntity, Camera):
     """Represents a single Bosch Smart Home camera in Home Assistant.
 
     • Shows the latest motion-triggered JPEG snapshot (refreshed every scan_interval)

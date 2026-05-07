@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.6";
+const CARD_VERSION = "2.11.7";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -3986,7 +3986,7 @@ window.customCards.push({
 //                                 #   mirror of GET /v11/video_inputs.priority).
 //                                 #   Default false: alphabetic ordering.
 // ─────────────────────────────────────────────────────────────────────────────
-const OVERVIEW_VERSION = "1.1.0";
+const OVERVIEW_VERSION = "1.2.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
   constructor() {
@@ -4003,7 +4003,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     this._config = {
       online_offline_view: config.online_offline_view !== false,
       title:     config.title     || "",
-      min_width: config.min_width || "360px",
+      min_width: config.min_width || "650px",
       gap:       config.gap       || "12px",
       columns:   config.columns   ?? "auto",  // "auto" | 1 | 2 | 3 | 4
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
@@ -4285,8 +4285,74 @@ class BoschCameraOverviewCard extends HTMLElement {
   static getStubConfig() {
     return { online_offline_view: true, title: "Bosch Kameras" };
   }
+  static getConfigElement() {
+    return document.createElement("bosch-camera-overview-card-editor");
+  }
   getCardSize() { return Math.max(4, this._cards ? this._cards.size * 3 : 4); }
 }
+
+class BoschCameraOverviewCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    if (this.shadowRoot) this._render();
+  }
+  connectedCallback() { this._render(); }
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    const cfg = this._config || {};
+    // eslint-disable-next-line eqeqeq
+    const sel = v => (cfg.columns == v || (v === "auto" && (cfg.columns === "auto" || cfg.columns == null))) ? "selected" : "";
+    const isAuto = cfg.columns === "auto" || cfg.columns == null;
+    const minW = cfg.min_width || "650px";
+    const minWpx = parseInt(minW) || 650;
+    this.shadowRoot.innerHTML = `
+      <style>
+        .row{display:flex;flex-direction:column;gap:12px;padding:16px}
+        label{font-size:14px;color:var(--primary-text-color);display:flex;flex-direction:column;gap:4px}
+        select,input{padding:8px;border-radius:4px;border:1px solid var(--divider-color);
+          background:var(--card-background-color);color:var(--primary-text-color);font-size:14px}
+        .hint{font-size:12px;color:var(--secondary-text-color)}
+        [hidden]{display:none}
+      </style>
+      <div class="row">
+        <label>Spalten
+          <select name="columns">
+            <option value="auto" ${sel("auto")}>Auto (Breakpoint)</option>
+            <option value="1" ${sel(1)}>1 – volle Breite</option>
+            <option value="2" ${sel(2)}>2</option>
+            <option value="3" ${sel(3)}>3</option>
+            <option value="4" ${sel(4)}>4</option>
+          </select>
+        </label>
+        <label id="minw-row" ${isAuto ? "" : "hidden"}>Breakpoint – Mindestbreite pro Kachel (px)
+          <input type="number" name="min_width" value="${minWpx}" min="200" max="900" step="10" />
+          <span class="hint">Bei Auto: 1 Spalte unter, 2+ Spalten über diesem Wert. Standard: 650 px</span>
+        </label>
+        <label>Titel <small style="color:var(--secondary-text-color)">(optional)</small>
+          <input type="text" name="title" value="${cfg.title || ""}" placeholder="Bosch Kameras" />
+        </label>
+      </div>`;
+    const colSel = this.shadowRoot.querySelector('select[name="columns"]');
+    const minwRow = this.shadowRoot.getElementById("minw-row");
+    colSel.addEventListener("change", e => {
+      const v = e.target.value;
+      minwRow.hidden = v !== "auto";
+      this._fire({ ...this._config, columns: v === "auto" ? "auto" : Number(v) });
+    });
+    this.shadowRoot.querySelector('input[name="min_width"]').addEventListener("change", e => {
+      const px = Math.max(200, Math.min(900, Number(e.target.value) || 360));
+      this._fire({ ...this._config, min_width: `${px}px` });
+    });
+    this.shadowRoot.querySelector('input[name="title"]').addEventListener("change", e => {
+      this._fire({ ...this._config, title: e.target.value });
+    });
+  }
+  _fire(config) {
+    this._config = config;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+  }
+}
+customElements.define("bosch-camera-overview-card-editor", BoschCameraOverviewCardEditor);
 
 customElements.define("bosch-camera-overview-card", BoschCameraOverviewCard);
 

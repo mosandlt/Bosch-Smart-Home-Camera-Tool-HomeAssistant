@@ -80,16 +80,16 @@ def _make_entry(**overrides):
 
 
 def _make_camera(coord=None, entry=None, **camera_overrides):
-    """Build a BoschSHCCamera stub.
+    """Build a BoschCamera stub.
 
     Bypasses CoordinatorEntity / Camera __init__ so the entity is
     callable in pure-Python tests without the HA framework. We attach
     only the attributes the methods-under-test read.
     """
-    from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+    from custom_components.bosch_shc_camera.camera import BoschCamera
     coord = coord or _make_coord()
     entry = entry or _make_entry()
-    cam = BoschSHCCamera.__new__(BoschSHCCamera)
+    cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
     cam._cam_id = CAM_ID
     cam._entry = entry
@@ -177,7 +177,7 @@ class TestLifecycleHooks:
 
     @pytest.mark.asyncio
     async def test_added_to_hass_registers_with_coordinator(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         # Patch CoordinatorEntity's parent to be a no-op so we don't need
@@ -186,12 +186,12 @@ class TestLifecycleHooks:
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_added_to_hass",
             new=AsyncMock(),
         ):
-            await BoschSHCCamera.async_added_to_hass(cam)
+            await BoschCamera.async_added_to_hass(cam)
         assert coord._camera_entities[CAM_ID] is cam
 
     @pytest.mark.asyncio
     async def test_added_to_hass_schedules_image_refresh(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         # Make hass.async_create_task close the coroutine so it doesn't leak
@@ -206,12 +206,12 @@ class TestLifecycleHooks:
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_added_to_hass",
             new=AsyncMock(),
         ):
-            await BoschSHCCamera.async_added_to_hass(cam)
+            await BoschCamera.async_added_to_hass(cam)
         cam.hass.async_create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_will_remove_unregisters_from_coordinator(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         coord._camera_entities[CAM_ID] = cam
@@ -219,14 +219,14 @@ class TestLifecycleHooks:
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
             new=AsyncMock(),
         ):
-            await BoschSHCCamera.async_will_remove_from_hass(cam)
+            await BoschCamera.async_will_remove_from_hass(cam)
         assert CAM_ID not in coord._camera_entities
 
     @pytest.mark.asyncio
     async def test_will_remove_when_not_registered_no_crash(self):
         """User edge case — `async_will_remove_from_hass` may fire after
         a reload that already cleared the dict. Must not raise."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         # Ensure dict is empty
@@ -236,7 +236,7 @@ class TestLifecycleHooks:
             new=AsyncMock(),
         ):
             # Must not raise
-            await BoschSHCCamera.async_will_remove_from_hass(cam)
+            await BoschCamera.async_will_remove_from_hass(cam)
 
 
 # ── _handle_coordinator_update (153-171) ────────────────────────────────
@@ -271,20 +271,20 @@ class TestHandleCoordinatorUpdate:
         return tasks
 
     def test_streaming_to_idle_triggers_refresh(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()  # _live_connections empty → not streaming
         cam = _make_camera(coord=coord, _was_streaming=True)
         tasks = self._create_task_collector(cam)
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
         ):
-            BoschSHCCamera._handle_coordinator_update(cam)
+            BoschCamera._handle_coordinator_update(cam)
         assert len(tasks) == 1
         # _was_streaming flipped
         assert cam._was_streaming is False
 
     def test_idle_to_idle_within_interval_no_refresh(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(
             coord=coord,
@@ -295,11 +295,11 @@ class TestHandleCoordinatorUpdate:
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
         ):
-            BoschSHCCamera._handle_coordinator_update(cam)
+            BoschCamera._handle_coordinator_update(cam)
         assert tasks == []
 
     def test_idle_to_idle_after_interval_triggers_refresh(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(
             coord=coord,
@@ -310,25 +310,25 @@ class TestHandleCoordinatorUpdate:
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
         ):
-            BoschSHCCamera._handle_coordinator_update(cam)
+            BoschCamera._handle_coordinator_update(cam)
         assert len(tasks) == 1
 
     def test_streaming_no_action(self):
         """Was streaming, still streaming → no refresh, no transition."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord(_live_connections={CAM_ID: {}})
         cam = _make_camera(coord=coord, _was_streaming=True)
         tasks = self._create_task_collector(cam)
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
         ):
-            BoschSHCCamera._handle_coordinator_update(cam)
+            BoschCamera._handle_coordinator_update(cam)
         assert tasks == []
         assert cam._was_streaming is True
 
     def test_custom_snapshot_interval_respected(self):
         """User-set `snapshot_interval` option must override default 1800s."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         entry = _make_entry(options={"snapshot_interval": 60})  # 1 min
         cam = _make_camera(
@@ -340,7 +340,7 @@ class TestHandleCoordinatorUpdate:
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
         ):
-            BoschSHCCamera._handle_coordinator_update(cam)
+            BoschCamera._handle_coordinator_update(cam)
         assert len(tasks) == 1
 
 
@@ -358,29 +358,29 @@ class TestAsyncTriggerImageRefresh:
         a stale event still). Pinned because the missing short-circuit
         in earlier versions caused dozens of empty PUT /connection
         round-trips per minute (2026-04-23 forum thread)."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord(_shc_state_cache={CAM_ID: {"privacy_mode": True}})
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_not_awaited()
         coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_force_refresh_flag_set_then_cleared(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         # finally clause clears the flag
         assert cam._force_image_refresh is False
 
     @pytest.mark.asyncio
     async def test_uses_live_snapshot_when_idle(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8live")
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
         assert cam._cached_image == b"\xff\xd8live"
         assert cam._last_image_fetch > 0
@@ -389,12 +389,12 @@ class TestAsyncTriggerImageRefresh:
     @pytest.mark.asyncio
     async def test_falls_back_to_local_when_remote_returns_none(self):
         """REMOTE snap.jpg may 401 on CAMERA_360 — try LOCAL Digest path."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=b"\xff\xd8local")
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
         coord.async_fetch_live_snapshot_local.assert_awaited_once_with(CAM_ID)
         assert cam._cached_image == b"\xff\xd8local"
@@ -405,13 +405,13 @@ class TestAsyncTriggerImageRefresh:
         fresh events as a last resort. Bosch sometimes returns a 0-byte
         snap.jpg right after a privacy-mode flip; the fresh event grab
         is the safety net."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=b"\xff\xd8event")
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_fresh_event_snapshot.assert_awaited_once_with(CAM_ID)
         assert cam._cached_image == b"\xff\xd8event"
 
@@ -420,10 +420,10 @@ class TestAsyncTriggerImageRefresh:
         """Opening PUT /connection while a stream is live tears down
         the active RTSP session. Skip both live paths when streaming;
         only the quick-seed (event) path runs."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord(_live_connections={CAM_ID: {}})  # → is_streaming True
         cam = _make_camera(coord=coord)
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_not_awaited()
         coord.async_fetch_live_snapshot_local.assert_not_awaited()
         # And NOT the fresh-event fallback either (line 228 check)
@@ -434,14 +434,14 @@ class TestAsyncTriggerImageRefresh:
         """First-mount path: _cached_image is None (haven't seeded the
         placeholder yet via __init__). Use async_camera_image to grab
         a quick event snapshot so the card has something within 1 s."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=None)
         cam = _make_camera(coord=coord, _cached_image=None)
         cam.async_camera_image = AsyncMock(return_value=b"\xff\xd8seed")
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         cam.async_camera_image.assert_awaited_once()
         assert cam._cached_image == b"\xff\xd8seed"
 
@@ -451,12 +451,12 @@ class TestAsyncTriggerImageRefresh:
         blank state otherwise. Pinned because earlier versions surfaced
         these as red toasts on every coordinator tick when the WAN was
         down."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(side_effect=RuntimeError("oops"))
         cam = _make_camera(coord=coord)
         # Must NOT raise
-        await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         # And the flag was still cleared (finally)
         assert cam._force_image_refresh is False
 
@@ -464,20 +464,20 @@ class TestAsyncTriggerImageRefresh:
     async def test_delay_zero_skips_sleep(self):
         """delay=0 must not call asyncio.sleep — pin so a refactor can't
         accidentally add a 0-second sleep that schedules a context switch."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
-            await BoschSHCCamera._async_trigger_image_refresh(cam, delay=0)
+            await BoschCamera._async_trigger_image_refresh(cam, delay=0)
             sleep.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_delay_nonzero_sleeps(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
-            await BoschSHCCamera._async_trigger_image_refresh(cam, delay=2)
+            await BoschCamera._async_trigger_image_refresh(cam, delay=2)
             sleep.assert_awaited_once_with(2)
 
 
@@ -493,7 +493,7 @@ class TestMotionDetectionToggle:
 
     @pytest.mark.asyncio
     async def test_enable_sends_enabled_true(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.motion_settings = lambda cid: {
             "enabled": False, "motionAlarmConfiguration": "MEDIUM",
@@ -501,7 +501,7 @@ class TestMotionDetectionToggle:
         cam = _make_camera(coord=coord)
         # Make hass.async_create_task close the coro to avoid leak warnings
         cam.hass.async_create_task = MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1])
-        await BoschSHCCamera.async_enable_motion_detection(cam)
+        await BoschCamera.async_enable_motion_detection(cam)
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID, "motion",
             {"enabled": True, "motionAlarmConfiguration": "MEDIUM"},
@@ -509,14 +509,14 @@ class TestMotionDetectionToggle:
 
     @pytest.mark.asyncio
     async def test_disable_sends_enabled_false_keeps_sensitivity(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.motion_settings = lambda cid: {
             "enabled": True, "motionAlarmConfiguration": "LOW",
         }
         cam = _make_camera(coord=coord)
         cam.hass.async_create_task = MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1])
-        await BoschSHCCamera.async_disable_motion_detection(cam)
+        await BoschCamera.async_disable_motion_detection(cam)
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID, "motion",
             {"enabled": False, "motionAlarmConfiguration": "LOW"},
@@ -526,12 +526,12 @@ class TestMotionDetectionToggle:
     async def test_enable_defaults_to_high_when_no_settings(self):
         """When motion_settings returns empty (cam not yet refreshed),
         default sensitivity to HIGH so the PUT doesn't drop the field."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.motion_settings = lambda cid: {}
         cam = _make_camera(coord=coord)
         cam.hass.async_create_task = MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1])
-        await BoschSHCCamera.async_enable_motion_detection(cam)
+        await BoschCamera.async_enable_motion_detection(cam)
         payload = coord.async_put_camera.await_args[0][2]
         assert payload["motionAlarmConfiguration"] == "HIGH"
         assert payload["enabled"] is True
@@ -540,11 +540,11 @@ class TestMotionDetectionToggle:
     async def test_enable_triggers_coordinator_refresh(self):
         """After PUT, fire a coordinator refresh in background so the
         `motion_detection_enabled` property reflects the new state."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         cam.hass.async_create_task = MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1])
-        await BoschSHCCamera.async_enable_motion_detection(cam)
+        await BoschCamera.async_enable_motion_detection(cam)
         cam.hass.async_create_task.assert_called_once()
 
 
@@ -558,18 +558,18 @@ class TestStreamSourceEdgeCases:
     async def test_returns_none_when_url_missing(self):
         """Live conn entry exists but has no rtsps/rtsp URL — return None.
         Edge case during the connect-handshake window."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord(_live_connections={CAM_ID: {"_connection_type": "LOCAL"}})
         coord._audio_enabled = {}
         cam = _make_camera(coord=coord)
-        url = await BoschSHCCamera.stream_source(cam)
+        url = await BoschCamera.stream_source(cam)
         assert url is None
 
     @pytest.mark.asyncio
     async def test_falls_back_from_rtsps_to_rtsp(self):
         """Some legacy code paths set `rtspUrl` (no s); stream_source
         accepts either. Pin so a refactor doesn't drop the fallback."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord(_live_connections={
             CAM_ID: {
                 "_connection_type": "LOCAL",
@@ -578,7 +578,7 @@ class TestStreamSourceEdgeCases:
         })
         coord._audio_enabled = {CAM_ID: True}
         cam = _make_camera(coord=coord)
-        url = await BoschSHCCamera.stream_source(cam)
+        url = await BoschCamera.stream_source(cam)
         assert url and "127.0.0.1:5000" in url
 
 
@@ -590,10 +590,10 @@ class TestIsRecording:
     level (Mini-NVR has its own switch entity). Pin to False."""
 
     def test_returns_false(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        assert BoschSHCCamera.is_recording.fget(cam) is False
+        assert BoschCamera.is_recording.fget(cam) is False
 
 
 # ── _token property (319-321) ────────────────────────────────────────────
@@ -601,18 +601,18 @@ class TestIsRecording:
 
 class TestTokenProperty:
     def test_returns_bearer_token_from_entry_data(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         entry = _make_entry(data={"bearer_token": "TOK-X"})
         cam = _make_camera(coord=coord, entry=entry)
-        assert BoschSHCCamera._token.fget(cam) == "TOK-X"
+        assert BoschCamera._token.fget(cam) == "TOK-X"
 
     def test_returns_empty_when_no_token(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         entry = _make_entry(data={})
         cam = _make_camera(coord=coord, entry=entry)
-        assert BoschSHCCamera._token.fget(cam) == ""
+        assert BoschCamera._token.fget(cam) == ""
 
 
 # ── _cam_data property ───────────────────────────────────────────────────
@@ -620,21 +620,21 @@ class TestTokenProperty:
 
 class TestCamDataProperty:
     def test_returns_coordinator_cam_dict(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        out = BoschSHCCamera._cam_data.fget(cam)
+        out = BoschCamera._cam_data.fget(cam)
         assert out["info"]["title"] == "Terrasse"
 
     def test_returns_empty_dict_for_unknown_cam(self):
         """If the cam disappears from coordinator.data (e.g. after a
         device removal), _cam_data must return {} rather than KeyError
         — every attribute consumer trusts the {} contract."""
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
+        from custom_components.bosch_shc_camera.camera import BoschCamera
         coord = _make_coord()
         coord.data = {}  # cam not in data
         cam = _make_camera(coord=coord)
-        assert BoschSHCCamera._cam_data.fget(cam) == {}
+        assert BoschCamera._cam_data.fget(cam) == {}
 
 
 # ── _PLACEHOLDER_JPEG class constant ─────────────────────────────────────
@@ -646,8 +646,8 @@ class TestPlaceholderJpeg:
     user sees a broken-image icon."""
 
     def test_placeholder_is_valid_jpeg(self):
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
-        ph = BoschSHCCamera._PLACEHOLDER_JPEG
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        ph = BoschCamera._PLACEHOLDER_JPEG
         assert ph.startswith(b"\xff\xd8")  # JPEG SOI
         assert ph.endswith(b"\xff\xd9")    # JPEG EOI
         # Reasonable size — not a multi-MB photo by accident
@@ -659,6 +659,6 @@ class TestPlaceholderJpeg:
         consumer that hits PIL)."""
         from PIL import Image
         from io import BytesIO
-        from custom_components.bosch_shc_camera.camera import BoschSHCCamera
-        img = Image.open(BytesIO(BoschSHCCamera._PLACEHOLDER_JPEG))
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        img = Image.open(BytesIO(BoschCamera._PLACEHOLDER_JPEG))
         assert img.size == (1, 1)
