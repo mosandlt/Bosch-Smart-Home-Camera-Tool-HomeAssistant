@@ -82,8 +82,8 @@ def _smb_upload_coord():
         "smb_username": "user",
         "smb_password": "pass",
         "smb_base_path": "Bosch",
-        "smb_folder_pattern": "{year}/{month}/{day}",
-        "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+        "folder_pattern": "{year}/{month}/{day}",
+        "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     })
 
 
@@ -479,8 +479,8 @@ class TestFtpSnapshotNon200:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -523,8 +523,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -551,8 +551,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -580,8 +580,8 @@ class TestFtpClipUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()
@@ -934,8 +934,8 @@ class TestFtpSafeUrlGuard:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()

@@ -61,8 +61,8 @@ DEFAULT_OPTIONS = {
     "smb_username": "",
     "smb_password": "",
     "smb_base_path": "Bosch-Kameras",
-    "smb_folder_pattern": "{year}/{month}/{day}",
-    "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+    "folder_pattern": "{camera}/{year}/{month}/{day}",
+    "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     "smb_retention_days": 180,
     "smb_disk_warn_mb": 5120,
     # ── Mini-NVR (continuous LAN-only recording) — Phase 1 MVP ──────────────

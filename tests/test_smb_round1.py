@@ -126,7 +126,7 @@ class TestSyncLocalSaveUncovered:
         with patch.dict(sys.modules, {"requests": fake_requests, "urllib3": MagicMock()}):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
-        written = list((tmp_path / "Terrasse").glob("*.jpg"))
+        written = list((tmp_path / "Terrasse").rglob("*.jpg"))
         assert len(written) == 1, "Image download must write one .jpg file"
 
 
@@ -420,8 +420,8 @@ class TestSyncFtpUpload:
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
         coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
                         "smb_password": "p", "smb_base_path": "Bosch",
-                        "smb_folder_pattern": "{year}/{month}",
-                        "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}"})
+                        "folder_pattern": "{year}/{month}",
+                        "file_pattern": "{camera}_{date}_{time}_{type}_{id}"})
 
         fake_ftp = MagicMock()
         fake_response = MagicMock()

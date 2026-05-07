@@ -386,7 +386,9 @@ def _hass_for_browse(tmp_path: Path, entry_id: str = "01ENT",
 
 def _seed_event(base: Path, camera: str, date: str,
                 t: str = "10-00-00") -> None:
-    cam_dir = base / camera
+    """Seed a single event jpg in the camera-first nested structure: camera/year/month/day/."""
+    year, month, day = date.split("-")
+    cam_dir = base / camera / year / month / day
     cam_dir.mkdir(parents=True, exist_ok=True)
     (cam_dir / f"{camera}_{date}_{t}_MOVEMENT_AB12CD34.jpg").write_bytes(b"x")
 
@@ -400,10 +402,11 @@ class TestBrowsePathAutoDetection:
     single_source mode.  Fixed by comparing against the actual backend kind.
     """
 
-    def test_camera_with_space_navigates_to_dates(self, tmp_path):
-        """Single source, camera name 'Meine Kamera' (with space) → dates listed.
+    def test_camera_with_space_navigates_to_years(self, tmp_path):
+        """Single source, camera name 'Meine Kamera' (with space) → years listed.
 
         Root context: Andreas74 (simon42 2026-05-07) reported empty subfolder.
+        Camera-first tree (default): camera level shows years.
         """
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
@@ -413,7 +416,7 @@ class TestBrowsePathAutoDetection:
         src = BoschCameraMediaSource(hass)
         out = src._browse("01ENT/Meine Kamera")
         assert len(out.children) == 1
-        assert out.children[0].title == "2026-05-07"
+        assert out.children[0].title == "2026"
 
     def test_camera_named_L_known_ambiguity(self, tmp_path):
         """KNOWN LIMITATION: camera named 'L' with local backend is ambiguous.
@@ -448,7 +451,7 @@ class TestBrowsePathAutoDetection:
             "and returns the camera list; 'L' is the camera name shown as a child."
         )
 
-    def test_camera_named_S_navigates_to_dates(self, tmp_path):
+    def test_camera_named_S_navigates_to_years(self, tmp_path):
         """Camera named 'S' must not be treated as SMB-source token."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
@@ -458,9 +461,9 @@ class TestBrowsePathAutoDetection:
         src = BoschCameraMediaSource(hass)
         out = src._browse("01ENT/S")
         assert len(out.children) == 1
-        assert out.children[0].title == "2026-05-07"
+        assert out.children[0].title == "2026"
 
-    def test_camera_named_N_navigates_to_dates(self, tmp_path):
+    def test_camera_named_N_navigates_to_years(self, tmp_path):
         """Camera named 'N' must not be treated as NVR-source token."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
@@ -470,15 +473,15 @@ class TestBrowsePathAutoDetection:
         src = BoschCameraMediaSource(hass)
         out = src._browse("01ENT/N")
         assert len(out.children) == 1
-        assert out.children[0].title == "2026-05-07"
+        assert out.children[0].title == "2026"
 
     def test_old_style_L_prefix_compatibility(self, tmp_path):
         """Old bookmark with 'L' prefix on single-source entry must still navigate.
 
-        When a user had multi-source and bookmarked '{entry_id}/L/Cam/date',
+        When a user had multi-source and bookmarked '{entry_id}/L/Cam',
         then removed SMB, single_source becomes True.  Identifier has 'L' at
         parts[1] which matches the actual backend kind → treated as source
-        token (backwards-compat path), rest = [cam, date] → correct tree.
+        token (backwards-compat path), rest = [cam] → camera-first year level.
         """
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
@@ -489,9 +492,9 @@ class TestBrowsePathAutoDetection:
         # Old multi-source identifier for the camera level: 01ENT/L/Terrasse
         out = src._browse("01ENT/L/Terrasse")
         assert len(out.children) == 1
-        assert out.children[0].title == "2026-05-07"
+        assert out.children[0].title == "2026"
 
-    def test_camera_with_umlaut_navigates_to_dates(self, tmp_path):
+    def test_camera_with_umlaut_navigates_to_years(self, tmp_path):
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
@@ -501,15 +504,15 @@ class TestBrowsePathAutoDetection:
         out = src._browse("01ENT/Küche")
         assert len(out.children) == 1
 
-    def test_camera_with_space_date_lists_events(self, tmp_path):
-        """Full path to date level with space in camera name returns events."""
+    def test_camera_with_space_day_lists_events(self, tmp_path):
+        """Full path to day level with space in camera name returns events."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
         _seed_event(tmp_path, "Bosch Terrasse", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
-        out = src._browse("01ENT/Bosch Terrasse/2026-05-07")
+        out = src._browse("01ENT/Bosch Terrasse/2026/05/07")
         assert len(out.children) == 1
         assert out.children[0].can_play is True
 
@@ -537,7 +540,7 @@ class TestBrowsePathAutoDetection:
         src = BoschCameraMediaSource(hass)
         out = src._browse("01ENT/Lounge")
         assert len(out.children) == 1
-        assert out.children[0].title == "2026-05-07"
+        assert out.children[0].title == "2026"  # camera-first: year level
 
     def test_multiple_cameras_with_spaces_sorted(self, tmp_path):
         """Multiple cameras with spaces are sorted case-insensitively."""
@@ -562,21 +565,21 @@ class TestBrowsePathAutoDetection:
         with pytest.raises((Exception,)):
             src._browse("UNKNOWN_ENTRY/Cam")
 
-    def test_camera_date_events_thumbnail_uses_space_in_url(self, tmp_path):
+    def test_camera_day_events_thumbnail_uses_space_in_url(self, tmp_path):
         """Thumbnail URL for events under a camera with a space must be set."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
         cam = "My Cam"
-        cam_dir = tmp_path / cam
-        cam_dir.mkdir()
+        cam_dir = tmp_path / cam / "2026" / "05" / "07"
+        cam_dir.mkdir(parents=True)
         # Write both jpg and mp4 to trigger thumbnail logic
         stem = f"{cam}_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
         (cam_dir / f"{stem}.jpg").write_bytes(b"x")
         (cam_dir / f"{stem}.mp4").write_bytes(b"x")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
-        out = src._browse("01ENT/My Cam/2026-05-07")
+        out = src._browse("01ENT/My Cam/2026/05/07")
         assert len(out.children) == 1
         event = out.children[0]
         # Thumbnail must be set for the jpg

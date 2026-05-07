@@ -134,7 +134,7 @@ class TestSyncLocalSave:
         resp.iter_content = lambda chunk_size: [b"FAKE"]
         with patch("requests.Session.get", return_value=resp):
             sync_local_save(coord, ev, "tok", "Innenbereich")
-        saved = list((tmp_path / "Innenbereich").glob("*"))
+        saved = list((tmp_path / "Innenbereich").rglob("*.*"))
         assert saved, "no files saved"
         for f in saved:
             assert _FILE_RE.match(f.name), f"filename {f.name!r} does not match _FILE_RE"
@@ -160,7 +160,7 @@ class TestSyncLocalSave:
         resp.iter_content = lambda chunk_size: [b"FAKE"]
         with patch("requests.Session.get", return_value=resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
-        saved = list((tmp_path / "Terrasse").glob("*.mp4"))
+        saved = list((tmp_path / "Terrasse").rglob("*.mp4"))
         assert saved == [], "MP4 must not be saved when clip status is not Done"
 
     def test_unsafe_url_not_fetched(self, tmp_path):
@@ -185,11 +185,11 @@ class TestSyncLocalSave:
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
-        cam_dir = tmp_path / "Terrasse"
-        cam_dir.mkdir()
-        # Pre-create the expected JPEG
+        # Pre-create the expected JPEG in the nested year/month/day folder
         stem = "Terrasse_2026-05-06_17-57-28_MOVEMENT_EE30D727"
-        (cam_dir / f"{stem}.jpg").write_bytes(b"existing")
+        nested_dir = tmp_path / "Terrasse" / "2026" / "05" / "06"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        (nested_dir / f"{stem}.jpg").write_bytes(b"existing")
         with patch("requests.Session.get") as mock_get:
             sync_local_save(coord, ev, "tok", "Terrasse")
             for call in mock_get.call_args_list:

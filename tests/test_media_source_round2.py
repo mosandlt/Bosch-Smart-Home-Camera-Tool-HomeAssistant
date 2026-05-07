@@ -78,9 +78,8 @@ class TestSyncLocalSaveDownload:
         sess = MagicMock()
         sess.get.return_value = _mock_response(200, b"JPEG")
         self._call(coord, _ev(videoClipUrl=None), sess)
-        files = list((tmp_path / "Terrasse").iterdir())
+        files = list((tmp_path / "Terrasse").rglob("*.jpg"))
         assert len(files) == 1
-        assert files[0].name.endswith(".jpg")
         assert files[0].read_bytes() == b"JPEG"
 
     def test_mp4_and_jpg_both_downloaded(self, tmp_path):
@@ -89,7 +88,7 @@ class TestSyncLocalSaveDownload:
         sess.get.return_value = _mock_response(200, b"DATA")
         self._call(coord, _ev(), sess)
         cam_dir = tmp_path / "Terrasse"
-        exts = {f.suffix for f in cam_dir.iterdir()}
+        exts = {f.suffix for f in cam_dir.rglob("*.*")}
         assert ".jpg" in exts
         assert ".mp4" in exts
 
@@ -99,7 +98,7 @@ class TestSyncLocalSaveDownload:
         sess.get.return_value = _mock_response(200, b"DATA")
         self._call(coord, _ev(videoClipUploadStatus="Pending"), sess)
         cam_dir = tmp_path / "Terrasse"
-        exts = {f.suffix for f in cam_dir.iterdir()}
+        exts = {f.suffix for f in cam_dir.rglob("*.*")}
         assert ".jpg" in exts
         assert ".mp4" not in exts
 
@@ -110,14 +109,14 @@ class TestSyncLocalSaveDownload:
         ev = _ev()
         del ev["videoClipUploadStatus"]
         self._call(coord, ev, sess)
-        exts = {f.suffix for f in (tmp_path / "Terrasse").iterdir()}
+        exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".mp4" not in exts
 
     def test_unsafe_url_skipped(self, tmp_path):
         coord = _coord(tmp_path)
         sess = MagicMock()
         self._call(coord, _ev(imageUrl="https://evil.example.com/x.jpg", videoClipUrl=None), sess)
-        assert not (tmp_path / "Terrasse").exists() or not list((tmp_path / "Terrasse").iterdir())
+        assert list((tmp_path / "Terrasse").rglob("*.*")) == []
         sess.get.assert_not_called()
 
     def test_missing_image_url_no_jpg(self, tmp_path):
@@ -125,7 +124,7 @@ class TestSyncLocalSaveDownload:
         sess = MagicMock()
         sess.get.return_value = _mock_response(200, b"DATA")
         self._call(coord, _ev(imageUrl=None), sess)
-        exts = {f.suffix for f in (tmp_path / "Terrasse").iterdir()}
+        exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".jpg" not in exts
 
     def test_http_non_200_no_file_written(self, tmp_path):
@@ -133,26 +132,27 @@ class TestSyncLocalSaveDownload:
         sess = MagicMock()
         sess.get.return_value = _mock_response(403)
         self._call(coord, _ev(videoClipUrl=None), sess)
-        assert not list((tmp_path / "Terrasse").iterdir())
+        assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
     def test_http_exception_does_not_crash(self, tmp_path):
         coord = _coord(tmp_path)
         sess = MagicMock()
         sess.get.side_effect = OSError("network gone")
         self._call(coord, _ev(videoClipUrl=None), sess)
-        assert not list((tmp_path / "Terrasse").iterdir())
+        assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
     def test_file_already_exists_skips_http(self, tmp_path):
         """If the file is already on disk, no HTTP request must be made."""
         coord = _coord(tmp_path)
-        cam_dir = tmp_path / "Terrasse"
-        cam_dir.mkdir()
         ev = _ev(videoClipUrl=None)
         ts = ev["timestamp"]
         date_str = ts[:10]
+        year, month, day = date_str.split("-")
         time_str = ts[11:19].replace(":", "-")
         stem = f"Terrasse_{date_str}_{time_str}_MOVEMENT_AABBCCDD"
-        (cam_dir / f"{stem}.jpg").write_bytes(b"OLD")
+        nested_dir = tmp_path / "Terrasse" / year / month / day
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        (nested_dir / f"{stem}.jpg").write_bytes(b"OLD")
         sess = MagicMock()
         self._call(coord, ev, sess)
         sess.get.assert_not_called()
@@ -163,7 +163,7 @@ class TestSyncLocalSaveDownload:
         sess = MagicMock()
         sess.get.return_value = _mock_response(200, b"X")
         self._call(coord, _ev(id=None, videoClipUrl=None), sess)
-        files = list((tmp_path / "Terrasse").iterdir())
+        files = list((tmp_path / "Terrasse").rglob("*.*"))
         assert len(files) == 1
         assert files[0].stem.endswith("_MOVEMENT_")
 
@@ -219,6 +219,18 @@ class TestSmbBackendProperties:
     def test_configured_false_when_no_share(self):
         assert self._make(smb_share="").configured is False
 
+    def test_camera_first_true_when_pattern_starts_with_camera(self):
+        b = self._make(folder_pattern="{camera}/{year}/{month}/{day}")
+        assert b.camera_first is True
+
+    def test_camera_first_false_when_pattern_starts_with_year(self):
+        b = self._make(folder_pattern="{year}/{month}/{day}")
+        assert b.camera_first is False
+
+    def test_camera_first_true_is_default(self):
+        b = self._make()  # no folder_pattern override
+        assert b.camera_first is True
+
     def test_label_contains_server_and_share(self):
         b = self._make()
         assert "nas.local" in b.label
@@ -260,7 +272,7 @@ def _dir_entry(name, is_dir=True, is_file=False):
 
 
 class TestSmbBackendScandir:
-    """Tests for list_years / list_months / list_days / list_events via mocked smbclient."""
+    """Tests for list_cameras / list_years / list_months / list_days / list_events via mocked smbclient."""
 
     def _make(self):
         from custom_components.bosch_shc_camera.media_source import _SmbBackend
@@ -271,26 +283,41 @@ class TestSmbBackendScandir:
             "smb_password": "p", "smb_base_path": "",
         })
 
+    def test_list_cameras_returns_dirs(self):
+        b = self._make()
+        entries = [_dir_entry("Terrasse"), _dir_entry("Kamera"), _dir_entry("Eingang")]
+        fake = _fake_smbclient(entries)
+        with patch.dict(sys.modules, {"smbclient": fake}):
+            cams = b.list_cameras()
+        assert cams == ["Eingang", "Kamera", "Terrasse"]
+
+    def test_list_cameras_skips_macos_junk(self):
+        b = self._make()
+        entries = [_dir_entry("Terrasse"), _dir_entry(".DS_Store")]
+        with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
+            cams = b.list_cameras()
+        assert ".DS_Store" not in cams
+
     def test_list_years_filters_non_year(self):
         b = self._make()
         entries = [_dir_entry("2025"), _dir_entry("2026"), _dir_entry("random")]
         fake = _fake_smbclient(entries)
         with patch.dict(sys.modules, {"smbclient": fake}):
-            years = b.list_years()
+            years = b.list_years("Terrasse")
         assert years == ["2026", "2025"]
 
     def test_list_years_skips_macos_junk(self):
         b = self._make()
         entries = [_dir_entry("2026"), _dir_entry(".DS_Store")]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            years = b.list_years()
+            years = b.list_years("Terrasse")
         assert ".DS_Store" not in years
 
     def test_list_months_filters_non_numeric(self):
         b = self._make()
         entries = [_dir_entry("05"), _dir_entry("12"), _dir_entry("junk")]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            months = b.list_months("2026")
+            months = b.list_months("Terrasse", "2026")
         assert "junk" not in months
         assert months == ["12", "05"]
 
@@ -298,7 +325,7 @@ class TestSmbBackendScandir:
         b = self._make()
         entries = [_dir_entry("03"), _dir_entry("22"), _dir_entry("07")]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            days = b.list_days("2026", "05")
+            days = b.list_days("Terrasse", "2026", "05")
         assert days == ["22", "07", "03"]
 
     def test_list_events_groups_jpg_and_mp4(self):
@@ -309,7 +336,7 @@ class TestSmbBackendScandir:
             _dir_entry(f"{stem}.mp4", is_dir=False, is_file=True),
         ]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            events = b.list_events("2026", "05", "07")
+            events = b.list_events("Terrasse", "2026", "05", "07")
         assert len(events) == 1
         preferred, image, parsed = events[0]
         assert preferred.endswith(".mp4")
@@ -319,7 +346,7 @@ class TestSmbBackendScandir:
         b = self._make()
         entries = [_dir_entry("not_a_valid_event.txt", is_dir=False, is_file=True)]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            events = b.list_events("2026", "05", "07")
+            events = b.list_events("Terrasse", "2026", "05", "07")
         assert events == []
 
     def test_list_events_image_only(self):
@@ -327,7 +354,7 @@ class TestSmbBackendScandir:
         stem = "Cam_2026-05-07_08-00-00_MOVEMENT_DEADBEEF"
         entries = [_dir_entry(f"{stem}.jpg", is_dir=False, is_file=True)]
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
-            events = b.list_events("2026", "05", "07")
+            events = b.list_events("Cam", "2026", "05", "07")
         assert len(events) == 1
         preferred, image, _ = events[0]
         assert preferred.endswith(".jpg")
@@ -349,21 +376,21 @@ class TestSmbBackendOpenFile:
         fake = _fake_smbclient()
         with patch.dict(sys.modules, {"smbclient": fake}):
             with pytest.raises(FileNotFoundError):
-                b.open_file("2026", "05", "07", "../secret.jpg")
+                b.open_file("Cam", "2026", "05", "07", "../secret.jpg")
 
     def test_backslash_in_filename_raises(self):
         b = self._make()
         fake = _fake_smbclient()
         with patch.dict(sys.modules, {"smbclient": fake}):
             with pytest.raises(FileNotFoundError):
-                b.open_file("2026", "05", "07", "a\\b.jpg")
+                b.open_file("Cam", "2026", "05", "07", "a\\b.jpg")
 
     def test_unparseable_filename_raises(self):
         b = self._make()
         fake = _fake_smbclient()
         with patch.dict(sys.modules, {"smbclient": fake}):
             with pytest.raises(FileNotFoundError):
-                b.open_file("2026", "05", "07", "not_valid_UNKNOWN.jpg")
+                b.open_file("Cam", "2026", "05", "07", "not_valid_UNKNOWN.jpg")
 
     def test_valid_filename_delegates_to_smbclient(self):
         b = self._make()
@@ -371,7 +398,7 @@ class TestSmbBackendOpenFile:
         fake_fobj = MagicMock()
         fake = _fake_smbclient(fobj=fake_fobj, stat_size=1234)
         with patch.dict(sys.modules, {"smbclient": fake}):
-            fobj, size = b.open_file("2026", "05", "07", f"{stem}.jpg")
+            fobj, size = b.open_file("Cam", "2026", "05", "07", f"{stem}.jpg")
         assert size == 1234
         assert fobj is fake_fobj
 
@@ -380,11 +407,12 @@ class TestSmbBackendOpenFile:
 # _browse_smb — tree navigation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _hass_smb(list_years=None, list_months=None, list_days=None, list_events=None):
+def _hass_smb(list_cameras=None, list_years=None, list_months=None, list_days=None, list_events=None):
     """Build a mock hass that returns a single SMB-backed source."""
     from custom_components.bosch_shc_camera.media_source import _SmbBackend, _Source
 
     backend = MagicMock(spec=_SmbBackend)
+    backend.list_cameras.return_value = list_cameras or []
     backend.list_years.return_value = list_years or []
     backend.list_months.return_value = list_months or []
     backend.list_days.return_value = list_days or []
@@ -415,13 +443,14 @@ def _hass_smb(list_years=None, list_months=None, list_days=None, list_events=Non
 
 class TestBrowseSmb:
 
-    def _browse(self, identifier, years=None, months=None, days=None, events=None):
+    def _browse(self, identifier, cameras=None, years=None, months=None, days=None, events=None):
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource, _Source, _SmbBackend,
         )
         from custom_components.bosch_shc_camera import media_source as ms
 
         backend = MagicMock(spec=_SmbBackend)
+        backend.list_cameras.return_value = cameras or []
         backend.list_years.return_value = years or []
         backend.list_months.return_value = months or []
         backend.list_days.return_value = days or []
@@ -436,27 +465,32 @@ class TestBrowseSmb:
         with patch.object(ms, "_enabled_sources", return_value=[(src, backend)]):
             return src_obj._browse(identifier)
 
-    def test_root_lists_years(self):
-        out = self._browse("", years=["2026", "2025"])
+    def test_root_lists_cameras(self):
+        out = self._browse("", cameras=["Terrasse", "Kamera"])
+        assert len(out.children) == 2
+        assert out.children[0].title == "Terrasse"
+
+    def test_camera_lists_years(self):
+        out = self._browse("01ENT/Terrasse", years=["2026", "2025"])
         assert len(out.children) == 2
         assert out.children[0].title == "2026"
 
-    def test_year_lists_months(self):
-        out = self._browse("01ENT/2026", months=["05", "04"])
+    def test_camera_year_lists_months(self):
+        out = self._browse("01ENT/Terrasse/2026", months=["05", "04"])
         assert len(out.children) == 2
-        assert out.children[0].title == "05"
+        assert "2026-05" in out.children[0].title
 
-    def test_year_month_lists_days(self):
-        out = self._browse("01ENT/2026/05", days=["22", "07"])
+    def test_camera_year_month_lists_days(self):
+        out = self._browse("01ENT/Terrasse/2026/05", days=["22", "07"])
         assert len(out.children) == 2
         assert "2026-05-22" in out.children[0].title
 
-    def test_year_month_day_lists_events(self):
+    def test_camera_year_month_day_lists_events(self):
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
         evs = [(f"{stem}.mp4", f"{stem}.jpg",
                 {"camera": "Terrasse", "date": "2026-05-07", "time": "10-00-00",
                  "etype": "MOVEMENT"})]
-        out = self._browse("01ENT/2026/05/07", events=evs)
+        out = self._browse("01ENT/Terrasse/2026/05/07", events=evs)
         assert len(out.children) == 1
         assert out.children[0].can_play is True
 
@@ -465,7 +499,7 @@ class TestBrowseSmb:
         evs = [(f"{stem}.mp4", f"{stem}.jpg",
                 {"camera": "Cam", "date": "2026-05-07", "time": "08-00-00",
                  "etype": "MOVEMENT"})]
-        out = self._browse("01ENT/2026/05/07", events=evs)
+        out = self._browse("01ENT/Cam/2026/05/07", events=evs)
         assert out.children[0].thumbnail is not None
 
     def test_event_no_thumbnail_when_image_none(self):
@@ -473,18 +507,56 @@ class TestBrowseSmb:
         evs = [(f"{stem}.mp4", None,
                 {"camera": "Cam", "date": "2026-05-07", "time": "08-00-00",
                  "etype": "MOVEMENT"})]
-        out = self._browse("01ENT/2026/05/07", events=evs)
+        out = self._browse("01ENT/Cam/2026/05/07", events=evs)
         assert out.children[0].thumbnail is None
 
     def test_too_deep_raises_unresolvable(self):
         from homeassistant.components.media_source.error import Unresolvable
         with pytest.raises(Unresolvable):
-            self._browse("01ENT/2026/05/07/file.mp4/extra")
+            self._browse("01ENT/Cam/2026/05/07/file.mp4/extra")
 
-    def test_single_source_skips_kind_token_for_year(self):
-        """Single SMB source: '01ENT/2026' directly navigates to months."""
-        out = self._browse("01ENT/2026", months=["05"])
-        assert out.children[0].title == "05"
+    def test_single_source_skips_kind_token_for_camera(self):
+        """Single SMB source: '01ENT/Terrasse' directly navigates to years."""
+        out = self._browse("01ENT/Terrasse", years=["2026"])
+        assert out.children[0].title == "2026"
+
+    def test_date_first_root_lists_years(self):
+        """When folder_pattern is date-first, root browse shows years."""
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource, _Source, _SmbBackend,
+        )
+        from custom_components.bosch_shc_camera import media_source as ms
+
+        backend = MagicMock(spec=_SmbBackend)
+        backend.camera_first = False  # date-first mode
+        backend.list_years.return_value = ["2026"]
+
+        src = _Source(entry_id="01ENT", kind="S", label="NAS")
+        hass = MagicMock()
+        hass.data = {}
+        src_obj = BoschCameraMediaSource(hass)
+        with patch.object(ms, "_enabled_sources", return_value=[(src, backend)]):
+            out = src_obj._browse("")
+        assert out.children[0].title == "2026"
+
+    def test_date_first_year_lists_months(self):
+        """Date-first: '01ENT/2026' → months."""
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource, _Source, _SmbBackend,
+        )
+        from custom_components.bosch_shc_camera import media_source as ms
+
+        backend = MagicMock(spec=_SmbBackend)
+        backend.camera_first = False
+        backend.list_months.return_value = ["05", "04"]
+
+        src = _Source(entry_id="01ENT", kind="S", label="NAS")
+        hass = MagicMock()
+        hass.data = {}
+        src_obj = BoschCameraMediaSource(hass)
+        with patch.object(ms, "_enabled_sources", return_value=[(src, backend)]):
+            out = src_obj._browse("01ENT/2026")
+        assert len(out.children) == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -601,15 +673,15 @@ class TestBrowseEntryRootDispatch:
         cameras = [c.title for c in out.children]
         assert "Terrasse" in cameras
 
-    def test_smb_single_source_root_shows_years(self):
-        """Single SMB source: root browse shows year folders."""
+    def test_smb_single_source_root_shows_cameras(self):
+        """Single SMB source: root browse shows camera folders (camera-first)."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource, _SmbBackend, _Source,
         )
         from custom_components.bosch_shc_camera import media_source as ms
 
         backend = MagicMock(spec=_SmbBackend)
-        backend.list_years.return_value = ["2026"]
+        backend.list_cameras.return_value = ["Terrasse"]
         src = _Source(entry_id="01ENT", kind="S", label="NAS")
 
         hass = MagicMock()
@@ -617,7 +689,7 @@ class TestBrowseEntryRootDispatch:
         obj = BoschCameraMediaSource(hass)
         with patch.object(ms, "_enabled_sources", return_value=[(src, backend)]):
             out = obj._browse("")
-        assert out.children[0].title == "2026"
+        assert out.children[0].title == "Terrasse"
 
     def test_multi_source_entry_root_shows_chooser(self, tmp_path):
         """Two backends on same entry: root shows source chooser."""

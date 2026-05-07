@@ -1252,8 +1252,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.13** — see the GitHub release page for full notes:
-[**v11.0.13 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.13)
+Latest stable: **v11.0.14** — see the GitHub release page for full notes:
+[**v11.0.14 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.14)
 
 | | |
 |---|---|

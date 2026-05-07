@@ -52,7 +52,9 @@ def _hass_with_local_dir(tmp_path: Path, options: dict | None = None):
 
 
 def _seed_local_event(base: Path, camera: str, date: str, time: str = "10-00-00"):
-    cam_dir = base / camera
+    """Seed a jpg+mp4 pair in the camera-first nested structure: camera/year/month/day/."""
+    year, month, day = date.split("-")
+    cam_dir = base / camera / year / month / day
     cam_dir.mkdir(parents=True, exist_ok=True)
     fname = f"{camera}_{date}_{time}_MOVEMENT_AB12.jpg"
     (cam_dir / fname).write_text("x")
@@ -100,7 +102,8 @@ class TestBrowseSingleEntrySingleBackend:
         assert "Terrasse" in titles
         assert "Garten" in titles
 
-    def test_camera_level_lists_dates(self, tmp_path):
+    def test_camera_level_lists_years(self, tmp_path):
+        """Camera-first tree (default): browsing a camera shows years, not flat dates."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
@@ -110,17 +113,17 @@ class TestBrowseSingleEntrySingleBackend:
         src = BoschCameraMediaSource(hass)
         out = src._browse("01TESTENTRY/Terrasse")
         titles = [c.title for c in out.children]
-        assert "2026-05-04" in titles
-        assert "2026-05-03" in titles
+        assert "2026" in titles
 
-    def test_date_level_lists_events(self, tmp_path):
+    def test_day_level_lists_events(self, tmp_path):
+        """Camera-first tree: browsing camera/year/month/day shows events."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
         mp4, jpg = _seed_local_event(tmp_path, "Terrasse", "2026-05-04", "10-30-00")
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
-        out = src._browse("01TESTENTRY/Terrasse/2026-05-04")
+        out = src._browse("01TESTENTRY/Terrasse/2026/05/04")
         # One event grouped from jpg+mp4 pair
         assert len(out.children) == 1
         ev = out.children[0]
@@ -132,6 +135,7 @@ class TestBrowseSingleEntrySingleBackend:
         assert ev.thumbnail and jpg in ev.thumbnail
 
     def test_too_deep_path_raises_unresolvable(self, tmp_path):
+        """Camera-first tree: 6 rest segments (beyond year/month/day/events) → Unresolvable."""
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
@@ -140,7 +144,7 @@ class TestBrowseSingleEntrySingleBackend:
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
-            src._browse("01TESTENTRY/Cam/2026-05-04/extra/extra2")
+            src._browse("01TESTENTRY/Cam/2026/05/04/extra/extra2")
 
 
 # ── Multiple entries → entry chooser ─────────────────────────────────────

@@ -43,14 +43,15 @@ def _safe_name(name: str) -> str:
 def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
     """Save a single event's image/clip to the local download_path on FCM trigger.
 
-    Filename format matches _FILE_RE in media_source.py:
-    {camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID8}.{ext}
+    Folder structure follows folder_pattern option (default: {camera}/{year}/{month}/{day}).
+    Filename follows file_pattern option (default: {camera}_{date}_{time}_{type}_{id}).
     """
     import requests
     import urllib3
     urllib3.disable_warnings()
 
-    download_path = (coordinator.options.get("download_path") or "").strip()
+    opts = coordinator.options
+    download_path = (opts.get("download_path") or "").strip()
     if not download_path:
         return
 
@@ -77,14 +78,28 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
             pass
 
     cam_safe = _safe_name(cam_name)
-    folder = os.path.join(download_path, cam_safe)
-    os.makedirs(folder, exist_ok=True)
-
     date_str = ts[:10]
     time_str = ts[11:19].replace(":", "-")
     etype = ev.get("eventType", "EVENT")
     ev_id = (ev.get("id") or "")[:8].upper()
-    stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
+
+    year, month, day = date_str[:4], date_str[5:7], date_str[8:10]
+    folder_pattern = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip().strip("/")
+    file_pattern = (opts.get("file_pattern") or "{camera}_{date}_{time}_{type}_{id}").strip()
+
+    try:
+        sub = folder_pattern.format(camera=cam_safe, year=year, month=month, day=day,
+                                    date=date_str, time=time_str, type=etype)
+    except (KeyError, ValueError):
+        sub = cam_safe
+
+    folder = os.path.join(download_path, sub.replace("/", os.sep))
+
+    try:
+        stem = file_pattern.format(camera=cam_safe, date=date_str, time=time_str,
+                                   type=etype, id=ev_id, year=year, month=month, day=day)
+    except (KeyError, ValueError):
+        stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
 
     session = requests.Session()
     session.headers["Authorization"] = f"Bearer {token}"
@@ -103,6 +118,7 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
         try:
             r = session.get(url, timeout=60, stream=True)
             if r.status_code == 200:
+                os.makedirs(folder, exist_ok=True)
                 with open(path, "wb") as f:
                     for chunk in r.iter_content(65536):
                         f.write(chunk)
@@ -116,7 +132,7 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
 def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     """Upload new event files to SMB or FTP.
 
-    Folder structure: {smb_base_path}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
+    Folder structure: {smb_base_path}/{camera}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
     Backend selected via ``upload_protocol`` option ("smb" default, or "ftp").
     """
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
@@ -133,8 +149,8 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
-    file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
+    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
     if not server or not share:
         return
@@ -477,8 +493,8 @@ def _sync_ftp_upload(coordinator, data: dict, token: str) -> None:
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
-    folder_pattern = opts.get("smb_folder_pattern", "{year}/{month}/{day}").strip()
-    file_pattern = opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
+    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
     if not server:
         return

@@ -172,8 +172,8 @@ class TestSyncSmbUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_smb = _fake_smb()
@@ -600,8 +600,8 @@ class TestSyncFtpUpload:
             "smb_username": "u",
             "smb_password": "p",
             "smb_base_path": "Bosch",
-            "smb_folder_pattern": "{year}/{month}/{day}",
-            "smb_file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            "folder_pattern": "{year}/{month}/{day}",
+            "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
 
         fake_ftp = MagicMock()

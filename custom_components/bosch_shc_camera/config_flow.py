@@ -70,10 +70,11 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
     ],
     "events_storage": [
+        "folder_pattern", "file_pattern",
         "enable_local_save", "download_path",
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
-        "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
+        "smb_base_path",
         "smb_retention_days", "smb_disk_warn_mb",
     ],
     "nvr": [
@@ -686,6 +687,14 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
         sectioned_schema[vol.Required("events_storage")] = section(
             vol.Schema({
                 vol.Optional(
+                    "folder_pattern",
+                    description={"suggested_value": opts.get("folder_pattern", "{camera}/{year}/{month}/{day}")},
+                ): str,
+                vol.Optional(
+                    "file_pattern",
+                    description={"suggested_value": opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}")},
+                ): str,
+                vol.Optional(
                     "enable_local_save",
                     default=bool(opts.get("enable_local_save", False)),
                 ): bool,
@@ -726,14 +735,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     "smb_base_path",
                     description={"suggested_value": opts.get("smb_base_path", "Bosch-Kameras")},
-                ): str,
-                vol.Optional(
-                    "smb_folder_pattern",
-                    description={"suggested_value": opts.get("smb_folder_pattern", "{year}/{month}/{day}")},
-                ): str,
-                vol.Optional(
-                    "smb_file_pattern",
-                    description={"suggested_value": opts.get("smb_file_pattern", "{camera}_{date}_{time}_{type}_{id}")},
                 ): str,
                 vol.Optional(
                     "smb_retention_days",

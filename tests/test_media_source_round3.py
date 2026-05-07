@@ -231,11 +231,12 @@ class TestBrowseDispatchSingleSource:
             ms._browse("unknown-entry/L/Terrasse")
 
     def test_too_deep_local_path_raises_unresolvable(self, tmp_path):
+        """Camera-first tree: 6 rest segments (past camera/year/month/day/events) → Unresolvable."""
         (tmp_path / "Terrasse").mkdir(parents=True, exist_ok=True)
         hass = _hass_stub("entry1", tmp_path=tmp_path)
         ms = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
-            ms._browse("entry1/L/Terrasse/2026-05-07/extra/segment")
+            ms._browse("entry1/L/Terrasse/2026/05/07/extra/segment")
 
 
 # ── async_get_media_source — view registration ────────────────────────────────
@@ -340,7 +341,7 @@ class TestMediaViewDispatch:
         request.headers = {}
         with pytest.raises(Exception):
             # S head — but only L backend is configured
-            await view.get(request, "entry1", "S/2026/05/07/file.mp4")
+            await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
 
 class TestServeLocal:
@@ -437,7 +438,7 @@ class TestServeSmb:
         request.headers = {}
         with pytest.raises(Exception):
             # year "XXXX" doesn't match _YEAR_RE → HTTPNotFound
-            await view.get(request, "entry1", "S/XXXX/05/07/file.mp4")
+            await view.get(request, "entry1", "S/Cam/XXXX/05/07/file.mp4")
 
     @pytest.mark.asyncio
     async def test_smb_file_not_found_raises_404(self):
@@ -453,7 +454,7 @@ class TestServeSmb:
         with patch(f"{MODULE}._find_source",
                    return_value=(MagicMock(kind="S"), backend_mock)):
             with pytest.raises(Exception):
-                await view.get(request, "entry1", "S/2026/05/07/file.mp4")
+                await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
     @pytest.mark.asyncio
     async def test_smb_os_error_raises_404(self):
@@ -469,7 +470,7 @@ class TestServeSmb:
         with patch(f"{MODULE}._find_source",
                    return_value=(MagicMock(kind="S"), backend_mock)):
             with pytest.raises(Exception):
-                await view.get(request, "entry1", "S/2026/05/07/file.mp4")
+                await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
     @pytest.mark.asyncio
     async def test_smb_range_request_206(self):
@@ -501,7 +502,7 @@ class TestServeSmb:
         with patch(f"{MODULE}._find_source",
                    return_value=(MagicMock(kind="S"), backend_mock)):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
-                resp = await view.get(request, "entry1", "S/2026/05/07/file.mp4")
+                resp = await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
         assert resp is real_response
 
     @pytest.mark.asyncio
@@ -534,5 +535,5 @@ class TestServeSmb:
         with patch(f"{MODULE}._find_source",
                    return_value=(MagicMock(kind="S"), backend_mock)):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
-                resp = await view.get(request, "entry1", "S/2026/05/07/file.mp4")
+                resp = await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
         assert resp is real_response
