@@ -72,9 +72,6 @@
           "high_quality_video": "Hohe Videoqualität (30 Mbps) — Standard für Stream-Qualität",
           "stream_connection_type": "Stream-Verbindungstyp",
           "live_buffer_mode": "Puffer-Verhalten (HLS Player)",
-          "shc_ip": "SHC IP-Adresse (optional)",
-          "shc_cert_path": "SHC Zertifikat-Pfad",
-          "shc_key_path": "SHC Schlüssel-Pfad",
           "fcm_push_mode": "FCM Push-Modus (auto / android / ios / polling)",
           "audio_default_on": "Audio standardmäßig AN beim Stream-Start",
           "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)",
@@ -123,9 +120,6 @@
           "high_quality_video": "Standard-Videoqualität für Live-Streams auf 30 Mbps setzen (statt Auto ~7.5 Mbps). Kann zur Laufzeit mit dem 'Video Quality'-Entity überschrieben werden.",
           "stream_connection_type": "Standard-Verbindungstyp für Live-Streams.\n• **auto** (empfohlen): Erst lokales Netzwerk (LAN) versuchen, bei Fehler automatisch auf Bosch Cloud-Proxy wechseln.\n• **local**: Nur direktes LAN — kein Internet nötig. Schnelleres RTSP, aber langsamere Snapshots (~6–10 s). Verbindung wird alle 50 s automatisch erneuert.\n• **remote**: Immer über Bosch Cloud-Proxy. Snapshots schneller (~0.4–1.9 s). Standard-Fallback wenn LAN nicht erreichbar.\nDer 'Stream Modus'-Select-Entity überschreibt diese Einstellung zur Laufzeit ohne Neustart.",
           "live_buffer_mode": "Wie viele Sekunden Video der Player zwischenpuffert, bevor er anzeigt. Mehr Puffer = weniger Ruckler, aber höhere Verzögerung zur Echtzeit.\n• **Latenz**: kleiner Puffer (~4-6 s Verzögerung). Auf Wi-Fi mit Schwankungen kann es ruckeln.\n• **Ausgewogen** (empfohlen): mittlerer Puffer (~8-10 s). Robust gegen typische Wi-Fi-Hänger.\n• **Stabil**: großer Puffer (~12-15 s). Kein Ruckeln auch bei schwachen Verbindungen, aber spürbar verzögert.\nÄndert nur die Card-Anzeige — keine Auswirkung auf Kamera, Aufnahme oder Snapshots.",
-          "shc_ip": "Smart Home Controller IP für lokale API-Funktionen (z.B. 192.168.1.100). Optional — die meisten Funktionen arbeiten ohne SHC.",
-          "shc_cert_path": "Pfad zur Client-Zertifikat PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_cert.pem",
-          "shc_key_path": "Pfad zur Client-Schlüssel PEM-Datei für SHC Mutual TLS. Beispiel: /config/shc_key.pem",
           "fcm_push_mode": "Push-Modus wählen. Auto versucht zuerst iOS, dann Android, dann Polling. Polling nutzt nur Standard-API-Aufrufe (kein FCM).",
           "audio_default_on": "Wenn AN: Audio-Schalter ist beim Start automatisch AN (Stream mit Ton). Wenn AUS: Audio startet stumm. Kann jederzeit im Dashboard umgeschaltet werden.",
           "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden.",
@@ -174,10 +168,6 @@
           "nvr": {
             "name": "Mini-NVR",
             "description": "Kontinuierliche LAN-Aufzeichnung. Optional Drain auf SMB oder FTP."
-          },
-          "shc": {
-            "name": "Smart Home Controller (optional)",
-            "description": "Lokale SHC-API für Kameralicht und Privacy-Modus ohne Cloud."
           },
           "auth": {
             "name": "Authentifizierung",

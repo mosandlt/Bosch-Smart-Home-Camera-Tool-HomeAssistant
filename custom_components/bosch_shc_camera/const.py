@@ -38,9 +38,6 @@ DEFAULT_OPTIONS = {
     # auto = show every backend that has data; local/smb = show only that one;
     # none = hide the provider entirely.
     "media_browser_source":   "auto",
-    "shc_ip":        "",
-    "shc_cert_path": "",
-    "shc_key_path":  "",
     "high_quality_video": False,
     "stream_connection_type": "auto",
     # HLS player buffer profile applied by the Lovelace card (hls.js).

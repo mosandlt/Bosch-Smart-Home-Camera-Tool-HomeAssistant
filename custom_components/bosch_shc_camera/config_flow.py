@@ -80,9 +80,6 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_nvr", "nvr_storage_target", "nvr_base_path",
         "nvr_smb_subpath", "nvr_retention_days",
     ],
-    "shc": [
-        "shc_ip", "shc_cert_path", "shc_key_path",
-    ],
     "auth": [
         "force_relogin", "migrate_to_oss_client",
     ],
@@ -791,24 +788,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     "nvr_retention_days",
                     default=int(opts.get("nvr_retention_days", 3)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-            }),
-            {"collapsed": True},
-        )
-
-        sectioned_schema[vol.Required("shc")] = section(
-            vol.Schema({
-                vol.Optional(
-                    "shc_ip",
-                    description={"suggested_value": opts.get("shc_ip", "")},
-                ): str,
-                vol.Optional(
-                    "shc_cert_path",
-                    description={"suggested_value": opts.get("shc_cert_path", "")},
-                ): str,
-                vol.Optional(
-                    "shc_key_path",
-                    description={"suggested_value": opts.get("shc_key_path", "")},
-                ): str,
             }),
             {"collapsed": True},
         )
