@@ -473,8 +473,13 @@ class BoschCameraMediaSource(MediaSource):
         # tree skips the chooser level), so parts[1] is already a tree segment
         # (year for SMB / camera for local / camera for NVR). Detect that case
         # and pick the source implicitly from the entry's only backend.
+        # Use the actual backend kind to distinguish a bare tree-segment from a
+        # source-kind token — this handles backwards-compatible bookmarks
+        # (old multi-source identifiers like "{entry_id}/L/cam") while also
+        # working correctly for camera names that coincidentally equal "L"/"S"/"N".
         single_source = len(by_entry[entry_id]) == 1
-        if single_source and parts[1] not in ("L", "S", "N"):
+        actual_kind = by_entry[entry_id][0][0].kind if single_source else None
+        if single_source and parts[1] != actual_kind:
             src, backend = by_entry[entry_id][0]
             rest = parts[1:]
         else:
