@@ -350,6 +350,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._stream_locks: dict[str, asyncio.Lock] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
+        # Epoch timestamp of coordinator start — used to reject event downloads for
+        # events that predate this session (e.g. queued FCM pushes arriving after reload).
+        self._download_started_at: float = time.time()
         # Alert-sent cache keyed by event_id → monotonic timestamp. Bosch can
         # send two FCM pushes ~10 s apart for the same MOVEMENT event (once at
         # detection start, again when the clip is finalized), and concurrent

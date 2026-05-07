@@ -5,6 +5,19 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.10
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: camera entity friendly_name was doubled.** With `_attr_has_entity_name = True`, HA concatenates device name and entity name. Because both were set to `"Bosch {title}"`, the result was `"Bosch Terrasse Bosch Terrasse"`. Fixed by setting entity name to `None` (camera is the device's main feature), so HA uses the device name directly as the friendly_name.
+- **Fix: Media Browser showed empty folders for files saved by v10.x.** Files downloaded by v10.x used the naming scheme `{date}_{time}_{type}_{id}.jpg` (no camera-name prefix). The filename parser required a camera-name prefix and silently skipped those files. Made the camera prefix optional so both old and new naming schemes are recognised. Reported by Andreas74 (simon42 forum).
+
+### Internal
+
+- Sprint G test coverage: `tls_proxy.py` daemon threads and `smb.py` FTP/cleanup paths (+137 tests, 2211 total).
+
 ## v11.0.9
 
 **Card v2.11.7** — overview card visual editor + wider tile default.

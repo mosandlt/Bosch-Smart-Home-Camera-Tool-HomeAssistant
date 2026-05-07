@@ -127,7 +127,8 @@ class BoschCamera(CoordinatorEntity, Camera):
         info = coordinator.data.get(cam_id, {}).get("info", {})
         title = info.get("title", cam_id)
 
-        self._attr_name      = f"Bosch {title}"
+        self._display_name   = f"Bosch {title}"
+        self._attr_name      = None  # entity is the main feature of the device; HA uses device name as friendly_name
         self._attr_unique_id = f"bosch_shc_cam_{cam_id.lower()}"
         self._model = info.get("hardwareVersion", "CAMERA")
         self._hw_version = info.get("hardwareVersion", "")
@@ -190,7 +191,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         # The frontend card shows the "Privat-Modus aktiv" placeholder instead.
         shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
         if shc.get("privacy_mode") is True:
-            _LOGGER.debug("%s: skipping image refresh — privacy mode is ON", self._attr_name)
+            _LOGGER.debug("%s: skipping image refresh — privacy mode is ON", self._display_name)
             return
 
         self._force_image_refresh = True
@@ -206,7 +207,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                     self._last_image_fetch = time.monotonic()
                     _LOGGER.debug(
                         "%s: quick event-snapshot seed — %d bytes",
-                        self._attr_name, len(quick),
+                        self._display_name, len(quick),
                     )
                     self.async_write_ha_state()
 
@@ -233,11 +234,11 @@ class BoschCamera(CoordinatorEntity, Camera):
                 self._last_image_fetch = time.monotonic()
                 _LOGGER.debug(
                     "%s: background refresh — %d bytes",
-                    self._attr_name, len(image),
+                    self._display_name, len(image),
                 )
                 self.async_write_ha_state()
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("%s: image refresh failed: %s", self._attr_name, err)
+            _LOGGER.debug("%s: image refresh failed: %s", self._display_name, err)
         finally:
             self._force_image_refresh = False
 
@@ -337,7 +338,7 @@ class BoschCamera(CoordinatorEntity, Camera):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers  = {(DOMAIN, self._cam_id)},
-            name         = self._attr_name,
+            name         = self._display_name,
             manufacturer = "Bosch",
             model        = self._model_name,
             sw_version   = self._fw,
@@ -496,7 +497,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         if raw and raw[:2] == b"\xff\xd8":
             _LOGGER.debug(
                 "%s: Using RCP thumbnail fallback (320×180) — %d bytes",
-                self._attr_name, len(raw),
+                self._display_name, len(raw),
             )
             return raw
 
@@ -507,17 +508,17 @@ class BoschCamera(CoordinatorEntity, Camera):
             if jpeg:
                 _LOGGER.debug(
                     "%s: Using RCP YUV422 fallback (320x180) — %d bytes → %d bytes JPEG",
-                    self._attr_name, len(raw), len(jpeg),
+                    self._display_name, len(raw), len(jpeg),
                 )
                 return jpeg
             _LOGGER.debug(
                 "%s: RCP YUV422 conversion failed (0x0c98, %d bytes)",
-                self._attr_name, len(raw),
+                self._display_name, len(raw),
             )
         elif raw:
             _LOGGER.debug(
                 "%s: RCP 0x0c98 unexpected size: %d bytes (expected 115200)",
-                self._attr_name, len(raw),
+                self._display_name, len(raw),
             )
         return None
 
@@ -545,7 +546,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug(
                 "%s: async_camera_image failed (%s) — serving placeholder",
-                self._attr_name, err,
+                self._display_name, err,
             )
             jpeg = self._cached_image or self._PLACEHOLDER_JPEG
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
@@ -632,7 +633,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                             self._last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: LOCAL live snap %d bytes",
-                                self._attr_name, len(data),
+                                self._display_name, len(data),
                             )
                             return self._cached_image
                     except asyncio.TimeoutError:
@@ -654,7 +655,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                                 self._last_image_fetch = time.monotonic()
                                 _LOGGER.debug(
                                     "%s: live proxy snapshot %d bytes",
-                                    self._attr_name, len(self._cached_image),
+                                    self._display_name, len(self._cached_image),
                                 )
                                 return self._cached_image
                         elif resp.status == 404:
@@ -663,7 +664,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                             age = time.monotonic() - opened_at
                             _LOGGER.debug(
                                 "%s: proxy snapshot 404 (age %.0fs) — proxy URL expired, refreshing connection",
-                                self._attr_name, age,
+                                self._display_name, age,
                             )
                             # Refresh the live connection so proxyUrl is current again
                             new_live = await self.coordinator.try_live_connection(self._cam_id)
@@ -691,7 +692,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                                 # which stops the card display ("disabled livestream").
                                 _LOGGER.debug(
                                     "%s: proxy snapshot %d (age %.0fs) — session expired, renewing connection",
-                                    self._attr_name, resp.status, age,
+                                    self._display_name, resp.status, age,
                                 )
                                 new_live = await self.coordinator.try_live_connection(self._cam_id)
                                 if new_live:
@@ -712,14 +713,14 @@ class BoschCamera(CoordinatorEntity, Camera):
                                 else:
                                     # Renewal failed — clear so is_streaming goes to False cleanly
                                     _LOGGER.debug(
-                                        "%s: session renewal failed — clearing", self._attr_name
+                                        "%s: session renewal failed — clearing", self._display_name
                                     )
                                     self.coordinator._live_connections.pop(self._cam_id, None)
                                     self.coordinator._live_opened_at.pop(self._cam_id, None)
                             else:
                                 _LOGGER.debug(
                                     "%s: proxy snapshot %d (age %.0fs) — keeping session (camera requires auth for snap.jpg)",
-                                    self._attr_name, resp.status, age,
+                                    self._display_name, resp.status, age,
                                 )
             except (asyncio.TimeoutError, aiohttp.ClientError):
                 # Any network/timeout error on the live proxy snap.jpg — try RCP thumbnail
@@ -756,7 +757,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                         self._last_image_fetch = now
                         _LOGGER.debug(
                             "%s: RCP thumbnail (first load, prefer_small) — %d bytes",
-                            self._attr_name, len(rcp_img),
+                            self._display_name, len(rcp_img),
                         )
                         return rcp_img
                 fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
@@ -768,7 +769,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                     self._last_image_fetch = now
                     _LOGGER.debug(
                         "%s: cloud proxy snapshot %d bytes (first load)",
-                        self._attr_name, len(fresh),
+                        self._display_name, len(fresh),
                     )
                     return fresh
             elif cache_stale:
@@ -780,7 +781,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                 # the same stale frame repeatedly.
                 _LOGGER.debug(
                     "%s: cache stale (%ds) — fetching fresh synchronously",
-                    self._attr_name, int(cache_age),
+                    self._display_name, int(cache_age),
                 )
                 if prefer_small:
                     rcp_img = await self._async_rcp_thumbnail()
@@ -800,7 +801,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                 self._last_image_fetch = now
                 _LOGGER.debug(
                     "%s: fresh fetch failed — returning cached (%ds old)",
-                    self._attr_name, int(cache_age),
+                    self._display_name, int(cache_age),
                 )
                 return self._cached_image
             else:
@@ -843,7 +844,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                         self._last_image_fetch = time.monotonic()
                         _LOGGER.info(
                             "%s: outage fallback — LOCAL snap.jpg %d bytes via cached Digest creds",
-                            self._attr_name, len(data),
+                            self._display_name, len(data),
                         )
                         return self._cached_image
                 except asyncio.TimeoutError:
@@ -872,7 +873,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                             self._last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: event snapshot %d bytes @ %s",
-                                self._attr_name,
+                                self._display_name,
                                 len(self._cached_image),
                                 ev.get("timestamp", "")[:19],
                             )
@@ -880,19 +881,19 @@ class BoschCamera(CoordinatorEntity, Camera):
                         elif resp.status == 401:
                             _LOGGER.warning(
                                 "%s: token expired — update via integration options",
-                                self._attr_name,
+                                self._display_name,
                             )
                             return self._cached_image
                         else:
                             # e.g. 403/404/410 = expired URL — try next event
                             _LOGGER.debug(
                                 "%s: event snapshot HTTP %d @ %s — trying next",
-                                self._attr_name,
+                                self._display_name,
                                 resp.status,
                                 ev.get("timestamp", "")[:19],
                             )
             except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug("%s: event snapshot error: %s", self._attr_name, err)
+                _LOGGER.debug("%s: event snapshot error: %s", self._display_name, err)
 
         # Return last cached image if all methods failed
         return self._cached_image or self._PLACEHOLDER_JPEG

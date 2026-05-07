@@ -5,6 +5,7 @@ All functions that previously used `self` now take a `coordinator` parameter.
 """
 from __future__ import annotations
 
+import calendar
 import logging
 import os
 import re
@@ -56,6 +57,24 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
     ts = ev.get("timestamp", "")
     if not ts or len(ts) < 19:
         return
+
+    # Reject events that predate this coordinator session (e.g. delayed/queued
+    # FCM pushes arriving after a reload). Parse ISO timestamp → epoch and
+    # compare against coordinator._download_started_at (set at __init__ time).
+    # Allow 60 s of slack for clock skew and network/processing delay.
+    started_at = getattr(coordinator, "_download_started_at", 0.0)
+    if started_at:
+        try:
+            struct = time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+            ev_epoch = calendar.timegm(struct)
+            if ev_epoch < started_at - 60:
+                _LOGGER.debug(
+                    "Local save skipped: event %s predates session start (%.0fs old at startup)",
+                    ts[:19], started_at - ev_epoch,
+                )
+                return
+        except Exception:
+            pass
 
     cam_safe = _safe_name(cam_name)
     folder = os.path.join(download_path, cam_safe)
