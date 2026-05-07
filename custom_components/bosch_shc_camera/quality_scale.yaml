@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      1430 tests across 64 files. Total line-coverage 52% with key resilience
+      2211 tests across 71 files. Total line-coverage 78% with key resilience
       paths fully covered: all entity platforms (camera, switch, sensor,
       binary_sensor, light, number, select, button, update), config flow,
       config flow helpers (PKCE, OAuth extraction), TLS proxy (digest auth,
@@ -53,8 +53,9 @@ rules:
       _refresh_local_creds_from_heartbeat URL rebuild + Stream.update_source
       + NVR sidecar restart + recover paths), SSRF guard (_is_safe_bosch_url
       lookalike + RFC1918 + http:// rejection), credential redaction.
-      Bug-finding test suite found 15 production bugs (12 prior + 3 fixed
-      in 2026-05 round). Round-1B + Round-2 (2026-05-06): __init__.py
+      Bug-finding test suite found 17 production bugs (12 prior + 3 fixed
+      in 2026-05 round + 2 in v11.0.10: camera friendly_name doubling,
+      media_source _FILE_RE rejecting v10.x filenames). Round-1B + Round-2 (2026-05-06): __init__.py
       18%→25% adding async-method coverage — FCM/SHC delegation wrappers
       (10+13 thin one-liners), async_put_camera 401-rescue path,
       _async_local_tcp_ping LAN reachability probe (5 branches),
@@ -177,6 +178,23 @@ rules:
       routing, step2 imageUrl retry loop 3-attempt, snapshot download/empty-body,
       clip direct/poll/size-guard, mark_events_read gate, smb/local_save executor
       gate, file cleanup alert_save_snapshots).
+      Sprint-G (2026-05-07):
+      2074→2211 tests across 71 files, 75%→78% total. tls_proxy.py 58%→93%
+      (_proxy_thread/_pipe closures via real socket pair: circuit-breaker
+      5-consecutive-failures closes server, <5 failures leave server alive,
+      pipe bidirectional data relay). smb.py 67%→85% (sync_smb_upload:
+      session-failure, HTTP-200 image write, mp4-status-not-Done skip,
+      short-ts skip, FTP delegation; _smb_makedirs: each-segment, existing-
+      dir-swallow, stat-success-skip; sync_smb_cleanup: FTP delegation,
+      no-server, zero-retention, import-error, walk+delete old/recent/
+      subdirectory; sync_smb_disk_check: FTP early-exit, no-statvfs,
+      below-threshold alert, above-threshold silent; _sync_ftp_upload:
+      no-server, login-fail, storbinary, mp4-status-skip, quit-finally;
+      _sync_ftp_cleanup: no-server, zero-retention, walk+delete old/recent/
+      recurse, quit-finally). v11.0.10 (2026-05-07): fixed camera friendly_name
+      doubling (_attr_name=None, _display_name for logging/device); fixed
+      media_source _FILE_RE making camera-name prefix optional for backward
+      compatibility with v10.x filenames.
 
   # Gold
   devices: done
