@@ -15,6 +15,8 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 [![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
 
 [![Community Forum][forum-shield]][forum]
+[![GitHub Stars][stars-shield]][stars]
+![AI-Assisted](https://img.shields.io/badge/AI--Assisted-blue?style=for-the-badge)
 
 [releases-shield]: https://img.shields.io/github/release/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
 [releases]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases
@@ -29,6 +31,8 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 [buymecoffee]: https://buymeacoffee.com/mosandlts
 [forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
 [forum]: https://community.home-assistant.io/
+[stars-shield]: https://img.shields.io/github/stars/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge&color=yellow
+[stars]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/stargazers
 
 ---
 
