@@ -20,6 +20,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements_test.txt
 
+      - name: Install system dependencies
+        run: sudo apt-get install -y libturbojpeg0-dev
+
       - name: Install test dependencies
         run: pip install -r requirements_test.txt
 
