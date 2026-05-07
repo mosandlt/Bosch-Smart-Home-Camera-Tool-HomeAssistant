@@ -49,11 +49,17 @@ class TestDefaultOptions:
 
         assert opts["alert_notify_service"] == "notify.signal"
         # Other defaults still present
+        assert opts["enable_local_save"] is False   # opt-in toggle, default off
         assert opts["download_path"] == "/config/bosch_events"
         assert opts["enable_fcm_push"] is False
 
+    def test_default_enable_local_save_is_false(self):
+        """Fresh install: enable_local_save must default to False (opt-in, not auto-enabled)."""
+        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        assert DEFAULT_OPTIONS.get("enable_local_save") is False
+
     def test_default_download_path_is_set(self):
-        """Fresh install: download_path must default to /config/bosch_events."""
+        """download_path has a default path but is inactive until enable_local_save=True."""
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
         assert DEFAULT_OPTIONS.get("download_path") == "/config/bosch_events"
 
@@ -105,12 +111,39 @@ def _resp_cm(status, body=b"", content_type="image/jpeg"):
 
 
 class TestFreshInstallAlertSave:
-    """With default options (no notify service, default download_path), events must be saved."""
+    """Fresh install (empty options): local save is opt-in — nothing fires without explicit path."""
 
     @pytest.mark.asyncio
-    async def test_local_save_fires_with_default_options(self):
-        """Regression v11.0.11: sync_local_save must be called on default (fresh install) options."""
+    async def test_no_local_save_on_default_options(self):
+        """Fresh install: download_path='' → async_send_alert must NOT queue sync_local_save."""
+        coord = _make_fresh_coord()  # download_path="" by default
+        coord.hass.async_add_executor_job = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Aussenkamera", "MOVEMENT",
+                            "2026-05-07T12:00:00.000Z",
+                            "", "", "",
+                        )
+
+        executor_calls = coord.hass.async_add_executor_job.call_args_list
+        assert not any(c.args[0] is mock_save for c in executor_calls), (
+            "sync_local_save must NOT fire on fresh install (download_path empty by default)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_local_save_fires_when_enabled_and_path_configured(self):
+        """sync_local_save must be called when user enables the toggle AND sets a path."""
         coord = _make_fresh_coord()
+        coord.options["enable_local_save"] = True   # user opted in
+        coord.options["download_path"] = "/config/bosch_events"
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -129,8 +162,7 @@ class TestFreshInstallAlertSave:
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
         assert any(c.args[0] is mock_save for c in executor_calls), (
-            "sync_local_save must be queued with default options (fresh install). "
-            f"executor calls: {[getattr(c.args[0], '__name__', repr(c.args[0])) for c in executor_calls]}"
+            "sync_local_save must fire when download_path is explicitly configured"
         )
 
     @pytest.mark.asyncio

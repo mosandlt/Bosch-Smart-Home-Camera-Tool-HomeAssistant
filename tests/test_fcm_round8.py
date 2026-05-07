@@ -907,6 +907,7 @@ class TestLocalSaveWithoutNotifyService:
     async def test_local_save_fires_without_notify_service(self):
         coord = _make_alert_coord(options={
             "alert_notify_service": "",
+            "enable_local_save": True,
             "download_path": "/tmp/bosch_test_events",
         })
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)

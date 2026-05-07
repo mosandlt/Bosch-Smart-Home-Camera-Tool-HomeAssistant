@@ -198,14 +198,15 @@ class TestIssue7_MarkEventsReadOptOut:
             / "custom_components" / "bosch_shc_camera"
         )
         strings = json.loads((comp / "strings.json").read_text())
-        # Recursively search for the key in the options data block
-        opts_data = (
+        # Labels now live under sections.<section>.data, not flat data.
+        sections = (
             strings.get("options", {})
             .get("step", {})
             .get("init", {})
-            .get("data", {})
+            .get("sections", {})
         )
-        assert "mark_events_read" in opts_data, (
+        all_labels = {k for sec in sections.values() for k in sec.get("data", {})}
+        assert "mark_events_read" in all_labels, (
             "The mark_events_read option must be exposed in the options "
             "flow UI — xDraGGi reported confusion about WHY events "
             "disappear from the Bosch app, fix is to make the toggle "

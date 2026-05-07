@@ -70,7 +70,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
     ],
     "events_storage": [
-        "download_path", "media_browser_source",
+        "enable_local_save", "download_path", "media_browser_source",
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
         "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
@@ -79,9 +79,6 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "nvr": [
         "enable_nvr", "nvr_storage_target", "nvr_base_path",
         "nvr_smb_subpath", "nvr_retention_days",
-    ],
-    "shc": [
-        "shc_ip", "shc_cert_path", "shc_key_path",
     ],
     "auth": [
         "force_relogin", "migrate_to_oss_client",
@@ -637,7 +634,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("enable_go2rtc", True)),
                 ): bool,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("fcm")] = section(
@@ -683,11 +680,15 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     description={"suggested_value": opts.get("alert_notify_system", "")},
                 ): str,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("events_storage")] = section(
             vol.Schema({
+                vol.Optional(
+                    "enable_local_save",
+                    default=bool(opts.get("enable_local_save", False)),
+                ): bool,
                 vol.Optional(
                     "download_path",
                     description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
@@ -755,7 +756,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("smb_disk_warn_mb", 5120)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("nvr")] = section(
@@ -788,25 +789,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("nvr_retention_days", 3)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }),
-            {"collapsed": True},
-        )
-
-        sectioned_schema[vol.Required("shc")] = section(
-            vol.Schema({
-                vol.Optional(
-                    "shc_ip",
-                    description={"suggested_value": opts.get("shc_ip", "")},
-                ): str,
-                vol.Optional(
-                    "shc_cert_path",
-                    description={"suggested_value": opts.get("shc_cert_path", "")},
-                ): str,
-                vol.Optional(
-                    "shc_key_path",
-                    description={"suggested_value": opts.get("shc_key_path", "")},
-                ): str,
-            }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         auth_inner: dict = {
@@ -816,7 +799,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
         sectioned_schema[vol.Required("auth")] = section(
             vol.Schema(auth_inner),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         sectioned_schema[vol.Required("debug")] = section(
@@ -826,7 +809,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("debug_logging", False)),
                 ): bool,
             }),
-            {"collapsed": True},
+            {"collapsed": False},
         )
 
         return self.async_show_form(

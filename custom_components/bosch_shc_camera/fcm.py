@@ -632,7 +632,7 @@ async def async_send_alert(
     # TROUBLE events use "system" — check that before bailing on missing information services.
     _is_trouble = event_type in ("TROUBLE_CONNECT", "TROUBLE_DISCONNECT")
     info_svcs = get_alert_services(coordinator, "information")
-    _has_local_save = bool(opts.get("download_path"))
+    _has_local_save = bool(opts.get("enable_local_save") and opts.get("download_path"))
     _has_smb_upload = bool(opts.get("enable_smb_upload") and opts.get("smb_server"))
     if not info_svcs and not _is_trouble and not _has_local_save and not _has_smb_upload:
         return  # Nothing to do (no notifications, no local save, no SMB upload)
