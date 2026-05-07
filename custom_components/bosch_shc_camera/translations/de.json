@@ -135,8 +135,7 @@
             "data": {
               "enable_local_save": "Events lokal speichern",
               "download_path": "Lokaler Speicher-Ordner",
-              "media_browser_source": "Quelle des Media Browsers",
-              "enable_smb_upload": "Upload auf SMB/NAS (z.B. FRITZ!Box)",
+              "enable_smb_upload": "Upload auf NAS (SMB oder FTP)",
               "upload_protocol": "Upload-Protokoll (SMB oder FTP)",
               "smb_server": "Server (IP oder Hostname)",
               "smb_share": "SMB-Freigabename",
@@ -151,7 +150,6 @@
             "data_description": {
               "enable_local_save": "Jedes neue Bewegungs-/Audio-Event als JPEG + MP4 im Ordner unten speichern. **Standardmäßig aus** — hier einschalten um lokales Speichern zu aktivieren.",
               "download_path": "Wo die Event-Dateien gespeichert werden. Beispiel: /config/bosch_events. Nur aktiv wenn 'Events lokal speichern' eingeschaltet ist.",
-              "media_browser_source": "Filtert, welches Backend der Media Browser unter **Bosch Camera** anzeigt.\n• **Auto** (Standard): zeigt jedes Backend mit Daten — lokaler Speicher-Ordner und/oder NAS-Upload.\n• **Nur Lokal**: blendet die NAS aus, auch wenn SMB-Upload aktiv ist.\n• **Nur NAS**: blendet lokale Dateien aus, auch wenn lokaler Speicher konfiguriert ist.\n• **Deaktiviert**: blendet den Media-Browser-Eintrag komplett aus.",
               "enable_smb_upload": "Ereignis-Snapshots und Videoclips auf eine SMB/CIFS- oder FTP-Netzwerkfreigabe hochladen (z.B. FRITZ!Box NAS, Synology, Windows-Freigabe). SMB benötigt das smbprotocol-Paket; FTP nutzt Python-Bordmittel.",
               "upload_protocol": "Übertragungsprotokoll. **SMB** (Standard) ist die typische Windows-/macOS-Freigabe. **FTP** ist auf vielen NAS-Geräten (z.B. FRITZ!Box) deutlich schneller bei vielen kleinen Files und umgeht den bekannten macOS-Sequoia-SMB-Hänger. Bei FTP wird der Freigabename-Eintrag ignoriert; der Basisordner ist relativ zum FTP-Wurzelverzeichnis (z.B. `FILES/Bosch-Kameras` statt nur `Bosch-Kameras`).",
               "smb_server": "IP-Adresse oder Hostname. Beispiel: 192.168.1.1 (FRITZ!Box), nas.local oder fritz.box",

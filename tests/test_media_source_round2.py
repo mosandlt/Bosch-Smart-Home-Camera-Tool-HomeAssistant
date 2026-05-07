@@ -506,25 +506,16 @@ class TestEnabledSourcesFilters:
         hass.data = {}
         return ms._enabled_sources(hass)
 
-    def test_none_filter_excludes_entry(self):
-        entry = self._entry({"media_browser_source": "none", "download_path": "/tmp"})
-        assert self._call(entry) == []
-
-    def test_smb_filter_excludes_local_backend(self, tmp_path):
-        """media_browser_source='smb' must not include the local backend."""
-        entry = self._entry({
-            "media_browser_source": "smb",
-            "download_path": str(tmp_path),
-            "enable_smb_upload": False,
-        })
+    def test_local_shown_when_download_path_set(self, tmp_path):
+        """Local backend always appears when download_path is configured."""
+        entry = self._entry({"download_path": str(tmp_path)})
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
-        assert "L" not in kinds
+        assert "L" in kinds
 
-    def test_local_filter_excludes_smb_backend(self, tmp_path):
-        """media_browser_source='local' must not include the SMB backend."""
+    def test_smb_shown_when_upload_enabled(self, tmp_path):
+        """SMB backend always appears when enable_smb_upload=True + credentials."""
         entry = self._entry({
-            "media_browser_source": "local",
             "download_path": str(tmp_path),
             "enable_smb_upload": True,
             "upload_protocol": "smb",
@@ -535,7 +526,22 @@ class TestEnabledSourcesFilters:
         })
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
-        assert "S" not in kinds
+        assert "S" in kinds
+
+    def test_smb_shown_when_ftp_protocol(self, tmp_path):
+        """SMB browser backend shown even when upload_protocol=ftp (v11.0.12 fix)."""
+        entry = self._entry({
+            "download_path": str(tmp_path),
+            "enable_smb_upload": True,
+            "upload_protocol": "ftp",
+            "smb_server": "nas",
+            "smb_share": "M",
+            "smb_username": "u",
+            "smb_password": "p",
+        })
+        sources = self._call(entry)
+        kinds = [src.kind for src, _ in sources]
+        assert "S" in kinds
 
     def test_nvr_backend_added_when_enabled(self, tmp_path):
         """enable_nvr=True with an existing dir must produce an NVR source."""

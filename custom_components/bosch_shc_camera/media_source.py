@@ -334,36 +334,32 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
             continue
         entry_id = entry.entry_id
         opts = coord.options
-        # Per-entry filter: auto / local / smb / none
-        filt = (opts.get("media_browser_source") or "auto").lower()
-        if filt == "none":
-            continue
-        show_local = filt in ("auto", "local")
-        show_smb = filt in ("auto", "smb")
-        if show_local and opts.get("download_path"):
+
+        # Local events — show whenever a download_path is configured (regardless
+        # of enable_local_save so already-saved files stay browseable even after
+        # the option is toggled off).
+        if opts.get("download_path"):
             base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
             try:
                 base_path = Path(base)
-                # Create the directory on first access so the Media Browser
-                # entry appears immediately after the user enables auto-download
-                # — even before the first event has been downloaded. Without
-                # this, the entry stayed hidden until the first poll cycle
-                # actually wrote a file (the v10.7.1 fix only set the default
-                # path; the directory still had to exist on disk).
                 if not base_path.exists():
                     base_path.mkdir(parents=True, exist_ok=True)
                 if base_path.is_dir():
                     out.append((_Source(entry_id, "L", "Lokal"), _LocalBackend(base)))
             except OSError:
                 pass
-        if show_smb and opts.get("enable_smb_upload") and (opts.get("upload_protocol") or "smb").lower() == "smb":
+
+        # NAS — show whenever SMB upload is enabled and credentials are present.
+        # Decoupled from upload_protocol: files uploaded via FTP land on the same
+        # NAS share and are readable via SMB, so we browse via SMB regardless of
+        # how they were uploaded.
+        if opts.get("enable_smb_upload"):
             smb = _SmbBackend(hass, opts)
             if smb.configured:
                 out.append((_Source(entry_id, "S", smb.label), smb))
-        # Mini-NVR continuous recording — always shown when enabled (filt
-        # `auto`/`local` only, NAS-only filter hides it). Backend lives on the
-        # local FS even though it might be a NAS bind-mount.
-        if show_local and opts.get("enable_nvr"):
+
+        # Mini-NVR continuous recording segments.
+        if opts.get("enable_nvr"):
             base = (opts.get("nvr_base_path") or "/config/bosch_nvr").strip()
             try:
                 base_path = Path(base)

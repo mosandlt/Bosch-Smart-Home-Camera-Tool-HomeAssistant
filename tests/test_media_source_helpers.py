@@ -172,11 +172,10 @@ class TestEnabledSources:
         assert _enabled_sources(hass) == []
 
     def test_download_path_set_adds_local_backend(self, tmp_path):
-        """download_path set → Local backend appears (no extra checkbox needed since v11.0.8)."""
+        """download_path set → Local backend always appears."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
             "download_path": str(tmp_path),
-            "media_browser_source": "auto",
         })])
         sources = _enabled_sources(hass)
         assert len(sources) == 1
@@ -185,11 +184,10 @@ class TestEnabledSources:
         assert src.label == "Lokal"
 
     def test_empty_download_path_hides_local_backend(self, tmp_path):
-        """v11.0.8: empty download_path → no local backend (disables FCM local save)."""
+        """Empty download_path → no local backend."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
             "download_path": "",
-            "media_browser_source": "auto",
         })])
         assert _enabled_sources(hass) == []
 
@@ -205,7 +203,6 @@ class TestEnabledSources:
         assert not new_dir.exists()
         hass = self._build_hass([self._entry(options={
             "download_path": str(new_dir),
-            "media_browser_source": "auto",
         })])
         sources = _enabled_sources(hass)
         assert new_dir.is_dir(), "download_path must be created on first browse"
@@ -217,54 +214,52 @@ class TestEnabledSources:
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
             "download_path": "/proc/cannot_create_here_12345",
-            "media_browser_source": "auto",
         })])
         result = _enabled_sources(hass)
         assert result == []
 
-    def test_media_browser_source_none_hides_entry(self, tmp_path):
-        """`media_browser_source=none` short-circuits — even with valid local data."""
+    def test_smb_shown_regardless_of_upload_protocol(self, tmp_path):
+        """SMB backend appears even when upload_protocol=ftp (FTP files land on
+        the same NAS share and are readable via SMB — v11.0.12 fix)."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
             "download_path": str(tmp_path),
-            "media_browser_source": "none",
+            "enable_smb_upload": True,
+            "upload_protocol": "ftp",
+            "smb_server": "192.168.1.1",
+            "smb_share": "FRITZ.NAS",
+            "smb_username": "user",
+            "smb_password": "pass",
         })])
-        assert _enabled_sources(hass) == []
+        sources = _enabled_sources(hass)
+        kinds = {s.kind for s, _ in sources}
+        assert "S" in kinds, "SMB backend must appear even when upload_protocol=ftp"
+        assert "L" in kinds, "Local backend must also appear"
 
-    def test_media_browser_source_local_filters_smb(self, tmp_path):
-        """`media_browser_source=local` hides SMB even if SMB upload is enabled."""
+    def test_both_local_and_smb_shown_when_configured(self, tmp_path):
+        """Local + SMB both shown simultaneously — no filter."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
         hass = self._build_hass([self._entry(options={
             "download_path": str(tmp_path),
             "enable_smb_upload": True,
             "smb_server": "192.168.1.1",
+            "smb_share": "FRITZ.NAS",
             "smb_username": "user",
             "smb_password": "pass",
-            "smb_share": "FRITZ.NAS",
-            "media_browser_source": "local",
+        })])
+        sources = _enabled_sources(hass)
+        kinds = {s.kind for s, _ in sources}
+        assert kinds == {"L", "S"}
+
+    def test_only_configured_sources_shown(self, tmp_path):
+        """When only download_path is set (no SMB), only local appears."""
+        from custom_components.bosch_shc_camera.media_source import _enabled_sources
+        hass = self._build_hass([self._entry(options={
+            "download_path": str(tmp_path),
         })])
         sources = _enabled_sources(hass)
         assert len(sources) == 1
         assert sources[0][0].kind == "L"
-
-    def test_media_browser_source_smb_filters_local(self, tmp_path):
-        """`media_browser_source=smb` hides Local even if download_path is set."""
-        from custom_components.bosch_shc_camera.media_source import _enabled_sources
-        hass = self._build_hass([self._entry(options={
-            "download_path": str(tmp_path),
-            "media_browser_source": "smb",
-        })])
-        assert _enabled_sources(hass) == []
-
-    def test_default_filter_is_auto(self, tmp_path):
-        """Missing `media_browser_source` option → default 'auto' shows everything."""
-        from custom_components.bosch_shc_camera.media_source import _enabled_sources
-        hass = self._build_hass([self._entry(options={
-            "download_path": str(tmp_path),
-            # NO media_browser_source key
-        })])
-        sources = _enabled_sources(hass)
-        assert len(sources) == 1
 
 
 # ── _format_event_title ─────────────────────────────────────────────────

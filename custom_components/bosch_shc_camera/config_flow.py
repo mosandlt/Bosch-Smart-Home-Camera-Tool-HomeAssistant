@@ -70,7 +70,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
     ],
     "events_storage": [
-        "enable_local_save", "download_path", "media_browser_source",
+        "enable_local_save", "download_path",
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
         "smb_base_path", "smb_folder_pattern", "smb_file_pattern",
@@ -634,7 +634,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("enable_go2rtc", True)),
                 ): bool,
             }),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         sectioned_schema[vol.Required("fcm")] = section(
@@ -680,7 +680,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     description={"suggested_value": opts.get("alert_notify_system", "")},
                 ): str,
             }),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         sectioned_schema[vol.Required("events_storage")] = section(
@@ -693,18 +693,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     "download_path",
                     description={"suggested_value": opts.get("download_path") or DEFAULT_OPTIONS.get("download_path", "")},
                 ): str,
-                vol.Optional(
-                    "media_browser_source",
-                    default=str(opts.get("media_browser_source", "auto")),
-                ): SelectSelector(SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value="auto",  label="Auto (alles Aktive anzeigen)"),
-                        SelectOptionDict(value="local", label="Nur Lokal (download_path)"),
-                        SelectOptionDict(value="smb",   label="Nur NAS (SMB-Upload)"),
-                        SelectOptionDict(value="none",  label="Provider deaktivieren"),
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
-                )),
                 vol.Optional(
                     "enable_smb_upload",
                     default=bool(opts.get("enable_smb_upload", False)),
@@ -756,7 +744,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("smb_disk_warn_mb", 5120)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
             }),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         sectioned_schema[vol.Required("nvr")] = section(
@@ -789,7 +777,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=int(opts.get("nvr_retention_days", 3)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         auth_inner: dict = {
@@ -799,7 +787,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
         sectioned_schema[vol.Required("auth")] = section(
             vol.Schema(auth_inner),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         sectioned_schema[vol.Required("debug")] = section(
@@ -809,7 +797,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     default=bool(opts.get("debug_logging", False)),
                 ): bool,
             }),
-            {"collapsed": False},
+            {"collapsed": True},
         )
 
         return self.async_show_form(

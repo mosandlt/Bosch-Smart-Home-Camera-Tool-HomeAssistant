@@ -135,8 +135,7 @@
             "data": {
               "enable_local_save": "Save events locally",
               "download_path": "Local save folder",
-              "media_browser_source": "Media Browser source",
-              "enable_smb_upload": "Upload to SMB/NAS (e.g. FRITZ!Box)",
+              "enable_smb_upload": "Upload to NAS (SMB or FTP)",
               "upload_protocol": "Upload protocol (SMB or FTP)",
               "smb_server": "Server (IP or hostname)",
               "smb_share": "SMB share name",
@@ -151,7 +150,6 @@
             "data_description": {
               "enable_local_save": "Save every new motion/audio event as JPEG + MP4 to the folder below. **Off by default** — turn on to activate local saving.",
               "download_path": "Where to store event files. Example: /config/bosch_events. Only active when 'Save events locally' is on.",
-              "media_browser_source": "Filters which backend the Media Browser entry **Bosch Camera** shows.\n• **Auto** (default): show every backend that has data — local save folder and/or NAS upload.\n• **Local only**: hide the NAS even if SMB upload is active.\n• **NAS only**: hide local files even if local save is configured.\n• **Disabled**: do not expose the Media Browser entry at all.",
               "enable_smb_upload": "Upload event snapshots and video clips to an SMB/CIFS or FTP network share (e.g. FRITZ!Box NAS, Synology, any Windows share). SMB requires the smbprotocol package; FTP uses Python's built-in ftplib.",
               "upload_protocol": "Transfer protocol. **SMB** (default) is the typical Windows/macOS share. **FTP** is significantly faster on many NAS devices (e.g. FRITZ!Box) for lots of small files and sidesteps the known macOS-Sequoia SMB-rename hang. With FTP the share-name field is ignored; the base path is relative to the FTP root (e.g. `FILES/Bosch-Kameras` instead of just `Bosch-Kameras`).",
               "smb_server": "IP address or hostname. Example: 192.168.1.1 (FRITZ!Box), nas.local or fritz.box",

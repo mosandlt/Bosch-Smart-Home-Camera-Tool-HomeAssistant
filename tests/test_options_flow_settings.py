@@ -327,15 +327,6 @@ class TestEventsStorageSection:
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"smb_retention_days": 3651})
 
-    @pytest.mark.asyncio
-    async def test_media_browser_source_values(self):
-        flow = BoschCameraOptionsFlow(_make_entry())
-        for val in ["auto", "local", "smb", "none"]:
-            data = await _submit(flow, {
-                "events_storage": {"media_browser_source": val},
-            })
-            assert data["media_browser_source"] == val
-
     def test_default_download_path(self):
         assert DEFAULT_OPTIONS["download_path"] == "/config/bosch_events"
 
@@ -495,7 +486,7 @@ class TestFullRoundTrip:
                     "alert_notify_screenshot": "", "alert_notify_video": "notify.video",
                     "alert_notify_system": ""},
             "events_storage": {"enable_local_save": True, "download_path": "/config/bosch_events",
-                                "media_browser_source": "local", "enable_smb_upload": False,
+                                "enable_smb_upload": False,
                                 "upload_protocol": "smb", "smb_server": "", "smb_share": "",
                                 "smb_username": "", "smb_password": "", "smb_base_path": "Bosch-Kameras",
                                 "smb_folder_pattern": "{year}/{month}/{day}",

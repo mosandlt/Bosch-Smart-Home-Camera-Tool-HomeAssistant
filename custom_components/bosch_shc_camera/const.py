@@ -34,10 +34,6 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_local_save":      False,
     "download_path":          "/config/bosch_events",
-    # Filter for the Media Browser provider (separate from upload/download).
-    # auto = show every backend that has data; local/smb = show only that one;
-    # none = hide the provider entirely.
-    "media_browser_source":   "auto",
     "high_quality_video": False,
     "stream_connection_type": "auto",
     # HLS player buffer profile applied by the Lovelace card (hls.js).
