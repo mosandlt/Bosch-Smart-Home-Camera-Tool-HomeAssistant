@@ -64,7 +64,6 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _last_slow=time_mod.monotonic(),      # recent → skip slow by default
         _last_smb_cleanup=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
-        _last_smb_disk_check=time_mod.monotonic(),
         _hw_version={cam_id: "HOME_Eyes_Outdoor"},
         _cached_status={cam_id: "ONLINE"},
         _cached_events={},

@@ -114,7 +114,7 @@
               "alert_notify_information": "Stufe 1 — Text-Benachrichtigung",
               "alert_notify_screenshot": "Stufe 2 — Snapshot-Bild",
               "alert_notify_video": "Stufe 3 — Videoclip",
-              "alert_notify_system": "System-Alerts (Token-Fehler, Speicherwarnung)"
+              "alert_notify_system": "System-Alerts (Token-Fehler)"
             },
             "data_description": {
               "enable_fcm_push": "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
@@ -144,8 +144,7 @@
               "smb_base_path": "Basisordner auf der Freigabe",
               "folder_pattern": "Unterordner-Muster",
               "file_pattern": "Dateiname-Muster",
-              "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)",
-              "smb_disk_warn_mb": "Speicherwarnung unter (MB, 0 = deaktiviert)"
+              "smb_retention_days": "Aufbewahrungsdauer (Tage, 0 = unbegrenzt)"
             },
             "data_description": {
               "enable_local_save": "Jedes neue Bewegungs-/Audio-Event als JPEG + MP4 im Ordner unten speichern. **Standardmäßig aus** — hier einschalten um lokales Speichern zu aktivieren.",
@@ -159,8 +158,7 @@
               "smb_base_path": "Basisordner auf der Freigabe. Standard: Bosch-Kameras",
               "folder_pattern": "Unterordner-Muster. Variablen: '{camera}', '{year}', '{month}', '{day}', '{type}'. Standard: '{camera}/{year}/{month}/{day}'",
               "file_pattern": "Dateiname-Muster (ohne Endung). Variablen: '{camera}', '{date}', '{time}', '{type}', '{id}', '{year}', '{month}', '{day}'. Standard: '{camera}_{date}_{time}_{type}_{id}'",
-              "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich.",
-              "smb_disk_warn_mb": "Alert senden wenn der freie Speicher auf dem NAS unter diesen Schwellwert fällt (in MB). 0 = deaktiviert. Standard: 5120 MB (5 GB). Nutzt konfigurierten Notify-Dienst, Fallback auf HA-Benachrichtigung."
+              "smb_retention_days": "Dateien auf dem NAS die älter als diese Anzahl Tage sind automatisch löschen. 0 = unbegrenzt behalten. Standard: 180 (6 Monate). Läuft einmal täglich."
             }
           },
           "nvr": {

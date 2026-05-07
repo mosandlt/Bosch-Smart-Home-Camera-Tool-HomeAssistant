@@ -119,7 +119,6 @@ def _make_coord_for_update_data(**overrides):
         _last_events=float("-inf"),
         _last_slow=float("-inf"),
         _last_smb_cleanup=time_mod.monotonic(),    # not stale by default
-        _last_smb_disk_check=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
         _fcm_lock=__import__("threading").Lock(),
         _fcm_running=False,

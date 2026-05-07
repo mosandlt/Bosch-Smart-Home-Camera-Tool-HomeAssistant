@@ -75,7 +75,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_smb_upload", "upload_protocol",
         "smb_server", "smb_share", "smb_username", "smb_password",
         "smb_base_path",
-        "smb_retention_days", "smb_disk_warn_mb",
+        "smb_retention_days",
     ],
     "nvr": [
         "enable_nvr", "nvr_storage_target", "nvr_base_path",
@@ -740,10 +740,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     "smb_retention_days",
                     default=int(opts.get("smb_retention_days", 180)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3650)),
-                vol.Optional(
-                    "smb_disk_warn_mb",
-                    default=int(opts.get("smb_disk_warn_mb", 5120)),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000000)),
             }),
             {"collapsed": True},
         )

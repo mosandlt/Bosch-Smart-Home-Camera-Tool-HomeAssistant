@@ -6,9 +6,6 @@ Target lines:
   - 257-271: smb_makedirs directory creation
   - 295: sync_smb_cleanup ftp protocol delegate
   - 307-333: sync_smb_cleanup walk_and_delete (old/recent files, recursion)
-  - 364: sync_smb_disk_check ftp early return
-  - 382: sync_smb_disk_check statvfs not present
-  - 385-387: sync_smb_disk_check statvfs below threshold fires alert
   - 541-653: _sync_ftp_upload / _sync_ftp_cleanup main loops
 
 All smbclient calls are mocked via patch.dict(sys.modules).
@@ -486,88 +483,6 @@ class TestSyncSmbCleanup:
         assert fake_smb.scandir.call_count >= 2, (
             "Directory entries must cause recursive scandir call"
         )
-
-
-# ── TestSyncSmbDiskCheck ─────────────────────────────────────────────────────
-
-
-class TestSyncSmbDiskCheck:
-    """Covers lines 364, 382, 385-387."""
-
-    def test_ftp_protocol_returns_early(self):
-        """upload_protocol='ftp' → return at line 364 (FTP has no statvfs)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-        coord = _coord({"upload_protocol": "ftp"})
-        sync_smb_disk_check(coord)  # must not raise
-
-    def test_statvfs_not_in_smbclient_returns_silently(self):
-        """smbclient without statvfs attr → line 382 return."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-            "smb_disk_warn_mb": 500,
-        })
-
-        # spec=[] means no attributes → hasattr(smbclient, "statvfs") is False
-        fake_smb = MagicMock(spec=[])
-        fake_smb.register_session = MagicMock()
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)  # must not raise; no alert fired
-
-        coord.hass.loop.call_soon_threadsafe.assert_not_called()
-
-    def test_statvfs_available_below_threshold_fires_alert(self):
-        """Free space < warn_mb → call_soon_threadsafe called to schedule alert (lines 385-387)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-            "smb_disk_warn_mb": 500,
-        })
-
-        fake_vfs = MagicMock()
-        fake_vfs.f_bavail = 100        # 100 blocks
-        fake_vfs.f_frsize = 1024 * 1024  # 1 MB per block → 100 MB free
-
-        fake_smb = MagicMock()
-        fake_smb.register_session = MagicMock()
-        fake_smb.statvfs.return_value = fake_vfs
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)
-
-        # Alert must have been scheduled via the HA event loop
-        coord.hass.loop.call_soon_threadsafe.assert_called_once()
-
-    def test_statvfs_above_threshold_no_alert(self):
-        """Free space >= warn_mb → no alert fired."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_disk_check
-
-        coord = _coord({
-            "smb_server": "192.168.1.1",
-            "smb_share": "SHARE",
-            "smb_disk_warn_mb": 500,
-        })
-
-        fake_vfs = MagicMock()
-        fake_vfs.f_bavail = 1000       # 1000 MB free (above 500 MB threshold)
-        fake_vfs.f_frsize = 1024 * 1024
-
-        fake_smb = MagicMock()
-        fake_smb.register_session = MagicMock()
-        fake_smb.statvfs.return_value = fake_vfs
-
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "smbclient._io": MagicMock()}):
-            with patch(f"{MODULE}.socket"):
-                sync_smb_disk_check(coord)
-
-        coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
 
 # ── TestSyncFtpUpload ────────────────────────────────────────────────────────

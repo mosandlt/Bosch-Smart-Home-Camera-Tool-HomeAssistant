@@ -60,8 +60,6 @@ from .fcm import (
 from .smb import (
     sync_smb_upload,
     sync_smb_cleanup,
-    sync_smb_disk_check,
-    async_smb_disk_alert,
 )
 from . import recorder as nvr_recorder
 from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy, stop_all_proxies
@@ -386,7 +384,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._firmware_cache: dict[str, dict] = {}
         # SMB maintenance — last run timestamps (monotonic)
         self._last_smb_cleanup: float = 0.0     # last daily cleanup run
-        self._last_smb_disk_check: float = 0.0  # last disk-free check
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False     # True after first alert sent
         self._token_fail_count: int = 0          # consecutive refresh failures
@@ -2147,23 +2144,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     self._run_nvr_cleanup_bg(),
                     "bosch_shc_camera_nvr_cleanup",
                 )
-
-            # ── 9. SMB disk-free check (hourly) ───────────────────────────────
-            _SMB_DISK_CHECK_INTERVAL = 3600  # once per hour
-            if (
-                opts.get("enable_smb_upload")
-                and opts.get("smb_server")
-                and opts.get("smb_disk_warn_mb", 500) > 0
-                and (time.monotonic() - self._last_smb_disk_check) >= _SMB_DISK_CHECK_INTERVAL
-            ):
-                self._last_smb_disk_check = time.monotonic()
-                try:
-                    await asyncio.wait_for(
-                        self.hass.async_add_executor_job(sync_smb_disk_check, self),
-                        timeout=30.0,
-                    )
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("SMB disk check timed out after 30s")
 
             # Quality-Scale Gold (stale-devices): remove devices for cameras that
             # no longer exist in the Bosch cloud account. Skip on the fast first

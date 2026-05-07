@@ -107,7 +107,6 @@ def _make_coord(**overrides):
         _last_events=float("-inf"),
         _last_slow=time.monotonic(),           # not stale → do_slow=False
         _last_smb_cleanup=time.monotonic(),    # far future → skip SMB cleanup
-        _last_smb_disk_check=time.monotonic(),
         _last_nvr_cleanup=time.monotonic(),
         # FCM
         _fcm_lock=threading.Lock(),

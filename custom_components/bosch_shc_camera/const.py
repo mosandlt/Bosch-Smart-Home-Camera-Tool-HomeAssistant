@@ -64,7 +64,6 @@ DEFAULT_OPTIONS = {
     "folder_pattern": "{camera}/{year}/{month}/{day}",
     "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
     "smb_retention_days": 180,
-    "smb_disk_warn_mb": 5120,
     # ── Mini-NVR (continuous LAN-only recording) — Phase 1 MVP ──────────────
     # Disabled by default; opt-in via integration options. See
     # `docs/mini-nvr-concept.md` for the full design.

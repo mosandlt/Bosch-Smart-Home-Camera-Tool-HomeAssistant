@@ -78,7 +78,6 @@ def _make_coord(**overrides):
         _last_events=time_mod.monotonic(),    # recent → do_events=False by default
         _last_slow=time_mod.monotonic(),       # recent → do_slow=False by default
         _last_smb_cleanup=time_mod.monotonic(),
-        _last_smb_disk_check=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
         _fcm_lock=threading.Lock(),
         _fcm_running=False,

@@ -100,7 +100,7 @@
               "alert_notify_information": "Step 1 — text notification",
               "alert_notify_screenshot": "Step 2 — snapshot image",
               "alert_notify_video": "Step 3 — video clip",
-              "alert_notify_system": "System alerts (token failure, disk warning)"
+              "alert_notify_system": "System alerts (token failure)"
             },
             "data_description": {
               "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
@@ -130,8 +130,7 @@
               "smb_base_path": "Base folder on share",
               "folder_pattern": "Subfolder pattern",
               "file_pattern": "File name pattern",
-              "smb_retention_days": "Retention period (days, 0 = keep forever)",
-              "smb_disk_warn_mb": "Low disk warning threshold (MB, 0 = disabled)"
+              "smb_retention_days": "Retention period (days, 0 = keep forever)"
             },
             "data_description": {
               "enable_local_save": "Save every new motion/audio event as JPEG + MP4 to the folder below. **Off by default** — turn on to activate local saving.",
@@ -145,8 +144,7 @@
               "smb_base_path": "Base folder on the share where files are stored. Default: Bosch-Kameras",
               "folder_pattern": "Subfolder pattern. Available variables: '{camera}', '{year}', '{month}', '{day}', '{type}'. Default: '{camera}/{year}/{month}/{day}'",
               "file_pattern": "File name pattern (without extension). Variables: '{camera}', '{date}', '{time}', '{type}', '{id}', '{year}', '{month}', '{day}'. Default: '{camera}_{date}_{time}_{type}_{id}'",
-              "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day.",
-              "smb_disk_warn_mb": "Send an alert when free space on the NAS share falls below this threshold in MB. 0 = disabled. Default: 5120 MB (5 GB). Uses configured notify service, falls back to HA notification."
+              "smb_retention_days": "Automatically delete files on the NAS older than this many days. 0 = keep forever. Default: 180 (6 months). Runs once per day."
             }
           },
           "nvr": {

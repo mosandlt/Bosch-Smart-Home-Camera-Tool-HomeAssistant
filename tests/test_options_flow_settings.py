@@ -307,14 +307,12 @@ class TestEventsStorageSection:
                 "folder_pattern": "{year}/{month}",
                 "file_pattern": "{camera}_{id}",
                 "smb_retention_days": 90,
-                "smb_disk_warn_mb": 2048,
             },
         })
         assert data["enable_smb_upload"] is True
         assert data["upload_protocol"] == "ftp"
         assert data["smb_server"] == "192.168.1.100"
         assert data["smb_retention_days"] == 90
-        assert data["smb_disk_warn_mb"] == 2048
 
     def test_smb_retention_days_range(self):
         schema_inner = _get_section_schema("events_storage")
@@ -491,7 +489,7 @@ class TestFullRoundTrip:
                                 "smb_username": "", "smb_password": "", "smb_base_path": "Bosch-Kameras",
                                 "folder_pattern": "{year}/{month}/{day}",
                                 "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
-                                "smb_retention_days": 180, "smb_disk_warn_mb": 5120},
+                                "smb_retention_days": 180},
             "nvr": {"enable_nvr": False, "nvr_storage_target": "local",
                     "nvr_base_path": "/config/bosch_nvr", "nvr_smb_subpath": "NVR",
                     "nvr_retention_days": 3},
