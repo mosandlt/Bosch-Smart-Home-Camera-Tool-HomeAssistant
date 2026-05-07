@@ -312,3 +312,44 @@ remove_friend:
       required: true
       selector:
         text:
+
+migrate_flat_events:
+  name: Migrate Flat Event Files
+  description: >
+    Move event files saved in the legacy flat layout (camera/file.mp4) into the
+    date-hierarchy layout (camera/year/month/day/file.mp4). Safe to run multiple
+    times — skips files whose destination already exists. Results shown as a
+    persistent notification.
+  fields: {}
+
+delete_event:
+  name: Delete Event File(s)
+  description: >
+    Delete one or more local event files. Either provide an exact file path,
+    or provide a camera name with an optional date filter to delete all matching
+    events for that camera/day.
+  fields:
+    file_path:
+      name: File Path
+      description: >
+        Absolute path to a single event file to delete
+        (e.g. /config/bosch_events/Innenbereich/2026/05/07/Innenbereich_2026-05-07_22-09-56_MOVEMENT_C6501509.mp4).
+        If provided, camera and date are ignored.
+      required: false
+      selector:
+        text:
+    camera:
+      name: Camera Name
+      description: >
+        Name of the camera folder (e.g. Innenbereich). Deletes all event files
+        for this camera. Use with date to limit to a specific day.
+      required: false
+      selector:
+        text:
+    date:
+      name: Date (optional)
+      description: "Date filter in YYYY-MM-DD format. Only used together with camera."
+      required: false
+      example: "2026-05-06"
+      selector:
+        text:

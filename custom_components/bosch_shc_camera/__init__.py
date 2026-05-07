@@ -5068,6 +5068,137 @@ def _register_services(hass: HomeAssistant) -> None:
                     raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Remove friend", "error": str(err)}) from err
                 break
 
+    async def handle_migrate_flat_events(call: ServiceCall) -> None:
+        """Move flat event files (camera/file) into date hierarchy (camera/year/month/day/file)."""
+        import shutil
+        import re as _re
+        from pathlib import Path
+
+        _PAT = _re.compile(
+            r"^(?:(?P<camera>.+?)_)?(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_"
+            r"(?P<etype>[A-Z_]+)_[0-9A-F]+\.(?P<ext>jpg|jpeg|mp4)$",
+            _re.IGNORECASE,
+        )
+        total = 0
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if not coord:
+                continue
+            opts = coord.options
+            base_str = (opts.get("download_path") or "").strip()
+            if not base_str:
+                continue
+            base = Path(base_str)
+            if not base.is_dir():
+                continue
+
+            def _migrate(base: Path) -> int:
+                moved = 0
+                for cam_dir in base.iterdir():
+                    if not cam_dir.is_dir():
+                        continue
+                    for f in list(cam_dir.iterdir()):
+                        if not f.is_file():
+                            continue
+                        m = _PAT.match(f.name)
+                        if not m:
+                            continue
+                        y, mo, d = m.group("date").split("-")
+                        dest_dir = cam_dir / y / mo / d
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest = dest_dir / f.name
+                        if dest.exists():
+                            _LOGGER.warning("migrate_flat_events: skip %s — dest exists", f.name)
+                            continue
+                        shutil.move(str(f), str(dest))
+                        moved += 1
+                return moved
+
+            n = await hass.async_add_executor_job(_migrate, base)
+            total += n
+            _LOGGER.info("migrate_flat_events: moved %d file(s) in %s", n, base)
+
+        await hass.services.async_call(
+            "persistent_notification", "create",
+            {"title": "Bosch Kamera", "message": f"Flat-file migration complete: {total} file(s) moved to date hierarchy.", "notification_id": "bosch_migrate"},
+        )
+
+    async def handle_delete_event(call: ServiceCall) -> None:
+        """Delete a local event file by file path or by camera + date."""
+        from pathlib import Path
+
+        file_path = (call.data.get("file_path") or "").strip()
+        camera = (call.data.get("camera") or "").strip()
+        date = (call.data.get("date") or "").strip()
+
+        deleted = 0
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if not coord:
+                continue
+            opts = coord.options
+            base_str = (opts.get("download_path") or "").strip()
+            if not base_str:
+                continue
+            base = Path(base_str).resolve()
+
+            def _delete(base: Path, file_path: str, camera: str, date: str) -> int:
+                import re as _re2
+                _PAT2 = _re2.compile(
+                    r"^(?:(?P<cam>.+?)_)?(?P<date>\d{4}-\d{2}-\d{2})_",
+                    _re2.IGNORECASE,
+                )
+                count = 0
+                if file_path:
+                    target = Path(file_path).resolve()
+                    try:
+                        target.relative_to(base)
+                    except ValueError:
+                        _LOGGER.warning("delete_event: path %s outside base %s — rejected", target, base)
+                        return 0
+                    if target.is_file():
+                        target.unlink()
+                        count += 1
+                    return count
+                # camera + optional date filter
+                if not camera:
+                    return 0
+                cam_dir = (base / camera).resolve()
+                try:
+                    cam_dir.relative_to(base)
+                except ValueError:
+                    return 0
+                if not cam_dir.is_dir():
+                    return 0
+                for f in cam_dir.rglob("*"):
+                    if not f.is_file():
+                        continue
+                    m = _PAT2.match(f.name)
+                    if not m:
+                        continue
+                    if date and m.group("date") != date:
+                        continue
+                    f.unlink()
+                    count += 1
+                # clean up empty dirs
+                for d in sorted(cam_dir.rglob("*"), reverse=True):
+                    if d.is_dir():
+                        try:
+                            d.rmdir()
+                        except OSError:
+                            pass
+                return count
+
+            n = await hass.async_add_executor_job(_delete, base, file_path, camera, date)
+            deleted += n
+            break
+
+        _LOGGER.info("delete_event: deleted %d file(s)", deleted)
+        await hass.services.async_call(
+            "persistent_notification", "create",
+            {"title": "Bosch Kamera", "message": f"Deleted {deleted} event file(s).", "notification_id": "bosch_delete_event"},
+        )
+
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
@@ -5100,3 +5231,7 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(DOMAIN, "list_friends", handle_list_friends)
     if not hass.services.has_service(DOMAIN, "remove_friend"):
         hass.services.async_register(DOMAIN, "remove_friend", handle_remove_friend)
+    if not hass.services.has_service(DOMAIN, "migrate_flat_events"):
+        hass.services.async_register(DOMAIN, "migrate_flat_events", handle_migrate_flat_events)
+    if not hass.services.has_service(DOMAIN, "delete_event"):
+        hass.services.async_register(DOMAIN, "delete_event", handle_delete_event)
