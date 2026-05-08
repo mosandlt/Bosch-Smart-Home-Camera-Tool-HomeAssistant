@@ -320,8 +320,9 @@ async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
                 if resp.status in (200, 201, 204):
                     _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
                     return True
+                body = await resp.text()
                 _LOGGER.warning(
-                    "FCM token registration failed: HTTP %d", resp.status
+                    "FCM token registration failed: HTTP %d — %s", resp.status, body[:200]
                 )
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("FCM token registration error: %s", err)

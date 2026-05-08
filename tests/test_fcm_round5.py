@@ -244,6 +244,7 @@ class TestRegisterFcmWithBosch:
         async def _post(*args, **kw):
             r = MagicMock()
             r.status = 500
+            r.text = AsyncMock(return_value='{"status":500,"error":"sh:internal.error"}')
             yield r
 
         session = MagicMock()
@@ -255,6 +256,37 @@ class TestRegisterFcmWithBosch:
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_500_logs_response_body(self, caplog):
+        """HTTP 500 warning must include the Bosch error body (regression: body was not logged)."""
+        import logging
+        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
+        bosch_body = '{"status":500,"error":"sh:internal.error","message":"Internal Server Error."}'
+
+        @asynccontextmanager
+        async def _post(*args, **kw):
+            r = MagicMock()
+            r.status = 500
+            r.text = AsyncMock(return_value=bosch_body)
+            yield r
+
+        session = MagicMock()
+        session.post = _post
+        coord = _stub_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
+            return_value=session,
+        ):
+            with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"):
+                ok = await register_fcm_with_bosch(coord)
+
+        assert ok is False
+        assert "sh:internal.error" in caplog.text, (
+            "Warning log must contain Bosch error body so operators can diagnose "
+            "FCM registration failures without enabling debug logging."
+        )
 
     @pytest.mark.asyncio
     async def test_timeout_returns_false(self):
