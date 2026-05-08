@@ -528,6 +528,7 @@ async def async_handle_fcm_push(coordinator) -> None:
                             newest_event.get("imageUrl", ""),
                             newest_event.get("videoClipUrl", ""),
                             newest_event.get("videoClipUploadStatus", ""),
+                            event_id=newest_id,
                         )
                     )
                 else:
@@ -624,6 +625,7 @@ async def async_send_alert(
     coordinator,
     cam_name: str, event_type: str, timestamp: str,
     image_url: str, clip_url: str = "", clip_status: str = "",
+    event_id: str = "",
 ) -> None:
     """Send a 3-step alert: instant text, snapshot image, video clip.
 
@@ -778,7 +780,7 @@ async def async_send_alert(
 
         # Try direct clip.mp4 download first (faster than polling)
         if not found_clip_url:
-            event_id = coordinator._last_event_ids.get(cam_id, "")
+            event_id = event_id or coordinator._last_event_ids.get(cam_id, "")
             if event_id:
                 try:
                     async with asyncio.timeout(10):
@@ -863,7 +865,7 @@ async def async_send_alert(
 
     # -- Mark event as read ------------------------------------------------
     if cam_id and coordinator.options.get("mark_events_read", False):
-        event_id = coordinator._last_event_ids.get(cam_id, "")
+        event_id = event_id or coordinator._last_event_ids.get(cam_id, "")
         if event_id:
             try:
                 await async_mark_events_read(coordinator, [event_id])
@@ -874,7 +876,7 @@ async def async_send_alert(
     if opts.get("enable_smb_upload") and opts.get("smb_server") and cam_id:
         try:
             # Build a minimal data dict for sync_smb_upload with just this event
-            ev_id = coordinator._last_event_ids.get(cam_id, "unknown")
+            ev_id = event_id or coordinator._last_event_ids.get(cam_id, "unknown")
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,
@@ -907,9 +909,9 @@ async def async_send_alert(
             _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
 
     # -- Local save (FCM-triggered, alongside SMB) -------------------------
-    if opts.get("download_path") and cam_id:
+    if opts.get("enable_local_save") and opts.get("download_path") and cam_id:
         try:
-            ev_id = coordinator._last_event_ids.get(cam_id, "unknown")
+            ev_id = event_id or coordinator._last_event_ids.get(cam_id, "unknown")
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,

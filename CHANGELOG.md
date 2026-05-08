@@ -5,6 +5,20 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.1.0
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: enable_local_save toggle ignored — snapshots/videos saved despite feature being disabled.** Disabling the "Local Save" toggle in Options had no effect as long as a `download_path` was still configured. `fcm.py` checked only `download_path`, not `enable_local_save`. Additionally, `sync_local_save`, `sync_smb_upload`, `sync_smb_cleanup`, and `_sync_ftp_cleanup` in `smb.py` all lacked the toggle check internally (defense-in-depth fix — callers already guard, but each function now enforces it independently).
+
+- **Fix: concurrent FCM events contaminate each other's filenames.** When two camera motions fired within seconds of each other, the FCM push pipeline for each event could use the wrong `event_id` when naming the saved file on NAS/local. Root cause: `async_send_alert` read `coordinator._last_event_ids[cam_id]` at upload time (up to 90 s after the push arrived), by which point newer pushes had already overwritten the shared dict. Fixed by snapshotting the event ID at push-arrival time and passing it as an explicit `event_id` parameter through the entire alert pipeline. The shared dict is now only a fallback for legacy call sites.
+
+### Internal
+
+- 20 new regression tests: toggle-off/on for all four smb.py functions + 2 fcm.py caller-path tests; concurrent-pipeline isolation test (two cameras push simultaneously — each upload receives its own event_id, not the other camera's); delegation assert for `_async_send_alert` event_id pass-through. All existing test fixtures updated with `enable_local_save`/`enable_smb_upload` defaults.
+
 ## v11.0.19
 
 No card changes.
@@ -15,7 +29,7 @@ No card changes.
 
 ### Internal
 
-- 5 new regression tests: `test_year_first_folders_appear_in_camera_list`, `test_list_year_first_months`, `test_list_year_first_days`, `test_list_year_first_events` (Local backend), plus updated `test_skips_legacy_year_first_folders_at_camera_level` → now asserts year-first folders are visible. Local resolver updated to accept 4-part paths (year/month/day/file).
+- 12 new regression tests: Local backend (year-first folders visible in `list_cameras`, `list_year_first_months/days/events`, 4-part resolver path); SMB backend (`list_cameras` includes year dirs, `list_year_first_months/days/events`); browse handler structural pins (`_browse_smb`/`_browse_local` call all three year-first methods, use `_YEAR_RE.match(camera)` for detection). Total: 3233 tests, 95% coverage.
 
 ## v11.0.18
 

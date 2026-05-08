@@ -35,10 +35,10 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def _coord(options: dict | None = None):
-    coord = SimpleNamespace(
-        options=options or {},
-        hass=MagicMock(),
-    )
+    opts = dict(options or {})
+    opts.setdefault("enable_local_save", True)
+    opts.setdefault("enable_smb_upload", True)
+    coord = SimpleNamespace(options=opts, hass=MagicMock())
     return coord
 
 
@@ -859,3 +859,116 @@ class TestFtpSafeUrlGuard:
             _sync_ftp_upload(coord, data, "tok")
 
         fake_session.get.assert_not_called()
+
+
+# ── Regression: enable-toggle guard inside each smb.py function ──────────────
+
+class TestEnableToggleGuards:
+    """Regression: smb.py functions must respect their enable-toggle even when
+    called directly (defense-in-depth — callers already guard, but the function
+    itself must not proceed if the toggle is off).
+
+    Bug: all four functions checked only the config values (download_path /
+    smb_server / smb_share) and ignored the enable_local_save /
+    enable_smb_upload toggles.  Disabling the toggle had no effect if the
+    config values were still populated.
+    Reported by user 2026-05-08.
+    """
+
+    def test_sync_local_save_skips_when_toggle_off(self):
+        """sync_local_save must return immediately when enable_local_save=False."""
+        from custom_components.bosch_shc_camera.smb import sync_local_save
+
+        coord = _coord({
+            "enable_local_save": False,
+            "download_path": "/tmp/bosch_test",
+        })
+        fake_req = MagicMock()
+        ev = {
+            "timestamp": "2026-05-08T10:00:00Z",
+            "eventType": "MOVEMENT",
+            "id": "ABCD1234",
+            "imageUrl": "https://residential.cbs.boschsecurity.com/v11/img.jpg",
+        }
+        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+            sync_local_save(coord, ev, "tok", "Terrasse")
+
+        fake_req.Session.assert_not_called()
+
+    def test_sync_local_save_runs_when_toggle_on(self):
+        """sync_local_save must proceed when enable_local_save=True."""
+        import tempfile
+        from custom_components.bosch_shc_camera.smb import sync_local_save
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            coord = _coord({
+                "enable_local_save": True,
+                "download_path": tmpdir,
+            })
+            fake_req, fake_session, _ = _fake_requests()
+            ev = {
+                "timestamp": "2026-05-08T10:00:00Z",
+                "eventType": "MOVEMENT",
+                "id": "ABCD1234",
+                "imageUrl": "https://residential.cbs.boschsecurity.com/v11/img.jpg",
+            }
+            with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+                sync_local_save(coord, ev, "tok", "Terrasse")
+
+        fake_session.get.assert_called()
+
+    def test_sync_smb_upload_skips_when_toggle_off(self):
+        """sync_smb_upload must return immediately when enable_smb_upload=False."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _coord({
+            "enable_smb_upload": False,
+            "smb_server": "nas.local",
+            "smb_share": "share",
+            "upload_protocol": "smb",
+        })
+        fake_smb = _fake_smb()
+        ev = {
+            "timestamp": "2026-05-08T10:00:00Z",
+            "eventType": "MOVEMENT",
+            "id": "ABCD1234",
+            "imageUrl": "https://media.bosch-smart-home.com/v11/img.jpg",
+        }
+        data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
+        fake_req, fake_session, _ = _fake_requests()
+        with patch.dict(sys.modules, {"smbclient": fake_smb, "requests": fake_req, "urllib3": MagicMock()}):
+            sync_smb_upload(coord, data, "tok")
+
+        fake_smb.register_session.assert_not_called()
+
+    def test_sync_smb_cleanup_skips_when_toggle_off(self):
+        """sync_smb_cleanup must return immediately when enable_smb_upload=False."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+
+        coord = _coord({
+            "enable_smb_upload": False,
+            "smb_server": "nas.local",
+            "smb_share": "share",
+            "smb_retention_days": 30,
+            "upload_protocol": "smb",
+        })
+        fake_smb = _fake_smb()
+        with patch.dict(sys.modules, {"smbclient": fake_smb}):
+            sync_smb_cleanup(coord)
+
+        fake_smb.register_session.assert_not_called()
+
+    def test_ftp_cleanup_skips_when_toggle_off(self):
+        """_sync_ftp_cleanup must return immediately when enable_smb_upload=False."""
+        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
+        coord = _coord({
+            "enable_smb_upload": False,
+            "smb_server": "ftp.example.com",
+            "smb_retention_days": 30,
+        })
+        fake_ftp_connect = MagicMock()
+        with patch(f"{MODULE}._ftp_connect", fake_ftp_connect):
+            _sync_ftp_cleanup(coord)
+
+        fake_ftp_connect.assert_not_called()

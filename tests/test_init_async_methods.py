@@ -242,6 +242,7 @@ class TestFcmWrappers:
             m.assert_awaited_once_with(
                 coord, "Terrasse", "motion", "2026-05-06T10:00",
                 "https://x/img.jpg", "https://x/clip.mp4", "ok",
+                event_id="",
             )
 
     @pytest.mark.asyncio

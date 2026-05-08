@@ -97,7 +97,7 @@ _FILE_RE = re.compile(
 
 
 def _make_coordinator(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(options={"download_path": str(tmp_path)})
+    return SimpleNamespace(options={"enable_local_save": True, "download_path": str(tmp_path)})
 
 
 def _make_ev(

@@ -955,3 +955,160 @@ class TestLocalSaveWithoutNotifyService:
                     )
 
         coord.hass.async_add_executor_job.assert_not_called()
+
+
+class TestLocalSaveEnableToggle:
+    """Regression: disabling enable_local_save must stop sync_local_save from being called.
+
+    Bug: fcm.py line ~910 checked only `download_path`, ignoring `enable_local_save`.
+    So unchecking the toggle in Options had no effect as long as download_path was still set.
+    Reported by user (simon42, 2026-05-08).
+    """
+
+    @pytest.mark.asyncio
+    async def test_local_save_skipped_when_toggle_off(self):
+        """enable_local_save=False → sync_local_save must NOT be called even if download_path is set."""
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "notify.mobile_app",
+            "enable_local_save": False,
+            "download_path": "/tmp/bosch_test_events",
+        })
+        coord.hass.async_add_executor_job = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Terrasse", "MOVEMENT",
+                            "2026-05-08T10:00:00.000Z",
+                            "", "", "",
+                        )
+
+        executor_calls = coord.hass.async_add_executor_job.call_args_list
+        assert not any(c.args[0] is mock_save for c in executor_calls), (
+            "sync_local_save must NOT run when enable_local_save=False, "
+            "even if download_path is configured."
+        )
+
+    @pytest.mark.asyncio
+    async def test_local_save_runs_when_toggle_on(self):
+        """enable_local_save=True + download_path set → sync_local_save must be called."""
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "notify.mobile_app",
+            "enable_local_save": True,
+            "download_path": "/tmp/bosch_test_events",
+        })
+        coord.hass.async_add_executor_job = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Terrasse", "MOVEMENT",
+                            "2026-05-08T10:00:00.000Z",
+                            "", "", "",
+                        )
+
+        executor_calls = coord.hass.async_add_executor_job.call_args_list
+        assert any(c.args[0] is mock_save for c in executor_calls), (
+            "sync_local_save must be called when enable_local_save=True and download_path is set."
+        )
+
+
+class TestEventIdNotOverwrittenByConcurrentPush:
+    """Regression: concurrent FCM pipelines used the wrong event_id in FTP/local-save filenames.
+
+    Bug: async_send_alert fetched coordinator._last_event_ids[cam_id] at SMB/local-save
+    time (after up to 90s of clip polling).  A later FCM push arriving during that window
+    overwrote _last_event_ids, so all concurrent pipelines reported the newest event_id
+    regardless of which event triggered them.  Observed 2026-05-08: three PERSON events
+    within 47s — all three FTP uploads showed id=664CD464 (the last push's event ID).
+
+    Fix: pass event_id as a parameter to async_send_alert; use it instead of looking up
+    _last_event_ids at upload time.
+    """
+
+    def _get_smb_ev_id(self, coord, mock_smb_upload) -> str | None:
+        """Extract the event id from the smb_data passed to async_add_executor_job."""
+        for c in coord.hass.async_add_executor_job.call_args_list:
+            if c.args and c.args[0] is mock_smb_upload:
+                smb_data = c.args[2]  # (fn, coordinator, smb_data, token)
+                for cam_data in smb_data.values():
+                    for ev in cam_data.get("events", []):
+                        return ev.get("id")
+        return None
+
+    @pytest.mark.asyncio
+    async def test_passed_event_id_used_over_last_event_ids(self):
+        """event_id kwarg must be used for SMB filename, not _last_event_ids at upload time."""
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "notify.mobile_app",
+            "enable_smb_upload": True,
+            "smb_server": "nas.local",
+            "smb_share": "cameras",
+        })
+        # Simulate a later push overwriting _last_event_ids before this pipeline's upload
+        coord._last_event_ids[CAM_ID] = "NEWER_OVERWRITE_ID"
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
+                    with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Terrasse", "PERSON",
+                            "2026-05-08T16:19:51.000Z",
+                            "", "", "",
+                            event_id="ORIGINAL_PIPELINE_ID",
+                        )
+                        ev_id = self._get_smb_ev_id(coord, mock_smb)
+
+        assert ev_id == "ORIGINAL_PIPELINE_ID", (
+            f"SMB upload must use the event_id passed at pipeline start, not _last_event_ids "
+            f"which may have been overwritten by a concurrent push. Got: {ev_id!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_last_event_ids_when_no_event_id_passed(self):
+        """When event_id kwarg is omitted, fall back to _last_event_ids (backwards compat)."""
+        coord = _make_alert_coord(options={
+            "alert_notify_service": "notify.mobile_app",
+            "enable_smb_upload": True,
+            "smb_server": "nas.local",
+            "smb_share": "cameras",
+        })
+        coord._last_event_ids[CAM_ID] = "FALLBACK_ID"
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
+                    with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        await async_send_alert(
+                            coord, "Terrasse", "PERSON",
+                            "2026-05-08T16:19:51.000Z",
+                            "", "", "",
+                            # no event_id — must fall back to _last_event_ids
+                        )
+                        ev_id = self._get_smb_ev_id(coord, mock_smb)
+
+        assert ev_id == "FALLBACK_ID", (
+            f"Without explicit event_id, SMB upload must fall back to _last_event_ids. "
+            f"Got: {ev_id!r}"
+        )

@@ -20,10 +20,10 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def _coord(options: dict | None = None):
-    coord = SimpleNamespace(
-        options=options or {},
-        hass=MagicMock(),
-    )
+    opts = dict(options or {})
+    opts.setdefault("enable_local_save", True)
+    opts.setdefault("enable_smb_upload", True)
+    coord = SimpleNamespace(options=opts, hass=MagicMock())
     return coord
 
 

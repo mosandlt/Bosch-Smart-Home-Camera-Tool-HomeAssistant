@@ -236,6 +236,7 @@ class TestLocalSaveFilenaming:
 
         coord = _make_fresh_coord()
         coord.options = dict(coord.options)
+        coord.options["enable_local_save"] = True
         coord.options["download_path"] = str(tmp_path)
         coord._download_started_at = 0.0  # disable "predates startup" guard
 

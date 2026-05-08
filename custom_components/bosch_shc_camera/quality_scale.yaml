@@ -294,6 +294,13 @@ rules:
       GitHub issue template (.github/ISSUE_TEMPLATE/bug_report.yml) added
       with structured debug workflow: Enable Debug Logging → reproduce →
       Download Diagnostics → copy log lines. Total: 95%, 3205→3208 tests.
+      Media Browser year-first fix (v11.0.19, 2026-05-08): removed migration
+      service; year-first folders (2026/, 2025/…) now visible in Media Browser
+      for Local, SMB, and FTP backends; browse navigation 2026→month→day→events
+      working; local resolver accepts 4-part year-first paths. 7 new tests
+      (_SmbBackend.list_cameras year-first, list_year_first_months/days/events,
+      _LocalBackend.resolve 4-part path, browse handler structural pins).
+      Total: 95%, 3208→3233 tests, 118 files.
 
   # Gold
   devices: done

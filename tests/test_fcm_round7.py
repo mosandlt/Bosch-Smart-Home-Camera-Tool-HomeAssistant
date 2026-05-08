@@ -829,6 +829,7 @@ class TestLocalSaveGate:
         """download_path set → sync_local_save submitted via async_add_executor_job."""
         coord = _make_coord(options={
             "alert_notify_service": "notify.signal",
+            "enable_local_save": True,
             "download_path": "/mnt/nvr",
         })
         executor_fns = []

@@ -33,7 +33,7 @@ def _iso_now(offset_s: float = 0) -> str:
 
 
 def _coord(tmp_path: Path, *, started_offset_s: float = -3600, extra_opts: dict | None = None):
-    opts = {"download_path": str(tmp_path)}
+    opts = {"enable_local_save": True, "download_path": str(tmp_path)}
     if extra_opts:
         opts.update(extra_opts)
     return SimpleNamespace(options=opts, _download_started_at=time.time() + started_offset_s)

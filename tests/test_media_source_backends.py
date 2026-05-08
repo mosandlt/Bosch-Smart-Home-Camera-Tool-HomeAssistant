@@ -266,6 +266,25 @@ class TestLocalBackendResolve:
         out = b.resolve("Cam")
         assert out is None
 
+    def test_resolve_year_first_4_part_path(self, tmp_path):
+        """resolve(year, month, day, filename) must return the file for year-first layout.
+
+        _serve_local accepts len(tail)==4, which maps to (year, month, day, filename) —
+        the year-first path where the year dir sits directly at the NAS/local root
+        with no camera prefix.  Without len(tail)==4 in the allow-list the handler
+        raises HTTPNotFound for every year-first playback attempt.
+        Fix: v11.0.19 (simon42/Andreas74 2026-05-08).
+        """
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        year_dir = tmp_path / "2026" / "03" / "25"
+        year_dir.mkdir(parents=True)
+        fname = "Garten_2026-03-25_10-33-11_MOVEMENT_ABC123.mp4"
+        (year_dir / fname).write_text("x")
+        b = _LocalBackend(str(tmp_path))
+        result = b.resolve("2026", "03", "25", fname)
+        assert result is not None, "4-part year-first resolve must return a Path, not None"
+        assert result.is_file(), "resolved 4-part path must point at a real file"
+
 
 # ── _NvrBackend ──────────────────────────────────────────────────────────
 
@@ -753,3 +772,127 @@ class TestViewRoutingCameraFirstLocal:
                     "Explicit kind token branch must NOT call _find_source — "
                     "L/S/N tokens are unambiguous by design"
                 )
+
+
+# ── _SmbBackend year-first browse ────────────────────────────────────────
+
+
+class TestSmbBackendYearFirst:
+    """_SmbBackend year-first browse methods — mocked at _scandir_filtered boundary.
+
+    Regression fix v11.0.19 (simon42/Andreas74 2026-05-08): year-first folders
+    ('2026', '2025') were not browseable via SMB.  Fix: remove _YEAR_RE filter
+    from list_cameras(); add list_year_first_months/days/events().
+    """
+
+    def _make_backend(self):
+        from custom_components.bosch_shc_camera.media_source import _SmbBackend
+        hass = SimpleNamespace(data={})
+        opts = {
+            "smb_server": "nas.local",
+            "smb_share": "Events",
+            "smb_username": "user",
+            "smb_password": "pass",
+            "smb_base_path": "",
+            "upload_protocol": "smb",
+            "folder_pattern": "{camera}/{year}/{month}/{day}",
+        }
+        return _SmbBackend(hass, opts)
+
+    def test_list_cameras_includes_year_first_folders(self):
+        """list_cameras() must return ALL dirs — including 4-digit year dirs.
+
+        Previously _YEAR_RE filtered these out, leaving legacy recordings
+        inaccessible for SMB/FTP users (same bug as for _LocalBackend).
+        """
+        from unittest.mock import patch
+        b = self._make_backend()
+        dirs = ["Terrasse", "2026", "Innenbereich", "2025"]
+        with patch.object(b, "_scandir_filtered", return_value=iter(dirs)):
+            result = b.list_cameras()
+        assert "2026" in result, "year-first folder must appear in SMB list_cameras()"
+        assert "Terrasse" in result, "normal camera folder must appear in SMB list_cameras()"
+        assert result == sorted(dirs, key=str.casefold), "SMB list_cameras() must be sorted case-insensitive"
+
+    def test_list_year_first_months_filters_by_date_dir_re(self):
+        """list_year_first_months('2026') filters to 2-digit dirs only, newest-first."""
+        from unittest.mock import patch
+        b = self._make_backend()
+        raw = ["03", "04", "junk", "not-a-month"]
+        with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
+            result = b.list_year_first_months("2026")
+        mock_scan.assert_called_once_with("2026", want_dirs=True)
+        assert result == ["04", "03"], (
+            f"SMB list_year_first_months must return ['04','03'] newest-first, got {result}"
+        )
+        assert "junk" not in result, "non-month dir must be excluded"
+
+    def test_list_year_first_days_filters_and_sorts(self):
+        """list_year_first_days('2026', '03') returns 2-digit day dirs, newest-first."""
+        from unittest.mock import patch
+        b = self._make_backend()
+        raw = ["25", "26", "notaday"]
+        with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
+            result = b.list_year_first_days("2026", "03")
+        mock_scan.assert_called_once_with("2026", "03", want_dirs=True)
+        assert result == ["26", "25"], (
+            f"SMB list_year_first_days must return ['26','25'] newest-first, got {result}"
+        )
+
+    def test_list_year_first_events_groups_mp4_and_jpg(self):
+        """list_year_first_events groups mp4+jpg into one event, video preferred."""
+        from unittest.mock import patch
+        b = self._make_backend()
+        raw = [
+            "Garten_2026-03-25_10-33-11_MOVEMENT_ABC123.mp4",
+            "Garten_2026-03-25_10-33-11_MOVEMENT_ABC123.jpg",
+            "unparseable_random_name.txt",  # must be silently skipped
+        ]
+        with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
+            result = b.list_year_first_events("2026", "03", "25")
+        mock_scan.assert_called_once_with("2026", "03", "25", want_dirs=False)
+        assert len(result) == 1, (
+            f"SMB list_year_first_events must return 1 event (random.txt not parsed), got {len(result)}"
+        )
+        fname, image, parsed = result[0]
+        assert fname.endswith(".mp4"), "video must be preferred over image in SMB year-first events"
+        assert image is not None and image.endswith(".jpg"), "jpg must be included as thumbnail"
+        assert parsed["camera"] == "Garten", f"parsed camera wrong: {parsed['camera']}"
+
+
+# ── Browse handler year-first routing (structural) ────────────────────────
+
+
+class TestBrowseYearFirstRouting:
+    """Pin the browse handler's year-first detection in async_browse_media.
+
+    Fix v11.0.19: camera=2026 must route to list_year_first_months, not
+    list_years('2026'), which would return [] (no nested year dirs inside 2026/).
+    """
+
+    def test_browse_handler_calls_year_first_methods(self):
+        """_browse_smb/_browse_local source must contain all three year-first method calls."""
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaSource
+        src_smb = inspect.getsource(BoschCameraMediaSource._browse_smb)
+        src_local = inspect.getsource(BoschCameraMediaSource._browse_local)
+        assert "list_year_first_months" in src_smb or "list_year_first_months" in src_local, (
+            "_browse_smb or _browse_local must call list_year_first_months for '2026 → month' browsing"
+        )
+        assert "list_year_first_days" in src_smb or "list_year_first_days" in src_local, (
+            "_browse_smb or _browse_local must call list_year_first_days for '2026 → month → day' browsing"
+        )
+        assert "list_year_first_events" in src_smb or "list_year_first_events" in src_local, (
+            "_browse_smb or _browse_local must call list_year_first_events for year-first events"
+        )
+
+    def test_browse_handler_detects_year_with_year_re(self):
+        """browse handler must use _YEAR_RE.match(camera) to detect year-first folders."""
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaSource
+        src_smb = inspect.getsource(BoschCameraMediaSource._browse_smb)
+        src_local = inspect.getsource(BoschCameraMediaSource._browse_local)
+        assert "_YEAR_RE.match(camera)" in src_smb or "_YEAR_RE.match(camera)" in src_local, (
+            "browse handler (_browse_smb or _browse_local) must call _YEAR_RE.match(camera) "
+            "to detect year-first folders at len(rest)==1/2/3 inside the camera_first block"
+        )

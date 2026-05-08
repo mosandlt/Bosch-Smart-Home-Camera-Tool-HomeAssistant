@@ -51,6 +51,8 @@ def sync_local_save(coordinator, ev: dict, token: str, cam_name: str) -> None:
     urllib3.disable_warnings()
 
     opts = coordinator.options
+    if not opts.get("enable_local_save"):
+        return
     download_path = (opts.get("download_path") or "").strip()
     if not download_path:
         return
@@ -152,7 +154,7 @@ def sync_smb_upload(coordinator, data: dict, token: str) -> None:
     folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
     file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
 
-    if not server or not share:
+    if not opts.get("enable_smb_upload") or not server or not share:
         return
 
     try:
@@ -307,7 +309,7 @@ def sync_smb_cleanup(coordinator) -> None:
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
     retention_days = int(opts.get("smb_retention_days", 180))
 
-    if not server or not share or retention_days <= 0:
+    if not opts.get("enable_smb_upload") or not server or not share or retention_days <= 0:
         return
 
     try:
@@ -543,7 +545,7 @@ def _sync_ftp_cleanup(coordinator) -> None:
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
     retention_days = int(opts.get("smb_retention_days", 180))
 
-    if not server or retention_days <= 0:
+    if not opts.get("enable_smb_upload") or not server or retention_days <= 0:
         return
 
     try:

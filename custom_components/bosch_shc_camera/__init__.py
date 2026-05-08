@@ -1718,6 +1718,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                                     newest_event.get("imageUrl", ""),
                                     newest_event.get("videoClipUrl", ""),
                                     newest_event.get("videoClipUploadStatus", ""),
+                                    event_id=newest_id,
                                 )
                             )
                             if self.options.get("mark_events_read", False):
@@ -3863,10 +3864,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
     async def _async_send_alert(
         self, cam_name: str, event_type: str, timestamp: str,
         image_url: str, clip_url: str = "", clip_status: str = "",
+        event_id: str = "",
     ) -> None:
         """Send a 3-step alert (delegated to fcm.py)."""
         return await _fcm_async_send_alert(
             self, cam_name, event_type, timestamp, image_url, clip_url, clip_status,
+            event_id=event_id,
         )
 
     async def async_mark_events_read(self, event_ids: list[str]) -> bool:

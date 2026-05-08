@@ -39,7 +39,7 @@ def _coord_with_download_path(tmp_path: Path, started_offset_s: float = -3600):
       Negative → started in the past.  Default = 1 h ago.
     """
     coord = SimpleNamespace(
-        options={"download_path": str(tmp_path)},
+        options={"enable_local_save": True, "download_path": str(tmp_path)},
         hass=MagicMock(),
         _download_started_at=time.time() + started_offset_s,
     )
