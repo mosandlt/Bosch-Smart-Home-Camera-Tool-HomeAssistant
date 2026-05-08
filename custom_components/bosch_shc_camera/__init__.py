@@ -4058,13 +4058,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         Priority:
           1. Runtime override set by BoschVideoQualitySelect (session-only)
-          2. Options setting 'high_quality_video' (persistent default)
-          3. 'auto' (balanced, ~7.5 Mbps)
+          2. 'auto' (LAN streams are always forced to hq=True, inst=1 regardless)
         """
         if cam_id in self._quality_preference:
             return self._quality_preference[cam_id]
-        if get_options(self._entry).get("high_quality_video"):
-            return "high"
         return "auto"
 
     def set_quality(self, cam_id: str, quality: str) -> None:

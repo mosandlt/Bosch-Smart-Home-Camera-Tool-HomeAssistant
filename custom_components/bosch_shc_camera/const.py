@@ -34,7 +34,6 @@ DEFAULT_OPTIONS = {
     "enable_snapshot_button": True,
     "enable_local_save":      False,
     "download_path":          "/config/bosch_events",
-    "high_quality_video": False,
     "stream_connection_type": "auto",
     # HLS player buffer profile applied by the Lovelace card (hls.js).
     # "latency"  → small buffer, ~4-6s lag, may stutter on Wi-Fi jitter

@@ -18,7 +18,6 @@ Already covered elsewhere (not duplicated here):
   - mark_events_read     → test_fcm_round8.py (called/not called)
   - alert_save_snapshots → test_fcm_round7.py
   - audio_default_on     → test_switches.py::test_is_on_default_true
-  - high_quality_video   → test_init_round9.py::test_high_quality_option
   - stream_connection_type → test_init_sprint_kd.py
 """
 
@@ -331,7 +330,6 @@ class TestFeatureFlagCoverage:
         "enable_smb_upload",
         "enable_go2rtc",
         "audio_default_on",
-        "high_quality_video",
         "mark_events_read",
         "alert_save_snapshots",
         "debug_logging",

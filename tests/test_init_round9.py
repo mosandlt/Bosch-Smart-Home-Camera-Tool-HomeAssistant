@@ -3,7 +3,7 @@
 Covers missing lines:
   async_put_camera (4124-4155): 401→refresh+retry, 401→refresh-fails→False,
     200/201/204→True, exception→False.
-  get_quality (4073-4086): runtime-override, high_quality_video option, default 'auto'.
+  get_quality (4073-4083): runtime-override, default 'auto'.
   get_quality_params (4094-4102): high→(True,1), low→(False,4), auto→(False,2).
   set_quality (4087-4092): sets preference + invalidates proxy_url_cache.
   _async_update_rcp_data (4048-4056): thin delegation wrapper.
@@ -226,43 +226,22 @@ class TestGetQuality:
         return SimpleNamespace(options=opts)
 
     def test_runtime_override_takes_precedence(self):
-        """Runtime preference in _quality_preference overrides entry options."""
+        """Runtime preference in _quality_preference overrides default."""
         coord = self._bind(_stub_coord(
             _quality_preference={CAM_ID: "low"},
-            _entry=self._make_entry(high_quality_video=True),
+            _entry=self._make_entry(),
         ))
         assert coord.get_quality(CAM_ID) == "low", \
-            "Runtime _quality_preference must override entry options"
-
-    def test_high_quality_option_returns_high(self):
-        """high_quality_video=True in entry options → 'high' when no runtime override."""
-        coord = self._bind(_stub_coord(
-            _quality_preference={},
-            _entry=self._make_entry(high_quality_video=True),
-        ))
-        with patch(f"{MODULE}.get_options", return_value={"high_quality_video": True}):
-            result = coord.get_quality(CAM_ID)
-        assert result == "high", "high_quality_video=True must return 'high'"
+            "Runtime _quality_preference must override default"
 
     def test_default_returns_auto(self):
-        """No runtime override and high_quality_video=False → 'auto'."""
-        coord = self._bind(_stub_coord(
-            _quality_preference={},
-            _entry=self._make_entry(high_quality_video=False),
-        ))
-        with patch(f"{MODULE}.get_options", return_value={"high_quality_video": False}):
-            result = coord.get_quality(CAM_ID)
-        assert result == "auto", "Default quality must be 'auto'"
-
-    def test_no_option_returns_auto(self):
-        """No high_quality_video key in options → 'auto'."""
+        """No runtime override → 'auto'."""
         coord = self._bind(_stub_coord(
             _quality_preference={},
             _entry=self._make_entry(),
         ))
-        with patch(f"{MODULE}.get_options", return_value={}):
-            result = coord.get_quality(CAM_ID)
-        assert result == "auto", "Missing high_quality_video key must default to 'auto'"
+        result = coord.get_quality(CAM_ID)
+        assert result == "auto", "Default quality must be 'auto'"
 
 
 class TestSetQuality:

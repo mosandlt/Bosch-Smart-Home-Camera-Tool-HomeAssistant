@@ -478,12 +478,12 @@ class TestBrowseSmb:
     def test_camera_year_lists_months(self):
         out = self._browse("01ENT/Terrasse/2026", months=["05", "04"])
         assert len(out.children) == 2
-        assert "2026-05" in out.children[0].title
+        assert out.children[0].title == "05"
 
     def test_camera_year_month_lists_days(self):
         out = self._browse("01ENT/Terrasse/2026/05", days=["22", "07"])
         assert len(out.children) == 2
-        assert "2026-05-22" in out.children[0].title
+        assert out.children[0].title == "22"
 
     def test_camera_year_month_day_lists_events(self):
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"

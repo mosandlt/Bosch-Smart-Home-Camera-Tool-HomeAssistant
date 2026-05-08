@@ -74,8 +74,7 @@
               "enable_snapshot_button": "Schalter & Buttons (Stream, Privat, Licht)",
               "enable_binary_sensors": "Bewegungs-/Audio-Sensoren",
               "audio_default_on": "Audio standardmäßig an",
-              "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)",
-              "high_quality_video": "Hohe Videoqualität (30 Mbps)"
+              "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)"
             },
             "data_description": {
               "enable_snapshots": "Zeigt das letzte Bewegungs-JPEG als Kamera-Entity in HA.",
@@ -83,8 +82,7 @@
               "enable_snapshot_button": "Erstellt Schalter und Buttons: Live Stream, Audio, Privat-Modus, Kameralicht, Benachrichtigungen, Aktualisieren.",
               "enable_binary_sensors": "Binärsensoren die nach Bewegung oder Audio-Alarm für 30 Sekunden EIN werden. Nützlich für Automationen.",
               "audio_default_on": "Wenn AN: Audio-Schalter ist beim Start automatisch AN (Stream mit Ton). Wenn AUS: Audio startet stumm. Kann jederzeit im Dashboard umgeschaltet werden.",
-              "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden.",
-              "high_quality_video": "Standard-Videoqualität für Live-Streams auf 30 Mbps setzen (statt Auto ~7.5 Mbps). Kann zur Laufzeit mit dem 'Video Quality'-Entity überschrieben werden."
+              "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden."
             }
           },
           "stream": {

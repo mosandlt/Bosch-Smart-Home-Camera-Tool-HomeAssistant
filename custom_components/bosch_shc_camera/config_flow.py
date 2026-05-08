@@ -58,7 +58,6 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "features": [
         "enable_snapshots", "enable_sensors", "enable_binary_sensors",
         "enable_snapshot_button", "audio_default_on", "enable_intercom",
-        "high_quality_video",
     ],
     "stream": [
         "stream_connection_type", "live_buffer_mode", "enable_go2rtc",
@@ -506,7 +505,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
 
             for k in ["enable_snapshots", "enable_sensors",
                       "enable_snapshot_button",
-                      "high_quality_video", "enable_binary_sensors",
+                      "enable_binary_sensors",
                       "enable_fcm_push", "alert_save_snapshots",
                       "alert_delete_after_send", "mark_events_read",
                       "audio_default_on",
@@ -597,10 +596,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     "enable_intercom",
                     default=bool(opts.get("enable_intercom", False)),
-                ): bool,
-                vol.Optional(
-                    "high_quality_video",
-                    default=bool(opts.get("high_quality_video", False)),
                 ): bool,
             }),
             {"collapsed": False},

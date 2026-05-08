@@ -210,6 +210,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 |---|---|---|
 | **Stream connection type** | `Auto` (try LOCAL → fall back to REMOTE), `Local` (LAN only), `Remote` (cloud only). Can also be changed at runtime via the per-camera **Stream Modus** select entity. | Auto |
 | **HLS player buffer profile** (`live_buffer_mode`) | Three hls.js buffer presets that trade latency for smoothness: **Latency** (~4-6 s), **Balanced** (~8-10 s, default), **Stable** (~12-15 s). See [HLS Buffer Tuning](#hls-buffer-tuning). | Balanced |
+| **Stream quality** | Per-camera quality preset for cloud/REMOTE streams: `Auto` (~7.5 Mbps), `High` (30 Mbps), `Low` (1.9 Mbps). LAN streams always use maximum quality regardless of this setting. Configurable at runtime via the **Video Quality** select entity (persists across restarts). | Auto |
 | **Audio default ON** | Whether the per-camera audio switch starts ON (stream with sound) or OFF (muted). | ON |
 | **Binary sensors** | Expose Motion / Audio / Person alarm binary sensors (ON for 30 s after each event). | ON |
 | **Debug logging** | Enable verbose logs (TLS-proxy RTSP exchanges, pre-warm timing, FCM payloads). Off by default to keep the log file readable. | OFF |
@@ -450,7 +451,7 @@ Before v11.0.0 these failure paths logged a WARNING and silently returned — cl
 | Pan position (360 camera) | `number` | enabled (±120°) |
 | Audio alarm threshold | `number` | disabled by default |
 | Speaker level (intercom volume) | `number` | disabled by default (0–100) |
-| Stream quality | `select` | Auto / Hoch 30 Mbps / Niedrig 1.9 Mbps (persists across restarts) |
+| Stream quality | `select` | Auto (~7.5 Mbps) / High (30 Mbps) / Low (1.9 Mbps). LAN always uses max quality; setting only affects REMOTE/cloud streams. Persists across restarts. |
 | Stream mode | `select` | Auto (Lokal → Cloud) / Nur Lokal / Nur Cloud |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
 | FCM Push mode | `select` | Auto / iOS / Android / Polling |
@@ -1252,8 +1253,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.15** — see the GitHub release page for full notes:
-[**v11.0.15 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.15)
+Latest stable: **v11.0.16** — see the GitHub release page for full notes:
+[**v11.0.16 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.16)
 
 | | |
 |---|---|

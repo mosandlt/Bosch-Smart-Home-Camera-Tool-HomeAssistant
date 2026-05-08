@@ -379,17 +379,10 @@ class TestQualityPreference:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         assert BoschCameraCoordinator.get_quality(_make_coord(), CAM_A) == "auto"
 
-    def test_get_quality_high_from_options(self):
+    def test_runtime_override_wins_over_default(self):
+        """Per-camera select-entity override beats the auto default."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         coord = _make_coord()
-        coord._entry.options["high_quality_video"] = True
-        assert BoschCameraCoordinator.get_quality(coord, CAM_A) == "high"
-
-    def test_runtime_override_wins_over_options(self):
-        """Per-camera select-entity override beats persisted option."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord()
-        coord._entry.options["high_quality_video"] = True  # default would be "high"
         coord._quality_preference[CAM_A] = "low"
         assert BoschCameraCoordinator.get_quality(coord, CAM_A) == "low"
 

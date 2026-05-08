@@ -74,8 +74,7 @@
               "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
               "enable_binary_sensors": "Motion / Audio alarm sensors",
               "audio_default_on": "Audio on by default",
-              "enable_intercom": "Intercom (two-way audio)",
-              "high_quality_video": "High quality video (30 Mbps)"
+              "enable_intercom": "Intercom (two-way audio)"
             },
             "data_description": {
               "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
@@ -83,8 +82,7 @@
               "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
               "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
               "audio_default_on": "When ON: audio switch starts enabled (stream with sound). When OFF: audio starts muted. Can be toggled anytime in the dashboard.",
-              "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker.",
-              "high_quality_video": "Set the default stream quality to 30 Mbps (instead of Auto ~7.5 Mbps). Can be overridden at runtime via the 'Video Quality' select entity."
+              "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker."
             }
           },
           "stream": {

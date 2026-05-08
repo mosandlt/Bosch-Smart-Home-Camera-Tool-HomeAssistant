@@ -701,7 +701,7 @@ class BoschCameraMediaSource(MediaSource):
                 year = rest[1]
                 if _YEAR_RE.match(year):
                     children = [
-                        _node(identifier=ident(camera, year, m), title=f"{year}-{m}")
+                        _node(identifier=ident(camera, year, m), title=m)
                         for m in backend.list_months(camera, year)
                     ]
                     return _node(identifier=ident(camera, year), title=year, children=children)
@@ -727,10 +727,10 @@ class BoschCameraMediaSource(MediaSource):
             if len(rest) == 3:  # days
                 year, month = rest[1], rest[2]
                 children = [
-                    _node(identifier=ident(camera, year, month, d), title=f"{year}-{month}-{d}")
+                    _node(identifier=ident(camera, year, month, d), title=d)
                     for d in backend.list_days(camera, year, month)
                 ]
-                return _node(identifier=ident(camera, year, month), title=f"{year}-{month}", children=children)
+                return _node(identifier=ident(camera, year, month), title=month, children=children)
             if len(rest) == 4:  # events
                 year, month, day = rest[1], rest[2], rest[3]
                 children = []
@@ -747,7 +747,7 @@ class BoschCameraMediaSource(MediaSource):
                     ))
                 return _node(
                     identifier=ident(camera, year, month, day),
-                    title=f"{year}-{month}-{day}",
+                    title=day,
                     children=children, children_media_class=MediaClass.VIDEO,
                 )
         else:
@@ -867,7 +867,7 @@ class BoschCameraMediaSource(MediaSource):
                 camera, year = rest[0], rest[1]
                 if _YEAR_RE.match(year):
                     children = [
-                        _node(identifier=ident(camera, year, m), title=f"{year}-{m}")
+                        _node(identifier=ident(camera, year, m), title=m)
                         for m in backend.list_months(camera, year)
                     ]
                     return _node(identifier=ident(camera, year), title=year, children=children)
@@ -893,10 +893,10 @@ class BoschCameraMediaSource(MediaSource):
             if len(rest) == 3:  # days
                 camera, year, month = rest
                 children = [
-                    _node(identifier=ident(camera, year, month, d), title=f"{year}-{month}-{d}")
+                    _node(identifier=ident(camera, year, month, d), title=d)
                     for d in backend.list_days(camera, year, month)
                 ]
-                return _node(identifier=ident(camera, year, month), title=f"{year}-{month}", children=children)
+                return _node(identifier=ident(camera, year, month), title=month, children=children)
             if len(rest) == 4:  # events
                 camera, year, month, day = rest
                 children = []
@@ -913,7 +913,7 @@ class BoschCameraMediaSource(MediaSource):
                     ))
                 return _node(
                     identifier=ident(camera, year, month, day),
-                    title=f"{year}-{month}-{day}",
+                    title=day,
                     children=children, children_media_class=MediaClass.VIDEO,
                 )
         else:

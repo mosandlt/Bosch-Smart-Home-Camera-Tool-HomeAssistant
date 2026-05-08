@@ -150,7 +150,6 @@ class TestFeaturesSection:
                 "enable_snapshot_button": True,
                 "audio_default_on": False,
                 "enable_intercom": True,
-                "high_quality_video": True,
             },
         })
         assert data["enable_snapshots"] is True
@@ -159,26 +158,22 @@ class TestFeaturesSection:
         assert data["enable_snapshot_button"] is True
         assert data["audio_default_on"] is False
         assert data["enable_intercom"] is True
-        assert data["high_quality_video"] is True
 
     @pytest.mark.asyncio
     async def test_boolean_coercion_1_0(self):
         """int 1/0 → True/False (HA schema may deliver ints from selector)."""
         flow = BoschCameraOptionsFlow(_make_entry())
         data = await _submit(flow, {
-            "features": {"enable_snapshots": 1, "high_quality_video": 0},
+            "features": {"enable_snapshots": 1, "enable_intercom": 0},
         })
         assert data["enable_snapshots"] is True
-        assert data["high_quality_video"] is False
+        assert data["enable_intercom"] is False
 
     def test_enable_snapshots_default_true(self):
         assert DEFAULT_OPTIONS["enable_snapshots"] is True
 
     def test_enable_intercom_default_false(self):
         assert DEFAULT_OPTIONS["enable_intercom"] is False
-
-    def test_high_quality_video_default_false(self):
-        assert DEFAULT_OPTIONS["high_quality_video"] is False
 
 
 class TestStreamSection:
@@ -476,7 +471,7 @@ class TestFullRoundTrip:
             "polling": {"scan_interval": 45, "interval_status": 200, "interval_events": 150, "snapshot_interval": 900},
             "features": {"enable_snapshots": True, "enable_sensors": True, "enable_binary_sensors": True,
                          "enable_snapshot_button": False, "audio_default_on": False,
-                         "enable_intercom": False, "high_quality_video": False},
+                         "enable_intercom": False},
             "stream": {"stream_connection_type": "local", "live_buffer_mode": "latency", "enable_go2rtc": True},
             "fcm": {"enable_fcm_push": True, "fcm_push_mode": "ios", "mark_events_read": False,
                     "alert_save_snapshots": False, "alert_delete_after_send": True,
