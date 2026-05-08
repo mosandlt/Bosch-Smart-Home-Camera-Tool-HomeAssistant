@@ -102,6 +102,21 @@ class TestFCMNoiseFilter:
         rec = _make_record("Unexpected exception during read")
         assert f.filter(rec) is True
 
+    def test_initial_last_passed_is_sentinel(self):
+        """_last_passed must be float('-inf'), not 0.0.
+
+        SENTINEL_RULE: CI VMs boot with time.monotonic() < 60 s. With 0.0,
+        now - 0.0 < 60 → the very first FCM noise record would be suppressed
+        instead of passing through. float('-inf') ensures the first call
+        always passes regardless of VM uptime.
+        """
+        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        f = _FCMNoiseFilter()
+        assert f._last_passed == float("-inf"), (
+            "SENTINEL_RULE violation: _last_passed=0.0 silently drops the first "
+            "FCM noise record on CI VMs with uptime < 60 s"
+        )
+
 
 # ── get_alert_services routing ──────────────────────────────────────────
 

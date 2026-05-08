@@ -67,7 +67,7 @@ class _FCMNoiseFilter(logging.Filter):
 
     def __init__(self):
         super().__init__()
-        self._last_passed = 0.0  # monotonic ts of last record we let through
+        self._last_passed = float("-inf")  # monotonic ts of last record we let through
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Only target the noisy "Unexpected exception during read" record;
@@ -300,6 +300,15 @@ async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
     if not coordinator._fcm_token or not coordinator.token:
         return False
 
+    # Skip re-registration when the same FCM device token was already successfully
+    # registered in a previous run. Bosch returns HTTP 500 on duplicate registration
+    # (server-side "sh:internal.error") — stable tokens across HA restarts make this
+    # the common path. Invalidated automatically when the FCM token rotates (new
+    # checkin_or_register() returns a different value → mismatch → POST fires again).
+    if coordinator._entry.data.get("fcm_registered_token") == coordinator._fcm_token:
+        _LOGGER.debug("FCM: token unchanged — skipping re-registration with Bosch CBS")
+        return True
+
     # Use the caller-supplied mode if provided; fall back to the coordinator field
     # only for direct calls after the mode is committed (e.g. token refresh).
     effective_mode = mode if mode is not None else coordinator._fcm_push_mode
@@ -310,19 +319,23 @@ async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
         "Authorization": f"Bearer {coordinator.token}",
         "Content-Type":  "application/json",
     }
-    body = {"deviceType": device_type, "deviceToken": coordinator._fcm_token}
+    payload = {"deviceType": device_type, "deviceToken": coordinator._fcm_token}
 
     try:
         async with asyncio.timeout(10):
             async with session.post(
-                f"{CLOUD_API}/v11/devices", headers=headers, json=body
+                f"{CLOUD_API}/v11/devices", headers=headers, json=payload
             ) as resp:
                 if resp.status in (200, 201, 204):
+                    coordinator.hass.config_entries.async_update_entry(
+                        coordinator._entry,
+                        data={**coordinator._entry.data, "fcm_registered_token": coordinator._fcm_token},
+                    )
                     _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
                     return True
-                body = await resp.text()
+                resp_body = await resp.text()
                 _LOGGER.warning(
-                    "FCM token registration failed: HTTP %d — %s", resp.status, body[:200]
+                    "FCM token registration failed: HTTP %d — %s", resp.status, resp_body[:200]
                 )
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("FCM token registration error: %s", err)

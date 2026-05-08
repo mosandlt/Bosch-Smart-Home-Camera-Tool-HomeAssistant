@@ -191,6 +191,7 @@ class TestFcmDeviceTypeRace:
             _fcm_token="token123",
             token="bearer-tok",
             _fcm_push_mode="unknown",  # simulates state BEFORE commit
+            _entry=SimpleNamespace(data={}),
             hass=MagicMock(),
         )
 
@@ -228,6 +229,7 @@ class TestFcmDeviceTypeRace:
             _fcm_token="token123",
             token="bearer-tok",
             _fcm_push_mode="unknown",
+            _entry=SimpleNamespace(data={}),
             hass=MagicMock(),
         )
 

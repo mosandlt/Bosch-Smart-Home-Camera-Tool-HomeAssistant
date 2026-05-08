@@ -347,6 +347,88 @@ class TestRegisterFcmWithBosch:
             await register_fcm_with_bosch(coord)
         assert captured["json"]["deviceType"] == "ANDROID"
 
+    @pytest.mark.asyncio
+    async def test_same_token_in_entry_skips_post(self):
+        """When fcm_registered_token matches the current FCM token, skip the POST.
+
+        Regression: every HA restart triggered a redundant POST → Bosch returned
+        HTTP 500 ("sh:internal.error") because the token was already registered.
+        """
+        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        post_called = []
+
+        @asynccontextmanager
+        async def _post(*args, **kw):
+            post_called.append(True)
+            r = MagicMock()
+            r.status = 204
+            yield r
+
+        session = MagicMock()
+        session.post = _post
+        coord = _stub_coord(
+            _entry=SimpleNamespace(data={"fcm_registered_token": "fcm-token-xyz"}),
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await register_fcm_with_bosch(coord)
+        assert ok is True, "already-registered token must return True"
+        assert not post_called, "POST must be skipped when token is unchanged"
+
+    @pytest.mark.asyncio
+    async def test_new_token_triggers_post(self):
+        """When no saved token exists (first run), the POST fires normally."""
+        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        post_called = []
+
+        @asynccontextmanager
+        async def _post(*args, **kw):
+            post_called.append(True)
+            r = MagicMock()
+            r.status = 204
+            yield r
+
+        session = MagicMock()
+        session.post = _post
+        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await register_fcm_with_bosch(coord)
+        assert ok is True
+        assert post_called, "POST must fire when no saved token exists"
+
+    @pytest.mark.asyncio
+    async def test_success_saves_registered_token(self):
+        """On HTTP 204, save fcm_registered_token to the config entry for future skip."""
+        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
+        @asynccontextmanager
+        async def _post(*args, **kw):
+            r = MagicMock()
+            r.status = 204
+            yield r
+
+        session = MagicMock()
+        session.post = _post
+        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await register_fcm_with_bosch(coord)
+        assert ok is True
+        update_call = coord.hass.config_entries.async_update_entry
+        update_call.assert_called_once()
+        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[1].get("data", {})
+        assert saved_data.get("fcm_registered_token") == "fcm-token-xyz", (
+            "Registered token must be saved to config entry so subsequent "
+            "restarts can skip the Bosch POST and avoid HTTP 500"
+        )
+
 
 # ── async_stop_fcm_push ──────────────────────────────────────────────────
 
