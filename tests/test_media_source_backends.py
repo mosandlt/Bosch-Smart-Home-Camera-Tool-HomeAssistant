@@ -66,6 +66,65 @@ class TestLocalBackendListCameras:
         b = _LocalBackend(str(tmp_path))
         assert b.list_cameras() == []
 
+    def test_year_first_folders_appear_in_camera_list(self, tmp_path):
+        """Year-first folders (e.g. "2026/") must appear in list_cameras() alongside
+        real camera folders so users can browse legacy recordings without restructuring.
+
+        Regression fix (simon42 / Andreas74 2026-05-08): previously these were
+        filtered out and reported as hidden, leaving legacy recordings inaccessible
+        in the Media Browser.
+        """
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        (tmp_path / "Terrasse").mkdir()
+        (tmp_path / "Innenbereich").mkdir()
+        (tmp_path / "2026").mkdir()
+        (tmp_path / "2025").mkdir()
+        b = _LocalBackend(str(tmp_path))
+        cameras = b.list_cameras()
+        assert "Terrasse" in cameras, "real camera must appear"
+        assert "Innenbereich" in cameras, "real camera must appear"
+        assert "2026" in cameras, "year-first folder must appear — browseable as 2026→month→day→events"
+        assert "2025" in cameras, "year-first folder must appear"
+
+    def test_list_year_first_months(self, tmp_path):
+        """list_year_first_months returns 2-digit month dirs under base/YYYY/."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        year_dir = tmp_path / "2026"
+        (year_dir / "03").mkdir(parents=True)
+        (year_dir / "04").mkdir()
+        (year_dir / "junk").mkdir()  # non-month dir must be excluded
+        (year_dir / "file.mp4").write_text("x")  # file must be excluded
+        b = _LocalBackend(str(tmp_path))
+        months = b.list_year_first_months("2026")
+        assert months == ["04", "03"], f"expected newest-first months, got {months}"
+
+    def test_list_year_first_days(self, tmp_path):
+        """list_year_first_days returns 2-digit day dirs under base/YYYY/MM/."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        day_dir = tmp_path / "2026" / "03"
+        (day_dir / "25").mkdir(parents=True)
+        (day_dir / "26").mkdir()
+        (day_dir / "notaday").mkdir()
+        b = _LocalBackend(str(tmp_path))
+        days = b.list_year_first_days("2026", "03")
+        assert days == ["26", "25"], f"expected newest-first days, got {days}"
+
+    def test_list_year_first_events(self, tmp_path):
+        """list_year_first_events returns (filename, image, parsed) tuples from base/YYYY/MM/DD/."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        day = tmp_path / "2026" / "03" / "25"
+        day.mkdir(parents=True)
+        (day / "Garten_2026-03-25_10-33-11_MOVEMENT_ABC123.mp4").write_text("x")
+        (day / "Garten_2026-03-25_10-33-11_MOVEMENT_ABC123.jpg").write_text("x")
+        (day / "._macjunk").write_text("x")  # must be filtered
+        b = _LocalBackend(str(tmp_path))
+        events = b.list_year_first_events("2026", "03", "25")
+        assert len(events) == 1, f"expected 1 event, got {len(events)}"
+        fname, image, parsed = events[0]
+        assert fname.endswith(".mp4"), "video preferred over image"
+        assert image is not None, "jpg thumbnail must be linked"
+        assert parsed["camera"] == "Garten"
+
 
 class TestLocalBackendListDates:
     def test_groups_files_by_date(self, tmp_path):
@@ -420,3 +479,277 @@ class TestAsyncResolveMedia:
         item = SimpleNamespace(identifier="L:01ENT/Cam/file.unknownext")
         out = await src.async_resolve_media(item)
         assert out.mime_type == "application/octet-stream"
+
+
+# ── LocalBackend camera_first year/month/day tree ────────────────────────────
+
+
+class TestLocalBackendCameraFirst:
+    """_LocalBackend with folder_pattern starting with {camera} → year/month/day tree.
+
+    Regression: reported by Georg (simon42, 2026-05-08): files saved via
+    sync_local_save land in camera/2026/05/08/ but the serve view routed
+    camera/year/… paths to the SMB backend (kind="S"), returning 404 for
+    every playback attempt. Fix: prefer Local when no SMB source is configured.
+    """
+
+    def test_list_years_returns_four_digit_dirs(self, tmp_path):
+        """list_years must return only dirs matching ^\\d{4}$ (not full YYYY-MM-DD names)."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        (cam / "2026").mkdir(parents=True)
+        (cam / "2025").mkdir()
+        (cam / "2026-05-08").mkdir()  # must NOT appear as a year
+        b = _LocalBackend(str(tmp_path))
+        years = b.list_years("Terrasse")
+        assert years == ["2026", "2025"], f"Expected only 4-digit year dirs, got {years}"
+
+    def test_list_months_returns_two_digit_dirs(self, tmp_path):
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        year_dir = cam / "2026"
+        (year_dir / "05").mkdir(parents=True)
+        (year_dir / "04").mkdir()
+        (year_dir / "not-a-month").mkdir()
+        b = _LocalBackend(str(tmp_path))
+        months = b.list_months("Terrasse", "2026")
+        assert months == ["05", "04"], f"Expected two-digit month dirs, got {months}"
+
+    def test_list_days_returns_two_digit_dirs(self, tmp_path):
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        month_dir = cam / "2026" / "05"
+        (month_dir / "08").mkdir(parents=True)
+        (month_dir / "07").mkdir()
+        b = _LocalBackend(str(tmp_path))
+        days = b.list_days("Terrasse", "2026", "05")
+        assert days == ["08", "07"], f"Expected two-digit day dirs, got {days}"
+
+    def test_list_events_dated_reads_files_from_day_dir(self, tmp_path):
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        day_dir = cam / "2026" / "05" / "08"
+        day_dir.mkdir(parents=True)
+        (day_dir / "Terrasse_2026-05-08_10-30-00_MOVEMENT_ABCD1234.jpg").write_bytes(b"\xff\xd8")
+        b = _LocalBackend(str(tmp_path))
+        events = b.list_events_dated("Terrasse", "2026", "05", "08")
+        assert len(events) == 1, "Expected 1 event in the day directory"
+        fname, _thumb, parsed = events[0]
+        assert "MOVEMENT" in fname, f"Event filename should contain event type, got {fname}"
+        assert parsed["date"] == "2026-05-08", f"Parsed date wrong: {parsed['date']}"
+
+    def test_resolve_camera_first_path(self, tmp_path):
+        """resolve(camera, year, month, day, filename) must return the correct file path."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        day_dir = cam / "2026" / "05" / "08"
+        day_dir.mkdir(parents=True)
+        fname = "Terrasse_2026-05-08_10-30-00_MOVEMENT_ABCD1234.jpg"
+        (day_dir / fname).write_bytes(b"\xff\xd8")
+        b = _LocalBackend(str(tmp_path))
+        resolved = b.resolve("Terrasse", "2026", "05", "08", fname)
+        assert resolved is not None, "resolve() must return a Path for a camera-first file"
+        assert resolved.is_file(), "Resolved path must be an actual file"
+
+    def test_camera_first_property_true_for_default_pattern(self):
+        """Default folder_pattern={camera}/{year}/{month}/{day} → camera_first=True."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        b = _LocalBackend("/tmp")  # default pattern
+        assert b.camera_first is True, (
+            "Default folder_pattern must make camera_first=True; "
+            "sync_local_save uses the same default and creates camera/year/month/day/"
+        )
+
+
+class TestViewRoutingCameraFirstLocal:
+    """Pin the routing fix: local camera-first paths must NOT be sent to SMB.
+
+    Before the fix (pre-v11.0.18): parts[1] matching ^\\d{4}$ always set kind='S',
+    so _find_source(entry_id, 'S') returned None for users without SMB → HTTP 404.
+    After the fix: kind falls through to 'L' when no SMB source is configured.
+    """
+
+    def test_source_routing_prefers_smb_only_when_smb_configured(self):
+        """When parts[1] is a year AND SMB is not configured, routing must pick Local.
+
+        This is a structural pin of the fix at BoschCameraMediaView.get — reads the
+        source code and asserts the disambiguation logic is present.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # The fix must check for an SMB source before defaulting to "S"
+        assert '_find_source' in src and '"S"' in src and '"L"' in src, (
+            "BoschCameraMediaView.get must disambiguate Local vs SMB camera-first paths "
+            "via _find_source — without this, Local camera-first files (camera/year/month/day/file) "
+            "are incorrectly routed to SMB and return HTTP 404 (georg, simon42, 2026-05-08)"
+        )
+        # Specifically, the SMB preference line must exist (not just hardcode "S")
+        assert 'kind = "S" if _find_source' in src or "kind = 'S' if _find_source" in src, (
+            "Routing must use _find_source to check if SMB is configured before choosing kind='S'"
+        )
+
+    def test_legacy_flat_path_routes_to_local_when_local_configured(self):
+        """Legacy flat identifier {camera}/{filename} routes to kind='L' when Local exists.
+
+        A camera name like 'Terrasse' never matches _YEAR_RE, so the path falls through
+        all year/NVR heuristics to the else branch. The else branch now checks for a
+        Local source first, so users with a local download_path get kind='L'.
+        The else branch must NOT unconditionally hardcode kind='S'.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # The else branch must prefer Local via _find_source (not hardcode 'L' or 'S')
+        assert '_find_source(self.hass, entry_id, "L") is not None' in src, (
+            "The else-branch must check _find_source for Local before choosing kind. "
+            "Hardcoding kind='L' would break SMB-only users; hardcoding kind='S' would "
+            "break Local-only users."
+        )
+        # Must also NOT unconditionally hardcode kind='S' in the else branch
+        lines = src.splitlines()
+        in_else = False
+        for line in lines:
+            if line.strip().startswith("else:"):
+                in_else = True
+            if in_else and 'kind = "S"' in line and '_find_source' not in line:
+                assert False, (
+                    "else-branch must not unconditionally set kind='S' — that would break Local users"
+                )
+
+    def test_camera_first_and_legacy_flat_coexist(self, tmp_path):
+        """_LocalBackend must serve BOTH old flat files AND new year/month/day files
+        from the same base directory (Georg's mixed-layout scenario).
+
+        Old files are flat in camera/. New files are in camera/2026/05/08/.
+        Both must be resolvable via backend.resolve().
+        """
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+        cam = tmp_path / "Terrasse"
+        # Old flat file
+        flat_fname = "Terrasse_2026-05-07_09-00-00_MOVEMENT_OLD00001.jpg"
+        cam.mkdir()
+        (cam / flat_fname).write_bytes(b"\xff\xd8")
+        # New camera-first file
+        day_dir = cam / "2026" / "05" / "08"
+        day_dir.mkdir(parents=True)
+        new_fname = "Terrasse_2026-05-08_10-30-00_MOVEMENT_ABCD1234.jpg"
+        (day_dir / new_fname).write_bytes(b"\xff\xd8")
+
+        b = _LocalBackend(str(tmp_path))
+        # Flat file → resolve(camera, filename)
+        flat_resolved = b.resolve("Terrasse", flat_fname)
+        assert flat_resolved is not None and flat_resolved.is_file(), (
+            "resolve(camera, flat_filename) must work for legacy flat files"
+        )
+        # Camera-first file → resolve(camera, year, month, day, filename)
+        new_resolved = b.resolve("Terrasse", "2026", "05", "08", new_fname)
+        assert new_resolved is not None and new_resolved.is_file(), (
+            "resolve(camera, year, month, day, filename) must work for camera-first files"
+        )
+
+    def test_smb_date_first_single_source_still_routes_to_smb(self):
+        """When parts[0] is a year (SMB date-first single-source), kind must still be 'S'.
+
+        The disambiguation fix must NOT change how SMB date-first paths are routed.
+        These paths have parts[0] = '2026' (a 4-digit year), which triggers the
+        EARLIER heuristic before the camera-first disambiguation branch is reached.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # The _YEAR_RE.match(head) branch must still unconditionally set kind='S'
+        lines = src.splitlines()
+        year_first_block = False
+        for line in lines:
+            stripped = line.strip()
+            if "_YEAR_RE.match(head)" in stripped:
+                year_first_block = True
+            if year_first_block and 'kind = "S"' in stripped and '_find_source' not in stripped:
+                break  # found the unconditional S assignment for date-first SMB
+        else:
+            assert False, (
+                "The SMB date-first path (_YEAR_RE.match(head)) must still unconditionally "
+                "set kind='S' — the disambiguation fix must only apply to camera/year/… paths"
+            )
+
+    def test_smb_camera_first_with_smb_configured_routes_to_smb(self):
+        """camera/year/month/day/filename must route to SMB when an SMB source exists.
+
+        FTP uploads land on the same NAS share and are browsed via SMB. The camera-first
+        disambiguation must pick 'S' when _find_source finds an SMB backend, so FTP
+        and SMB camera-first files are served correctly.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # After the fix: the camera/year path picks 'S' when SMB is present
+        assert 'kind = "S" if _find_source(self.hass, entry_id, "S") is not None else "L"' in src, (
+            "camera-first disambiguation must choose kind='S' when _find_source returns SMB, "
+            "so FTP-uploaded / SMB camera-first files are served correctly"
+        )
+
+    def test_smb_flat_single_source_routes_to_smb_when_no_local(self):
+        """Flat SMB file {camera}/{filename} must route to kind='S' when no Local source exists.
+
+        Users with only a NAS share (no local download_path) and old flat files directly
+        in the camera/ folder on the NAS would get HTTP 404 if the else-branch always
+        hardcoded kind='L'. Fix: prefer Local when it exists, fall back to SMB.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # The else branch must use _find_source to choose between L and S
+        assert '_find_source(self.hass, entry_id, "L") is not None' in src, (
+            "The else-branch (flat file fallback) must check for a Local source before "
+            "defaulting to kind='L', so SMB-only users with flat NAS files are served"
+        )
+
+    def test_nvr_path_routes_to_nvr(self):
+        """camera/YYYY-MM-DD/HH-MM.mp4 must always route to kind='N' (NVR).
+
+        NVR paths use the full ISO-date format (2026-05-08) in parts[1], which matches
+        _NVR_DATE_DIR_RE but NOT _YEAR_RE (has dashes). The NVR branch must fire before
+        the else branch so that continuous-recording segments are served correctly.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        assert '_NVR_DATE_DIR_RE.match(parts[1])' in src, (
+            "BoschCameraMediaView.get must have an NVR branch checking _NVR_DATE_DIR_RE "
+            "before the flat-file fallback, so NVR segments route to kind='N'"
+        )
+        # NVR must set kind='N' unconditionally (not via _find_source heuristic)
+        lines = [l.strip() for l in src.splitlines()]
+        nvr_block = False
+        for line in lines:
+            if "_NVR_DATE_DIR_RE.match(parts[1])" in line:
+                nvr_block = True
+            if nvr_block and 'kind = "N"' in line:
+                break
+        else:
+            assert False, "NVR branch must set kind='N' after matching _NVR_DATE_DIR_RE"
+
+    def test_explicit_kind_tokens_bypass_all_heuristics(self):
+        """When the path starts with L, S, or N (multi-source), heuristics are skipped.
+
+        This is the normal path for multi-source entries (both Local + SMB configured).
+        Explicit tokens are never ambiguous, so no _find_source lookup is needed there.
+        """
+        import inspect
+        from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
+        src = inspect.getsource(BoschCameraMediaView.get)
+        # The very first if-branch must handle explicit tokens without calling _find_source
+        lines = src.splitlines()
+        token_block = False
+        for line in lines:
+            stripped = line.strip()
+            if 'head in ("L", "S", "N")' in stripped:
+                token_block = True
+            if token_block and 'tail = parts[1:]' in stripped:
+                break  # found the token branch — correctly peels the token and moves on
+            if token_block and '_find_source' in stripped:
+                assert False, (
+                    "Explicit kind token branch must NOT call _find_source — "
+                    "L/S/N tokens are unambiguous by design"
+                )

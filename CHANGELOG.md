@@ -5,6 +5,51 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.0.19
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: Media Browser — legacy year-first folders were hidden and not browseable.** Recordings stored in the old year-first layout (`2026/MM/DD/file.mp4` at the NAS or local root) were silently filtered out of the Media Browser camera list. Clicking the source showed camera-first cameras only; any `2026/` folder was invisible. Fixed by removing the filter: year-first folders now appear in the camera list and are fully navigable (`2026 → Month → Day → Event`). Works for all three backends: Local, SMB, and FTP (FRITZ.NAS). No file restructuring required — recordings stay in place. Removed the `migrate_year_first_events` service that was introduced in v11.0.18 as a workaround. Reported by Andreas74 (simon42, 2026-05-08).
+
+### Internal
+
+- 5 new regression tests: `test_year_first_folders_appear_in_camera_list`, `test_list_year_first_months`, `test_list_year_first_days`, `test_list_year_first_events` (Local backend), plus updated `test_skips_legacy_year_first_folders_at_camera_level` → now asserts year-first folders are visible. Local resolver updated to accept 4-part paths (year/month/day/file).
+
+## v11.0.18
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: Media Browser — event clips not playable when using local year/month/day folder layout.** When `folder_pattern` defaults to `{camera}/{year}/{month}/{day}` (the default since v11.0.13), new FCM-triggered downloads land in `Camera/2026/05/08/`. The Media Browser showed them correctly in the nested tree, but clicking play returned HTTP 404. Root cause: the file-serve view detected `year` as the second path segment and incorrectly routed the request to the SMB backend (`kind='S'`). When no SMB share is configured, `_find_source` returned `None` → 404. Fixed by checking whether an SMB source is actually configured before choosing `kind='S'`; falls back to `kind='L'` (Local) when only a local download path is set. Both old flat files (`camera/filename.jpg`) and new nested files (`camera/2026/05/08/filename.jpg`) now serve correctly from the same base directory. Reported by Georg (simon42, 2026-05-08).
+
+### Internal
+
+- 10 new regression tests for `_LocalBackend` camera-first tree (list_years / list_months / list_days / list_events_dated / resolve) and view routing disambiguation (legacy flat routes to Local, SMB date-first still routes to SMB, flat+nested coexist). Total: 95%, 3218 tests.
+
+## v11.0.17
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: NVR crash-loop guard misfired on CI / fresh HA installs.** `_nvr_recent_crash.get(cam_id, 0.0)` violated the SENTINEL_RULE — on hosts where `time.monotonic()` was less than `_RESPAWN_WINDOW_SECONDS` (30 s), the very first NVR crash was misread as a crash-loop and the recorder never restarted. Fixed by using `float("-inf")` as the default so the check correctly evaluates "no previous crash".
+- **Fix: Motion alerts suppressed at HA startup on hosts with low uptime.** `_alert_sent_ids.get(newest_id, 0.0)` and `fcm.py _sent.get(newest_id, 0.0)` violated the SENTINEL_RULE — on systems where `time.monotonic() < 60 s` (e.g. container restarts), the dedup guard fired immediately and dropped the first motion alert after startup. Fixed by using `float("-inf")` in both locations.
+- **Fix: Camera status checks stopped firing when `scan_interval < interval_status`.** `_should_check_status` used the global `_last_status` timestamp (advanced on every scan tick) instead of the per-camera `_per_cam_status_at` — so whenever `scan_interval` was shorter than `interval_status`, the global timestamp was always "fresh" and per-camera status was never re-checked after the first tick. Fixed by using per-camera timestamps for all cameras.
+- **Fix: `pre_warm_rtsp` leaked TCP writer on exception paths.** If `asyncio.open_connection` succeeded but the RTSP exchange raised, the writer was not closed. The no-nonce retry path also called `writer.close()` without `await writer.wait_closed()`. Both paths now properly close and await.
+- **Fix: `_auto_renew_local_session` marked session stale after a successful heartbeat rescue.** The `renewal_fails` counter was not reset when a heartbeat-forced renewal succeeded — a session that recovered via heartbeat still accumulated prior failure counts and triggered `_session_stale=True` on the next failure threshold check. Fixed by resetting `renewal_fails = 0` on heartbeat-forced success.
+
+### Improvements
+
+- **Richer diagnostics JSON.** `Download Diagnostics` now includes: `integration_version` (top-level, from `manifest.json`), `debug_logging` flag and `stream_warming_count` in the coordinator section; per-camera `stream_error_count`, `stream_fell_back`, `session_stale`, and `offline_since_seconds` — the key signals for diagnosing stream-restart loops and session bugs without follow-up questions.
+- **GitHub issue template.** New structured bug-report template (`.github/ISSUE_TEMPLATE/bug_report.yml`) guides users through: enable Debug Logging → reproduce → Download Diagnostics → copy log lines. Includes required fields for HA version, integration version, camera model and connection type.
+
+### Internal
+
+- Bug-hunt regression suite: 12 new tests in `test_bug_regression_v11.py` (37 total). 3 new diagnostics tests (11 total). Coverage: 95%, 3208 tests across 118 files.
+
 ## v11.0.10
 
 No card changes.

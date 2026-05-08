@@ -172,18 +172,26 @@ class TestShouldCheckStatus:
 
     def test_normal_cadence_due(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord(_last_status=0.0)
+        now = time.monotonic()
+        coord = _make_coord(_per_cam_status_at={CAM_A: now - 90.0})
         # 90 s elapsed > 60 s interval → due
         assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, 90.0, 60,
+            coord, CAM_A, now, 60,
         ) is True
 
     def test_normal_cadence_not_due(self):
+        """Camera checked 10s ago with interval=60s must not re-check.
+
+        Fixed: _should_check_status now uses _per_cam_status_at[cam] not
+        the global _last_status. With _last_status, scan_interval < interval_status
+        caused _last_status to advance every tick → status never re-checked.
+        """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord(_last_status=time.monotonic() - 10.0)
+        now = time.monotonic()
+        coord = _make_coord(_per_cam_status_at={CAM_A: now - 10.0})
         # 10 s ago < 60 s interval → not due
         assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, time.monotonic(), 60,
+            coord, CAM_A, now, 60,
         ) is False
 
     def test_offline_extended_cadence(self):
@@ -213,6 +221,36 @@ class TestShouldCheckStatus:
         assert BoschCameraCoordinator._should_check_status(
             coord, CAM_A, now, 60,
         ) is False
+
+    def test_scan_interval_shorter_than_status_interval(self):
+        """scan_interval=15s, interval_status=120s: status must fire at 120s, not every 15s.
+
+        Bug: _should_check_status used global _last_status which advanced every
+        scan tick (15s). After tick 1, (now - _last_status) was always 15s < 120s
+        so status was never re-checked. Fix: use per-camera _per_cam_status_at.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        # Simulate: status checked at t=0, now at t=15 (scan tick fires)
+        # Global _last_status just advanced to t=0 (updated on previous tick)
+        now = time.monotonic()
+        coord = _make_coord(
+            _last_status=now - 15.0,           # advanced every 15s scan tick (bug scenario)
+            _per_cam_status_at={CAM_A: now - 15.0},  # last actual check was 15s ago
+        )
+        # interval_status=120s, only 15s elapsed → NOT due
+        assert BoschCameraCoordinator._should_check_status(
+            coord, CAM_A, now, 120,
+        ) is False, "Status must not re-fire 15s after last check when interval is 120s"
+
+        # Now simulate 120s later — status IS due
+        coord2 = _make_coord(
+            _last_status=now,                  # global updated every tick (irrelevant now)
+            _per_cam_status_at={CAM_A: now - 125.0},  # last actual check 125s ago
+        )
+        assert BoschCameraCoordinator._should_check_status(
+            coord2, CAM_A, now, 120,
+        ) is True, "Status must fire after 125s when interval is 120s"
 
 
 # ── _token_still_valid — JWT exp parsing ────────────────────────────────

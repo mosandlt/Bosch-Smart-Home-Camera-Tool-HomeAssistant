@@ -46,7 +46,7 @@ def _make_coord(**overrides):
         _nvr_user_intent={},
         _proxy_url_cache={},
         _snapshot_fetch_locks={},
-        _camera_status_extra={},
+        _shc_state_cache={},
         token="tok-A",
         hass=SimpleNamespace(
             async_add_executor_job=AsyncMock(),
@@ -170,7 +170,7 @@ class TestFetchDigestClosure:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            _camera_status_extra={CAM_A: {"privacy_mode": True}},
+            _shc_state_cache={CAM_A: {"privacy_mode": True}},
         )
         result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
             coord, CAM_A
@@ -707,7 +707,7 @@ class TestAsyncFetchLiveSnapshotLockCreation:
             _async_fetch_live_snapshot_impl=impl_mock,
         )
         coord.token = "tok-A"
-        coord._camera_status_extra = {}
+        coord._shc_state_cache = {}
 
         result = await BoschCameraCoordinator.async_fetch_live_snapshot(
             coord, CAM_A
@@ -748,7 +748,7 @@ class TestProxyCacheEviction:
         # Simulate expired cache: expires_at in the past
         coord = _make_coord(
             _proxy_url_cache={CAM_A: ("proxy.host:443", time.monotonic() - 10)},
-            _camera_status_extra={},
+            _shc_state_cache={},
         )
         coord.token = "tok-A"
 
@@ -785,11 +785,11 @@ class TestProxyCacheEviction:
 
     @pytest.mark.asyncio
     async def test_privacy_mode_short_circuits_impl(self):
-        """privacy_mode=True in _camera_status_extra → impl returns None immediately."""
+        """privacy_mode=True in _shc_state_cache → impl returns None immediately."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            _camera_status_extra={CAM_A: {"privacy_mode": True}},
+            _shc_state_cache={CAM_A: {"privacy_mode": True}},
         )
         coord.token = "tok-A"
 
@@ -803,7 +803,7 @@ class TestProxyCacheEviction:
         """No token → _async_fetch_live_snapshot_impl returns None immediately."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord(token=None, _camera_status_extra={})
+        coord = _make_coord(token=None, _shc_state_cache={})
         result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
             coord, CAM_A
         )

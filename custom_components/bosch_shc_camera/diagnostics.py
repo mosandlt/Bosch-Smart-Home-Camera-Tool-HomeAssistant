@@ -10,11 +10,19 @@ addresses, cloud IDs) are redacted via homeassistant.diagnostics.async_redact_da
 
 from __future__ import annotations
 
+import json
+import pathlib
+import time
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+
+_MANIFEST: dict[str, Any] = json.loads(
+    (pathlib.Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
+)
+INTEGRATION_VERSION: str = _MANIFEST.get("version", "unknown")
 
 TO_REDACT = {
     # Tokens / OAuth credentials
@@ -62,11 +70,17 @@ async def async_get_config_entry_diagnostics(
     coord = getattr(entry, "runtime_data", None)
 
     # Per-camera summary — only fields safe to share, no secrets, no rtsps URLs
+    now = time.monotonic()
     cameras: list[dict[str, Any]] = []
     if coord is not None and coord.data:
+        offline_since: dict = getattr(coord, "_offline_since", {})
+        stream_error_count: dict = getattr(coord, "_stream_error_count", {})
+        stream_fell_back: dict = getattr(coord, "_stream_fell_back", {})
+        session_stale: dict = getattr(coord, "_session_stale", {})
         for cam_id, cdata in coord.data.items():
             info = cdata.get("info", {})
             live = cdata.get("live", {})
+            since = offline_since.get(cam_id)
             cameras.append(
                 {
                     "cam_id_prefix": cam_id[:8],
@@ -79,10 +93,18 @@ async def async_get_config_entry_diagnostics(
                     "events_today_count": len(cdata.get("events", [])),
                     "live_connection_type": live.get("connectionType"),
                     "live_age_seconds": live.get("age_seconds"),
+                    # stream health — useful for diagnosing stream-restart loops
+                    "stream_error_count": stream_error_count.get(cam_id, 0),
+                    "stream_fell_back": stream_fell_back.get(cam_id, False),
+                    "session_stale": session_stale.get(cam_id, False),
+                    "offline_since_seconds": int(now - since) if since is not None else None,
                 }
             )
 
+    stream_warming: set = getattr(coord, "_stream_warming", set())
+
     return {
+        "integration_version": INTEGRATION_VERSION,
         "entry": {
             "title": entry.title,
             "version": entry.version,
@@ -92,10 +114,12 @@ async def async_get_config_entry_diagnostics(
         "coordinator": {
             "running": coord is not None,
             "last_update_success": getattr(coord, "last_update_success", None),
+            "debug_logging": getattr(coord, "debug", False),
             "fcm_running": getattr(coord, "_fcm_running", None),
             "fcm_healthy": getattr(coord, "_fcm_healthy", None),
             "auth_outage_count": getattr(coord, "_auth_outage_count", None),
             "scan_interval": getattr(getattr(coord, "update_interval", None), "total_seconds", lambda: None)(),
+            "stream_warming_count": len(stream_warming),
         },
         "cameras": cameras,
     }

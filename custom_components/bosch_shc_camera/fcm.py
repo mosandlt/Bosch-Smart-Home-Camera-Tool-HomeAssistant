@@ -247,8 +247,10 @@ async def async_start_fcm_push(coordinator) -> None:
             coordinator._fcm_client = None
             return False
 
-        # Register FCM token with Bosch CBS API
-        await register_fcm_with_bosch(coordinator)
+        # Register FCM token with Bosch CBS API — pass mode explicitly so
+        # register_fcm_with_bosch uses the correct deviceType. coordinator._fcm_push_mode
+        # is still "unknown" at this point (set to `mode` only after client.start()).
+        await register_fcm_with_bosch(coordinator, mode)
 
         # Start listening for pushes
         try:
@@ -285,18 +287,23 @@ async def async_start_fcm_push(coordinator) -> None:
         await _try_fcm_with_mode("ios")
 
 
-async def register_fcm_with_bosch(coordinator) -> bool:
+async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
     """Register our FCM token with Bosch CBS so it sends us push notifications.
 
     Endpoint: POST /v11/devices {"deviceType": "ANDROID"|"IOS", "deviceToken": token}
     Response: HTTP 204 on success.
     deviceType must match the FCM platform used for registration.
+
+    `mode` should be passed explicitly by the caller because coordinator._fcm_push_mode
+    is still "unknown" at call time (it is set only after client.start() succeeds).
     """
     if not coordinator._fcm_token or not coordinator.token:
         return False
 
-    # Determine device type from active push mode
-    device_type = "IOS" if coordinator._fcm_push_mode == "ios" else "ANDROID"
+    # Use the caller-supplied mode if provided; fall back to the coordinator field
+    # only for direct calls after the mode is committed (e.g. token refresh).
+    effective_mode = mode if mode is not None else coordinator._fcm_push_mode
+    device_type = "IOS" if effective_mode == "ios" else "ANDROID"
 
     session = async_get_clientsession(coordinator.hass, verify_ssl=False)
     headers = {
@@ -410,7 +417,7 @@ async def async_handle_fcm_push(coordinator) -> None:
             import time as _time
             _now = _time.monotonic()
             _sent = coordinator._alert_sent_ids
-            if newest_id and _sent.get(newest_id, 0.0) > _now - 60.0:
+            if newest_id and _sent.get(newest_id, float("-inf")) > _now - 60.0:
                 _LOGGER.debug(
                     "FCM push dedup: skipping duplicate alert for %s id=%s (already sent %.1fs ago)",
                     cam_id, newest_id[:8], _now - _sent[newest_id],

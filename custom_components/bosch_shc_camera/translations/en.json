@@ -581,20 +581,102 @@
           "description": "Cloud UUID of the camera (find in entity attributes)"
         }
       }
+    },
+    "migrate_flat_events": {
+      "name": "Migrate Flat Event Files",
+      "description": "Move event files from the legacy flat layout (camera/file.mp4) into the date hierarchy (camera/year/month/day/file.mp4). Safe to run multiple times — files that already exist at the destination are skipped. Result is shown as a persistent notification."
+    },
+    "delete_event": {
+      "name": "Delete Event File(s)",
+      "description": "Delete one or more local event files by exact path, or delete all files for a camera on a given date.",
+      "fields": {
+        "file_path": {
+          "name": "File Path",
+          "description": "Absolute path to a single event file to delete."
+        },
+        "camera_name": {
+          "name": "Camera Name",
+          "description": "Delete all events for this camera (combine with Date to limit scope)."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Limit deletion to this date (YYYY-MM-DD). Requires Camera Name."
+        }
+      }
+    },
+    "get_motion_zones": {
+      "name": "Get Motion Zones",
+      "description": "Read the current motion detection zones from the camera. Result is written to a persistent notification.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera ID",
+          "description": "Cloud UUID of the camera (find in entity attributes)"
+        }
+      }
+    },
+    "set_motion_zones": {
+      "name": "Set Motion Zones",
+      "description": "Write motion detection zone configuration to the camera.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera ID",
+          "description": "Cloud UUID of the camera"
+        },
+        "zones": {
+          "name": "Zones",
+          "description": "List of zone objects as returned by Get Motion Zones."
+        }
+      }
+    },
+    "rename_camera": {
+      "name": "Rename Camera",
+      "description": "Change the display name of a camera in the Bosch cloud.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera ID",
+          "description": "Cloud UUID of the camera"
+        },
+        "name": {
+          "name": "New Name",
+          "description": "New display name for the camera"
+        }
+      }
     }
   },
   "exceptions": {
-    "argument_required": {"message": "{argument} is required"},
-    "argument_must_be_list": {"message": "{argument} must be a list"},
-    "missing_field": {"message": "{kind} {index} is missing field {field}"},
-    "value_out_of_range": {"message": "{kind} {index} {field}={value} out of range 0.0–1.0"},
-    "index_out_of_range": {"message": "Index {index} out of range (have {count} items)"},
-    "not_found": {"message": "{kind} {id} not found"},
-    "live_connection_failed": {"message": "Could not establish live connection for camera {cam_id_prefix} — see log for mitmproxy capture instructions"},
-    "http_error": {"message": "{action} failed: HTTP {status}"},
-    "http_error_with_body": {"message": "{action} failed: HTTP {status} — {body}"},
-    "privacy_blocked": {"message": "{action}: feature unavailable while Privacy mode is active"},
-    "unexpected_error": {"message": "{action} failed: {error}"}
+    "argument_required": {
+      "message": "{argument} is required"
+    },
+    "argument_must_be_list": {
+      "message": "{argument} must be a list"
+    },
+    "missing_field": {
+      "message": "{kind} {index} is missing field {field}"
+    },
+    "value_out_of_range": {
+      "message": "{kind} {index} {field}={value} out of range 0.0–1.0"
+    },
+    "index_out_of_range": {
+      "message": "Index {index} out of range (have {count} items)"
+    },
+    "not_found": {
+      "message": "{kind} {id} not found"
+    },
+    "live_connection_failed": {
+      "message": "Could not establish live connection for camera {cam_id_prefix} — see log for mitmproxy capture instructions"
+    },
+    "http_error": {
+      "message": "{action} failed: HTTP {status}"
+    },
+    "http_error_with_body": {
+      "message": "{action} failed: HTTP {status} — {body}"
+    },
+    "privacy_blocked": {
+      "message": "{action}: feature unavailable while Privacy mode is active"
+    },
+    "unexpected_error": {
+      "message": "{action} failed: {error}"
+    }
   },
   "issues": {
     "token_expired": {

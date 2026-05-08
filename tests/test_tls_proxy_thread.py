@@ -709,3 +709,101 @@ class TestPreWarmGaps:
                 "wait_closed() raising ConnectionResetError must be swallowed; "
                 "pre_warm_rtsp must still return got_ok=True"
             )
+
+    @pytest.mark.asyncio
+    async def test_no_nonce_wait_closed_exception_swallowed(self):
+        """writer.wait_closed() raising on the no-nonce path is swallowed (lines 404-405).
+
+        Bug 12 fix: the no-nonce retry path now calls await writer.wait_closed();
+        if that raises, it must be suppressed so the retry loop continues.
+        """
+        async def _handle(reader, writer):
+            try:
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = await asyncio.wait_for(reader.read(4096), timeout=1.0)
+                    if not chunk:
+                        return
+                    data += chunk
+                # Respond without nonce/realm
+                writer.write(b"RTSP/1.0 500 Error\r\nCSeq: 1\r\n\r\n")
+                await writer.drain()
+            except Exception:
+                pass
+            finally:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+        srv = await asyncio.start_server(_handle, "127.0.0.1", 0)
+        proxy_port = srv.sockets[0].getsockname()[1]
+        original_open = asyncio.open_connection
+
+        async def _patched_open(host, port, **kwargs):
+            reader, writer = await original_open(host, port, **kwargs)
+
+            async def _raising_wait_closed():
+                raise ConnectionResetError("server reset")
+
+            writer.wait_closed = _raising_wait_closed
+            return reader, writer
+
+        try:
+            with patch("asyncio.open_connection", side_effect=_patched_open):
+                result = await pre_warm_rtsp(
+                    proxy_port, "u", "p", "127.0.0.1",
+                    max_attempts=1, retry_wait=0, post_success_wait=0,
+                    describe_timeout=1,
+                )
+        finally:
+            srv.close()
+            await srv.wait_closed()
+
+        assert result is False, (
+            "No nonce + wait_closed exception → must return False without raising"
+        )
+
+    @pytest.mark.asyncio
+    async def test_exception_path_closes_writer_if_open(self):
+        """If open_connection succeeds but drain/wait_for raises, writer is closed (lines 449-454).
+
+        Bug 11 fix: when the connection was established but the RTSP exchange fails
+        (TimeoutError, ConnectionResetError, etc.), the writer must be closed so the
+        camera's session slot is freed before the retry.
+        """
+        original_open = asyncio.open_connection
+        close_called = [False]
+
+        async def _patched_open(host, port, **kwargs):
+            reader, writer = await original_open(host, port, **kwargs)
+            original_close = writer.close
+
+            def _tracking_close():
+                close_called[0] = True
+                original_close()
+
+            writer.close = _tracking_close
+            return reader, writer
+
+        srv = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+        proxy_port = srv.sockets[0].getsockname()[1]
+
+        try:
+            with patch("asyncio.open_connection", side_effect=_patched_open):
+                with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+                    result = await pre_warm_rtsp(
+                        proxy_port, "u", "p", "127.0.0.1",
+                        max_attempts=1, retry_wait=0, post_success_wait=0,
+                        describe_timeout=1,
+                    )
+        finally:
+            srv.close()
+            await srv.wait_closed()
+
+        assert result is False, "TimeoutError in exchange must return False"
+        assert close_called[0], (
+            "Bug 11: writer.close() must be called in exception path when "
+            "open_connection succeeded but RTSP exchange raised"
+        )

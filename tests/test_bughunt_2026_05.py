@@ -54,7 +54,7 @@ class TestDedupContinueDropsData:
         source = (SRC / "__init__.py").read_text()
         # Find the dedup-continue block
         dedup_block = (
-            '_alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0'
+            '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
         )
         assert dedup_block in source, (
             "FCM dedup guard not found — __init__.py structure changed. "
@@ -70,7 +70,8 @@ class TestDedupContinueDropsData:
         """
         source = (SRC / "__init__.py").read_text()
         # Locate the dedup block and data assignment
-        dedup_idx = source.find("_alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0")
+        dedup_pattern = '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
+        dedup_idx = source.find(dedup_pattern)
         data_assign_idx = source.find('data[cam_id] = {')
         assert dedup_idx != -1, "Dedup guard not found"
         assert data_assign_idx != -1, "data[cam_id] assignment not found"
@@ -107,7 +108,8 @@ class TestDedupContinueDropsData:
         source = (SRC / "__init__.py").read_text()
         # The dedup path must update _last_event_ids[cam_id] = newest_id
         # before any early exit
-        dedup_idx = source.find("_alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0")
+        dedup_pattern = '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
+        dedup_idx = source.find(dedup_pattern)
         assert dedup_idx != -1
         # In the 400 chars after the dedup guard, _last_event_ids must be updated
         nearby = source[dedup_idx:dedup_idx + 400]

@@ -812,7 +812,7 @@ def _make_snapshot_coord(**overrides):
         token="tok-A",
         _proxy_url_cache={},
         _snapshot_fetch_locks={},
-        _camera_status_extra={},
+        _shc_state_cache={},
         get_quality_params=MagicMock(return_value=(True, {})),
         _get_cached_rcp_session=AsyncMock(return_value=None),
         _rcp_read=AsyncMock(return_value=None),

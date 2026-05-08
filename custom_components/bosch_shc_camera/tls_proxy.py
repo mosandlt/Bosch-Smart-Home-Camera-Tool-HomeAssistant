@@ -285,11 +285,19 @@ async def rtsp_keepalive(
             if "200 OK" in resp1_str:
                 _LOGGER.debug("Keepalive OPTIONS 200 OK (no auth needed) on port %d", proxy_port)
                 writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
                 return True
             _LOGGER.debug(
                 "Keepalive: no nonce/realm on port %d (%.100s)", proxy_port, resp1_str
             )
             writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
             return False
 
         nonce, realm = nonce_m.group(1), realm_m.group(1)
@@ -306,6 +314,10 @@ async def rtsp_keepalive(
         resp2 = await asyncio.wait_for(reader.read(4096), timeout=5)
         resp2_str = resp2.decode("utf-8", errors="replace")
         writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
 
         if "200 OK" in resp2_str:
             _LOGGER.debug("Keepalive OPTIONS 200 OK on port %d", proxy_port)
@@ -359,6 +371,7 @@ async def pre_warm_rtsp(
     times out and we should not pin the user on a dead LOCAL URL.
     """
     for attempt in range(1, max_attempts + 1):
+        writer = None  # track so exception path can close it if open_connection succeeded
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
             uri = (
@@ -386,6 +399,10 @@ async def pre_warm_rtsp(
                     proxy_port, attempt, max_attempts, resp1_str,
                 )
                 writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
                 if attempt < max_attempts:
                     await asyncio.sleep(retry_wait)
                     continue
@@ -429,6 +446,12 @@ async def pre_warm_rtsp(
                 "Pre-warm RTSP failed on port %d (attempt %d/%d): %s",
                 proxy_port, attempt, max_attempts, exc,
             )
+            if writer is not None:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
             if attempt < max_attempts:
                 await asyncio.sleep(retry_wait)
     return False

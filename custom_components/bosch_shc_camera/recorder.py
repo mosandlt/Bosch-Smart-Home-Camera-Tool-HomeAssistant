@@ -375,7 +375,7 @@ async def _watch_recorder(
 
     # Crash-loop guard.
     if elapsed < _RESPAWN_WINDOW_SECONDS:
-        prev_crash = coordinator._nvr_recent_crash.get(cam_id, 0.0)
+        prev_crash = coordinator._nvr_recent_crash.get(cam_id, float("-inf"))
         now = time.monotonic()
         if (now - prev_crash) < _RESPAWN_WINDOW_SECONDS:
             _LOGGER.error(

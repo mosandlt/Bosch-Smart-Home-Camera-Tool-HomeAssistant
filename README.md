@@ -199,7 +199,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 | **SMB Share** | Share name (e.g. `FRITZ.NAS`, `cameras`). | empty |
 | **SMB Username** / **SMB Password** | SMB authentication credentials. | empty |
 | **SMB Base Path** | Base folder on the share (e.g. `Bosch-Kameras`). | empty |
-| **SMB Folder Pattern** | Subfolder pattern with `{year}` / `{month}` / `{day}`. | `{year}/{month}` |
+| **SMB Folder Pattern** | Subfolder pattern with `{camera}` / `{year}` / `{month}` / `{day}`. | `{camera}/{year}/{month}/{day}` |
 | **SMB File Pattern** | File-naming pattern with `{camera}` / `{date}` / `{time}` / `{type}` / `{id}`. | `{camera}_{date}_{time}_{type}_{id}` |
 | **Retention period (days)** | Auto-delete files older than N days. `0` = keep forever. | 180 |
 | **Low disk warning (MB)** | Notify when free space on the share drops below this. | 500 |
@@ -548,13 +548,13 @@ Upload event snapshots and video clips directly to a SMB/CIFS network share (FRI
 
 **Configuration:** Go to **Settings → Integrations → Bosch Smart Home Camera → Configure** and enable **SMB Upload**. Then fill in the server, share, and credentials.
 
-**Folder pattern variables:** `{year}`, `{month}`, `{day}`
+**Folder pattern variables:** `{camera}`, `{year}`, `{month}`, `{day}`
 **File pattern variables:** `{camera}`, `{date}`, `{time}`, `{type}`, `{id}`
 
-Example file path on NAS:
+Example file path on NAS (default camera-first layout):
 ```
-\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\2026\03\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.jpg
-\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\2026\03\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
+\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\Garten\2026\03\25\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.jpg
+\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\Garten\2026\03\25\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
 ```
 
 > Requires the `smbprotocol` Python package, which is auto-installed via `manifest.json`.
@@ -585,7 +585,7 @@ To use your FRITZ!Box as a NAS for camera event storage:
    | SMB Username | FRITZ!Box NAS user | `nas_user` |
    | SMB Password | User password | `your_password` |
    | SMB Base Path | Folder on NAS | `Bosch-Kameras` |
-   | SMB Folder Pattern | Subfolder structure | `{year}/{month}` |
+   | SMB Folder Pattern | Subfolder structure | `{camera}/{year}/{month}/{day}` |
    | SMB File Pattern | File naming | `{camera}_{date}_{time}_{type}_{id}` |
    | Retention (days) | Delete files older than N days | `180` (6 months) |
    | Low disk warning (MB) | Alert below this free space | `5120` (5 GB) |
@@ -636,8 +636,9 @@ All configured backends appear side by side — no filter option needed:
 | **Aufnahmen** (NVR) | `Mini-NVR` is enabled |
 
 **Tree shape**
-- *Local / NVR:* `Camera → Date → Event`
-- *NAS:* `Year → Month → Day → Event` (all cameras share a day folder)
+- *Camera-first (default):* `Camera → Year → Month → Day → Event`
+- *Year-first (legacy):* `2026 → Month → Day → Event` — folders named with a 4-digit year at the NAS/local root are automatically detected and fully browseable without any restructuring
+- *NVR:* `Camera → Date → Event`
 
 Each event shows `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garten)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. If only a JPEG exists for an event (no video clip), the image is shown directly. macOS resource-fork files (`._*`) are filtered out.
 
@@ -1253,8 +1254,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.0.16** — see the GitHub release page for full notes:
-[**v11.0.16 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.16)
+Latest stable: **v11.0.19** — see the GitHub release page for full notes:
+[**v11.0.19 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.0.19)
 
 | | |
 |---|---|

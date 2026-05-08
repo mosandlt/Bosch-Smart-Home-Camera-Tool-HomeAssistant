@@ -131,7 +131,7 @@ class _StreamSupportNoiseFilter(logging.Filter):
             return True  # not us, leave alone
         import time as _t
         now = _t.monotonic()
-        last = self._last_passed.get(ent, 0.0)
+        last = self._last_passed.get(ent, float('-inf'))
         if (now - last) < 30.0:
             return False
         # Prune oldest entry when dict grows too large
@@ -567,7 +567,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._nvr_user_intent: dict[str, bool] = {}
         self._nvr_error_state: dict[str, str] = {}
         self._nvr_recent_crash: dict[str, float] = {}
-        self._last_nvr_cleanup: float = 0.0
+        self._last_nvr_cleanup: float = float("-inf")  # float('-inf') → runs on first tick
         # Drain watcher state — populated by recorder.sync_drain_tick. Used by
         # BoschNvrStateSensor to render `target` / `pending_uploads` /
         # `failed_uploads` / `last_segment_age_s` attributes without coupling
@@ -1282,14 +1282,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
 
         - Normal cameras: check every interval_status seconds.
         - Persistently offline cameras (>15 min): check every _OFFLINE_EXTENDED_INTERVAL.
+
+        Uses per-camera timestamps (_per_cam_status_at) instead of the global
+        _last_status so that the check interval is independent of scan_interval.
+        With _last_status, setting scan_interval < interval_status caused _last_status
+        to advance every tick, making (now - _last_status) always < interval_status
+        and status checks never firing after the first tick.
         """
-        last = self._last_status
+        per_cam_last = self._per_cam_status_at.get(cam_id, -86400.0)
         offline_since = self._offline_since.get(cam_id)
         if offline_since and (now - offline_since) > self._OFFLINE_EXTENDED_INTERVAL:
             # Camera has been offline for a while — use extended interval
-            per_cam_last = self._per_cam_status_at.get(cam_id, -86400.0)
             return (now - per_cam_last) >= self._OFFLINE_EXTENDED_INTERVAL
-        return (now - last) >= interval_status
+        return (now - per_cam_last) >= interval_status
 
     # ── Main update ───────────────────────────────────────────────────────────
     async def _async_update_data(self) -> dict:
@@ -1320,7 +1325,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         if is_first_tick:
             self._first_tick_done = True
 
-        do_status = (now - self._last_status) >= int(opts.get("interval_status", 60))
         # v10.3.22: FCM silent-death watchdog. firebase-messaging#33 describes
         # how the listener can terminate after WAN blips (disabled via
         # abort_on_sequential_error_count=None in fcm.py, but library-level
@@ -1567,8 +1571,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     continue
                 cid, status = result
                 self._cached_status[cid] = status
-                if self._should_check_status(cid, now, interval_status):
-                    any_status_checked = True
+                # Mark as checked unconditionally — _per_cam_status_at[cid] was
+                # just updated inside _check_status, so re-calling _should_check_status
+                # would always return False for extended-offline cams (their per-cam
+                # timestamp was just set to `now`). That caused _last_status to stall
+                # forever when all cameras were persistently offline, making do_status=True
+                # on every subsequent tick even though no real API calls ran.
+                any_status_checked = True
 
             # ── 3. Events — parallel across all cameras ──────────────────────
             async def _fetch_events(cam_id: str) -> tuple[str, list]:
@@ -1657,7 +1666,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # Guards against a polling tick firing an alert that the
                         # FCM handler already dispatched for the same event ID.
                         _now_mono = time.monotonic()
-                        _dedup_skip = self._alert_sent_ids.get(newest_id, 0.0) > _now_mono - 60.0
+                        _dedup_skip = self._alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0
                         self._last_event_ids[cam_id] = newest_id
                         if _dedup_skip:
                             _LOGGER.debug(
@@ -2442,6 +2451,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                         # LOCAL response: {"user": "...", "password": "...", "urls": ["192.168.x.x:443"]}
                         local_user = result.get("user", "")
                         local_pass = result.get("password", "")
+                        local_rtsp_url = ""  # guard: set inside `if urls:` below; "" means pre-warm skipped
                         if type_val == "LOCAL" and local_user and local_pass:
                             result["_connection_type"] = "LOCAL"
                             result["_local_user"]     = local_user
@@ -2885,12 +2895,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # falls back to its cached frame or _PLACEHOLDER_JPEG. Detected via the
         # cached `privacy_mode` boolean populated in the same /v11/video_inputs
         # response (line 1386) — no extra request needed.
-        # getattr() guard: the cache dict isn't allocated until the first
-        # successful coordinator tick (cf. v10.4.3 hotfix v10.4.4 — without
-        # the guard the call raised AttributeError and broke ALL snapshot
-        # refreshes during the boot/integration-load window).
-        priv_cache = getattr(self, "_camera_status_extra", {}).get(cam_id, {})
-        if priv_cache.get("privacy_mode") is True:
+        # _shc_state_cache is always initialized to {} in __init__ (line 300),
+        # so the old getattr() guard for AttributeError is no longer needed.
+        # Previous hotfix used _camera_status_extra (wrong attr — never assigned),
+        # so the privacy short-circuit never fired; fixed here.
+        if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
@@ -3090,12 +3099,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         token = self.token
         if not token:
             return None
-        # Same privacy short-circuit as the REMOTE fetch (line 2335) — the LAN
-        # snap.jpg also returns 0 bytes when privacy mode is ON, no point
-        # opening a fresh PUT /connection LOCAL just to get an empty body.
-        # getattr() guard same as REMOTE path — see hotfix note in v10.4.4.
-        priv_cache = getattr(self, "_camera_status_extra", {}).get(cam_id, {})
-        if priv_cache.get("privacy_mode") is True:
+        # Same privacy short-circuit as the REMOTE fetch — the LAN snap.jpg
+        # also returns 0 bytes when privacy mode is ON. _shc_state_cache is
+        # always initialized to {} in __init__, no getattr guard needed.
+        if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
@@ -3702,6 +3709,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
                     result = await self.try_live_connection(cam_id, is_renewal=True)
                     if result:
                         _LOGGER.info("Heartbeat: session renewed for %s", cam_id[:8])
+                        renewal_fails = 0  # prevent stale flag misfiring after heartbeat rescue
                     else:
                         _LOGGER.warning("Heartbeat: renewal failed for %s", cam_id[:8])
                         session_start = time.monotonic()

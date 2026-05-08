@@ -581,20 +581,102 @@
           "description": "Cloud-UUID der Kamera (in den Entity-Attributen zu finden)"
         }
       }
+    },
+    "migrate_flat_events": {
+      "name": "Flache Ereignisdateien migrieren",
+      "description": "Ereignisdateien aus dem alten flachen Format (Kamera/Datei.mp4) in die Datumshierarchie (Kamera/Jahr/Monat/Tag/Datei.mp4) verschieben. Kann mehrfach ausgeführt werden — Dateien, die am Ziel bereits existieren, werden übersprungen. Das Ergebnis erscheint als persistente Benachrichtigung."
+    },
+    "delete_event": {
+      "name": "Ereignisdatei(en) löschen",
+      "description": "Eine oder mehrere lokale Ereignisdateien per Pfad löschen, oder alle Dateien einer Kamera an einem bestimmten Datum.",
+      "fields": {
+        "file_path": {
+          "name": "Dateipfad",
+          "description": "Absoluter Pfad zur zu löschenden Ereignisdatei."
+        },
+        "camera_name": {
+          "name": "Kameraname",
+          "description": "Alle Ereignisse dieser Kamera löschen (mit Datum kombinierbar)."
+        },
+        "date": {
+          "name": "Datum",
+          "description": "Löschung auf dieses Datum beschränken (JJJJ-MM-TT). Erfordert Kameraname."
+        }
+      }
+    },
+    "get_motion_zones": {
+      "name": "Bewegungszonen auslesen",
+      "description": "Aktuelle Bewegungserkennungszonen der Kamera auslesen. Ergebnis erscheint als persistente Benachrichtigung.",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Cloud-UUID der Kamera (in den Entity-Attributen zu finden)"
+        }
+      }
+    },
+    "set_motion_zones": {
+      "name": "Bewegungszonen setzen",
+      "description": "Bewegungserkennungszonen auf der Kamera speichern.",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Cloud-UUID der Kamera"
+        },
+        "zones": {
+          "name": "Zonen",
+          "description": "Liste von Zonenobjekten, wie von 'Bewegungszonen auslesen' zurückgegeben."
+        }
+      }
+    },
+    "rename_camera": {
+      "name": "Kamera umbenennen",
+      "description": "Anzeigename einer Kamera in der Bosch-Cloud ändern.",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Cloud-UUID der Kamera"
+        },
+        "name": {
+          "name": "Neuer Name",
+          "description": "Neuer Anzeigename für die Kamera"
+        }
+      }
     }
   },
   "exceptions": {
-    "argument_required": {"message": "{argument} ist erforderlich"},
-    "argument_must_be_list": {"message": "{argument} muss eine Liste sein"},
-    "missing_field": {"message": "{kind} {index}: Feld {field} fehlt"},
-    "value_out_of_range": {"message": "{kind} {index} {field}={value} außerhalb des erlaubten Bereichs 0.0–1.0"},
-    "index_out_of_range": {"message": "Index {index} außerhalb des Bereichs (vorhanden: {count})"},
-    "not_found": {"message": "{kind} {id} nicht gefunden"},
-    "live_connection_failed": {"message": "Live-Verbindung für Kamera {cam_id_prefix} konnte nicht aufgebaut werden — siehe Log für mitmproxy-Anweisungen"},
-    "http_error": {"message": "{action} fehlgeschlagen: HTTP {status}"},
-    "http_error_with_body": {"message": "{action} fehlgeschlagen: HTTP {status} — {body}"},
-    "privacy_blocked": {"message": "{action}: nicht verfügbar bei aktivem Privacy-Mode"},
-    "unexpected_error": {"message": "{action} fehlgeschlagen: {error}"}
+    "argument_required": {
+      "message": "{argument} ist erforderlich"
+    },
+    "argument_must_be_list": {
+      "message": "{argument} muss eine Liste sein"
+    },
+    "missing_field": {
+      "message": "{kind} {index}: Feld {field} fehlt"
+    },
+    "value_out_of_range": {
+      "message": "{kind} {index} {field}={value} außerhalb des erlaubten Bereichs 0.0–1.0"
+    },
+    "index_out_of_range": {
+      "message": "Index {index} außerhalb des Bereichs (vorhanden: {count})"
+    },
+    "not_found": {
+      "message": "{kind} {id} nicht gefunden"
+    },
+    "live_connection_failed": {
+      "message": "Live-Verbindung für Kamera {cam_id_prefix} konnte nicht aufgebaut werden — siehe Log für mitmproxy-Anweisungen"
+    },
+    "http_error": {
+      "message": "{action} fehlgeschlagen: HTTP {status}"
+    },
+    "http_error_with_body": {
+      "message": "{action} fehlgeschlagen: HTTP {status} — {body}"
+    },
+    "privacy_blocked": {
+      "message": "{action}: nicht verfügbar bei aktivem Privacy-Mode"
+    },
+    "unexpected_error": {
+      "message": "{action} fehlgeschlagen: {error}"
+    }
   },
   "issues": {
     "token_expired": {

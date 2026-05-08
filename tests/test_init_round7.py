@@ -72,7 +72,7 @@ def _stub_coord(**kwargs):
         hass=hass,
         _entry=SimpleNamespace(entry_id="01ENTRY"),
         _proxy_url_cache={},
-        _camera_status_extra={},
+        _shc_state_cache={},
         _rcp_session_cache={},
         _live_connections={},
     )
@@ -174,7 +174,7 @@ class TestFetchLiveSnapshotImpl:
     @pytest.mark.asyncio
     async def test_privacy_mode_on_returns_none(self):
         coord = self._bind(_stub_coord(
-            _camera_status_extra={CAM_ID: {"privacy_mode": True}}
+            _shc_state_cache={CAM_ID: {"privacy_mode": True}}
         ))
         assert await coord._async_fetch_live_snapshot_impl(CAM_ID) is None
 
@@ -481,7 +481,7 @@ class TestFetchLiveSnapshotLocal:
     @pytest.mark.asyncio
     async def test_privacy_mode_on_returns_none(self):
         coord = self._bind(_stub_coord(
-            _camera_status_extra={CAM_ID: {"privacy_mode": True}}
+            _shc_state_cache={CAM_ID: {"privacy_mode": True}}
         ))
         assert await coord.async_fetch_live_snapshot_local(CAM_ID) is None
 

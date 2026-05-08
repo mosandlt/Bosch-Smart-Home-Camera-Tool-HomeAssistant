@@ -128,6 +128,34 @@ class _LocalBackend:
             key=str.casefold,
         )
 
+    # ── year-first methods (year/month/day at root, no camera subdir) ───────────
+    def list_year_first_months(self, year: str) -> list[str]:
+        d = _safe_join(self.base, year)
+        if d is None or not d.is_dir():
+            return []
+        return sorted([p.name for p in d.iterdir() if p.is_dir() and _DATE_DIR_RE.match(p.name)], reverse=True)
+
+    def list_year_first_days(self, year: str, month: str) -> list[str]:
+        d = _safe_join(self.base, year)
+        if d is None:
+            return []
+        d = _safe_join(d, month)
+        if d is None or not d.is_dir():
+            return []
+        return sorted([p.name for p in d.iterdir() if p.is_dir() and _DATE_DIR_RE.match(p.name)], reverse=True)
+
+    def list_year_first_events(self, year: str, month: str, day: str) -> list[tuple[str, str | None, dict[str, str]]]:
+        d = _safe_join(self.base, year)
+        if d is None:
+            return []
+        d2 = _safe_join(d, month)
+        if d2 is None:
+            return []
+        d3 = _safe_join(d2, day)
+        if d3 is None or not d3.is_dir():
+            return []
+        return self._collect_events(d3)
+
     # ── camera-first methods (year/month/day subfolders) ──────────────────────
     def list_years(self, camera: str) -> list[str]:
         cam_dir = _safe_join(self.base, camera)
@@ -303,6 +331,38 @@ class _SmbBackend:
             (n for n in self._scandir_filtered(want_dirs=True)),
             key=str.casefold,
         )
+
+    # ── year-first methods (year/month/day at root, no camera subdir) ───────────
+    def list_year_first_months(self, year: str) -> list[str]:
+        return sorted(
+            (n for n in self._scandir_filtered(year, want_dirs=True) if _DATE_DIR_RE.match(n)),
+            reverse=True,
+        )
+
+    def list_year_first_days(self, year: str, month: str) -> list[str]:
+        return sorted(
+            (n for n in self._scandir_filtered(year, month, want_dirs=True) if _DATE_DIR_RE.match(n)),
+            reverse=True,
+        )
+
+    def list_year_first_events(self, year: str, month: str, day: str) -> list[tuple[str, str | None, dict[str, str]]]:
+        groups: dict[str, dict[str, Any]] = {}
+        for name in self._scandir_filtered(year, month, day, want_dirs=False):
+            parsed = _parse_filename(name)
+            if not parsed:
+                continue
+            stem, _, ext = name.rpartition(".")
+            slot = groups.setdefault(stem, {"parsed": parsed, "files": {}})
+            slot["files"][ext.lower()] = name
+        out: list[tuple[str, str | None, dict[str, str]]] = []
+        for stem in sorted(groups, reverse=True):
+            files = groups[stem]["files"]
+            video = files.get("mp4")
+            image = files.get("jpg") or files.get("jpeg")
+            preferred = video or image
+            if preferred:
+                out.append((preferred, image, groups[stem]["parsed"]))
+        return out
 
     def list_years(self, camera: str) -> list[str]:
         return sorted(
@@ -859,12 +919,27 @@ class BoschCameraMediaSource(MediaSource):
                 return _node(identifier="" if root else prefix, title=title_root, children=children)
             if len(rest) == 1:  # years + any flat dates (files directly in camera/)
                 camera = rest[0]
+                if _YEAR_RE.match(camera):
+                    # Year-first folder: camera IS the year — show months directly
+                    children = [
+                        _node(identifier=ident(camera, m), title=m)
+                        for m in backend.list_year_first_months(camera)
+                    ]
+                    return _node(identifier=ident(camera), title=camera, children=children)
                 children = [_node(identifier=ident(camera, y), title=y) for y in backend.list_years(camera)]
                 for d in backend.list_flat_dates(camera):
                     children.append(_node(identifier=ident(camera, d), title=d))
                 return _node(identifier=ident(camera), title=camera, children=children)
             if len(rest) == 2:  # months or flat-date events
                 camera, year = rest[0], rest[1]
+                if _YEAR_RE.match(camera) and _DATE_DIR_RE.match(year):
+                    # Year-first: camera=YYYY, year=MM — show days
+                    actual_year, month = camera, year
+                    children = [
+                        _node(identifier=ident(actual_year, month, d), title=d)
+                        for d in backend.list_year_first_days(actual_year, month)
+                    ]
+                    return _node(identifier=ident(actual_year, month), title=f"{actual_year}-{month}", children=children)
                 if _YEAR_RE.match(year):
                     children = [
                         _node(identifier=ident(camera, year, m), title=m)
@@ -890,8 +965,28 @@ class BoschCameraMediaSource(MediaSource):
                     title=date,
                     children=children, children_media_class=MediaClass.VIDEO,
                 )
-            if len(rest) == 3:  # days
+            if len(rest) == 3:  # days or year-first events
                 camera, year, month = rest
+                if _YEAR_RE.match(camera) and _DATE_DIR_RE.match(year) and _DATE_DIR_RE.match(month):
+                    # Year-first: camera=YYYY, year=MM, month=DD — show events
+                    actual_year, actual_month, day = camera, year, month
+                    children = []
+                    for fname, image, parsed in backend.list_year_first_events(actual_year, actual_month, day):
+                        ext = fname.rsplit(".", 1)[-1].lower()
+                        mime = "video/mp4" if ext == "mp4" else "image/jpeg"
+                        mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
+                        thumb = f"{URL_PREFIX}/{ident(actual_year, actual_month, day, image)}" if image else None
+                        children.append(_node(
+                            identifier=ident(actual_year, actual_month, day, fname),
+                            title=_format_event_title(parsed),
+                            media_class=mc, media_content_type=mime,
+                            can_play=True, can_expand=False, thumbnail=thumb,
+                        ))
+                    return _node(
+                        identifier=ident(actual_year, actual_month, day),
+                        title=f"{actual_year}-{actual_month}-{day}",
+                        children=children, children_media_class=MediaClass.VIDEO,
+                    )
                 children = [
                     _node(identifier=ident(camera, year, month, d), title=d)
                     for d in backend.list_days(camera, year, month)
@@ -992,15 +1087,21 @@ class BoschCameraMediaView(HomeAssistantView):
             kind = "S"
             tail = parts
         elif len(parts) >= 2 and _YEAR_RE.match(parts[1]):
-            # camera/year/month/day/filename → SMB camera-first single-source
-            kind = "S"
+            # camera/year/month/day/filename — Local OR SMB camera-first single-source.
+            # Prefer SMB only when an SMB source is actually configured; otherwise this
+            # is a Local camera-first path (folder_pattern={camera}/{year}/{month}/{day}).
+            kind = "S" if _find_source(self.hass, entry_id, "S") is not None else "L"
             tail = parts
         elif len(parts) >= 3 and _NVR_DATE_DIR_RE.match(parts[1]):
             # camera/YYYY-MM-DD/HH-MM.mp4 → NVR single-source.
             kind = "N"
             tail = parts
         else:
-            kind = "L"
+            # Flat file in camera/ folder — Local or SMB flat single-source.
+            # Prefer Local if a Local source is configured; fall back to SMB
+            # so that users with only an SMB share (no local download_path) still
+            # get their flat NAS files served correctly.
+            kind = "L" if _find_source(self.hass, entry_id, "L") is not None else "S"
             tail = parts
 
         match = _find_source(self.hass, entry_id, kind)
@@ -1009,7 +1110,7 @@ class BoschCameraMediaView(HomeAssistantView):
         _src, backend = match
 
         if isinstance(backend, _LocalBackend):
-            if len(tail) not in (2, 5):
+            if len(tail) not in (2, 4, 5):
                 raise web.HTTPNotFound
             return await self._serve_local(request, backend, *tail)
 

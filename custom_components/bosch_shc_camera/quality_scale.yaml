@@ -261,6 +261,39 @@ rules:
       iconLedBrightness TypeError, stream.update_source success, _INTEGRATION_
       VERSION fallback, ValueError swallow, CancelledError re-raise, delegation).
       Total: 93%→95%, 2863→2978 tests, 108→111 files. HA Gold-tier (>95%) reached.
+      v11.0.16 bug-hunt + regression (2026-05-08): 7 production bugs fixed:
+      (1) privacy short-circuit used _camera_status_extra (never assigned →
+      always bypassed — 5-8 wasted PUT /connection per minute in privacy mode);
+      (2) _last_nvr_cleanup=0.0 violated SENTINEL_RULE (NVR cleanup skipped
+      first 24h on fresh installs); (3) FCM device_type race (register_fcm_with_
+      bosch called before _fcm_push_mode set → always ANDROID even in iOS mode);
+      (4) local_rtsp_url uninitialized when Bosch returns LOCAL+empty-urls →
+      NameError; (5) _StreamSupportNoiseFilter 0.0 sentinel → SENTINEL_RULE
+      violation; (6) any_status_checked stale re-eval → _last_status stalled when
+      all cams extended-offline; (7) rtsp_keepalive writer.close() without
+      await wait_closed() on 3 of 4 exit paths. Regression tests: 1 new file
+      (test_bug_regression_v11.py, 25 tests). tls_proxy.py 92%→95%.
+      Total: 94%, 2978→3173 tests, 111→117 files.
+      v11.0.17 bug-hunt round 2 (2026-05-08): 3 new production bugs + 3 SENTINEL
+      violations fixed: (1) recorder.py _nvr_recent_crash.get(cam_id, 0.0) →
+      on CI VMs with monotonic < _RESPAWN_WINDOW_SECONDS, first NVR crash
+      triggered "crash-loop" guard → NVR never restarted; (2) __init__.py
+      _alert_sent_ids.get(id, 0.0) + fcm.py _sent.get(id, 0.0) → on hosts
+      with monotonic < 60s, dedup guard fires for every first event → motion
+      alerts suppressed at startup; (3) _should_check_status used global
+      _last_status (advanced every scan tick) instead of per-camera
+      _per_cam_status_at → when scan_interval < interval_status, status checks
+      never fired after the first tick (dead do_status variable removed).
+      camera.py 100% (executor closures via real_executor). 17 new tests.
+      Total: 95%, 3173→3205 tests, 117→118 files.
+      Diagnostics enhancement (2026-05-08): diagnostics.py now exposes
+      integration_version (from manifest.json — single source of truth),
+      debug_logging flag, stream_warming_count in coordinator section; per-
+      camera stream_error_count, stream_fell_back, session_stale,
+      offline_since_seconds. 3 new tests (11 total for diagnostics).
+      GitHub issue template (.github/ISSUE_TEMPLATE/bug_report.yml) added
+      with structured debug workflow: Enable Debug Logging → reproduce →
+      Download Diagnostics → copy log lines. Total: 95%, 3205→3208 tests.
 
   # Gold
   devices: done

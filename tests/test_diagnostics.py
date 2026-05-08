@@ -177,27 +177,142 @@ async def test_diagnostics_handles_missing_runtime_data(hass: HomeAssistant) -> 
 async def test_coordinator_section_exposes_health_signals(
     hass: HomeAssistant,
 ) -> None:
-    """coordinator.running, fcm_running, fcm_healthy, auth_outage_count
-    are essential bug-report context — must appear in diagnostics."""
+    """coordinator.running, fcm_running, fcm_healthy, auth_outage_count,
+    debug_logging and stream_warming_count are essential bug-report context."""
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
     entry.runtime_data = type("Stub", (), {
         "data": {},
         "last_update_success": False,  # mid-incident
+        "debug": True,
         "_fcm_running": True,
         "_fcm_healthy": False,
         "_auth_outage_count": 4,
+        "_stream_warming": {"cam-A", "cam-B"},
         "update_interval": type("Td", (), {"total_seconds": lambda self: 60.0})(),
     })()
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     coord = diag["coordinator"]
-    assert coord["running"] is True
-    assert coord["last_update_success"] is False
-    assert coord["fcm_running"] is True
-    assert coord["fcm_healthy"] is False
-    assert coord["auth_outage_count"] == 4
-    assert coord["scan_interval"] == 60.0
+    assert coord["running"] is True, "coordinator.running must be True"
+    assert coord["last_update_success"] is False, "last_update_success must reflect mid-incident state"
+    assert coord["fcm_running"] is True, "fcm_running must be exposed"
+    assert coord["fcm_healthy"] is False, "fcm_healthy must be exposed"
+    assert coord["auth_outage_count"] == 4, "auth_outage_count must be exposed"
+    assert coord["scan_interval"] == 60.0, "scan_interval must be exposed"
+    assert coord["debug_logging"] is True, "debug_logging must be exposed (shows if verbose data is available)"
+    assert coord["stream_warming_count"] == 2, "stream_warming_count must reflect warming cameras"
+
+
+async def test_integration_version_exposed(hass: HomeAssistant) -> None:
+    """integration_version must appear at the top level of the diagnostics JSON.
+
+    This is the first thing support needs to know — without it every bug report
+    requires a follow-up question.
+    """
+    from custom_components.bosch_shc_camera.diagnostics import INTEGRATION_VERSION
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {}, "last_update_success": True,
+        "_fcm_running": False, "_fcm_healthy": True,
+        "_auth_outage_count": 0, "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert "integration_version" in diag, "integration_version must be a top-level key"
+    ver = diag["integration_version"]
+    assert isinstance(ver, str) and ver != "unknown", (
+        f"integration_version must be a real version string, got {ver!r}"
+    )
+    # Must match what INTEGRATION_VERSION constant reports
+    assert ver == INTEGRATION_VERSION, "diagnostics version must match module constant"
+    # Must look like a semver (N.N.N) so we catch manifest parsing breaks
+    parts = ver.split(".")
+    assert len(parts) == 3 and all(p.isdigit() for p in parts), (
+        f"Expected N.N.N version string, got {ver!r}"
+    )
+
+
+async def test_camera_stream_health_fields(hass: HomeAssistant) -> None:
+    """Per-camera diagnostics must include stream health fields.
+
+    stream_error_count, stream_fell_back, session_stale, and offline_since_seconds
+    are the key signals for diagnosing stream-restart loops and session bugs.
+    """
+    import time
+    cam_id = "11111111-1111-1111-1111-111111111111"
+    offline_ts = time.monotonic() - 120.0  # camera offline for ~120s
+    entry = MockConfigEntry(domain=DOMAIN, data={"bearer_token": "x"}, options={})
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {
+            cam_id: {
+                "info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor", "firmwareVersion": "9.40.25"},
+                "status": "OFFLINE",
+                "events": [],
+                "live": {"connectionType": "REMOTE", "age_seconds": 5},
+            }
+        },
+        "last_update_success": True,
+        "_fcm_running": False,
+        "_fcm_healthy": True,
+        "_auth_outage_count": 0,
+        "_offline_since": {cam_id: offline_ts},
+        "_stream_error_count": {cam_id: 3},
+        "_stream_fell_back": {cam_id: True},
+        "_session_stale": {cam_id: False},
+        "_stream_warming": set(),
+        "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    cam = diag["cameras"][0]
+    assert cam["stream_error_count"] == 3, "stream_error_count must be exposed for loop detection"
+    assert cam["stream_fell_back"] is True, "stream_fell_back must be exposed to show REMOTE fallback"
+    assert cam["session_stale"] is False, "session_stale must be exposed"
+    offline_s = cam["offline_since_seconds"]
+    assert isinstance(offline_s, int), "offline_since_seconds must be an int"
+    assert 100 <= offline_s <= 200, (
+        f"Expected ~120s offline, got {offline_s}s — offline_since_seconds arithmetic is wrong"
+    )
+
+
+async def test_camera_stream_health_defaults_for_healthy_camera(hass: HomeAssistant) -> None:
+    """Stream health fields must default to zero/False when camera is healthy.
+
+    A camera that has never errored must not show stream_error_count=None or missing key.
+    """
+    cam_id = "22222222-0000-0000-0000-000000000000"
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    entry.runtime_data = type("Stub", (), {
+        "data": {
+            cam_id: {
+                "info": {"title": "Indoor", "hardwareVersion": "CAMERA_360", "firmwareVersion": "7.91.56"},
+                "status": "ONLINE",
+                "events": [],
+                "live": {"connectionType": "LOCAL", "age_seconds": 30},
+            }
+        },
+        "last_update_success": True,
+        "_fcm_running": True,
+        "_fcm_healthy": True,
+        "_auth_outage_count": 0,
+        "_offline_since": {},
+        "_stream_error_count": {},
+        "_stream_fell_back": {},
+        "_session_stale": {},
+        "_stream_warming": set(),
+        "update_interval": None,
+    })()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    cam = diag["cameras"][0]
+    assert cam["stream_error_count"] == 0, "healthy camera must show 0 stream errors, not None"
+    assert cam["stream_fell_back"] is False, "healthy camera must show stream_fell_back=False"
+    assert cam["session_stale"] is False, "healthy camera must show session_stale=False"
+    assert cam["offline_since_seconds"] is None, "online camera must show offline_since_seconds=None"
 
 
 async def test_options_redaction_strips_smb_credentials(hass: HomeAssistant) -> None:

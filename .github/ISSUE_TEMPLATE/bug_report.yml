@@ -1,0 +1,118 @@
+name: Bug Report
+description: Report a bug in the Bosch Smart Home Camera integration
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before you submit
+
+        Please follow these steps to collect the best possible debug data — it saves a round-trip of follow-up questions:
+
+        1. **Enable Debug Logging**
+           Go to **Settings → Devices & Services → Bosch Smart Home Camera → Configure** and enable *Debug logging*.
+           Restart Home Assistant (or reload the integration if only the option changed).
+
+        2. **Reproduce the issue**
+           Perform the action that triggers the bug (e.g. open the camera stream, trigger a motion event).
+
+        3. **Download Diagnostics**
+           Go to **Settings → Devices & Services → Bosch Smart Home Camera**, click the three-dot menu on the integration card, and select **Download diagnostics**.
+           Attach the downloaded `diagnostics.json` file below.
+
+        4. **Copy relevant log lines**
+           Go to **Settings → System → Logs**, search for `bosch`, and copy lines around the error.
+           Alternatively: `ha core logs 2>/dev/null | grep -i bosch | tail -50` via SSH.
+
+        5. **Disable Debug Logging** again after collecting data (it is verbose and impacts performance).
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "e.g. 2026.5.3"
+    validations:
+      required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Shown in the diagnostics JSON as `integration_version`, or in HACS.
+      placeholder: "e.g. 11.0.16"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: camera_model
+    attributes:
+      label: Camera model(s)
+      multiple: true
+      options:
+        - Gen1 Eyes Outdoor (SVO-1601-220)
+        - Gen1 360° Indoor (SVI-1609-5)
+        - Gen2 Outdoor II (SHC-ECO3)
+        - Gen2 Indoor II (SHC-ECI3)
+        - Other / Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Camera firmware version
+      description: Shown in diagnostics JSON per camera as `firmware`.
+      placeholder: "e.g. 9.40.25"
+
+  - type: dropdown
+    id: connection_type
+    attributes:
+      label: Connection type at time of bug
+      options:
+        - LOCAL (LAN)
+        - REMOTE (cloud)
+        - AUTO (both tried)
+        - Unknown / not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open camera stream on Lovelace dashboard
+        2. Wait 30 seconds
+        3. Stream freezes / error shown
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics JSON
+      description: |
+        Paste the contents of the downloaded `diagnostics.json` here.
+        Enable **Debug Logging** first (see instructions above) so the snapshot includes stream error counts and session state.
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Paste log lines containing `bosch` around the time of the error. Include timestamps.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, network setup notes, anything else that might be relevant.
