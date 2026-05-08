@@ -5,6 +5,22 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.1.1
+
+No card changes.
+
+### Bug fixes
+
+- **Fix: FCM re-registration on every HA restart triggered HTTP 500 from Bosch.** Bosch's `POST /v11/devices` returns `{"status":500,"error":"sh:internal.error"}` when the same FCM device token is registered twice. FCM pushed fine (old registration still active), but the error filled the log on every restart. Fixed by saving the successfully-registered token in the config entry; subsequent restarts skip the POST when the token is unchanged. The POST fires automatically again when the FCM token rotates (new `checkin_or_register()` result).
+
+- **Fix: FCM registration failure body not logged.** When Bosch returned a non-2xx status on `POST /v11/devices`, only the HTTP status code was logged — not the response body. Diagnosing the `sh:internal.error` code required a separate debug session. The response body (first 200 chars) is now included in the WARNING log line.
+
+- **Fix: SENTINEL_RULE violation in `_FCMNoiseFilter`.** `_last_passed` was initialized to `0.0` instead of `float("-inf")`. On systems with `time.monotonic() < 60 s` (container cold-starts), the very first FCM noise record was incorrectly suppressed instead of passing through.
+
+### Internal
+
+- 7 new regression tests: FCM skip-registration (same-token skips POST, new token fires POST, success saves token); response-body logging assertion; sentinel value check for `_FCMNoiseFilter._last_passed`; fixed two test stubs missing `_entry` attribute. Total: 3247 tests, 95% coverage.
+
 ## v11.1.0
 
 No card changes.
@@ -15,13 +31,9 @@ No card changes.
 
 - **Fix: concurrent FCM events contaminate each other's filenames.** When two camera motions fired within seconds of each other, the FCM push pipeline for each event could use the wrong `event_id` when naming the saved file on NAS/local. Root cause: `async_send_alert` read `coordinator._last_event_ids[cam_id]` at upload time (up to 90 s after the push arrived), by which point newer pushes had already overwritten the shared dict. Fixed by snapshotting the event ID at push-arrival time and passing it as an explicit `event_id` parameter through the entire alert pipeline. The shared dict is now only a fallback for legacy call sites.
 
-- **Fix: FCM re-registration on every HA restart triggered HTTP 500 from Bosch.** Bosch's `POST /v11/devices` returns `{"status":500,"error":"sh:internal.error"}` when the same FCM device token is registered twice. FCM pushed fine (old registration still active), but the error filled the log on every restart. Fixed by saving the successfully-registered token in the config entry; subsequent restarts skip the POST when the token is unchanged. The POST fires automatically again when the FCM token rotates (new `checkin_or_register()` result).
-
-- **Fix: SENTINEL_RULE violation in `_FCMNoiseFilter`.** `_last_passed` was initialized to `0.0` instead of `float("-inf")`. On systems with `time.monotonic() < 60 s` (CI VMs, container cold-starts), the very first FCM noise record was incorrectly suppressed instead of passing through.
-
 ### Internal
 
-- 24 new regression tests: toggle-off/on for all four smb.py functions + 2 fcm.py caller-path tests; concurrent-pipeline isolation test (two cameras push simultaneously — each upload receives its own event_id, not the other camera's); delegation assert for `_async_send_alert` event_id pass-through; 3 skip-registration tests (same-token skips POST, new token fires POST, success saves token); sentinel value test for `_FCMNoiseFilter._last_passed`. All existing test fixtures updated with `enable_local_save`/`enable_smb_upload` defaults. Total: 3247 tests.
+- 20 new regression tests: toggle-off/on for all four smb.py functions + 2 fcm.py caller-path tests; concurrent-pipeline isolation test (two cameras push simultaneously — each upload receives its own event_id, not the other camera's); delegation assert for `_async_send_alert` event_id pass-through. All existing test fixtures updated with `enable_local_save`/`enable_smb_upload` defaults. Total: 3240 tests.
 
 ## v11.0.19
 
