@@ -167,14 +167,20 @@
               "nvr_storage_target": "NVR storage target",
               "nvr_base_path": "NVR storage folder",
               "nvr_smb_subpath": "NVR subfolder on NAS / FTP",
-              "nvr_retention_days": "NVR retention (days)"
+              "nvr_retention_days": "NVR retention (days)",
+              "nvr_quality": "NVR recording quality",
+              "nvr_preroll_seconds": "Pre-roll buffer (seconds)",
+              "nvr_preroll_cache_dir": "Pre-roll cache directory"
             },
             "data_description": {
               "enable_nvr": "Continuously record each camera's LOCAL stream to disk in 5-minute MP4 segments. LAN-only — recording pauses if the camera is on the cloud relay. Adds a recording switch per camera (disabled by default; enable each camera individually). Requires ffmpeg.",
               "nvr_storage_target": "Where the finalized NVR segments end up. **Local**: stays under the storage folder below. **SMB / FTP**: ffmpeg still writes locally first (staging), then a watcher uploads each segment to the same NAS configured in the events-storage section, under a separate subfolder. Default: Local.",
               "nvr_base_path": "Folder for NVR segments. Each camera gets one subfolder, then one subfolder per day, with 5-minute MP4 segments named HH-MM.mp4 inside. Default: /config/bosch_nvr. Use a NAS mount for >1 day retention — at 5 Mbps a single camera writes ~54 GB/day.",
               "nvr_smb_subpath": "Subfolder under the SMB / FTP base path used exclusively for NVR segments. Default: NVR. Keeps the NVR tree separate from cloud-event uploads.",
-              "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day."
+              "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day.",
+              "nvr_quality": "**Auto** uses the full-quality stream (inst=1, ~30 Mbps). **Low** uses the low-bandwidth stream (inst=4, ~2 Mbps) — saves ~90% disk space at the cost of resolution. LAN-only; the cloud relay does not support inst=4.",
+              "nvr_preroll_seconds": "Keep a rolling buffer of this many seconds in RAM (/dev/shm). When motion is detected, a motion clip is created that includes this pre-roll. 0 = disabled. Default: 0. RAM cost: ~250 KB/s per camera.",
+              "nvr_preroll_cache_dir": "Directory for the pre-roll segment cache. Must be a tmpfs mount (RAM disk) — /dev/shm/bosch_nvr_cache is the default on Linux. Change only if /dev/shm is not available."
             }
           },
           "auth": {

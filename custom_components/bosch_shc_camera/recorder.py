@@ -19,8 +19,11 @@ Architecture choice (`docs/mini-nvr-concept.md` §10): in-integration via
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
+import math
 import os
+import re
 import shutil
 import signal
 import time
@@ -43,6 +46,11 @@ _RESPAWN_WINDOW_SECONDS = 30.0
 _RESPAWN_DELAY_SECONDS = 5.0
 # Stop timeout — give ffmpeg time to flush the trailing moov atom on SIGTERM.
 _STOP_GRACE_SECONDS = 5.0
+
+# ── Phase 4: pre-roll buffer tunables ────────────────────────────────────────
+_PREROLL_SEGMENT_SECONDS = 10      # short segments for fine-grained pre-roll
+_PREROLL_MAX_SEGMENTS = 5          # keep last 5 × 10 s = 50 s max in tmpfs
+_PREROLL_MIN_SIZE_BYTES = 1024     # discard sub-1 KB corrupt segments
 
 # ── Staging-drain watcher tunables ───────────────────────────────────────────
 # ffmpeg writes EVERY segment locally first ("staging") so a half-flushed file
@@ -133,11 +141,29 @@ def _remote_ftp_path(opts: dict, cam_name: str, date: str, fname: str) -> str:
     return f"/{base}/{sub}/{cam}/{date}/{fname}".replace("//", "/")
 
 
+def _apply_quality(rtsp_url: str, quality: str) -> str:
+    """Return a copy of rtsp_url with inst= adjusted for the requested quality.
+
+    "low"  → inst=4 (~1.9 Mbps, LOCAL only — REMOTE rejects inst=4)
+    "auto" → inst=1 (~30 Mbps, unchanged)
+    If the URL has no inst= parameter and quality is "low", append &inst=4.
+    Pure function so tests can exercise it without spawning ffmpeg.
+    """
+    if quality != "low":
+        return rtsp_url
+    if "inst=" in rtsp_url:
+        return re.sub(r"inst=\d+", "inst=4", rtsp_url)
+    # No inst= in URL — append it
+    sep = "&" if "?" in rtsp_url else "?"
+    return rtsp_url + sep + "inst=4"
+
+
 def _build_ffmpeg_args(
     rtsp_url: str,
     segment_pattern: str,
     *,
     segment_seconds: int = DEFAULT_SEGMENT_SECONDS,
+    quality: str = "auto",
 ) -> list[str]:
     """Return the exact ffmpeg argv used to record the stream.
 
@@ -145,7 +171,9 @@ def _build_ffmpeg_args(
     Pattern is fed to ``-f segment`` via ``-strftime 1`` — ffmpeg substitutes
     ``%Y/%m/%d/%H/%M`` from the wall clock and creates parent directories
     implicitly via ``-segment_format mp4`` + ``-strftime_mkdir 1``.
+    Phase 3: pass quality="low" to select inst=4 (~1.9 Mbps) instead of inst=1.
     """
+    effective_url = _apply_quality(rtsp_url, quality)
     return [
         "ffmpeg",
         "-hide_banner",
@@ -154,13 +182,10 @@ def _build_ffmpeg_args(
         # Force TCP — RTP-over-UDP through the loopback proxy is fragile and
         # the TLS proxy already rewrites SETUP to TCP-interleaved anyway.
         "-rtsp_transport", "tcp",
-        # Reconnect on transient TCP drops; without this a TLS-proxy renewal
-        # gap kills the recorder permanently.
-        "-reconnect", "1",
-        "-reconnect_at_eof", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-        "-i", rtsp_url,
+        # -reconnect_* are HTTP-only options and crash ffmpeg with rc=8 on
+        # rtsp:// inputs. The watcher (_watch_recorder) handles respawn on
+        # TLS-proxy renewal gaps instead.
+        "-i", effective_url,
         "-map", "0",  # include all streams (video + AAC audio) — MVP keeps audio per concept §10
         "-c", "copy",
         "-f", "segment",
@@ -173,6 +198,302 @@ def _build_ffmpeg_args(
         "-movflags", "+faststart",
         segment_pattern,
     ]
+
+
+# ── Phase 4: pre-roll helpers ─────────────────────────────────────────────────
+
+def _preroll_dir(cache_dir: str, cam_name: str) -> str:
+    """Return {cache_dir}/{safe_cam_name}/"""
+    return os.path.join(cache_dir, _safe_name(cam_name))
+
+
+def _preroll_pattern(cache_dir: str, cam_name: str) -> str:
+    """strftime pattern for pre-roll 10 s segments in tmpfs."""
+    return os.path.join(_preroll_dir(cache_dir, cam_name), "%H%M%S.mp4")
+
+
+def _list_preroll_segments(cam_dir: str) -> list:
+    """Return [(path, mtime)] sorted oldest-first for one camera's cache dir."""
+    out = []
+    if not os.path.isdir(cam_dir):
+        return out
+    try:
+        names = os.listdir(cam_dir)
+    except OSError:
+        return out
+    for name in names:
+        full = os.path.join(cam_dir, name)
+        if not os.path.isfile(full):
+            continue
+        try:
+            st = os.stat(full)
+        except OSError:
+            continue
+        if st.st_size < _PREROLL_MIN_SIZE_BYTES:
+            continue
+        out.append((full, st.st_mtime))
+    out.sort(key=lambda x: x[1])
+    return out
+
+
+def prune_preroll_cache(cam_dir: str, max_segments: int) -> int:
+    """Delete oldest segments keeping max_segments newest. Returns count deleted."""
+    segs = _list_preroll_segments(cam_dir)
+    to_delete = segs[: max(0, len(segs) - max_segments)]
+    deleted = 0
+    for path, _ in to_delete:
+        try:
+            os.unlink(path)
+            deleted += 1
+        except OSError:
+            pass
+    return deleted
+
+
+def _build_preroll_ffmpeg_args(rtsp_url: str, pattern: str) -> list[str]:
+    """ffmpeg args for 10 s segments to tmpfs. No -segment_atclocktime, no -strftime_mkdir.
+    No -reconnect* — those are HTTP-only and crash ffmpeg rc=8 on rtsp:// inputs."""
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel", "warning",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        "-map", "0",
+        "-c", "copy",
+        "-f", "segment",
+        "-segment_time", str(_PREROLL_SEGMENT_SECONDS),
+        "-segment_format", "mp4",
+        "-reset_timestamps", "1",
+        "-strftime", "1",
+        "-movflags", "+faststart",
+        pattern,
+    ]
+
+
+async def _watch_preroll_recorder(
+    coordinator: "BoschCameraCoordinator",
+    cam_id: str,
+    cam_dir: str,
+    max_segs: int,
+) -> None:
+    """Periodic prune loop — keeps the pre-roll ring buffer bounded while running.
+
+    Fires every _PREROLL_SEGMENT_SECONDS (10 s) and discards the oldest
+    segments so the buffer never grows past max_segs × 10 s. Exits cleanly
+    when the process exits or is cancelled.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_PREROLL_SEGMENT_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        proc = coordinator._nvr_preroll_processes.get(cam_id)
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            await coordinator.hass.async_add_executor_job(
+                prune_preroll_cache, cam_dir, max_segs,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+    """Spawn parallel pre-roll ffmpeg for one camera to tmpfs."""
+    await stop_preroll_recorder(coordinator, cam_id)
+
+    live = coordinator._live_connections.get(cam_id, {})
+    if live.get("_connection_type") != "LOCAL":
+        return
+    rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
+    if not rtsp_url.startswith("rtsp://"):
+        return
+
+    opts = coordinator.options
+    cache_dir = (opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache").strip()
+    cam_name = (
+        coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+    )
+    cam_dir = _preroll_dir(cache_dir, cam_name)
+    try:
+        await coordinator.hass.async_add_executor_job(
+            os.makedirs, cam_dir, 0o755, True,
+        )
+    except OSError as err:
+        _LOGGER.warning("NVR pre-roll: cannot create cache dir for %s: %s", cam_name, err)
+        return
+
+    pattern = _preroll_pattern(cache_dir, cam_name)
+    args = _build_preroll_ffmpeg_args(rtsp_url, pattern)
+    _LOGGER.debug("NVR pre-roll starting for %s -> %s", cam_name, pattern)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        _LOGGER.error("NVR pre-roll: ffmpeg not found on PATH")
+        return
+    except OSError as err:
+        _LOGGER.warning("NVR pre-roll ffmpeg spawn failed for %s: %s", cam_name, err)
+        return
+
+    coordinator._nvr_preroll_processes[cam_id] = proc
+    # Compute max_segs once; used for prune-on-spawn and periodic watcher.
+    preroll_secs = int(opts.get("nvr_preroll_seconds", 0))
+    max_segs = max(2, math.ceil(preroll_secs / _PREROLL_SEGMENT_SECONDS) + 1)
+    # Prune on spawn so stale segments from a previous session don't inflate the buffer.
+    try:
+        await coordinator.hass.async_add_executor_job(
+            prune_preroll_cache, cam_dir, max_segs,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Start periodic prune watcher — keeps the ring buffer bounded while running.
+    if not hasattr(coordinator, "_nvr_preroll_tasks"):
+        coordinator._nvr_preroll_tasks = {}
+    task = coordinator.hass.async_create_background_task(
+        _watch_preroll_recorder(coordinator, cam_id, cam_dir, max_segs),
+        f"bosch_nvr_preroll_watch_{cam_id[:8]}",
+    )
+    coordinator._bg_tasks.add(task)
+    task.add_done_callback(coordinator._bg_tasks.discard)
+    coordinator._nvr_preroll_tasks[cam_id] = task
+
+
+async def stop_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+    """Stop pre-roll recorder for one camera."""
+    # Cancel the periodic prune watcher first.
+    tasks = getattr(coordinator, "_nvr_preroll_tasks", {})
+    watcher = tasks.pop(cam_id, None)
+    if watcher is not None and not watcher.done():
+        watcher.cancel()
+
+    proc = coordinator._nvr_preroll_processes.pop(cam_id, None)
+    if proc is None:
+        return
+    if proc.returncode is not None:
+        return
+    try:
+        proc.send_signal(signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE_SECONDS)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def stop_all_preroll(coordinator: "BoschCameraCoordinator") -> None:
+    """Stop all pre-roll recorders — called on integration unload."""
+    for cam_id in list(coordinator._nvr_preroll_processes.keys()):
+        await stop_preroll_recorder(coordinator, cam_id)
+
+
+def list_preroll_files(coordinator: "BoschCameraCoordinator", cam_id: str) -> list:
+    """Return list of pre-roll segment paths for cam_id, sorted oldest-first."""
+    opts = coordinator.options
+    cache_dir = (opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache").strip()
+    cam_name = (
+        coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+    )
+    cam_dir = _preroll_dir(cache_dir, cam_name)
+    return [path for path, _ in _list_preroll_segments(cam_dir)]
+
+
+def create_motion_clip_args(preroll_paths: list, output_path: str) -> list:
+    """Return ffmpeg argv to concat preroll_paths into one MP4 clip."""
+    # Build concat list in memory via pipe — use -f concat -safe 0
+    # The actual concat file is written by create_motion_clip before calling ffmpeg.
+    concat_file = output_path + ".concat.txt"
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel", "warning",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_file,
+        "-c", "copy",
+        "-movflags", "+faststart",
+        "-y",
+        output_path,
+    ]
+
+
+async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str, output_path: str) -> bool:
+    """Concatenate available pre-roll segments into output_path. Returns True on success."""
+    paths = list_preroll_files(coordinator, cam_id)
+    if not paths:
+        _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
+        return False
+
+    concat_file = output_path + ".concat.txt"
+    concat_content = "\n".join(f"file '{p}'" for p in paths) + "\n"
+
+    def _write_concat():
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(concat_file, "w") as f:
+            f.write(concat_content)
+
+    try:
+        await coordinator.hass.async_add_executor_job(_write_concat)
+    except OSError as err:
+        _LOGGER.warning("NVR motion clip: cannot write concat file: %s", err)
+        return False
+
+    args = create_motion_clip_args(paths, output_path)
+    _LOGGER.debug("NVR motion clip for %s: %d segments -> %s", cam_id[:8], len(paths), output_path)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        _LOGGER.error("NVR motion clip: ffmpeg not found on PATH")
+        return False
+    except OSError as err:
+        _LOGGER.warning("NVR motion clip: ffmpeg spawn failed: %s", err)
+        return False
+
+    try:
+        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        _LOGGER.warning("NVR motion clip: ffmpeg timed out for %s", cam_id[:8])
+        return False
+
+    # Clean up concat file
+    try:
+        await coordinator.hass.async_add_executor_job(os.unlink, concat_file)
+    except OSError:
+        pass
+
+    if proc.returncode != 0:
+        tail = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:]
+        _LOGGER.warning(
+            "NVR motion clip: ffmpeg rc=%d for %s. Tail: %s",
+            proc.returncode, cam_id[:8], tail,
+        )
+        return False
+    return True
 
 
 def should_record(
@@ -227,6 +548,15 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
         return
 
     opts = coordinator.options
+
+    # Event-only mode: skip continuous recording, run only the pre-roll ring
+    # buffer. Motion events can still create clips from cached segments.
+    if opts.get("nvr_event_only", False):
+        preroll_secs = int((opts.get("nvr_preroll_seconds") or 0))
+        if preroll_secs > 0:
+            await start_preroll_recorder(coordinator, cam_id)
+        return
+
     base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()
     cam_name = (
         coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
@@ -237,24 +567,32 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
     # on `nvr_storage_target`.
     pattern = _staging_pattern(base_path, cam_name)
 
-    # Make the staging camera dir up-front so ffmpeg never trips on a missing
-    # parent (strftime_mkdir creates only the strftime-derived leaf, not the
-    # full chain).
+    # Pre-create the staging camera dir AND today's/tomorrow's date subdir.
+    # -strftime_mkdir 1 is unreliable on some ffmpeg versions bundled with HA
+    # (confirmed rc=254 "Failed to open segment" on HA 2026-05-08). We create
+    # the next 2 days so a recording that starts just before midnight doesn't
+    # fail when ffmpeg rolls over to a new date subdirectory.
+    staging_cam = _staging_dir(base_path, cam_name)
     try:
-        await coordinator.hass.async_add_executor_job(
-            os.makedirs, _staging_dir(base_path, cam_name), 0o755, True,
-        )
+        for day_offset in range(2):
+            day = (
+                datetime.date.today() + datetime.timedelta(days=day_offset)
+            ).strftime("%Y-%m-%d")
+            await coordinator.hass.async_add_executor_job(
+                os.makedirs, os.path.join(staging_cam, day), 0o755, True,
+            )
     except OSError as err:
         _LOGGER.warning(
             "NVR cannot create staging dir for %s: %s", cam_name, err,
         )
         return
 
-    args = _build_ffmpeg_args(rtsp_url, pattern)
+    quality = (opts.get("nvr_quality") or "auto").strip().lower()
+    args = _build_ffmpeg_args(rtsp_url, pattern, quality=quality)
 
     _LOGGER.info(
-        "NVR starting recorder for %s -> %s",
-        cam_name, pattern,
+        "NVR starting recorder for %s -> %s (quality=%s)",
+        cam_name, pattern, quality,
     )
     _LOGGER.debug("NVR ffmpeg argv for %s: %s", cam_name, " ".join(args))
     try:
@@ -284,9 +622,15 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
     coordinator._bg_tasks.add(task)
     task.add_done_callback(coordinator._bg_tasks.discard)
 
+    # Start pre-roll buffer if configured (nvr_preroll_seconds > 0).
+    preroll_secs = int((opts.get("nvr_preroll_seconds") or 0))
+    if preroll_secs > 0:
+        await start_preroll_recorder(coordinator, cam_id)
+
 
 async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
     """Stop the recorder for one camera, giving ffmpeg up to 5 s to flush MP4."""
+    await stop_preroll_recorder(coordinator, cam_id)
     proc = coordinator._nvr_processes.pop(cam_id, None)
     if proc is None:
         return
@@ -326,6 +670,7 @@ async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> N
 
 async def stop_all(coordinator: "BoschCameraCoordinator") -> None:
     """Stop every recorder — called on integration unload / HA stop."""
+    await stop_all_preroll(coordinator)
     for cam_id in list(coordinator._nvr_processes.keys()):
         await stop_recorder(coordinator, cam_id)
 

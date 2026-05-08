@@ -67,6 +67,8 @@ def _make_coord(**overrides):
         _renewal_tasks={},
         _bg_tasks=set(),
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_user_intent={},
         _rcp_lan_ip_cache={},
         _local_creds_cache={},

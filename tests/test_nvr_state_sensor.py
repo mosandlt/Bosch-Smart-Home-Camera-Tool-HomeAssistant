@@ -33,8 +33,11 @@ def _make_coord(
                                   "firmwareVersion": "9.40.25", "macAddress": ""}}},
         _nvr_drain_state=drain_state or {},
         _nvr_processes=nvr_processes or {},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_user_intent=user_intent or {},
         _nvr_error_state=error_state or {},
+        options={"nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache", "nvr_preroll_seconds": 0},
     )
 
 

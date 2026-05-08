@@ -44,6 +44,8 @@ def _make_coord(*, conn_type: str = "LOCAL", base_path: str = "/tmp/nvr_test"):
             }
         },
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_user_intent={CAM_ID: True},
         _nvr_recent_crash={},
         _nvr_error_state={},

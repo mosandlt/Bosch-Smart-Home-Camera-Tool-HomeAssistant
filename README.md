@@ -644,6 +644,173 @@ Each event shows `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Gart
 
 Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; path-traversal is blocked, only `image/jpeg` and `video/mp4` are returned. NAS files are streamed on demand via `smbprotocol` — no local cache, no HA disk usage.
 
+### Mini-NVR — Local Continuous Recording (BETA)
+
+Continuously records the LOCAL stream to disk in 5-minute wall-aligned segments. No cloud involved. Recording stops automatically when the camera falls back to REMOTE (relay).
+
+> **BETA:** The NVR switch becomes unavailable whenever the camera is on a REMOTE connection. A live stream must be active (via `switch.bosch_{name}_live_stream`) for the TLS proxy to start before recording can begin.
+
+#### Enable
+
+1. Settings → Devices & Services → **Bosch Smart Home Camera** → Configure
+2. Scroll to the **NVR** section and enable **Mini-NVR**
+3. Set **Base path** (default: `/config/bosch_nvr`)
+4. Set **Retention** in days (default: 3 days)
+5. Choose **Storage target**: `local`, `smb`, or `ftp`
+
+#### NVR Entities
+
+These entities are **disabled by default** — enable them individually in the entity settings:
+
+| Entity | Description |
+|--------|-------------|
+| `switch.bosch_{name}_mini_nvr` | Turn recording ON/OFF. Unavailable when camera is on REMOTE connection. |
+| `sensor.bosch_{name}_mini_nvr_status` | State: `idle` / `recording` / `error` |
+
+`sensor.bosch_{name}_mini_nvr_status` attributes: `target`, `pending_uploads`, `failed_uploads`, `last_segment_age_s`, `preroll_segments`, `preroll_running`.
+
+#### Recording Quality
+
+Set `nvr_quality` in the configure dialog:
+
+| Value | Bitrate | Notes |
+|-------|---------|-------|
+| `auto` | ~30 Mbps | Default. Full-resolution stream. LOCAL only. |
+| `low` | ~1.9 Mbps | Sub-stream. Reduces disk usage significantly. |
+
+#### Pre-Roll Buffer
+
+Set `nvr_preroll_seconds` to a value between 1 and 60 to keep a RAM-based ring buffer of the last N seconds before a motion event.
+
+- Uses 10-second segments stored at `nvr_preroll_cache_dir`
+- Default path: `/dev/shm/bosch_nvr_cache` — inside the HA container namespace, not visible via SSH
+- Change to `/config/bosch_nvr_preroll` if you want the cache on shared storage
+- On FCM motion push, the cached segments are prepended to the recorded clip automatically
+
+Set to `0` (default) to disable pre-roll.
+
+#### File Layout
+
+```
+/config/bosch_nvr/
+├── Terrasse/              ← finalized segments
+│   └── 2026-05-08/
+│       ├── 21-07.mp4      ← wall-aligned 5-min segments
+│       └── 21-10.mp4
+└── _staging/              ← FFmpeg writes here first (incomplete segments)
+    └── Terrasse/2026-05-08/
+```
+
+Segments are moved from `_staging/` to the final tree only when complete. Incomplete segments from a crash or restart are cleaned up on next startup.
+
+#### Lovelace Cards (BETA)
+
+Two new card types ship with the integration:
+
+**Timeline card** — 24-hour canvas timeline with motion events, click to seek:
+
+```yaml
+type: custom:bosch-nvr-timeline-card
+camera_entity: camera.bosch_terrasse
+```
+
+Optional: add `date: "2026-05-08"` to show a specific day (default: today).
+
+**Multi-camera card** — stacked view with a shared seek bar and drift correction:
+
+```yaml
+type: custom:bosch-nvr-multicam-card
+cameras:
+  - camera.bosch_terrasse
+  - camera.bosch_innenbereich
+```
+
+#### Event-Buffer-Only Mode
+
+Set `nvr_event_only: true` in the options to run **only** the pre-roll ring buffer without 24/7 continuous recording. FFmpeg writes 10-second segments to the cache; on FCM motion the cached segments are assembled into a clip. Disk usage is negligible (a few MB per camera).
+
+Requires `nvr_preroll_seconds > 0`. The main continuous recorder is skipped — no 5-minute segments are written to `nvr_base_path`.
+
+#### Automation Examples
+
+**Away-mode: start recording when leaving home**
+
+```yaml
+alias: "NVR bei Abwesenheit"
+trigger:
+  - platform: state
+    entity_id: person.thomas
+    to: "not_home"
+action:
+  - service: switch.turn_on
+    target:
+      entity_id: switch.bosch_terrasse_mini_nvr
+```
+
+**Alarm mode: arm all NVR switches with the alarm panel**
+
+```yaml
+alias: "NVR mit Alarmanlage"
+trigger:
+  - platform: state
+    entity_id: alarm_control_panel.home_alarm
+    to:
+      - armed_away
+      - armed_night
+action:
+  - service: switch.turn_on
+    target:
+      entity_id:
+        - switch.bosch_terrasse_mini_nvr
+        - switch.bosch_innenbereich_mini_nvr
+```
+
+**Disarm: stop recording when coming home**
+
+```yaml
+alias: "NVR aus bei Zuhause"
+trigger:
+  - platform: state
+    entity_id: alarm_control_panel.home_alarm
+    to: disarmed
+action:
+  - service: switch.turn_off
+    target:
+      entity_id:
+        - switch.bosch_terrasse_mini_nvr
+        - switch.bosch_innenbereich_mini_nvr
+```
+
+**Motion-only clip via sensor attribute** (verify pre-roll is running before sending alert)
+
+```yaml
+alias: "Prüfe Pre-Roll vor Alarm"
+trigger:
+  - platform: event
+    event_type: bosch_shc_camera_motion
+    event_data:
+      device_id: "YOUR_DEVICE_ID"
+condition:
+  - condition: template
+    value_template: >
+      {{ state_attr('sensor.bosch_terrasse_mini_nvr_status', 'preroll_running') == true }}
+action:
+  - service: notify.signal_kamera
+    data:
+      message: "Bewegung erkannt – Pre-Roll aktiv, Clip wird erstellt."
+```
+
+→ More examples: [`examples/automations/`](examples/automations/) — bilingual EN+DE, covers presence, alarm, privacy, NVR, and notification patterns.
+
+#### Limitations
+
+- LOCAL connection only — no cloud fallback recording
+- NVR switch shows `unavailable` when camera is on REMOTE
+- Pre-roll cache at `/dev/shm/…` is inside the HA container and not visible via SSH; change to `/config/…` if direct access is needed
+- Live stream switch must be ON for the TLS proxy (and thus FFmpeg) to start
+
+---
+
 ### HA Events
 
 The integration fires events on the HA event bus for custom automations:
@@ -1254,8 +1421,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v11.1.1** — see the GitHub release page for full notes:
-[**v11.1.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.1.1)
+Latest: **v11.2.0** — see the GitHub release page for full notes:
+[**v11.2.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.2.0)
 
 | | |
 |---|---|

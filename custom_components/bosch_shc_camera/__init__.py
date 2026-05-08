@@ -77,6 +77,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 _LOGGER = logging.getLogger(__name__)
 
+# Coalesce concurrent async_fetch_fresh_event_snapshot calls for the same camera.
+# After an FCM push all HA consumers wake simultaneously and each requests the latest
+# event thumbnail. 8 s covers the burst window; the 60 s scan cycle always gets fresh data.
+_FRESH_SNAP_TTL = 8.0
+
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
 try:
@@ -346,6 +351,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         # Per-camera lock serializing try_live_connection(). Initialised here
         # (not lazily) so _get_stream_lock stays a plain dict lookup.
         self._stream_locks: dict[str, asyncio.Lock] = {}
+        # Short-lived cache for async_fetch_fresh_event_snapshot.
+        # After an FCM push, async_update_listeners() wakes all HA consumers
+        # simultaneously; each calls async_image() → async_fetch_fresh_event_snapshot.
+        # Without coalescing this fires 8+ identical cloud round-trips in ~200 ms.
+        # The lock (created lazily per cam_id) serialises concurrent callers:
+        # the first one fetches and stores the result; the rest acquire the lock
+        # after it releases, find the cache hit, and return without a network call.
+        # TTL=8s covers the burst window while staying well inside the 60s scan cycle.
+        self._fresh_snap_cache: dict[str, tuple[bytes, float]] = {}
+        self._fresh_snap_locks: dict[str, asyncio.Lock] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
         # Epoch timestamp of coordinator start — used to reject event downloads for
@@ -568,6 +583,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._nvr_error_state: dict[str, str] = {}
         self._nvr_recent_crash: dict[str, float] = {}
         self._last_nvr_cleanup: float = float("-inf")  # float('-inf') → runs on first tick
+        # Phase 4: pre-roll buffer — one short-segment ffmpeg per camera writing to tmpfs.
+        # Keyed by cam_id, lifecycle mirrors _nvr_processes but independently controlled.
+        self._nvr_preroll_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._nvr_preroll_last_crash: dict[str, float] = {}
         # Drain watcher state — populated by recorder.sync_drain_tick. Used by
         # BoschNvrStateSensor to render `target` / `pending_uploads` /
         # `failed_uploads` / `last_segment_age_s` attributes without coupling
@@ -3035,58 +3054,87 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         Used as fallback for cameras whose snap.jpg returns 401 (e.g. CAMERA_360).
         Bypasses the coordinator's cached event list — always hits Bosch API directly
         so the returned imageUrl is always fresh (not expired).
+
+        Concurrent callers for the same cam_id are coalesced: the first caller
+        acquires the per-camera lock, fetches, and stores the result in
+        `_fresh_snap_cache`; subsequent callers that arrive while the first is
+        in-flight wait on the lock and then return the cached result without an
+        additional network round-trip. This prevents 8+ duplicate cloud requests
+        after an FCM push wakes all HA consumers simultaneously.
         """
+        # Fast path: cache hit without acquiring the lock (hot path after first fetch)
+        cached = self._fresh_snap_cache.get(cam_id)
+        if cached:
+            data, expiry = cached
+            if time.monotonic() < expiry:
+                return data
+
         token = self.token
         if not token:
             return None
 
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-        session  = async_get_clientsession(self.hass, verify_ssl=False)
-        headers  = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
+        # Slow path: serialise concurrent fetches for the same camera
+        lock = self._fresh_snap_locks.setdefault(cam_id, asyncio.Lock())
+        async with lock:
+            # Re-check cache now that we hold the lock — a concurrent caller that
+            # raced through the fast-path miss and waited here may have already
+            # populated the cache while we were queued.
+            cached = self._fresh_snap_cache.get(cam_id)
+            if cached:
+                data, expiry = cached
+                if time.monotonic() < expiry:
+                    return data
 
-        try:
-            async with asyncio.timeout(15):
-                async with session.get(events_url, headers=headers) as resp:
-                    if resp.status != 200:
-                        _LOGGER.debug(
-                            "fetch_fresh_event_snapshot: events HTTP %d for %s",
-                            resp.status, cam_id,
-                        )
-                        return None
-                    import json as _json
-                    events = _json.loads(await resp.text())
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            session  = async_get_clientsession(self.hass, verify_ssl=False)
+            headers  = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
 
-            if not events:
-                return None
+            try:
+                async with asyncio.timeout(15):
+                    async with session.get(events_url, headers=headers) as resp:
+                        if resp.status != 200:
+                            _LOGGER.debug(
+                                "fetch_fresh_event_snapshot: events HTTP %d for %s",
+                                resp.status, cam_id,
+                            )
+                            return None
+                        import json as _json
+                        events = _json.loads(await resp.text())
 
-            # Try each event URL from newest to oldest
-            img_headers = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
-            for ev in events:
-                img_url = ev.get("imageUrl")
-                if not img_url:
-                    continue
-                if not _is_safe_bosch_url(img_url):
-                    _LOGGER.warning("Unsafe imageUrl rejected: %s", img_url[:60])
-                    continue
-                try:
-                    async with asyncio.timeout(20):
-                        async with session.get(img_url, headers=img_headers) as snap_resp:
-                            if snap_resp.status == 200:
-                                data = await snap_resp.read()
-                                if data:
-                                    _LOGGER.debug(
-                                        "fetch_fresh_event_snapshot: %s → %d bytes @ %s",
-                                        cam_id, len(data), ev.get("timestamp", "")[:19],
-                                    )
-                                    return data
-                except (asyncio.TimeoutError, aiohttp.ClientError):
-                    continue
+                if not events:
+                    return None
 
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.debug("fetch_fresh_event_snapshot error for %s: %s", cam_id, err)
+                # Try each event URL from newest to oldest
+                img_headers = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
+                for ev in events:
+                    img_url = ev.get("imageUrl")
+                    if not img_url:
+                        continue
+                    if not _is_safe_bosch_url(img_url):
+                        _LOGGER.warning("Unsafe imageUrl rejected: %s", img_url[:60])
+                        continue
+                    try:
+                        async with asyncio.timeout(20):
+                            async with session.get(img_url, headers=img_headers) as snap_resp:
+                                if snap_resp.status == 200:
+                                    data = await snap_resp.read()
+                                    if data:
+                                        _LOGGER.debug(
+                                            "fetch_fresh_event_snapshot: %s → %d bytes @ %s",
+                                            cam_id, len(data), ev.get("timestamp", "")[:19],
+                                        )
+                                        self._fresh_snap_cache[cam_id] = (
+                                            data, time.monotonic() + _FRESH_SNAP_TTL
+                                        )
+                                        return data
+                    except (asyncio.TimeoutError, aiohttp.ClientError):
+                        continue
 
-        return None
+            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.debug("fetch_fresh_event_snapshot error for %s: %s", cam_id, err)
+
+            return None
 
     async def async_fetch_live_snapshot_local(self, cam_id: str) -> bytes | None:
         """Fetch a live snapshot via LOCAL connection using HTTP Digest auth.

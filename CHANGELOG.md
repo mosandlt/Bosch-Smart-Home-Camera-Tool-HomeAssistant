@@ -5,21 +5,58 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.0
+
+> **⚠ BETA — local NVR only, no cloud recordings.**
+> This release ships the next phases of the built-in Mini-NVR (local-only continuous recording to your HA disk, NAS, or FRITZ.NAS).
+> The recorder runs only while the camera is on a LOCAL stream — it stops cleanly when the connection falls back to the cloud relay.
+> **Looking for testers!** If you try this, please share your experience (what works, what breaks, camera model + HA version) in the [simon42 thread](https://www.simon42.com/t/bosch-smart-home-kamera-integration-fuer-home-assistant/5221) or open a GitHub issue.
+
+### New features
+
+- **Phase 3 — Quality selector.** New NVR option `nvr_quality`: `auto` (default, full-resolution ~30 Mbps) or `low` (~1.9 Mbps, `inst=4` sub-stream). Useful for low-bandwidth NAS targets or Raspberry Pi setups. LOCAL-only — REMOTE sessions always use full-resolution.
+
+- **Phase 4 — Pre-roll buffer.** When enabled (`nvr_preroll_seconds > 0`), a second ffmpeg process writes 10 s rolling segments to a tmpfs cache directory (`/dev/shm/bosch_nvr_cache` by default). On motion (FCM push), the last N seconds before the trigger are prepended to the motion clip, giving true pre-roll capture without a cloud dependency. Configurable via `nvr_preroll_seconds` (0–60) and `nvr_preroll_cache_dir` in the NVR options. A background watcher prunes the ring buffer every 10 s to keep it bounded at the configured depth.
+
+- **Event-buffer-only mode (`nvr_event_only`).** New option: skip the 24/7 continuous recorder and run only the pre-roll ring buffer. Motion events still produce clips from the cached segments; disk usage stays in the single-digit MB range. Enable via `nvr_event_only: true` in the NVR options (requires `nvr_preroll_seconds > 0`).
+
+- **Phase 5 — Timeline card (`BoschNvrTimelineCard`).** New Lovelace card type `custom:bosch-nvr-timeline-card`. Renders a 24-hour canvas strip of recorded segments and motion events. Clicking a segment seeks the embedded video player to that timestamp.
+
+- **Phase 6 — Multi-camera stacked view (`BoschNvrMultiCamCard`).** New Lovelace card type `custom:bosch-nvr-multicam-card`. Stacks multiple camera streams with a shared seek bar and rAF-based drift correction that keeps playback positions within ±100 ms of each other.
+
+### Fixes bundled in this release
+
+- **Fix: pre-roll recorder never started — wiring omission.** `start_preroll_recorder()` was defined but never called from `start_recorder()`. The pre-roll ring buffer silently produced nothing even when `nvr_preroll_seconds > 0`. Confirmed live (2026-05-08): no cache directory was ever created. Fixed by wiring the call into `start_recorder()`, `stop_recorder()`, and `stop_all()`.
+
+- **Fix: pre-roll ring buffer grew unbounded.** `prune_preroll_cache()` was only called once at ffmpeg spawn time. After that the cache accumulated indefinitely — confirmed live: 11 segments when max should be 4. Fixed by adding `_watch_preroll_recorder()`, a background task that prunes every `_PREROLL_SEGMENT_SECONDS` (10 s) while the pre-roll process is alive.
+
+- **Fix: ffmpeg crashed with rc=8 on RTSP inputs due to HTTP-only `-reconnect` flags.** The `-reconnect`, `-reconnect_at_eof`, `-reconnect_streamed`, `-reconnect_delay_max` options are HTTP demuxer options only — passing them on an `rtsp://` input causes ffmpeg to exit immediately with `Option reconnect not found`. Removed from both the main segment recorder and the pre-roll recorder. The watcher (`_watch_recorder`) already handles respawn on TLS-proxy gaps.
+
+- **Fix: ffmpeg failed to open segment file (`rc=254`) due to missing date subdirectory.** `-strftime_mkdir 1` does not create date-level subdirectories on the ffmpeg version bundled with HA (confirmed on HA 2026-05-08). `start_recorder()` now pre-creates today's and tomorrow's date dirs (`YYYY-MM-DD/`) under the staging path before spawning ffmpeg, so segment rotation across midnight also works without a restart.
+
+### Internal
+
+- 76 new tests: Phase 3 quality URL rewrite + ffmpeg-arg pins (8); pre-roll dir/pattern/prune/concat helpers (10); pre-roll motion-clip creation (9); pre-roll recorder lifecycle start/stop/stop-all (5); list_preroll_files (1); `_build_preroll_ffmpeg_args` wire-format pins including no-reconnect regression (6); `start_recorder` date-dir pre-creation (2); 22 Timeline-card contract tests; prune watcher loop + cancel + exit conditions (5); event-only mode (4); watcher task create/stop (4). Total: 3327 tests, 95% coverage.
+
+---
+
 ## v11.1.1
 
 No card changes.
 
 ### Bug fixes
 
-- **Fix: FCM re-registration on every HA restart triggered HTTP 500 from Bosch.** Bosch's `POST /v11/devices` returns `{"status":500,"error":"sh:internal.error"}` when the same FCM device token is registered twice. FCM pushed fine (old registration still active), but the error filled the log on every restart. Fixed by saving the successfully-registered token in the config entry; subsequent restarts skip the POST when the token is unchanged. The POST fires automatically again when the FCM token rotates (new `checkin_or_register()` result).
+- **Fix: FCM re-registration on every HA restart triggered HTTP 500 from Bosch.** Bosch's `POST /v11/devices` returns `{"status":500,"error":"sh:internal.error"}` when the same FCM device token is registered twice. FCM pushed fine (old registration still active), but the error filled the log on every restart. Fixed in two layers: (1) Bosch's `sh:internal.error` is now recognized as "already registered" — the token is saved to the config entry and the call returns success; (2) subsequent restarts skip the POST entirely when the saved token matches the current FCM token. The POST fires automatically again when the FCM token rotates (new `checkin_or_register()` result).
 
 - **Fix: FCM registration failure body not logged.** When Bosch returned a non-2xx status on `POST /v11/devices`, only the HTTP status code was logged — not the response body. Diagnosing the `sh:internal.error` code required a separate debug session. The response body (first 200 chars) is now included in the WARNING log line.
 
 - **Fix: SENTINEL_RULE violation in `_FCMNoiseFilter`.** `_last_passed` was initialized to `0.0` instead of `float("-inf")`. On systems with `time.monotonic() < 60 s` (container cold-starts), the very first FCM noise record was incorrectly suppressed instead of passing through.
 
+- **Perf: concurrent post-FCM snapshot requests coalesced.** When an FCM push arrives, HA wakes all consumers simultaneously, causing up to 8 `fetch_fresh_event_snapshot` calls within ~230 ms — all fetching the same 350 KB JPEG from the Bosch cloud. A per-camera `asyncio.Lock` with an 8 s TTL cache now ensures only one network call fires per event burst; subsequent callers within the window receive the cached bytes without a round-trip.
+
 ### Internal
 
-- 7 new regression tests: FCM skip-registration (same-token skips POST, new token fires POST, success saves token); response-body logging assertion; sentinel value check for `_FCMNoiseFilter._last_passed`; fixed two test stubs missing `_entry` attribute. Total: 3247 tests, 95% coverage.
+- 11 new regression tests: FCM skip-registration (same-token skips POST, new token fires POST, success saves token, 500 sh:internal.error treated as success); response-body logging assertion; sentinel value check for `_FCMNoiseFilter._last_passed`; fixed two test stubs missing `_entry` attribute; snapshot coalescing (second call uses cache, expired entry re-fetches, 3 concurrent calls produce 1 network request). Total: 3251 tests, 95% coverage.
 
 ## v11.1.0
 

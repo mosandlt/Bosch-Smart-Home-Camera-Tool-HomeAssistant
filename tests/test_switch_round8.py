@@ -104,6 +104,8 @@ def _coord(
         _image_rotation_180=image_rotation_180 if image_rotation_180 is not None else {},
         _nvr_user_intent=nvr_user_intent if nvr_user_intent is not None else {},
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_error_state={},
         _privacy_sound_set_at={},
         motion_settings=_ms,

@@ -86,6 +86,8 @@ def _stub_coord(**overrides):
         _image_rotation_180={},
         _nvr_user_intent={},
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_error_state={},
         _bg_tasks=set(),
         last_update_success=True,

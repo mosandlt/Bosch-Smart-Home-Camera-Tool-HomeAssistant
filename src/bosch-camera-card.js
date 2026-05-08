@@ -4362,3 +4362,435 @@ window.customCards.push({
   description: "Auto-discovers all Bosch Smart Home cameras and renders them in a responsive grid (online first, offline after).",
   preview:     false,
 });
+
+// ── Phase 5: NVR Timeline Card ────────────────────────────────────────────────
+// config: { camera_entity, nvr_source_id, motion_entity, show_date }
+// nvr_source_id: media_source identifier for this camera's NVR folder,
+//   e.g. "media-source://bosch_shc_camera/N/11111111.../2026-05-08"
+// Renders a 24-hour canvas timeline + <video> player + date navigation.
+
+class BoschNvrTimelineCard extends HTMLElement {
+  setConfig(config) {
+    if (!config.nvr_source_id) throw new Error("nvr_source_id is required");
+    this._config = config;
+    if (this.isConnected) this._init();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._initialized) this._init();
+  }
+
+  connectedCallback() {
+    if (this._hass && !this._initialized) this._init();
+  }
+
+  disconnectedCallback() {
+    this._stopCursor();
+  }
+
+  _init() {
+    if (!this._hass || !this._config) return;
+    this._initialized = true;
+    this._segments = [];
+    this._motionEvents = [];
+    this._currentDate = new Date().toISOString().slice(0, 10);
+    this._render();
+    this._loadDay(this._currentDate);
+    if (this._config.motion_entity) this._loadMotion(this._currentDate);
+  }
+
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host{display:block;background:var(--card-background-color);border-radius:12px;overflow:hidden}
+        .header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+          background:var(--primary-color);color:var(--text-primary-color);font-size:14px;font-weight:500}
+        .nav-btn{background:none;border:none;color:inherit;cursor:pointer;font-size:18px;padding:4px 8px}
+        .date-label{flex:1;text-align:center}
+        canvas{width:100%;height:48px;display:block;cursor:pointer;background:#111}
+        video{width:100%;max-height:340px;display:block;background:#000}
+        .status{padding:8px 16px;font-size:12px;color:var(--secondary-text-color)}
+        .no-data{padding:16px;text-align:center;color:var(--secondary-text-color)}
+      </style>
+      <div class="header">
+        <button class="nav-btn" id="prev">&#8249;</button>
+        <span class="date-label" id="date-lbl">${this._currentDate}</span>
+        <button class="nav-btn" id="next">&#8250;</button>
+      </div>
+      <canvas id="timeline" height="48"></canvas>
+      <video id="player" controls preload="none" playsinline></video>
+      <div class="status" id="status">Lade Aufnahmen…</div>`;
+
+    const canvas = this.shadowRoot.getElementById("timeline");
+    canvas.addEventListener("click", e => this._onCanvasClick(e));
+    this.shadowRoot.getElementById("prev").addEventListener("click", () => this._changeDay(-1));
+    this.shadowRoot.getElementById("next").addEventListener("click", () => this._changeDay(1));
+
+    const video = this.shadowRoot.getElementById("player");
+    video.addEventListener("timeupdate", () => this._drawTimeline());
+  }
+
+  _changeDay(delta) {
+    const d = new Date(this._currentDate + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    this._currentDate = d.toISOString().slice(0, 10);
+    this.shadowRoot.getElementById("date-lbl").textContent = this._currentDate;
+    this._segments = [];
+    this._motionEvents = [];
+    this._loadDay(this._currentDate);
+    if (this._config.motion_entity) this._loadMotion(this._currentDate);
+  }
+
+  async _loadDay(dateStr) {
+    if (!this._hass) return;
+    // Browse the per-camera per-date media source folder
+    const camPart = this._config.nvr_source_id;
+    const mediaId = camPart.replace(/\/\d{4}-\d{2}-\d{2}$/, "") + "/" + dateStr;
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/browse_media",
+        media_content_id: mediaId,
+      });
+      this._segments = (result.children || []).filter(c => c.media_class === "video");
+      this._drawTimeline();
+      const status = this.shadowRoot.getElementById("status");
+      status.textContent = this._segments.length
+        ? `${this._segments.length} Segment(e) — klicken zum Abspielen`
+        : "Keine Aufnahmen für diesen Tag";
+    } catch (err) {
+      const status = this.shadowRoot.getElementById("status");
+      status.textContent = "Fehler beim Laden der Segmente";
+    }
+  }
+
+  async _loadMotion(dateStr) {
+    if (!this._hass || !this._config.motion_entity) return;
+    const start = dateStr + "T00:00:00+00:00";
+    const end   = dateStr + "T23:59:59+00:00";
+    try {
+      const result = await this._hass.callApi(
+        "GET",
+        `history/period/${start}?end_time=${end}&filter_entity_id=${this._config.motion_entity}`,
+      );
+      const states = (result || [])[0] || [];
+      this._motionEvents = states
+        .filter(s => s.state === "on")
+        .map(s => {
+          const t = new Date(s.last_changed);
+          return (t.getHours() * 3600 + t.getMinutes() * 60 + t.getSeconds()) / 86400;
+        });
+      this._drawTimeline();
+    } catch (_) {
+      // Motion overlay is best-effort; don't surface errors
+    }
+  }
+
+  _drawTimeline() {
+    const canvas = this.shadowRoot && this.shadowRoot.getElementById("timeline");
+    if (!canvas) return;
+    const W = canvas.offsetWidth || canvas.width || 600;
+    canvas.width = W;
+    const H = canvas.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw segments as green bars
+    for (const seg of this._segments) {
+      const pos = this._segmentTimeOffset(seg);
+      if (pos === null) continue;
+      const x = Math.floor(pos.start * W);
+      const w = Math.max(2, Math.floor(pos.duration * W));
+      ctx.fillStyle = "rgba(76,175,80,0.7)";
+      ctx.fillRect(x, 2, w, H - 4);
+    }
+
+    // Motion ticks — red vertical marks
+    ctx.fillStyle = "rgba(244,67,54,0.85)";
+    for (const frac of this._motionEvents) {
+      const x = Math.floor(frac * W);
+      ctx.fillRect(x - 1, 0, 2, H);
+    }
+
+    // Hour grid
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 1;
+    for (let h = 1; h < 24; h++) {
+      const x = Math.floor((h / 24) * W);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+
+    // Current time cursor from video
+    const video = this.shadowRoot && this.shadowRoot.getElementById("player");
+    if (video && !isNaN(video.duration) && video.currentTime > 0) {
+      // Map video position onto today's timeline via segment start offset
+      const activeSeg = this._activeSegment;
+      if (activeSeg) {
+        const pos = this._segmentTimeOffset(activeSeg);
+        if (pos) {
+          const frac = pos.start + (video.currentTime / 86400);
+          const x = Math.floor(frac * W);
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        }
+      }
+    }
+  }
+
+  _segmentTimeOffset(seg) {
+    // seg.title is expected to be "HH-MM.mp4" or similar; derive fractional day offset
+    if (!seg.title) return null;
+    const m = seg.title.match(/(\d{2})[:\-](\d{2})/);
+    if (!m) return null;
+    const start = (parseInt(m[1]) * 60 + parseInt(m[2])) * 60 / 86400;
+    const duration = 300 / 86400; // 5-min segments
+    return { start, duration };
+  }
+
+  async _onCanvasClick(e) {
+    const canvas = e.currentTarget;
+    const frac = e.offsetX / canvas.offsetWidth;
+    const offsetSeconds = Math.floor(frac * 86400);
+
+    // Find the segment that contains this time offset
+    let best = null;
+    let bestDelta = Infinity;
+    for (const seg of this._segments) {
+      const pos = this._segmentTimeOffset(seg);
+      if (!pos) continue;
+      const segStart = pos.start * 86400;
+      const segEnd = segStart + pos.duration * 86400;
+      if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
+        best = seg;
+        bestDelta = 0;
+        break;
+      }
+      const delta = Math.abs(segStart - offsetSeconds);
+      if (delta < bestDelta) { bestDelta = delta; best = seg; }
+    }
+    if (best) {
+      this._activeSegment = best;
+      await this._playSegment(best.media_content_id);
+    }
+  }
+
+  async _playSegment(mediaContentId) {
+    if (!this._hass) return;
+    const status = this.shadowRoot.getElementById("status");
+    status.textContent = "Lade Stream…";
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/resolve_media",
+        media_content_id: mediaContentId,
+      });
+      const video = this.shadowRoot.getElementById("player");
+      video.src = result.url;
+      video.load();
+      video.play().catch(() => {});
+      status.textContent = "Wiedergabe";
+    } catch (err) {
+      status.textContent = "Fehler beim Laden des Segments";
+    }
+  }
+
+  _stopCursor() {
+    if (this._cursorRaf) { cancelAnimationFrame(this._cursorRaf); this._cursorRaf = null; }
+  }
+
+  getCardSize() { return 4; }
+}
+customElements.define("bosch-nvr-timeline-card", BoschNvrTimelineCard);
+window.customCards.push({
+  type:        "bosch-nvr-timeline-card",
+  name:        "Bosch NVR Timeline",
+  description: "24-hour timeline scrubber for Mini-NVR recordings. Click a segment to play it.",
+  preview:     false,
+});
+
+// ── Phase 6: Multi-Cam Stacked Card ──────────────────────────────────────────
+// config: { cameras: [{camera_entity, nvr_source_id, motion_entity, label}], show_date }
+// Each camera row shows an independent timeline + video player.
+// Shared seek: clicking any row's timeline scrubs ALL cameras to the same time.
+// rAF drift correction keeps follower videos in sync with the master (first) video.
+
+class BoschNvrMultiCamCard extends HTMLElement {
+  setConfig(config) {
+    if (!Array.isArray(config.cameras) || !config.cameras.length) {
+      throw new Error("cameras array is required");
+    }
+    this._config = config;
+    if (this.isConnected) this._initRows();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._initialized) this._initRows();
+    // Push hass down to child timeline cards
+    if (this._rowCards) {
+      for (const card of this._rowCards) card.hass = hass;
+    }
+  }
+
+  connectedCallback() {
+    if (this._hass && !this._initialized) this._initRows();
+  }
+
+  disconnectedCallback() {
+    this._stopDriftCorrection();
+  }
+
+  _initRows() {
+    if (!this._hass || !this._config) return;
+    this._initialized = true;
+    this._rowCards = [];
+    this._currentDate = new Date().toISOString().slice(0, 10);
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host{display:block;background:var(--card-background-color);border-radius:12px;overflow:hidden}
+        .multi-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+          background:var(--primary-color);color:var(--text-primary-color);font-size:14px;font-weight:500}
+        .nav-btn{background:none;border:none;color:inherit;cursor:pointer;font-size:18px;padding:4px 8px}
+        .date-label{flex:1;text-align:center}
+        .cam-row{border-bottom:1px solid var(--divider-color);padding:8px 0}
+        .cam-label{padding:4px 16px;font-size:12px;font-weight:500;color:var(--secondary-text-color);
+          text-transform:uppercase;letter-spacing:0.05em}
+      </style>
+      <div class="multi-header">
+        <button class="nav-btn" id="prev">&#8249;</button>
+        <span class="date-label" id="date-lbl">${this._currentDate}</span>
+        <button class="nav-btn" id="next">&#8250;</button>
+      </div>
+      <div id="rows"></div>`;
+
+    this.shadowRoot.getElementById("prev").addEventListener("click", () => this._changeDay(-1));
+    this.shadowRoot.getElementById("next").addEventListener("click", () => this._changeDay(1));
+
+    const rowsEl = this.shadowRoot.getElementById("rows");
+    for (const camCfg of this._config.cameras) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "cam-row";
+      if (camCfg.label) {
+        const lbl = document.createElement("div");
+        lbl.className = "cam-label";
+        lbl.textContent = camCfg.label;
+        rowEl.appendChild(lbl);
+      }
+      const timelineCard = document.createElement("bosch-nvr-timeline-card");
+      timelineCard.setConfig({
+        camera_entity: camCfg.camera_entity,
+        nvr_source_id: camCfg.nvr_source_id + "/" + this._currentDate,
+        motion_entity: camCfg.motion_entity,
+        show_date: false,
+      });
+      timelineCard.hass = this._hass;
+      rowEl.appendChild(timelineCard);
+      rowsEl.appendChild(rowEl);
+      this._rowCards.push(timelineCard);
+    }
+
+    // Override each card's canvas click to implement shared seek
+    this._patchSharedSeek();
+    this._startDriftCorrection();
+  }
+
+  _patchSharedSeek() {
+    // Replace each row card's _onCanvasClick so a click seeks ALL cameras
+    for (const card of this._rowCards) {
+      card._onCanvasClick = async (e) => {
+        const canvas = e.currentTarget;
+        const frac = e.offsetX / canvas.offsetWidth;
+        const offsetSeconds = Math.floor(frac * 86400);
+        await this._seekAll(this._currentDate, offsetSeconds);
+      };
+    }
+  }
+
+  async _seekAll(dateStr, offsetSeconds) {
+    const promises = this._rowCards.map(card => {
+      let best = null;
+      let bestDelta = Infinity;
+      for (const seg of (card._segments || [])) {
+        const pos = card._segmentTimeOffset(seg);
+        if (!pos) continue;
+        const segStart = pos.start * 86400;
+        const segEnd = segStart + pos.duration * 86400;
+        if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
+          best = seg; bestDelta = 0; break;
+        }
+        const delta = Math.abs(segStart - offsetSeconds);
+        if (delta < bestDelta) { bestDelta = delta; best = seg; }
+      }
+      if (best) {
+        card._activeSegment = best;
+        return card._playSegment(best.media_content_id);
+      }
+      return Promise.resolve();
+    });
+    await Promise.all(promises);
+  }
+
+  _changeDay(delta) {
+    const d = new Date(this._currentDate + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    this._currentDate = d.toISOString().slice(0, 10);
+    this.shadowRoot.getElementById("date-lbl").textContent = this._currentDate;
+    for (const card of this._rowCards) {
+      card._segments = [];
+      card._motionEvents = [];
+      card._currentDate = this._currentDate;
+      card._loadDay(this._currentDate);
+      if (card._config && card._config.motion_entity) card._loadMotion(this._currentDate);
+    }
+  }
+
+  _startDriftCorrection() {
+    this._stopDriftCorrection();
+    const TOLERANCE_S = 0.1;
+    const tick = () => {
+      if (!this._rowCards || this._rowCards.length < 2) {
+        this._driftRaf = requestAnimationFrame(tick);
+        return;
+      }
+      const masterShadow = this._rowCards[0].shadowRoot;
+      const master = masterShadow && masterShadow.getElementById("player");
+      if (!master || master.paused || isNaN(master.currentTime)) {
+        this._driftRaf = requestAnimationFrame(tick);
+        return;
+      }
+      for (let i = 1; i < this._rowCards.length; i++) {
+        const followShadow = this._rowCards[i].shadowRoot;
+        const follower = followShadow && followShadow.getElementById("player");
+        if (!follower || isNaN(follower.currentTime)) continue;
+        const drift = master.currentTime - follower.currentTime;
+        if (Math.abs(drift) > TOLERANCE_S) {
+          follower.currentTime = master.currentTime;
+        }
+        if (master.paused && !follower.paused) follower.pause();
+        if (!master.paused && follower.paused && !follower.ended) {
+          follower.play().catch(() => {});
+        }
+      }
+      this._driftRaf = requestAnimationFrame(tick);
+    };
+    this._driftRaf = requestAnimationFrame(tick);
+  }
+
+  _stopDriftCorrection() {
+    if (this._driftRaf) { cancelAnimationFrame(this._driftRaf); this._driftRaf = null; }
+  }
+
+  getCardSize() {
+    return (this._config && this._config.cameras ? this._config.cameras.length : 1) * 4;
+  }
+}
+customElements.define("bosch-nvr-multi-cam-card", BoschNvrMultiCamCard);
+window.customCards.push({
+  type:        "bosch-nvr-multi-cam-card",
+  name:        "Bosch NVR Multi-Cam",
+  description: "Stacked NVR timeline view for multiple cameras with shared seek and drift correction.",
+  preview:     false,
+});

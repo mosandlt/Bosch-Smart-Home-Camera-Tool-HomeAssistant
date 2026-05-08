@@ -75,6 +75,8 @@ def _stub_coord(**kwargs):
         _shc_state_cache={},
         _rcp_session_cache={},
         _live_connections={},
+        _fresh_snap_cache={},
+        _fresh_snap_locks={},
     )
     coord.get_quality_params = MagicMock(return_value=(True, 0))
     coord._get_cached_rcp_session = AsyncMock(return_value=None)
@@ -460,6 +462,93 @@ class TestFetchFreshEventSnapshot:
         with patch(self._PATCH, return_value=session):
             result = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_second_call_within_ttl_uses_cache(self):
+        """Second call within _FRESH_SNAP_TTL must return cached bytes without
+        hitting the network again (no additional session.get calls).
+
+        Regression: 8 concurrent HA consumers each called the Bosch cloud API
+        after every FCM push — 16 round-trips for identical data.
+        """
+        img_url = "https://events.cbs.boschsecurity.com/snap/img.jpg"
+        img_bytes = b"\xff\xd8" + b"\xaa" * 50
+        events_cm = _resp_cm(200, text=f'[{{"imageUrl": "{img_url}"}}]')
+        img_cm = _resp_cm(200, body=img_bytes)
+        session = MagicMock()
+        session.get = MagicMock(side_effect=[events_cm, img_cm])
+        coord = self._bind(_stub_coord())
+
+        with patch(self._PATCH, return_value=session):
+            r1 = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
+            r2 = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
+
+        assert r1 == img_bytes
+        assert r2 == img_bytes, "second call must return the same bytes from cache"
+        assert session.get.call_count == 2, (
+            "cache must prevent the second call from making additional network requests "
+            "(expected 2 calls total: events API + image download, both from first call)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cache_expires_and_refetches(self):
+        """After TTL expires the next call must hit the network again."""
+        img_url = "https://events.cbs.boschsecurity.com/snap/img.jpg"
+        img_bytes = b"\xff\xd8" + b"\xbb" * 50
+        coord = self._bind(_stub_coord())
+        # Pre-populate cache with an already-expired entry
+        coord._fresh_snap_cache[CAM_ID] = (b"stale", time.monotonic() - 1.0)
+
+        events_cm = _resp_cm(200, text=f'[{{"imageUrl": "{img_url}"}}]')
+        img_cm = _resp_cm(200, body=img_bytes)
+        session = MagicMock()
+        session.get = MagicMock(side_effect=[events_cm, img_cm])
+        with patch(self._PATCH, return_value=session):
+            result = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
+
+        assert result == img_bytes, "expired cache entry must trigger a fresh network fetch"
+        assert session.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_coalesced_to_one_request(self):
+        """Concurrent calls for the same cam_id must fire only one network request.
+
+        Regression: async_update_listeners() wakes 8+ HA consumers simultaneously;
+        without coalescing each fires 2 Bosch cloud requests (events API + image).
+        The per-camera lock ensures only the first caller fetches; the rest wait
+        and return the cached result.
+        """
+        img_url = "https://events.cbs.boschsecurity.com/snap/concurrent.jpg"
+        img_bytes = b"\xff\xd8" + b"\xcc" * 60
+        request_count = []
+
+        original_side_effects = [
+            _resp_cm(200, text=f'[{{"imageUrl": "{img_url}"}}]'),
+            _resp_cm(200, body=img_bytes),
+        ]
+
+        def _tracking_get(url, **kw):
+            request_count.append(url)
+            if not original_side_effects:
+                raise AssertionError("unexpected extra network call")
+            return original_side_effects.pop(0)
+
+        session = MagicMock()
+        session.get = _tracking_get
+        coord = self._bind(_stub_coord())
+
+        with patch(self._PATCH, return_value=session):
+            results = await asyncio.gather(
+                coord.async_fetch_fresh_event_snapshot(CAM_ID),
+                coord.async_fetch_fresh_event_snapshot(CAM_ID),
+                coord.async_fetch_fresh_event_snapshot(CAM_ID),
+            )
+
+        assert all(r == img_bytes for r in results), "all callers must receive the same bytes"
+        assert len(request_count) == 2, (
+            f"expected exactly 2 network requests (events API + image), got {len(request_count)}; "
+            "concurrent callers must be coalesced by the per-camera lock"
+        )
 
 
 # ── async_fetch_live_snapshot_local ─────────────────────────────────────────

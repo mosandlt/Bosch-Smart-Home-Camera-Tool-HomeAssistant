@@ -1,0 +1,112 @@
+# Mini-NVR: Away-Mode + Alarm Integration
+# =========================================
+# These automations start / stop the Mini-NVR recording switches based on
+# presence and alarm panel state.  Adapt entity IDs to your setup.
+#
+# Replace:
+#   person.thomas           → your person entity
+#   alarm_control_panel.home_alarm → your alarm entity
+#   switch.bosch_terrasse_mini_nvr, switch.bosch_innenbereich_mini_nvr
+#                           → your camera NVR switches
+#   sensor.bosch_terrasse_mini_nvr_status → your NVR status sensor
+#   notify.signal_kamera    → your notification service
+#
+# Requirements:
+#   - Mini-NVR enabled in Integration → Configure → NVR
+#   - switch.bosch_*_mini_nvr entities enabled in entity settings
+#   - nvr_preroll_seconds > 0 for the motion-clip condition to be meaningful
+
+# ── 1. Start recording when leaving home ──────────────────────────────────────
+- alias: "NVR — Aufnahme bei Abwesenheit starten (EN: Start NVR when away)"
+  description: >
+    Turns on the NVR recording switch for all configured cameras whenever the
+    tracked person leaves home.  Combine with the "disarm" automation below.
+  trigger:
+    - platform: state
+      entity_id: person.thomas
+      to: "not_home"
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id:
+          - switch.bosch_terrasse_mini_nvr
+          - switch.bosch_innenbereich_mini_nvr
+
+# ── 2. Stop recording when arriving home ─────────────────────────────────────
+- alias: "NVR — Aufnahme bei Ankunft stoppen (EN: Stop NVR when home)"
+  trigger:
+    - platform: state
+      entity_id: person.thomas
+      to: "home"
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id:
+          - switch.bosch_terrasse_mini_nvr
+          - switch.bosch_innenbereich_mini_nvr
+
+# ── 3. Arm NVR with alarm panel (away + night mode) ──────────────────────────
+- alias: "NVR — Aufnahme mit Alarmanlage aktivieren (EN: Arm NVR with alarm)"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.home_alarm
+      to:
+        - armed_away
+        - armed_night
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id:
+          - switch.bosch_terrasse_mini_nvr
+          - switch.bosch_innenbereich_mini_nvr
+
+# ── 4. Disarm NVR when alarm is disarmed ─────────────────────────────────────
+- alias: "NVR — Aufnahme bei Alarm-Deaktivierung stoppen (EN: Disarm NVR)"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.home_alarm
+      to: "disarmed"
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id:
+          - switch.bosch_terrasse_mini_nvr
+          - switch.bosch_innenbereich_mini_nvr
+
+# ── 5. Alert when pre-roll buffer is active and motion detected ───────────────
+# Useful with nvr_event_only=true (ring-buffer-only mode, no 24/7 recording).
+# The motion event triggers a Signal notification only when the pre-roll buffer
+# is actually running (confirms the ring buffer captured footage).
+- alias: "NVR — Bewegung mit Pre-Roll-Bestätigung (EN: Motion with preroll check)"
+  trigger:
+    - platform: event
+      event_type: bosch_shc_camera_motion
+      event_data:
+        # Filter to a specific camera by device_id (optional)
+        # device_id: "YOUR_DEVICE_ID"
+  condition:
+    - condition: template
+      value_template: >
+        {{ state_attr('sensor.bosch_terrasse_mini_nvr_status', 'preroll_running') == true }}
+  action:
+    - service: notify.signal_kamera
+      data:
+        message: >
+          Bewegung erkannt – Pre-Roll aktiv ({{ now().strftime('%H:%M') }}).
+          Clip wird automatisch erstellt.
+
+# ── 6. Alert on NVR error state ──────────────────────────────────────────────
+- alias: "NVR — Fehler-Benachrichtigung (EN: NVR error alert)"
+  description: >
+    Sends a notification when the NVR error state is set (e.g. ffmpeg crashed
+    twice within 30 s — toggle the NVR switch off+on to reset).
+  trigger:
+    - platform: template
+      value_template: >
+        {{ state_attr('sensor.bosch_terrasse_mini_nvr_status', 'error') not in ['', none] }}
+  action:
+    - service: notify.signal_kamera
+      data:
+        message: >
+          NVR Fehler (Terrasse): {{ state_attr('sensor.bosch_terrasse_mini_nvr_status', 'error') }}.
+          NVR-Schalter aus- und einschalten zum Zurücksetzen.

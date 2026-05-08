@@ -334,6 +334,18 @@ async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
                     _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
                     return True
                 resp_body = await resp.text()
+                if resp.status == 500 and "sh:internal.error" in resp_body:
+                    # Bosch returns 500 "sh:internal.error" when the same device
+                    # token is already registered — FCM push still works. Treat as
+                    # success and save the token so subsequent restarts skip the POST.
+                    coordinator.hass.config_entries.async_update_entry(
+                        coordinator._entry,
+                        data={**coordinator._entry.data, "fcm_registered_token": coordinator._fcm_token},
+                    )
+                    _LOGGER.debug(
+                        "FCM: token already registered with Bosch (HTTP 500 sh:internal.error) — skipping on next restart"
+                    )
+                    return True
                 _LOGGER.warning(
                     "FCM token registration failed: HTTP %d — %s", resp.status, resp_body[:200]
                 )

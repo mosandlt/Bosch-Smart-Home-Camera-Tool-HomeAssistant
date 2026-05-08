@@ -79,6 +79,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "nvr": [
         "enable_nvr", "nvr_storage_target", "nvr_base_path",
         "nvr_smb_subpath", "nvr_retention_days",
+        "nvr_quality", "nvr_preroll_seconds", "nvr_preroll_cache_dir",
     ],
     "auth": [
         "force_relogin", "migrate_to_oss_client",
@@ -768,6 +769,24 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
                     "nvr_retention_days",
                     default=int(opts.get("nvr_retention_days", 3)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                vol.Optional(
+                    "nvr_quality",
+                    default=str(opts.get("nvr_quality", "auto")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="auto", label="Auto (max. Qualität, ~30 Mbps)"),
+                        SelectOptionDict(value="low",  label="Niedrig (~1.9 Mbps, LOCAL only)"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
+                vol.Optional(
+                    "nvr_preroll_seconds",
+                    default=int(opts.get("nvr_preroll_seconds", 0)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+                vol.Optional(
+                    "nvr_preroll_cache_dir",
+                    description={"suggested_value": opts.get("nvr_preroll_cache_dir", "/dev/shm/bosch_nvr_cache")},
+                ): str,
             }),
             {"collapsed": True},
         )

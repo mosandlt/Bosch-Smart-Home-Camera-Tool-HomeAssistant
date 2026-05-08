@@ -60,6 +60,8 @@ def _stub_coord(**overrides):
         _image_rotation_180={},
         _nvr_user_intent={},
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _nvr_error_state={},
         last_update_success=True,
         options={"audio_default_on": True, "nvr_base_path": "/config/bosch_nvr", "nvr_retention_days": 3},

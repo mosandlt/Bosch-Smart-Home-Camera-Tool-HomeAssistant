@@ -921,6 +921,8 @@ def _make_coord_live(**overrides):
         _auto_renew_generation={},
         _nvr_user_intent={},
         _nvr_processes={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_tasks={},
         _async_local_tcp_ping=AsyncMock(return_value=False),
         _start_tls_proxy=AsyncMock(return_value=12345),
         _stop_tls_proxy=AsyncMock(),

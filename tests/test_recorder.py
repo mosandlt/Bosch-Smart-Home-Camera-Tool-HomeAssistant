@@ -219,13 +219,13 @@ class TestBuildFfmpegArgs:
         idx = args.index("-reset_timestamps")
         assert args[idx + 1] == "1"
 
-    def test_reconnect_enabled(self):
-        """Without `-reconnect 1` a TLS-proxy cred-rotation hiccup permanently
-        kills the recorder. Pinned so a future refactor can't drop it."""
+    def test_reconnect_not_present(self):
+        """-reconnect is an HTTP-only flag that crashes ffmpeg on rtsp:// inputs
+        (rc=8, 'Option reconnect not found'). Confirmed on live HA 2026-05-08.
+        Watcher (_watch_recorder) handles respawn instead."""
         from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
-        idx = args.index("-reconnect")
-        assert args[idx + 1] == "1"
+        assert "-reconnect" not in args
 
 
 # ── 3. File pattern / directory layout ──────────────────────────────────

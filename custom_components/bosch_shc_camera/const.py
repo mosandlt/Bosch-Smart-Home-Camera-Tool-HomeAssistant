@@ -78,6 +78,11 @@ DEFAULT_OPTIONS = {
     # Subfolder under smb_base_path / FTP base_path to keep NVR segments
     # separate from the cloud-event upload tree. Default "NVR".
     "nvr_smb_subpath": "NVR",
+    # Phase 3: quality — "auto" = inst=1 (max ~30 Mbps), "low" = inst=4 (~1.9 Mbps, LOCAL only)
+    "nvr_quality": "auto",
+    # Phase 4: pre-roll buffer — 0 = disabled; 10-60 s = keep rolling cache in tmpfs
+    "nvr_preroll_seconds": 0,
+    "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
     "debug_logging": False,
     "enable_go2rtc": True,
 }

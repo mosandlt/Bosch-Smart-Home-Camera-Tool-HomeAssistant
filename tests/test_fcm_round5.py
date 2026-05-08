@@ -237,14 +237,15 @@ class TestRegisterFcmWithBosch:
         assert ok is True
 
     @pytest.mark.asyncio
-    async def test_500_returns_false(self):
+    async def test_500_unknown_error_returns_false(self):
+        """HTTP 500 with an unrecognised error body must return False and log a warning."""
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
 
         @asynccontextmanager
         async def _post(*args, **kw):
             r = MagicMock()
             r.status = 500
-            r.text = AsyncMock(return_value='{"status":500,"error":"sh:internal.error"}')
+            r.text = AsyncMock(return_value='{"status":500,"error":"sh:unknown.error"}')
             yield r
 
         session = MagicMock()
@@ -259,11 +260,11 @@ class TestRegisterFcmWithBosch:
 
     @pytest.mark.asyncio
     async def test_500_logs_response_body(self, caplog):
-        """HTTP 500 warning must include the Bosch error body (regression: body was not logged)."""
+        """HTTP 500 with unknown error must include the body in the WARNING log."""
         import logging
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
 
-        bosch_body = '{"status":500,"error":"sh:internal.error","message":"Internal Server Error."}'
+        bosch_body = '{"status":500,"error":"sh:unknown.error","message":"Something else."}'
 
         @asynccontextmanager
         async def _post(*args, **kw):
@@ -283,9 +284,49 @@ class TestRegisterFcmWithBosch:
                 ok = await register_fcm_with_bosch(coord)
 
         assert ok is False
-        assert "sh:internal.error" in caplog.text, (
+        assert "sh:unknown.error" in caplog.text, (
             "Warning log must contain Bosch error body so operators can diagnose "
-            "FCM registration failures without enabling debug logging."
+            "unexpected FCM registration failures."
+        )
+
+    @pytest.mark.asyncio
+    async def test_500_already_registered_treated_as_success(self):
+        """HTTP 500 with sh:internal.error means the token is already registered.
+
+        Bosch returns this on every re-registration of an existing token.
+        FCM push still works — treat as success and save the token so the
+        next restart skips the POST entirely (avoids persistent 500 spam).
+        """
+        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
+        already_registered_body = '{"status":500,"error":"sh:internal.error","message":"Internal Server Error."}'
+
+        @asynccontextmanager
+        async def _post(*args, **kw):
+            r = MagicMock()
+            r.status = 500
+            r.text = AsyncMock(return_value=already_registered_body)
+            yield r
+
+        session = MagicMock()
+        session.post = _post
+        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await register_fcm_with_bosch(coord)
+
+        assert ok is True, (
+            "sh:internal.error means the token is already registered — must return True "
+            "so the coordinator treats FCM as functional"
+        )
+        update_call = coord.hass.config_entries.async_update_entry
+        update_call.assert_called_once()
+        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[1].get("data", {})
+        assert saved_data.get("fcm_registered_token") == "fcm-token-xyz", (
+            "Token must be saved even on 500 sh:internal.error so the next restart "
+            "skips the registration POST entirely"
         )
 
     @pytest.mark.asyncio
