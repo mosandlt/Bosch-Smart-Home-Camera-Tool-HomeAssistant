@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.9";
+const CARD_VERSION = "2.12.0";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -217,6 +217,12 @@ class BoschCameraCard extends HTMLElement {
       if (/^fe80:/i.test(h)) return false;
       return true;
     })();
+    // On Android WebView the autoplay policy (mediaPlaybackRequiresUserGesture)
+    // can block even muted play. Start with audio muted regardless of the HA
+    // audio entity state — user can enable via the Ton toggle after the stream
+    // is active. Cleared on first explicit Ton toggle so the entity state takes
+    // over normally from that point on.
+    this._androidAudioMuted = /Android/i.test(navigator.userAgent || "");
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -600,6 +606,32 @@ class BoschCameraCard extends HTMLElement {
         }
         .ios-hls-banner.visible { display: flex; }
         .ios-hls-banner span { white-space: nowrap; }
+
+        /* Tap-to-play overlay — shown when Android WebView blocks autoplay
+           (HA app "Autoplay videos" setting is off). z-index 9 = above video,
+           below loading-overlay (10). */
+        .tap-to-play-overlay {
+          display: none;
+          position: absolute; inset: 0; z-index: 9;
+          flex-direction: column; align-items: center; justify-content: center;
+          gap: 10px;
+          background: rgba(0,0,0,.55);
+          backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+          cursor: pointer;
+        }
+        .tap-to-play-overlay.visible { display: flex; }
+        .tap-to-play-overlay svg {
+          width: 56px; height: 56px; fill: rgba(255,255,255,.9);
+          filter: drop-shadow(0 2px 8px rgba(0,0,0,.5));
+        }
+        .tap-to-play-overlay .ttp-label {
+          font-size: 13px; font-weight: 500; color: rgba(255,255,255,.85);
+          text-shadow: 0 1px 3px rgba(0,0,0,.6);
+        }
+        .tap-to-play-overlay .ttp-hint {
+          font-size: 11px; color: rgba(255,255,255,.5);
+          text-align: center; max-width: 200px; line-height: 1.4;
+        }
 
         /* Push status badge */
         .push-badge {
@@ -1025,6 +1057,11 @@ class BoschCameraCard extends HTMLElement {
           <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
           <div class="ios-hls-banner" id="ios-hls-banner">
             <span>ℹ HLS-Modus (kein WebRTC über Tunnel)</span>
+          </div>
+          <div class="tap-to-play-overlay" id="tap-to-play-overlay">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span class="ttp-label">Zum Abspielen tippen</span>
+            <span class="ttp-hint">Oder in den HA-App-Einstellungen „Videos automatisch abspielen" aktivieren</span>
           </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
@@ -2283,7 +2320,24 @@ class BoschCameraCard extends HTMLElement {
             // Do NOT auto-unmute — Chrome will pause the video.
           })
           .catch((err) => {
-            // If even muted play fails, retry after a moment
+            if (err.name === "NotAllowedError") {
+              // Android System WebView blocks autoplay when "Autoplay videos"
+              // is disabled in HA app settings (mediaPlaybackRequiresUserGesture).
+              // One tap satisfies the user-gesture requirement — show overlay.
+              const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+              if (overlay) {
+                overlay.classList.add("visible");
+                const resume = () => {
+                  overlay.classList.remove("visible");
+                  overlay.removeEventListener("click", resume);
+                  video.muted = true;
+                  video.play().catch(() => {});
+                };
+                overlay.addEventListener("click", resume);
+              }
+              return;
+            }
+            // Any other error: retry after a short delay
             console.warn("bosch-camera-card: muted play failed:", err.message);
             setTimeout(() => {
               video.muted = true;
@@ -2539,6 +2593,9 @@ class BoschCameraCard extends HTMLElement {
     // Clean up stream-connecting state
     this._streamConnecting = false;
     if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+    // Hide tap-to-play overlay if stream stops before user tapped
+    const tapOverlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+    if (tapOverlay) tapOverlay.classList.remove("visible");
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
@@ -3191,12 +3248,15 @@ class BoschCameraCard extends HTMLElement {
     // Keep live video muted state in sync with Ton toggle (only when streaming).
     // Only unmute when the video is already playing — unmuting a paused video
     // before play() is called would cause an autoplay NotAllowedError.
+    // On Android WebView: _androidAudioMuted starts true so the video is always
+    // muted at startup. Cleared on the first explicit Ton toggle so the entity
+    // state takes over normally from that point on.
     if (this._liveVideoActive) {
       const video   = this.shadowRoot.getElementById("cam-video");
       const audioOn = this._getEffectiveState(ents.audio) === "on";
       if (video) {
-        if (!audioOn) {
-          video.muted = true;           // mute immediately — always safe
+        if (!audioOn || this._androidAudioMuted) {
+          video.muted = true;
         } else if (!video.paused) {
           video.muted = false;          // unmute only if already playing
         }
@@ -3802,6 +3862,9 @@ class BoschCameraCard extends HTMLElement {
     const state = this._hass.states[entityId]?.state;
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
+    // First explicit tap on Android clears the startup mute override so the
+    // entity state takes over from here on (video.muted syncs normally).
+    this._androidAudioMuted = false;
     // Optimistic update → calls _update() which syncs video.muted state.
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     // Persist to HA (affects rtsps URL for next stream open)

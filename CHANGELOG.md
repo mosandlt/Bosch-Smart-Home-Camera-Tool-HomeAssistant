@@ -5,6 +5,12 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.3
+
+### Fixes
+
+- **Card: Android WebView autoplay blocked** (`bosch-camera-card.js` v2.12.0): When Android's `mediaPlaybackRequiresUserGesture` setting blocks `video.play()` (HA app → "Autoplay videos" is disabled), the card now shows a tap-to-play overlay instead of silently freezing on a black screen. One tap satisfies the user-gesture requirement and starts the stream. The overlay also includes a hint to enable "Autoplay videos" in the HA app settings for a seamless experience.
+
 ## v11.2.2
 
 ### Fixes
