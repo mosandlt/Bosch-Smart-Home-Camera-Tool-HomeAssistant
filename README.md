@@ -972,10 +972,10 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.10.21 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.12.4 |
 | `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline** with colored outlines per tier (green / orange / grey), or by Bosch-app `priority` if `use_bosch_sort: true`. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v1.1.0 |
 
-> **Card version: v2.10.21** — Companion App + external-endpoint detection skips WebRTC and uses native HLS directly (covers Cloudflare-Tunnel/iOS where UDP can't traverse), desktop browsers externally still try WebRTC normally; info banner while streaming over the tunnel, stale-state guard against accidental toggles after Companion-App backgrounding, Bosch-app sort option, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **Card version: v2.12.4** — LL-HLS now active for all buffer profiles (was latency-only); HLS startup drops from ~20 s to ~1.5–5 s. tap-to-play overlay when Android WebView blocks autoplay (HA app → "Videos automatisch abspielen" enablen für WebRTC mit ~1–2 s Erstbild), Android starts muted (Ton-Tap unmutes), offline guard prevents stream-start on unavailable cameras, faster WebRTC retry (5 s for first extra attempts), Companion App + external-endpoint detection skips WebRTC and uses HLS directly (Cloudflare-Tunnel/iOS), stale-state guard against accidental toggles after app background, Bosch-app sort, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
 
@@ -1182,6 +1182,7 @@ type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
 title: Garten
 minimal: true
+
 ```
 
 All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist. The **Reaktion** slot in the info row reads the `buffering_time_ms` attribute exposed by the camera entity (Bosch cloud-issued, ~500 ms on LOCAL and ~1000 ms on REMOTE); it stays `—` while the stream is idle. The **Verbindung** slot reads `connection_type` and shows `LAN`, `Cloud`, or `—`.

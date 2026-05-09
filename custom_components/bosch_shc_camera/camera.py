@@ -404,6 +404,23 @@ class BoschCamera(CoordinatorEntity, Camera):
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
+    async def async_create_stream(self):
+        """Auto-open live connection when play_stream / Cast is requested.
+
+        HA calls this when camera.play_stream is invoked (e.g. Cast to Chromecast).
+        Without the override stream_source() returns None with no active session
+        → async_create_stream() returns None → HA logs
+        "does not support play stream service" (observed 2026-05-09 19:02 CEST).
+        """
+        if not self.coordinator._live_connections.get(self._cam_id):
+            _LOGGER.debug("%s: play_stream — auto-opening live connection", self._display_name)
+            result = await self.coordinator.try_live_connection(self._cam_id)
+            if not result:
+                _LOGGER.warning("%s: play_stream — live connection failed", self._display_name)
+                return None
+            self.coordinator.async_update_listeners()
+        return await super().async_create_stream()
+
     async def stream_source(self) -> str | None:
         """Return RTSP URL when a live connection has been opened.
 

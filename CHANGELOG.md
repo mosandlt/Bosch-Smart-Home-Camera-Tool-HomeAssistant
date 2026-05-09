@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.4
+
+### Changed
+
+- **Card: LL-HLS enabled for all buffer profiles** (`bosch-camera-card.js` v2.12.4): `lowLatencyMode: true` is now set in all three hls.js buffer profiles (latency / balanced / stable). Previously only the `latency` profile used LL-HLS, so the `ll_hls: true` HA config had no effect for users on the default `balanced` mode. With `part_duration: 0.75 s`, the HLS fallback first-frame time drops from ~20 s to ~1.5–5 s depending on profile.
+- **Card: `android_auto_stream` removed** (`bosch-camera-card.js` v2.12.3): The option introduced in v2.12.1 is removed — it started streams even when the user had manually stopped them. Existing configs with `android_auto_stream: true/false` load without error; the key is silently ignored.
+- **Card: Android offline guard** (v2.12.2): `_toggleStream()` silently aborts when the server returns `unavailable` for the live-stream switch, preventing HA log warnings when OFFLINE cameras are referenced. Same guard in the auto-stream timer (`_isOffline` + `swState !== "unavailable"`).
+- **Card: faster WebRTC retry** (v2.12.2): Retry attempts 6–7 use 5 s delay (was 10 s) to catch the go2rtc registration window (~5–8 s after stream switch turns on); further retries stay at 10 s.
+- **LL-HLS** (`configuration.yaml`): `stream: ll_hls: true, part_duration: 0.75` reduces HLS fallback first-frame time from ~20 s to ~3–5 s on LAN.
+
+> **Android tip:** enable **"Videos automatisch abspielen"** in the HA app settings to use WebRTC instead of HLS — first frame in ~1–2 s.
+
 ## v11.2.3
 
 ### Fixes

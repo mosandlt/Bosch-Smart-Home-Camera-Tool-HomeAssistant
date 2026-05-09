@@ -663,3 +663,66 @@ class TestPlaceholderJpeg:
         from custom_components.bosch_shc_camera.camera import BoschCamera
         img = Image.open(BytesIO(BoschCamera._PLACEHOLDER_JPEG))
         assert img.size == (1, 1)
+
+
+# ── async_create_stream (play_stream / Cast) ─────────────────────────────
+#
+# Regression test for 2026-05-09 19:02 CEST error:
+# "Error requesting stream: camera.bosch_terrasse does not support play stream service"
+# Root cause: stream_source() returns None when no live connection is active →
+# Camera.async_create_stream() (HA base) returns None → HA treats camera as
+# incapable. Fix: override async_create_stream() to auto-open the live
+# connection before delegating to super().
+
+
+class TestAsyncCreateStream:
+    @pytest.mark.asyncio
+    async def test_no_connection_auto_opens_and_returns_stream(self):
+        """With no active live session, opens connection and returns the stream."""
+        live_result = {"rtspsUrl": "rtsps://proxy-12.live.cbs.boschsecurity.com:443/abc/rtsp_tunnel"}
+        coord = _make_coord(
+            try_live_connection=AsyncMock(return_value=live_result),
+            async_update_listeners=MagicMock(),
+        )
+        cam = _make_camera(coord=coord)
+        fake_stream = object()
+        with patch(
+            "homeassistant.components.camera.Camera.async_create_stream",
+            new=AsyncMock(return_value=fake_stream),
+        ):
+            result = await cam.async_create_stream()
+        coord.try_live_connection.assert_awaited_once_with(CAM_ID)
+        coord.async_update_listeners.assert_called_once()
+        assert result is fake_stream
+
+    @pytest.mark.asyncio
+    async def test_connection_open_failure_returns_none(self):
+        """When try_live_connection fails, returns None instead of raising."""
+        coord = _make_coord(
+            try_live_connection=AsyncMock(return_value=None),
+            async_update_listeners=MagicMock(),
+        )
+        cam = _make_camera(coord=coord)
+        result = await cam.async_create_stream()
+        coord.try_live_connection.assert_awaited_once_with(CAM_ID)
+        coord.async_update_listeners.assert_not_called()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_existing_connection_skips_open(self):
+        """When a live session is already active, skips try_live_connection."""
+        coord = _make_coord(
+            _live_connections={CAM_ID: {"rtspsUrl": "rtsps://proxy-12/xyz"}},
+            try_live_connection=AsyncMock(),
+            async_update_listeners=MagicMock(),
+        )
+        cam = _make_camera(coord=coord)
+        fake_stream = object()
+        with patch(
+            "homeassistant.components.camera.Camera.async_create_stream",
+            new=AsyncMock(return_value=fake_stream),
+        ):
+            result = await cam.async_create_stream()
+        coord.try_live_connection.assert_not_awaited()
+        coord.async_update_listeners.assert_not_called()
+        assert result is fake_stream

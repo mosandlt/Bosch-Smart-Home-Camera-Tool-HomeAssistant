@@ -148,18 +148,19 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.0";
+const CARD_VERSION = "2.12.4";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
-// hls.js parameters here. HA emits 2 s HLS segments by default, so:
-//   liveSyncDurationCount * 2 ≈ steady-state lag behind live edge.
-//   maxBufferLength MUST stay below HA's 30 s OUTPUT_IDLE_TIMEOUT, otherwise
-//   hls.js stops fetching and FFmpeg gets killed.
+// hls.js parameters here. With LL-HLS (part_duration 0.75s in HA config),
+// liveSyncDurationCount refers to parts, not segments, so lag in seconds =
+// liveSyncDurationCount * 0.75. lowLatencyMode: true in all profiles so
+// hls.js uses EXT-X-PART sub-segments (LL-HLS Blocking Playlist Reload).
+// maxBufferLength MUST stay below HA's 30 s OUTPUT_IDLE_TIMEOUT.
 const BOSCH_BUFFER_PROFILES = {
-  latency:  { liveSyncDurationCount: 2, liveMaxLatencyDurationCount:  4, maxBufferLength:  8, maxMaxBufferLength: 14, lowLatencyMode: true  },
-  balanced: { liveSyncDurationCount: 4, liveMaxLatencyDurationCount:  8, maxBufferLength: 14, maxMaxBufferLength: 22, lowLatencyMode: false },
-  stable:   { liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 12, maxBufferLength: 22, maxMaxBufferLength: 28, lowLatencyMode: false },
+  latency:  { liveSyncDurationCount: 2, liveMaxLatencyDurationCount:  4, maxBufferLength:  8, maxMaxBufferLength: 14, lowLatencyMode: true },
+  balanced: { liveSyncDurationCount: 4, liveMaxLatencyDurationCount:  8, maxBufferLength: 14, maxMaxBufferLength: 22, lowLatencyMode: true },
+  stable:   { liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 12, maxBufferLength: 22, maxMaxBufferLength: 28, lowLatencyMode: true },
 };
 
 class BoschCameraCard extends HTMLElement {
@@ -2448,19 +2449,20 @@ class BoschCameraCard extends HTMLElement {
         }, 1500);
       } else {
         // After 5 attempts, back off but DON'T give up permanently.
-        // Schedule a retry in 10s — the stream may still be starting.
-        console.warn("bosch-camera-card: stream not available (attempt " + attempt + "), retrying in 10s", e);
+        // First 2 extra retries: 5s (catches go2rtc registration window ~5-8s after switch on).
+        // Further retries: 10s to avoid hammering HA.
+        const retryDelay = attempt <= 6 ? 5000 : 10000;
+        console.warn(`bosch-camera-card: stream not available (attempt ${attempt}), retrying in ${retryDelay/1000}s`, e);
         this._liveVideoActive   = false;
         this._startingLiveVideo = false;
         this._startRefreshTimer();
-        // Retry after 10s if stream is still supposed to be on
         setTimeout(() => {
           if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
             this._waitingForStream = true;
             this._setLoadingOverlay(true, "Stream wird erneut versucht…");
             this._waitForStreamReady();
           }
-        }, 10000);
+        }, retryDelay);
       }
     }
   }
@@ -3786,6 +3788,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._hass && this._entities.switch) {
       try {
         const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh?.state === "unavailable") return; // camera offline — abort silently
         if (fresh && fresh.state) serverIsOn = fresh.state === "on";
       } catch (e) {
         // REST failed — fall through to cached state, no worse than before

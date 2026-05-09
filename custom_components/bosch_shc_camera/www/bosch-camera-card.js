@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.0";
+const CARD_VERSION = "2.12.4";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -23,14 +23,14 @@ const BOSCH_BUFFER_PROFILES = {
     liveMaxLatencyDurationCount: 8,
     maxBufferLength: 14,
     maxMaxBufferLength: 22,
-    lowLatencyMode: false
+    lowLatencyMode: true
   },
   stable: {
     liveSyncDurationCount: 6,
     liveMaxLatencyDurationCount: 12,
     maxBufferLength: 22,
     maxMaxBufferLength: 28,
-    lowLatencyMode: false
+    lowLatencyMode: true
   }
 };
 
@@ -993,7 +993,8 @@ class BoschCameraCard extends HTMLElement {
           }
         }, 1500);
       } else {
-        console.warn("bosch-camera-card: stream not available (attempt " + attempt + "), retrying in 10s", e);
+        const retryDelay = attempt <= 6 ? 5e3 : 1e4;
+        console.warn(`bosch-camera-card: stream not available (attempt ${attempt}), retrying in ${retryDelay / 1e3}s`, e);
         this._liveVideoActive = false;
         this._startingLiveVideo = false;
         this._startRefreshTimer();
@@ -1003,7 +1004,7 @@ class BoschCameraCard extends HTMLElement {
             this._setLoadingOverlay(true, "Stream wird erneut versucht…");
             this._waitForStreamReady();
           }
-        }, 1e4);
+        }, retryDelay);
       }
     }
   }
@@ -2125,6 +2126,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._hass && this._entities.switch) {
       try {
         const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh?.state === "unavailable") return;
         if (fresh && fresh.state) serverIsOn = fresh.state === "on";
       } catch (e) {}
     }
