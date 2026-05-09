@@ -5,6 +5,25 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.2
+
+### Fixes
+
+- **Card: Android companion app startup error popup** (`bosch-camera-card.js` v2.11.9): Added service availability guard in `_triggerFreshSnapshot`. If `bosch_shc_camera.trigger_snapshot` is not yet registered when the card loads (Android companion app opens dashboard before HA finishes setup), the call is silently skipped instead of producing a native Android error toast.
+
+## v11.2.1
+
+### Fixes
+
+- **Log noise: CF unbuffer startup message** (`cf_unbuffer.py`): "patch applied" message demoted from WARNING to INFO — no longer appears in the HA system log on every restart.
+- **Log noise: TLS proxy EBADF suppression** (`tls_proxy.py`): `[Errno 9] Bad file descriptor` after credential rotation is now silently ignored. Expected during session teardown when the C→CAM pipe closes the shared TLS socket before CAM→C finishes.
+- **Log noise: "Camera not found" burst** (`__init__.py`): Extended `_StreamSupportNoiseFilter` with a 60 s global rate-limit for "Error requesting stream: Camera not found". Collapses the go2rtc startup-race burst (up to 17 occurrences in 36 s) to at most 1 log line per minute.
+- **Card: FCM push badge** (`bosch-camera-card.js` v2.11.8): Push status badge now shows "fcm" without appending the mode suffix (was "fcm ios" / "fcm android"). Mode detail is visible in the HA entity settings.
+
+### Tests
+
+- 20 new regression tests: `test_stream_noise_filter.py` (20), `test_cf_unbuffer.py` (+2), `test_tls_proxy.py` (+3). Total: 3347 / 3 skipped.
+
 ## v11.2.0
 
 > **⚠ BETA — local NVR only, no cloud recordings.**

@@ -485,3 +485,60 @@ class TestRegisterEdgeBranches:
         # _PATCHED must remain False because the patch never completed
         assert mod._PATCHED is False
         mod._PATCHED = original_patched
+
+
+# ── Log-level regression ──────────────────────────────────────────────────────
+
+
+class TestRegisterLogLevel:
+    """Regression: 'patch applied' must log at INFO, not WARNING.
+
+    User-reported: cf_unbuffer startup message appeared in HA system log
+    (which shows WARNING+). Changed WARNING → INFO so it no longer pollutes
+    the system log on every HA restart. The failure case (patch failed) must
+    still use WARNING.
+    """
+
+    def test_successful_patch_logs_at_info_not_warning(self):
+        """register() success path uses _LOGGER.info, not _LOGGER.warning."""
+        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "custom_components" / "bosch_shc_camera" / "cf_unbuffer.py"
+        ).read_text()
+        # After the _PATCHED = True assignment, the next log call must be info()
+        # Find the block: `_PATCHED = True` ... `_LOGGER.<level>(`
+        import re
+        m = re.search(r"_PATCHED\s*=\s*True.*?_LOGGER\.(\w+)\(", src, re.DOTALL)
+        assert m, "Could not find _LOGGER call after _PATCHED = True"
+        level = m.group(1)
+        assert level == "info", (
+            f"CF-unbuffer 'patch applied' log must be INFO (not {level!r}) — "
+            "WARNING floods HA system log on every restart"
+        )
+
+    def test_failure_path_still_logs_at_warning(self):
+        """register() exception handler must keep WARNING (real failure condition)."""
+        from pathlib import Path
+        import re
+
+        src = (
+            Path(__file__).parent.parent
+            / "custom_components" / "bosch_shc_camera" / "cf_unbuffer.py"
+        ).read_text()
+        # Find the outer `except Exception` block (register()'s top-level handler
+        # that wraps the whole patch attempt). It must be followed by _LOGGER.warning.
+        # There is also an inner `except Exception` (inside _emit_segment_chunked)
+        # that correctly uses _LOGGER.debug — the regex must skip it and find the
+        # outer one, which appears AFTER the `_PATCHED = True` assignment.
+        m = re.search(
+            r"_PATCHED\s*=\s*True.*?except Exception.*?_LOGGER\.(\w+)\(",
+            src, re.DOTALL,
+        )
+        assert m, "Could not find _LOGGER call in outer except block after _PATCHED = True"
+        level = m.group(1)
+        assert level == "warning", (
+            f"CF-unbuffer outer exception handler must log at WARNING (not {level!r})"
+        )

@@ -371,3 +371,69 @@ class TestStartTlsProxyContract:
             )
         finally:
             stop_tls_proxy(cam_id, cache)
+
+
+# ── EBADF suppression regression ─────────────────────────────────────────────
+
+
+class TestPipeErrnoEBADFSuppression:
+    """Regression: [Errno 9] EBADF in _pipe must NOT be logged even at DEBUG.
+
+    After credential rotation, start_tls_proxy stops the old proxy and starts
+    a new one on a fresh port. The old pipe threads (C→CAM and CAM→C) share
+    the same TLS socket. When C→CAM ends it closes the socket; CAM→C's next
+    recv() raises OSError(EBADF). This is expected shutdown — logging it
+    confuses users into thinking there is a real network error.
+
+    Regression introduced in: fix commit 'suppress expected EBADF noise'.
+    """
+
+    def test_ebadf_is_suppressed_in_source(self):
+        """The _pipe exception handler must guard against EBADF before logging."""
+        from pathlib import Path
+        import re
+
+        src = (
+            Path(__file__).parent.parent
+            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+        ).read_text()
+        # The guard must reference errno.EBADF
+        assert "errno.EBADF" in src, (
+            "tls_proxy._pipe must suppress OSError(errno.EBADF) — "
+            "it is expected when the peer socket is closed by the other pipe direction"
+        )
+
+    def test_ebadf_imported_at_module_level(self):
+        """errno must be imported at module level (not inside the nested function)."""
+        from pathlib import Path
+        import re
+
+        src = (
+            Path(__file__).parent.parent
+            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+        ).read_text()
+        # First occurrence of `import errno` must appear before the class definitions
+        # (i.e., it is a top-level import, not deferred)
+        lines = src.splitlines()
+        import_line = next(
+            (i for i, l in enumerate(lines) if re.match(r"^import errno\s*$", l)),
+            None,
+        )
+        assert import_line is not None, "import errno must be at module level"
+        # Must appear in the first 30 lines (module header area)
+        assert import_line < 30, (
+            f"import errno at line {import_line + 1} — expected in module header (<30)"
+        )
+
+    def test_other_oserrors_still_logged_at_debug(self):
+        """Non-EBADF OSErrors (e.g. ECONNRESET) must still reach the debug logger."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).parent.parent
+            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+        ).read_text()
+        # The guard must be `not is_ebadf` (or equivalent) so other errors pass through
+        assert "not is_ebadf" in src or "not (isinstance(exc, OSError) and exc.errno == errno.EBADF)" in src, (
+            "The EBADF guard must be a negative check so other OSErrors still get logged"
+        )

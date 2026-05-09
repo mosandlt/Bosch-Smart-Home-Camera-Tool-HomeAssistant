@@ -96,26 +96,26 @@ except Exception:
 class _StreamSupportNoiseFilter(logging.Filter):
     """Rate-limit HA camera-component log spam during stream pre-warm.
 
-    When the user starts a Bosch live stream, the LOCAL pre-warm path needs
-    ~25 s (PUT /connection → TLS proxy bring-up → Bosch encoder warm-up →
-    rtspsUrl set). During that window any consumer that calls the
-    `camera/stream` WS API gets a stream_source()==None response, and
-    HA's camera component logs `Error requesting stream: camera.<id> does
-    not support play stream service` — once per call. With multiple
-    Lovelace tabs / a Companion app in the background / our own card's
-    `_startLiveVideo` HLS fallback all polling around the same time, real
-    captures show 9 of these in 15 s for a single stream start. Each
-    line is benign (the Bosch coordinator is just slower than the
-    consumer's first try) but the noise crowds out actually-useful log
-    lines and worries users.
+    Handles two recurring burst patterns from HA's camera component:
 
-    Filter strategy: keep one ERROR per 30 s per entity_id so a real
-    "stream truly broken" issue still surfaces, but the pre-warm-window
-    burst is collapsed to a single line. Limited to bosch_* entity ids
-    so other camera integrations are unaffected.
+    1. "does not support play stream service" — fired when stream_source()
+       returns None during LOCAL pre-warm (~25 s window). Multiple tabs /
+       Companion app / card HLS fallback can produce 9 of these in 15 s.
+       Rate-limited to 1 per 30 s *per entity_id* (bosch_* only).
+
+    2. "Camera not found" — fired when the browser requests WebRTC for a
+       camera not yet registered in go2rtc (startup race: browser reconnects
+       and sees cached "streaming" state before the coordinator has finished
+       re-registering the stream). Rate-limited to 1 per 60 s globally
+       (message carries no entity_id so per-entity tracking isn't possible).
+
+    A real "stream truly broken" issue still surfaces because one ERROR per
+    window is always passed through. Other camera integrations are unaffected.
     """
 
     _MAX_TRACKED = 32  # max entity IDs to track — prevents unbounded growth
+    _NOT_FOUND_KEY = "__camera_not_found__"
+    _NOT_FOUND_WINDOW = 60.0
 
     def __init__(self):
         super().__init__()
@@ -123,6 +123,18 @@ class _StreamSupportNoiseFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
+
+        # ── "Camera not found" burst (startup race, no entity_id in message) ──
+        if "Camera not found" in msg and "Error requesting stream" in msg:
+            import time as _t
+            now = _t.monotonic()
+            last = self._last_passed.get(self._NOT_FOUND_KEY, float('-inf'))
+            if (now - last) < self._NOT_FOUND_WINDOW:
+                return False
+            self._last_passed[self._NOT_FOUND_KEY] = now
+            return True
+
+        # ── "does not support play stream service" burst (pre-warm window) ──
         if "does not support play stream service" not in msg:
             return True
         # Extract entity_id from "Error requesting stream: camera.<id> ..."

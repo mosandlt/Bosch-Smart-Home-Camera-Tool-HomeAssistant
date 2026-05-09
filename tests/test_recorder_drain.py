@@ -1012,7 +1012,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
             ],
             "/Bosch/NVR/Terrasse": [
                 "-rw-r--r--  1 user grp  1024 Apr 01 10:00 old.mp4",
-                "-rw-r--r--  1 user grp  1024 May 06 10:00 new.mp4",
+                "-rw-r--r--  1 user grp  1024 May 09 10:00 new.mp4",
             ],
         }
 
@@ -1023,11 +1023,13 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         ftp.retrlines.side_effect = fake_retrlines
 
-        # MDTM responses
+        # MDTM responses — new.mp4 uses current time so the test never drifts
+        # past the retention boundary as calendar days advance.
         def sendcmd(cmd):
+            import datetime
             if cmd == "MDTM old.mp4":
                 return "213 20260101010000"
-            return "213 20260506100000"
+            return datetime.datetime.utcnow().strftime("213 %Y%m%d%H%M%S")
 
         ftp.sendcmd.side_effect = sendcmd
         ftp.cwd.return_value = None

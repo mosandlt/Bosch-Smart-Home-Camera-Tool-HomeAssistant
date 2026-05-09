@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.11.7";
+const CARD_VERSION = "2.11.9";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -526,6 +526,8 @@ class BoschCameraCard extends HTMLElement {
     // _force_image_refresh makes frame_interval=0.1s so the next proxy request
     // actually calls async_camera_image instead of returning HA's internal cache.
     // Cloud API response varies (1.5–5s), so fetch at 1.5s and 4s.
+    // Guard: skip if service not yet registered (Android companion app startup race).
+    if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot) return;
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);
@@ -2704,9 +2706,8 @@ class BoschCameraCard extends HTMLElement {
     const pushLabel  = this.shadowRoot.getElementById("push-label");
     if (pushBadge && pushLabel) {
       const isFcm  = pushState?.state === "fcm_push";
-      const mode   = pushState?.attributes?.fcm_push_mode || "";
       pushBadge.className = "push-badge " + (isFcm ? "fcm" : "poll");
-      pushLabel.textContent = isFcm ? `fcm${mode ? " " + mode : ""}` : "poll";
+      pushLabel.textContent = isFcm ? "fcm" : "poll";
     }
 
     // Status dot

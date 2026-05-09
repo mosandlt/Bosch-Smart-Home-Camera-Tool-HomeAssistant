@@ -174,7 +174,7 @@ def register(hass: HomeAssistant) -> None:
             patched_segment.append(cls_name)
 
         _PATCHED = True
-        _LOGGER.warning(
+        _LOGGER.info(
             "Bosch CF-tunnel HLS unbuffer patch applied — "
             "playlists [%s] get text/event-stream Content-Type, "
             "segments [%s] re-emit as chunked StreamResponse "

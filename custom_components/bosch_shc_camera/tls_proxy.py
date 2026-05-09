@@ -13,6 +13,7 @@ thread and the asyncio event loop may be busy during stream negotiation.
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import logging
 import re
@@ -182,7 +183,13 @@ def start_tls_proxy(
                             data = text.encode("utf-8")
                         dst.sendall(data)
                 except Exception as exc:
-                    if debug and str(exc):
+                    # OSError(EBADF) = the peer socket was closed by the other
+                    # pipe direction. When C→CAM ends it closes the shared TLS
+                    # socket; CAM→C's next recv() then raises EBADF. This is
+                    # expected during session teardown (e.g. after credential
+                    # rotation) — not a real error, so don't log it.
+                    is_ebadf = isinstance(exc, OSError) and exc.errno == errno.EBADF
+                    if debug and str(exc) and not is_ebadf:
                         _LOGGER.debug("TLS proxy %s [%s] pipe error: %s", cam_id[:8], direction, exc)
                 finally:
                     try:
