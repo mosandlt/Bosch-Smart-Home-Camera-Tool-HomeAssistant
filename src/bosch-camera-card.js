@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.4";
+const CARD_VERSION = "2.12.5";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -1876,7 +1876,8 @@ class BoschCameraCard extends HTMLElement {
         value: Math.max(-120, Math.min(120, pos)),
       }).then(() => {
         // Trigger backend image refresh so _cached_image is warm before card requests it
-        this._callService("bosch_shc_camera", "trigger_snapshot", {});
+        if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
+          this._callService("bosch_shc_camera", "trigger_snapshot", {});
         // Refresh snapshot after camera has had time to move (~2s)
         this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
@@ -2639,7 +2640,8 @@ class BoschCameraCard extends HTMLElement {
 
     const startPoll = (prevBytes) => {
       // Fire backend refresh AFTER prevBytes capture — see above.
-      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
+        this._callService("bosch_shc_camera", "trigger_snapshot", {});
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
@@ -2877,7 +2879,8 @@ class BoschCameraCard extends HTMLElement {
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
+        this._callService("bosch_shc_camera", "trigger_snapshot", {});
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }

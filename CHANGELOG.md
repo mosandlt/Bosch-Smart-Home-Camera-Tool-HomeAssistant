@@ -5,6 +5,12 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.5
+
+### Fixed
+
+- **Card: `trigger_snapshot` service guard missing in 3 call paths** (`bosch-camera-card.js` v2.12.5): v11.2.2 added a guard for the proactive load-time call, but three further call paths lacked the check — stream-stopped state update, snapshot-button `startPoll`, and pan-button `.then()` callback. On Android, the stream-stopped path fires on app-resume via WebSocket state updates before HA has finished registering services, producing the `bosch_shc_camera/trigger_snapshot konnte nicht ausgeführt werden` popup. Guard added to all three paths: `if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)` before each `callService` call.
+
 ## v11.2.4
 
 ### Changed

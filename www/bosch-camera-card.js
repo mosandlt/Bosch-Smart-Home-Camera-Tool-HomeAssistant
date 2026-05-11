@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.4";
+const CARD_VERSION = "2.12.5";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -571,7 +571,7 @@ class BoschCameraCard extends HTMLElement {
         entity_id: this._entities.pan,
         value: Math.max(-120, Math.min(120, pos))
       }).then(() => {
-        this._callService("bosch_shc_camera", "trigger_snapshot", {});
+        if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot) this._callService("bosch_shc_camera", "trigger_snapshot", {});
         this._scheduleImageLoad(2e3);
       }).catch(err => console.warn("bosch-camera-card: pan set_value", err));
     };
@@ -1168,7 +1168,7 @@ class BoschCameraCard extends HTMLElement {
     const dispW = Math.round(this.offsetWidth || 640);
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
     const startPoll = prevBytes => {
-      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot) this._callService("bosch_shc_camera", "trigger_snapshot", {});
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(() => this._pollSnapshotImage(prevBytes, startTime), 500);
     };
@@ -1358,7 +1358,7 @@ class BoschCameraCard extends HTMLElement {
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot) this._callService("bosch_shc_camera", "trigger_snapshot", {});
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }

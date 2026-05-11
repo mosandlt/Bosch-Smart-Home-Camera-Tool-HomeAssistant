@@ -188,7 +188,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 | **Step 2 — snapshot image** | Notify services for the JPG attachment ~3-5 s after the event. | (default) |
 | **Step 3 — video clip** | Notify services for the MP4 attachment 30-90 s after the event. | (default) |
 | **System alerts** | Notify services for token-expiry / disk-warning system messages. | (default) |
-| **Save alert snapshots** | Keep downloaded event images / videos in `/media/bosch_alerts/` after sending. If OFF, files are deleted within seconds. | OFF |
+| **Save alert snapshots** | Keep downloaded event images / videos in `www/bosch_alerts/` (inside HA config dir, served at `/local/bosch_alerts/`) after sending. If OFF, files are deleted within seconds. | OFF |
 
 #### SMB / NAS upload
 
@@ -514,7 +514,7 @@ No automations needed — the integration sends alerts directly:
 | `Save alert snapshots` | Keep files locally or delete after sending | OFF |
 | `Delete after send` | Cleanup local files after notification sent | ON |
 
-**iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are saved to `/media/bosch_alerts/` and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
+**iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are temporarily saved to `www/bosch_alerts/` (served as `/local/bosch_alerts/`) and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
 
 **Notification switch guard (v7.9.1+):** Alerts respect the notification switches — if `switch.bosch_{name}_notifications` (master) is OFF, no alerts are sent. Type-specific switches (`movement_notifications`, `person_notifications`, `audio_notifications`) are also checked. The FCM push is still received (for event tracking), but the HA notification is suppressed.
 
