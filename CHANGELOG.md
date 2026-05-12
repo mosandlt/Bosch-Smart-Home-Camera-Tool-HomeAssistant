@@ -5,6 +5,15 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.0.0 — 2026-05-12
+
+**Quality Scale: Gold → Platinum.**
+
+- `strict-typing`: mypy --strict now green across all 24 source files (was 593 errors). Added `pyproject.toml` with strict mypy config, ~80 targeted `# type: ignore[misc/no-any-return]` for unavoidable HA-stub gaps.
+- `async-dependency`: removed all `requests` imports from production code. HTTP Digest auth now via new `auth_utils.async_digest_request` (aiohttp); sync cloud downloads via stdlib `urllib.request`. Removes `requests>=2.28.0,<3` from runtime requirements.
+- New module `auth_utils.py` (75 stmts, 100% test coverage, 29 tests).
+- Test suite: 3633 passing (was 3604 in v11.2.7).
+
 ## v11.2.7
 
 ### Fixed

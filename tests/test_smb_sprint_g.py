@@ -9,7 +9,7 @@ Target lines:
   - 541-653: _sync_ftp_upload / _sync_ftp_cleanup main loops
 
 All smbclient calls are mocked via patch.dict(sys.modules).
-requests is patched at the module level (import requests as req inside functions).
+urllib.request.urlopen is patched instead of requests.Session (removed).
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import pytest
 
 MODULE = "custom_components.bosch_shc_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
+URLOPEN = f"{MODULE}.urllib.request.urlopen"
 
 
 def _coord(options: dict | None = None):
@@ -44,21 +45,14 @@ def _fake_smb():
     return smb
 
 
-def _fake_requests(status=200, content=b"IMGDATA"):
-    """Return fake requests module + session with one mock HTTP response."""
-    fake_response = MagicMock()
-    fake_response.status_code = status
-    fake_response.content = content
-    fake_response.iter_content.return_value = [content]
-
-    fake_session = MagicMock()
-    fake_session.get.return_value = fake_response
-    fake_session.headers = {}
-
-    fake_req = MagicMock()
-    fake_req.Session.return_value = fake_session
-
-    return fake_req, fake_session, fake_response
+def _urlopen_resp(status: int = 200, content: bytes = b"IMGDATA") -> MagicMock:
+    """Return a MagicMock that behaves like urllib.request.urlopen()'s context manager."""
+    resp = MagicMock()
+    resp.status = status
+    resp.read.side_effect = [content, b""]
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
 
 
 # ── TestSyncLocalSaveMalformedTimestamp ──────────────────────────────────────
@@ -85,14 +79,13 @@ class TestSyncLocalSaveMalformedTimestamp:
             "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
         }
 
-        fake_req, fake_session, fake_response = _fake_requests(status=200, content=b"JPEG")
-        fake_response.iter_content.return_value = [b"JPEG"]
+        resp = _urlopen_resp(200, b"JPEG")
 
-        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+        with patch(URLOPEN, return_value=resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         # The download was attempted (exception swallowed, execution continues)
-        fake_session.get.assert_called_once()
+        resp.__enter__.assert_called()
 
     def test_valid_old_timestamp_skipped_when_started_at_set(self, tmp_path):
         """Timestamp predating session start → skipped (ev_epoch < started_at - 60).
@@ -111,13 +104,11 @@ class TestSyncLocalSaveMalformedTimestamp:
             "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
         }
 
-        fake_req, fake_session, _ = _fake_requests()
-
-        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+        with patch(URLOPEN) as mock_urlopen:
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         # Old event must be skipped — no download
-        fake_session.get.assert_not_called()
+        mock_urlopen.assert_not_called()
 
 
 # ── TestSyncSmbUpload ────────────────────────────────────────────────────────
@@ -152,12 +143,9 @@ class TestSyncSmbUpload:
         fake_smb = _fake_smb()
         fake_smb.register_session.side_effect = Exception("auth failed")
 
-        fake_req, _, _ = _fake_requests()
-
         with patch.dict(sys.modules, {"smbclient": fake_smb}):
             with patch(f"{MODULE}.socket"):
-                with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
-                    sync_smb_upload(coord, {}, "tok")  # must not raise
+                sync_smb_upload(coord, {}, "tok")  # must not raise
 
     def test_uploads_image_when_http_200(self):
         """Valid event with imageUrl + HTTP 200 → open_file called (image written to SMB)."""
@@ -183,9 +171,7 @@ class TestSyncSmbUpload:
         fake_file.__exit__ = MagicMock(return_value=False)
         fake_smb.open_file.return_value = fake_file
 
-        fake_req, fake_session, fake_response = _fake_requests(status=200, content=b"IMG")
-        fake_response.status_code = 200
-        fake_response.content = b"IMG"
+        resp = _urlopen_resp(200, b"IMG")
 
         data = {
             CAM_ID: {
@@ -202,7 +188,7 @@ class TestSyncSmbUpload:
         with patch.dict(sys.modules, {"smbclient": fake_smb}):
             with patch(f"{MODULE}.socket"):
                 with patch(f"{MODULE}.smb_makedirs"):
-                    with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+                    with patch(URLOPEN, return_value=resp):
                         sync_smb_upload(coord, data, "tok")
 
         fake_smb.open_file.assert_called_once()
@@ -222,8 +208,6 @@ class TestSyncSmbUpload:
         fake_smb = _fake_smb()
         fake_smb.stat.side_effect = OSError("not found")
 
-        fake_req, fake_session, fake_response = _fake_requests(status=200, content=b"VID")
-
         data = {
             CAM_ID: {
                 "info": {"title": "Cam"},
@@ -240,8 +224,7 @@ class TestSyncSmbUpload:
         with patch.dict(sys.modules, {"smbclient": fake_smb}):
             with patch(f"{MODULE}.socket"):
                 with patch(f"{MODULE}.smb_makedirs"):
-                    with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
-                        sync_smb_upload(coord, data, "tok")
+                    sync_smb_upload(coord, data, "tok")
 
         # open_file must not have been called for mp4
         for c in fake_smb.open_file.call_args_list:
@@ -258,7 +241,6 @@ class TestSyncSmbUpload:
         })
 
         fake_smb = _fake_smb()
-        fake_req, _, _ = _fake_requests()
 
         data = {
             CAM_ID: {
@@ -269,8 +251,7 @@ class TestSyncSmbUpload:
 
         with patch.dict(sys.modules, {"smbclient": fake_smb}):
             with patch(f"{MODULE}.socket"):
-                with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
-                    sync_smb_upload(coord, data, "tok")
+                sync_smb_upload(coord, data, "tok")
 
         fake_smb.open_file.assert_not_called()
 
@@ -503,8 +484,7 @@ class TestSyncFtpUpload:
         coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u", "smb_password": "p"})
 
         with patch(f"{MODULE}._ftp_connect", side_effect=Exception("login failed")):
-            with patch.dict(sys.modules, {"requests": MagicMock(), "urllib3": MagicMock()}):
-                _sync_ftp_upload(coord, {}, "tok")  # must not raise
+            _sync_ftp_upload(coord, {}, "tok")  # must not raise
 
     def test_uploads_image_via_ftp_storbinary(self):
         """Valid event + HTTP 200 → storbinary called with .jpg STOR command."""
@@ -520,8 +500,7 @@ class TestSyncFtpUpload:
         })
 
         fake_ftp = MagicMock()
-        fake_req, fake_session, fake_response = _fake_requests(status=200, content=b"IMGBYTES")
-        fake_response.content = b"IMGBYTES"
+        resp = _urlopen_resp(200, b"IMGBYTES")
 
         data = {
             CAM_ID: {
@@ -538,7 +517,7 @@ class TestSyncFtpUpload:
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
             with patch(f"{MODULE}._ftp_makedirs"):
                 with patch(f"{MODULE}._ftp_exists", return_value=False):
-                    with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+                    with patch(URLOPEN, return_value=resp):
                         _sync_ftp_upload(coord, data, "tok")
 
         stor_calls = fake_ftp.storbinary.call_args_list
@@ -557,7 +536,6 @@ class TestSyncFtpUpload:
         })
 
         fake_ftp = MagicMock()
-        fake_req, _, _ = _fake_requests()
 
         data = {
             CAM_ID: {
@@ -575,8 +553,7 @@ class TestSyncFtpUpload:
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
             with patch(f"{MODULE}._ftp_makedirs"):
                 with patch(f"{MODULE}._ftp_exists", return_value=False):
-                    with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
-                        _sync_ftp_upload(coord, data, "tok")
+                    _sync_ftp_upload(coord, data, "tok")
 
         for c in fake_ftp.storbinary.call_args_list:
             assert ".mp4" not in str(c), "MP4 must not be uploaded when status != Done"
@@ -596,8 +573,7 @@ class TestSyncFtpUpload:
         data = {CAM_ID: {"info": {"title": "Cam"}, "events": []}}
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
-            with patch.dict(sys.modules, {"requests": MagicMock(), "urllib3": MagicMock()}):
-                _sync_ftp_upload(coord, data, "tok")
+            _sync_ftp_upload(coord, data, "tok")
 
         fake_ftp.quit.assert_called_once()
 

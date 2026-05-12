@@ -73,10 +73,10 @@ async def async_get_config_entry_diagnostics(
     now = time.monotonic()
     cameras: list[dict[str, Any]] = []
     if coord is not None and coord.data:
-        offline_since: dict = getattr(coord, "_offline_since", {})
-        stream_error_count: dict = getattr(coord, "_stream_error_count", {})
-        stream_fell_back: dict = getattr(coord, "_stream_fell_back", {})
-        session_stale: dict = getattr(coord, "_session_stale", {})
+        offline_since: dict[str, float] = getattr(coord, "_offline_since", {})
+        stream_error_count: dict[str, int] = getattr(coord, "_stream_error_count", {})
+        stream_fell_back: dict[str, bool] = getattr(coord, "_stream_fell_back", {})
+        session_stale: dict[str, bool] = getattr(coord, "_session_stale", {})
         for cam_id, cdata in coord.data.items():
             info = cdata.get("info", {})
             live = cdata.get("live", {})
@@ -101,7 +101,7 @@ async def async_get_config_entry_diagnostics(
                 }
             )
 
-    stream_warming: set = getattr(coord, "_stream_warming", set())
+    stream_warming: set[str] = getattr(coord, "_stream_warming", set())
 
     return {
         "integration_version": INTEGRATION_VERSION,

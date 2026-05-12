@@ -32,7 +32,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API
+from . import DOMAIN, CLOUD_API  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
+class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: ignore[misc]
     """Base class for Gen2 light entities.
 
     Inherits from RestoreEntity so `_last_color_hex`, `_last_brightness`,
@@ -71,7 +71,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
     _led_key: str = ""  # "frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry = entry
@@ -114,7 +114,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
             self._last_white_balance = float(lwb)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Expose last-known values even when the light is off.
 
         HA's light platform blanks `rgb_color` / `brightness` when state=="off",
@@ -122,7 +122,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
         color on the color circle. These extra attributes stay populated
         regardless of on/off state.
         """
-        attrs: dict = {}
+        attrs: dict[str, Any] = {}
         color_hex = self._color_hex or self._last_color_hex
         if color_hex:
             h = color_hex.lstrip("#")
@@ -143,7 +143,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
         return attrs
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
@@ -171,7 +171,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return bool(self.coordinator.last_update_success)
 
     def _load_state_from_cache(self) -> None:
         """Sync state from coordinator lighting/switch cache.
@@ -200,7 +200,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
             self._last_white_balance = wb
             self._color_hex = None
 
-    def _get_current_state(self) -> dict:
+    def _get_current_state(self) -> dict[str, Any]:
         """Get the current lighting/switch state from coordinator cache."""
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         # Default fallback if cache is empty
@@ -210,7 +210,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):
             "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
         }
 
-    async def _put_lighting_switch(self, updates: dict) -> bool:
+    async def _put_lighting_switch(self, updates: dict[str, Any]) -> bool:
         """Send PUT /lighting/switch — ALWAYS sends full body with all 3 groups.
 
         The Bosch API requires all 3 light groups in every PUT request.
@@ -314,6 +314,7 @@ class _BoschRgbLedLight(_BoschLightBase):
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
         was_off = not self._is_on
+        color_hex: str | None = None
 
         if rgb:
             color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
@@ -321,7 +322,7 @@ class _BoschRgbLedLight(_BoschLightBase):
             self._last_color_hex = color_hex
             self._white_balance = None
         else:
-            # Restore last color
+            # Restore last color (may be None if user has never picked a color)
             color_hex = self._color_hex or self._last_color_hex
 
         if brightness:
@@ -378,7 +379,7 @@ class BoschTopLedLight(_BoschRgbLedLight):
 
     _led_key = "topLedLightSettings"
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_name            = f"Bosch {self._cam_title} Oberes Licht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_top_led_light"
@@ -392,7 +393,7 @@ class BoschBottomLedLight(_BoschRgbLedLight):
 
     _led_key = "bottomLedLightSettings"
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_name            = f"Bosch {self._cam_title} Unteres Licht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_bottom_led_light"
@@ -415,7 +416,7 @@ class BoschFrontLight(_BoschLightBase):
     _attr_min_color_temp_kelvin = 2000
     _attr_max_color_temp_kelvin = 6500
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_name            = f"Bosch {self._cam_title} Frontlicht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_front_light_entity"

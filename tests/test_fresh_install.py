@@ -252,14 +252,13 @@ class TestLocalSaveFilenaming:
             "videoClipUploadStatus": "",
         }
 
-        mock_session = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Type": "image/jpeg"}
-        mock_resp.content = b"JFIF" + b"\x00" * 200
-        mock_session.get.return_value = mock_resp
+        mock_resp.status = 200
+        mock_resp.read.side_effect = [b"JFIF" + b"\x00" * 200, b""]
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("requests.Session", return_value=mock_session):
+        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=mock_resp):
             with patch("custom_components.bosch_shc_camera.smb._is_safe_bosch_url", return_value=True):
                 sync_local_save(coord, ev, "tok", cam_name)
 

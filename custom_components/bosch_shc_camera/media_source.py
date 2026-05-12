@@ -22,7 +22,7 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Generator, Iterable
 
 from aiohttp import web
 
@@ -250,7 +250,7 @@ class _LocalBackend:
             slot["files"][ext] = f.name
         return self._groups_to_events(groups)
 
-    def _groups_to_events(self, groups: dict) -> list[tuple[str, str | None, dict[str, str]]]:
+    def _groups_to_events(self, groups: dict[str, Any]) -> list[tuple[str, str | None, dict[str, str]]]:
         out: list[tuple[str, str | None, dict[str, str]]] = []
         for stem in sorted(groups, reverse=True):
             files = groups[stem]["files"]
@@ -305,7 +305,7 @@ class _SmbBackend:
         key = (self.server, self.username)
         if key in sessions:
             return
-        from smbclient import register_session
+        from smbclient import register_session  # type: ignore[import-not-found]
         register_session(self.server, username=self.username, password=self.password)
         sessions.add(key)
 
@@ -313,7 +313,7 @@ class _SmbBackend:
         all_parts = (self.share, *self.base_parts, *(s for s in segments if s))
         return "\\\\" + self.server + "\\" + "\\".join(all_parts)
 
-    def _scandir_filtered(self, *segments: str, want_dirs: bool):
+    def _scandir_filtered(self, *segments: str, want_dirs: bool) -> Generator[str, None, None]:
         from smbclient import scandir
         self._ensure_session()
         path = self._path(*segments)
@@ -402,7 +402,7 @@ class _SmbBackend:
                 out.append((preferred, image, groups[stem]["parsed"]))
         return out
 
-    def open_file(self, camera: str, year: str, month: str, day: str, filename: str):
+    def open_file(self, camera: str, year: str, month: str, day: str, filename: str) -> tuple[Any, int]:
         """Return (file-like, size). Caller closes the file-like."""
         from smbclient import open_file, stat as smb_stat
         self._ensure_session()
@@ -451,7 +451,7 @@ class _SmbBackend:
                 out.append((preferred, image, groups[stem]["parsed"]))
         return out
 
-    def open_flat_file(self, camera: str, filename: str):
+    def open_flat_file(self, camera: str, filename: str) -> tuple[Any, int]:
         """Return (file-like, size) for a file directly in camera/ folder."""
         from smbclient import open_file, stat as smb_stat
         self._ensure_session()
@@ -540,7 +540,7 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
         # of enable_local_save so already-saved files stay browseable even after
         # the option is toggled off).
         if opts.get("download_path"):
-            base = (opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", "")
+            base = str((opts.get("download_path") or "").strip() or DEFAULT_OPTIONS.get("download_path", ""))
             fp = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip()
             try:
                 base_path = Path(base)
@@ -574,7 +574,7 @@ def _enabled_sources(hass: HomeAssistant) -> list[tuple[_Source, _LocalBackend |
 
 def _find_source(
     hass: HomeAssistant, entry_id: str, kind: str
-) -> tuple[_Source, _LocalBackend | _SmbBackend] | None:
+) -> tuple[_Source, _LocalBackend | _SmbBackend | _NvrBackend] | None:
     for src, backend in _enabled_sources(hass):
         if src.entry_id == entry_id and src.kind == kind:
             return src, backend
@@ -615,7 +615,7 @@ def _node(
     )
 
 
-class BoschCameraMediaSource(MediaSource):
+class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
     name = "Bosch Camera"
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -739,7 +739,10 @@ class BoschCameraMediaSource(MediaSource):
         root: bool = False,
     ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
-        ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+
+        def ident(*parts: str) -> str:
+            return "/".join((prefix, *parts)) if parts else prefix
+
         title_root = self.name if root else (
             _entry_title(self.hass, src.entry_id) if single_source else src.label
         )
@@ -850,7 +853,9 @@ class BoschCameraMediaSource(MediaSource):
         root: bool = False,
     ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
-        ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+
+        def ident(*parts: str) -> str:
+            return "/".join((prefix, *parts)) if parts else prefix
 
         if not rest:
             children = [
@@ -907,7 +912,10 @@ class BoschCameraMediaSource(MediaSource):
         root: bool = False,
     ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
-        ident = lambda *parts: "/".join((prefix, *parts)) if parts else prefix
+
+        def ident(*parts: str) -> str:
+            return "/".join((prefix, *parts)) if parts else prefix
+
         title_root = self.name if root else (
             _entry_title(self.hass, src.entry_id) if single_source else src.label
         )
@@ -1055,7 +1063,7 @@ class BoschCameraMediaSource(MediaSource):
 
 
 # ── HTTP view ────────────────────────────────────────────────────────────────
-class BoschCameraMediaView(HomeAssistantView):
+class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
     """Serve event jpg/mp4 files from local FS or via SMB. Auth required."""
 
     name = f"api:{DOMAIN}:event"

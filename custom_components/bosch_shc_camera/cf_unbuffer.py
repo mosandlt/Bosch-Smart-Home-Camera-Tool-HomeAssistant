@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import logging
 from functools import wraps
+from typing import Any
 
 from aiohttp import web
 
@@ -77,7 +78,7 @@ _SEGMENT_VIEW_CLASSES = (
 )
 
 
-def _wrap_playlist_response(response):
+def _wrap_playlist_response(response: web.Response | None) -> web.Response | None:
     """Manifest path — rewrite Content-Type to bypass cloudflared buffer."""
     if response is None or not hasattr(response, "headers"):
         return response
@@ -87,7 +88,7 @@ def _wrap_playlist_response(response):
     return response
 
 
-async def _emit_segment_chunked(request, response):
+async def _emit_segment_chunked(request: web.Request, response: web.Response) -> web.StreamResponse | web.Response:
     """Binary-segment path — re-emit body via chunked StreamResponse.
 
     aiohttp's `web.Response` always sets Content-Length when the body is
@@ -118,9 +119,9 @@ async def _emit_segment_chunked(request, response):
 _PATCHED = False
 
 
-def _make_playlist_wrapper(orig_handle):
+def _make_playlist_wrapper(orig_handle: Any) -> Any:
     @wraps(orig_handle)
-    async def _wrapped(self, *args, **kwargs):
+    async def _wrapped(self: Any, *args: Any, **kwargs: Any) -> web.Response | None:
         response = await orig_handle(self, *args, **kwargs)
         return _wrap_playlist_response(response)
 
@@ -128,9 +129,9 @@ def _make_playlist_wrapper(orig_handle):
     return _wrapped
 
 
-def _make_segment_wrapper(orig_handle):
+def _make_segment_wrapper(orig_handle: Any) -> Any:
     @wraps(orig_handle)
-    async def _wrapped(self, request, *args, **kwargs):
+    async def _wrapped(self: Any, request: web.Request, *args: Any, **kwargs: Any) -> web.StreamResponse | web.Response | None:
         response = await orig_handle(self, request, *args, **kwargs)
         if response is None or not isinstance(response, web.Response):
             return response

@@ -629,14 +629,28 @@ class TestFetchLiveSnapshotLocal:
             )
         )
         jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 50
-        coord.hass.async_add_executor_job = AsyncMock(return_value=jpeg)
+
+        # Build a mock CM for async_digest_request returning 200 + image/jpeg
+        snap_resp = MagicMock()
+        snap_resp.status = 200
+        snap_resp.headers = {"Content-Type": "image/jpeg"}
+        snap_resp.read = AsyncMock(return_value=jpeg)
+        snap_cm = MagicMock()
+        snap_cm.__aenter__ = AsyncMock(return_value=snap_resp)
+        snap_cm.__aexit__ = AsyncMock(return_value=None)
+        client_session = MagicMock()
+
         with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch(f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result == jpeg
 
     @pytest.mark.asyncio
     async def test_executor_returns_none_propagated(self):
+        """Non-image Content-Type from Digest snap → None."""
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(
@@ -644,9 +658,21 @@ class TestFetchLiveSnapshotLocal:
                 200, text='{"user":"u","password":"p","urls":["192.0.2.149:443"]}'
             )
         )
-        coord.hass.async_add_executor_job = AsyncMock(return_value=None)
+        # Mock a 200 response but with non-image content-type → returns None
+        snap_resp = MagicMock()
+        snap_resp.status = 200
+        snap_resp.headers = {"Content-Type": "text/html"}
+        snap_resp.read = AsyncMock(return_value=b"")
+        snap_cm = MagicMock()
+        snap_cm.__aenter__ = AsyncMock(return_value=snap_resp)
+        snap_cm.__aexit__ = AsyncMock(return_value=None)
+        client_session = MagicMock()
+
         with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch(f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 

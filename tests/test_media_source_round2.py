@@ -52,11 +52,18 @@ def _ev(**kwargs) -> dict:
     return base
 
 
-def _mock_response(status=200, content=b"FAKEDATA"):
-    r = MagicMock()
-    r.status_code = status
-    r.iter_content = lambda chunk_size: iter([content])
-    return r
+_URLOPEN = "custom_components.bosch_shc_camera.smb.urllib.request.urlopen"
+
+
+def _urlopen_resp(status: int = 200, content: bytes = b"FAKEDATA",
+                  raises: Exception | None = None) -> MagicMock:
+    """Build a MagicMock that behaves like urllib.request.urlopen()'s context manager."""
+    resp = MagicMock()
+    resp.status = status
+    resp.read.side_effect = [content, b""]
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,27 +73,31 @@ def _mock_response(status=200, content=b"FAKEDATA"):
 class TestSyncLocalSaveDownload:
     """Cover the actual HTTP download logic (lines 79-111)."""
 
-    def _call(self, coord, ev, mock_session, cam_name="Terrasse"):
+    def _call(self, coord, ev, mock_urlopen_resp, cam_name="Terrasse"):
         from custom_components.bosch_shc_camera.smb import sync_local_save
-        # requests is imported locally inside sync_local_save, so patch at the
-        # global requests module level (already in sys.modules after first import).
-        with patch("requests.Session", return_value=mock_session):
+        if mock_urlopen_resp is None:
             sync_local_save(coord, ev, "TOKEN", cam_name)
+        elif isinstance(mock_urlopen_resp, Exception):
+            with patch(_URLOPEN, side_effect=mock_urlopen_resp):
+                sync_local_save(coord, ev, "TOKEN", cam_name)
+        else:
+            with patch(_URLOPEN, return_value=mock_urlopen_resp):
+                sync_local_save(coord, ev, "TOKEN", cam_name)
 
     def test_jpg_downloaded_on_200(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"JPEG")
-        self._call(coord, _ev(videoClipUrl=None), sess)
+        resp = _urlopen_resp(200, b"JPEG")
+        self._call(coord, _ev(videoClipUrl=None), resp)
         files = list((tmp_path / "Terrasse").rglob("*.jpg"))
         assert len(files) == 1
         assert files[0].read_bytes() == b"JPEG"
 
     def test_mp4_and_jpg_both_downloaded(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"DATA")
-        self._call(coord, _ev(), sess)
+        resp = _urlopen_resp(200, b"DATA")
+        # Two files → read() called multiple times; reset side_effect for each call
+        resp.read.side_effect = [b"DATA", b"", b"DATA", b""]
+        self._call(coord, _ev(), resp)
         cam_dir = tmp_path / "Terrasse"
         exts = {f.suffix for f in cam_dir.rglob("*.*")}
         assert ".jpg" in exts
@@ -94,9 +105,8 @@ class TestSyncLocalSaveDownload:
 
     def test_mp4_skipped_when_status_not_done(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"DATA")
-        self._call(coord, _ev(videoClipUploadStatus="Pending"), sess)
+        resp = _urlopen_resp(200, b"DATA")
+        self._call(coord, _ev(videoClipUploadStatus="Pending"), resp)
         cam_dir = tmp_path / "Terrasse"
         exts = {f.suffix for f in cam_dir.rglob("*.*")}
         assert ".jpg" in exts
@@ -104,41 +114,37 @@ class TestSyncLocalSaveDownload:
 
     def test_mp4_skipped_when_status_missing(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"DATA")
+        resp = _urlopen_resp(200, b"DATA")
         ev = _ev()
         del ev["videoClipUploadStatus"]
-        self._call(coord, ev, sess)
+        self._call(coord, ev, resp)
         exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".mp4" not in exts
 
     def test_unsafe_url_skipped(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        self._call(coord, _ev(imageUrl="https://evil.example.com/x.jpg", videoClipUrl=None), sess)
+        with patch(_URLOPEN) as mock_urlopen:
+            from custom_components.bosch_shc_camera.smb import sync_local_save
+            sync_local_save(coord, _ev(imageUrl="https://evil.example.com/x.jpg", videoClipUrl=None), "TOKEN", "Terrasse")
+            mock_urlopen.assert_not_called()
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
-        sess.get.assert_not_called()
 
     def test_missing_image_url_no_jpg(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"DATA")
-        self._call(coord, _ev(imageUrl=None), sess)
+        resp = _urlopen_resp(200, b"DATA")
+        self._call(coord, _ev(imageUrl=None), resp)
         exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".jpg" not in exts
 
     def test_http_non_200_no_file_written(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(403)
-        self._call(coord, _ev(videoClipUrl=None), sess)
+        resp = _urlopen_resp(403, b"")
+        self._call(coord, _ev(videoClipUrl=None), resp)
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
     def test_http_exception_does_not_crash(self, tmp_path):
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.side_effect = OSError("network gone")
-        self._call(coord, _ev(videoClipUrl=None), sess)
+        self._call(coord, _ev(videoClipUrl=None), OSError("network gone"))
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
     def test_file_already_exists_skips_http(self, tmp_path):
@@ -153,16 +159,16 @@ class TestSyncLocalSaveDownload:
         nested_dir = tmp_path / "Terrasse" / year / month / day
         nested_dir.mkdir(parents=True, exist_ok=True)
         (nested_dir / f"{stem}.jpg").write_bytes(b"OLD")
-        sess = MagicMock()
-        self._call(coord, ev, sess)
-        sess.get.assert_not_called()
+        with patch(_URLOPEN) as mock_urlopen:
+            from custom_components.bosch_shc_camera.smb import sync_local_save
+            sync_local_save(coord, ev, "TOKEN", "Terrasse")
+            mock_urlopen.assert_not_called()
 
     def test_stem_uses_empty_id_when_none(self, tmp_path):
         """id=None must not crash; stem ends with empty id suffix."""
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"X")
-        self._call(coord, _ev(id=None, videoClipUrl=None), sess)
+        resp = _urlopen_resp(200, b"X")
+        self._call(coord, _ev(id=None, videoClipUrl=None), resp)
         files = list((tmp_path / "Terrasse").rglob("*.*"))
         assert len(files) == 1
         assert files[0].stem.endswith("_MOVEMENT_")
@@ -170,23 +176,24 @@ class TestSyncLocalSaveDownload:
     def test_short_timestamp_returns_early(self, tmp_path):
         """Events with timestamp shorter than 19 chars must be ignored."""
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        self._call(coord, _ev(timestamp="2026-05"), sess, cam_name="Cam")
-        sess.get.assert_not_called()
+        with patch(_URLOPEN) as mock_urlopen:
+            from custom_components.bosch_shc_camera.smb import sync_local_save
+            sync_local_save(coord, _ev(timestamp="2026-05"), "TOKEN", "Cam")
+            mock_urlopen.assert_not_called()
 
     def test_no_download_path_returns_early(self, tmp_path):
         """Empty download_path must be a no-op."""
         coord = SimpleNamespace(options={"download_path": ""}, _download_started_at=time.time() - 3600)
-        sess = MagicMock()
-        self._call(coord, _ev(), sess, cam_name="Cam")
-        sess.get.assert_not_called()
+        with patch(_URLOPEN) as mock_urlopen:
+            from custom_components.bosch_shc_camera.smb import sync_local_save
+            sync_local_save(coord, _ev(), "TOKEN", "Cam")
+            mock_urlopen.assert_not_called()
 
     def test_camera_name_with_space_creates_dir(self, tmp_path):
         """Camera name containing a space must produce the right directory."""
         coord = _coord(tmp_path)
-        sess = MagicMock()
-        sess.get.return_value = _mock_response(200, b"X")
-        self._call(coord, _ev(videoClipUrl=None), sess, cam_name="Außen Kamera")
+        resp = _urlopen_resp(200, b"X")
+        self._call(coord, _ev(videoClipUrl=None), resp, cam_name="Außen Kamera")
         assert (tmp_path / "Außen Kamera").is_dir()
 
 

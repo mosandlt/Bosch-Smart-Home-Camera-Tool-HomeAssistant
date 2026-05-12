@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -31,7 +32,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from . import DOMAIN, BoschCameraCoordinator
+from . import DOMAIN, BoschCameraCoordinator  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def async_setup_entry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
+class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ignore[misc]
     """Shared base for Bosch camera binary sensors."""
 
     # Disabled by default — enable explicitly in entity registry if desired
@@ -90,11 +91,11 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         self._mac       = info.get("macAddress", "")
 
     @property
-    def _cam_data(self) -> dict:
-        return self.coordinator.data.get(self._cam_id, {})
+    def _cam_data(self) -> dict[str, Any]:
+        return self.coordinator.data.get(self._cam_id, {})  # type: ignore[no-any-return]
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",
@@ -104,15 +105,15 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
             "connections":  {("mac", self._mac)} if self._mac else set(),
         }
 
-    def _get_latest_event_of_type(self, event_type: str) -> dict | None:
+    def _get_latest_event_of_type(self, event_type: str) -> dict[str, Any] | None:
         """Return the most recent event matching event_type, or None."""
         events = self._cam_data.get("events", [])
         for ev in events:
             if ev.get("eventType", "") == event_type:
-                return ev
+                return ev  # type: ignore[no-any-return]
         return None
 
-    def _event_within_window(self, event: dict) -> bool:
+    def _event_within_window(self, event: dict[str, Any]) -> bool:
         """Return True if the event timestamp is within EVENT_ACTIVE_WINDOW seconds of now.
 
         Bosch /v11/events returns timestamps in **UTC** (the API string ends
@@ -163,7 +164,7 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
         return self._event_within_window(event)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         event = self._get_latest_event_of_type("MOVEMENT")
         if not event:
             return {}
@@ -200,7 +201,7 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
         return self._event_within_window(event)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         event = self._get_latest_event_of_type("AUDIO_ALARM")
         if not event:
             return {}
@@ -237,7 +238,7 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
         return self._event_within_window(event)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         event = self._get_latest_event_of_type("PERSON")
         if not event:
             return {}

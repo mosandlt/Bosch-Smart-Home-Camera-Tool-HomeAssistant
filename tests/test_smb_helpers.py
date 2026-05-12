@@ -119,6 +119,16 @@ def _make_ev(
 
 
 class TestSyncLocalSave:
+    def _make_urlopen_resp(self, content: bytes = b"FAKE") -> MagicMock:
+        """Build a MagicMock that behaves like urllib.request.urlopen()'s return value."""
+        resp = MagicMock()
+        resp.status = 200
+        # read() returns content once, then b"" to end the loop
+        resp.read.side_effect = [content, b""]
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
     def test_filename_matches_file_re(self, tmp_path):
         """v11.0.8: saved filename must match _FILE_RE so media_source can list it.
 
@@ -129,10 +139,8 @@ class TestSyncLocalSave:
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.iter_content = lambda chunk_size: [b"FAKE"]
-        with patch("requests.Session.get", return_value=resp):
+        resp = self._make_urlopen_resp(b"FAKE")
+        with patch("urllib.request.urlopen", return_value=resp):
             sync_local_save(coord, ev, "tok", "Innenbereich")
         saved = list((tmp_path / "Innenbereich").rglob("*.*"))
         assert saved, "no files saved"
@@ -143,10 +151,8 @@ class TestSyncLocalSave:
         """Camera name subdirectory is created inside download_path."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = _make_coordinator(tmp_path)
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.iter_content = lambda chunk_size: [b"FAKE"]
-        with patch("requests.Session.get", return_value=resp):
+        resp = self._make_urlopen_resp(b"FAKE")
+        with patch("urllib.request.urlopen", return_value=resp):
             sync_local_save(coord, _make_ev(), "tok", "Terrasse")
         assert (tmp_path / "Terrasse").is_dir()
 
@@ -155,10 +161,8 @@ class TestSyncLocalSave:
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(clip_status="Pending")
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.iter_content = lambda chunk_size: [b"FAKE"]
-        with patch("requests.Session.get", return_value=resp):
+        resp = self._make_urlopen_resp(b"FAKE")
+        with patch("urllib.request.urlopen", return_value=resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
         saved = list((tmp_path / "Terrasse").rglob("*.mp4"))
         assert saved == [], "MP4 must not be saved when clip status is not Done"
@@ -168,7 +172,7 @@ class TestSyncLocalSave:
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(image_url="https://attacker.com/evil.jpg", clip_url="")
-        with patch("requests.Session.get") as mock_get:
+        with patch("urllib.request.urlopen") as mock_get:
             sync_local_save(coord, ev, "tok", "Terrasse")
             mock_get.assert_not_called()
 
@@ -176,7 +180,7 @@ class TestSyncLocalSave:
         """Empty download_path → function returns immediately, no files saved."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
         coord = SimpleNamespace(options={"download_path": ""})
-        with patch("requests.Session.get") as mock_get:
+        with patch("urllib.request.urlopen") as mock_get:
             sync_local_save(coord, _make_ev(), "tok", "Terrasse")
             mock_get.assert_not_called()
 
@@ -190,11 +194,13 @@ class TestSyncLocalSave:
         nested_dir = tmp_path / "Terrasse" / "2026" / "05" / "06"
         nested_dir.mkdir(parents=True, exist_ok=True)
         (nested_dir / f"{stem}.jpg").write_bytes(b"existing")
-        with patch("requests.Session.get") as mock_get:
+        with patch("urllib.request.urlopen") as mock_urlopen:
             sync_local_save(coord, ev, "tok", "Terrasse")
-            for call in mock_get.call_args_list:
-                url = call.args[0] if call.args else call.kwargs.get("url", "")
-                assert "snap.jpg" not in url, "JPEG must not be re-fetched"
+            # urlopen receives a urllib.request.Request object; check full_url
+            for c in mock_urlopen.call_args_list:
+                req_arg = c.args[0] if c.args else c.kwargs.get("url", "")
+                url_str = getattr(req_arg, "full_url", str(req_arg))
+                assert "snap.jpg" not in url_str, "JPEG must not be re-fetched"
 
 
 # ── _is_safe_bosch_url (smb copy) ───────────────────────────────────────

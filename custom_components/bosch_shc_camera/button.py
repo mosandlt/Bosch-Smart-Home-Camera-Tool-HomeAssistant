@@ -8,6 +8,7 @@ The Live Stream is controlled by the switch platform (switch.py):
 """
 
 import logging
+from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -16,7 +17,8 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, get_options
+from .const import DOMAIN
+from . import get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ async def async_setup_entry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
+class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):  # type: ignore[misc]
     """Button: force an immediate coordinator refresh.
 
     Fetches latest camera info, status, and events from the Bosch Cloud API
@@ -55,7 +57,7 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry  = entry
@@ -74,7 +76,7 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
         self._attr_translation_key = "refresh_snapshot"
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",
@@ -98,7 +100,7 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
+class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):  # type: ignore[misc]
     """Button: trigger the camera siren (acoustic alarm).
 
     Sends PUT /v11/video_inputs/{id}/acoustic_alarm to activate the built-in siren.
@@ -112,7 +114,7 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
     _attr_translation_key = "acoustic_alarm"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry  = entry
@@ -130,7 +132,7 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):
         self._attr_icon            = "mdi:alarm-light"
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",

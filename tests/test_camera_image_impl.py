@@ -189,16 +189,13 @@ class TestAsyncCameraImageWrapper:
 
 
 class TestAsyncCameraImageImplLocalDigest:
-    """The LOCAL path that uses `requests` (sync) via executor for
-    HTTP Digest auth (aiohttp doesn't support it natively).
+    """The LOCAL path uses async_digest_request (aiohttp-native Digest auth).
 
-    Mock async_add_executor_job to simulate the sync fetch result
+    Mock async_digest_request to simulate the async fetch result
     without actually doing any HTTP."""
 
-    @pytest.mark.asyncio
-    async def test_local_digest_success_caches_image(self):
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-        coord = _make_coord(_live_connections={
+    def _local_coord(self):
+        return _make_coord(_live_connections={
             CAM_ID: {
                 "_connection_type": "LOCAL",
                 "proxyUrl": "https://192.0.2.1/snap.jpg",
@@ -206,17 +203,35 @@ class TestAsyncCameraImageImplLocalDigest:
                 "_local_password": "p",
             },
         })
-        cam = _make_camera(coord=coord)
-        # Mock the executor to return our fake fetched bytes
-        cam.hass.async_add_executor_job = AsyncMock(return_value=b"\xff\xd8local-img")
+
+    def _digest_resp_cm(self, status: int, body: bytes = b"", content_type: str = "image/jpeg"):
+        """Build a mock CM for async_digest_request."""
+        from unittest.mock import AsyncMock, MagicMock
+        resp = MagicMock()
+        resp.status = status
+        resp.headers = {"Content-Type": content_type}
+        resp.read = AsyncMock(return_value=body)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+
+    @pytest.mark.asyncio
+    async def test_local_digest_success_caches_image(self):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        cam = _make_camera(coord=self._local_coord())
+        img = b"\xff\xd8local-img"
+        cm = self._digest_resp_cm(200, img, "image/jpeg")
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_clientsession",
             return_value=MagicMock(),
+        ), patch(
+            "custom_components.bosch_shc_camera.camera.async_digest_request",
+            new=AsyncMock(return_value=cm),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
-        assert out == b"\xff\xd8local-img"
-        assert cam._cached_image == b"\xff\xd8local-img"
-        # _last_image_fetch updated
+        assert out == img
+        assert cam._cached_image == img
         assert cam._last_image_fetch > 0
 
     @pytest.mark.asyncio
@@ -228,23 +243,13 @@ class TestAsyncCameraImageImplLocalDigest:
         requires Digest auth — unauth aiohttp would 401 in another
         ~10 s, blowing HA's outer timeout)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
-        coord = _make_coord(_live_connections={
-            CAM_ID: {
-                "_connection_type": "LOCAL",
-                "proxyUrl": "https://192.0.2.1/snap.jpg",
-                "_local_user": "cbs-1",
-                "_local_password": "p",
-            },
-        })
-        cam = _make_camera(coord=coord, _cached_image=b"\xff\xd8cached")
-        # Make executor raise TimeoutError directly — same effect as the
-        # asyncio.timeout(6) wrapper firing, without the 6-second wait.
-        cam.hass.async_add_executor_job = AsyncMock(
-            side_effect=asyncio.TimeoutError(),
-        )
+        cam = _make_camera(coord=self._local_coord(), _cached_image=b"\xff\xd8cached")
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_clientsession",
             return_value=MagicMock(),
+        ), patch(
+            "custom_components.bosch_shc_camera.camera.async_digest_request",
+            new=AsyncMock(side_effect=asyncio.TimeoutError()),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         # TimeoutError caught inside the LOCAL block, early-return cached/placeholder
@@ -252,22 +257,17 @@ class TestAsyncCameraImageImplLocalDigest:
 
     @pytest.mark.asyncio
     async def test_local_digest_fetch_failure_returns_cached(self):
-        """If the executor returns None (digest 401, network error, etc.),
+        """If async_digest_request returns non-image (aiohttp error, 401, etc.),
         skip aiohttp and return cached/placeholder."""
+        import aiohttp
         from custom_components.bosch_shc_camera.camera import BoschCamera
-        coord = _make_coord(_live_connections={
-            CAM_ID: {
-                "_connection_type": "LOCAL",
-                "proxyUrl": "https://192.0.2.1/snap.jpg",
-                "_local_user": "cbs-1",
-                "_local_password": "p",
-            },
-        })
-        cam = _make_camera(coord=coord, _cached_image=b"\xff\xd8cached")
-        cam.hass.async_add_executor_job = AsyncMock(return_value=None)
+        cam = _make_camera(coord=self._local_coord(), _cached_image=b"\xff\xd8cached")
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_clientsession",
             return_value=MagicMock(),
+        ), patch(
+            "custom_components.bosch_shc_camera.camera.async_digest_request",
+            new=AsyncMock(side_effect=aiohttp.ClientError("network error")),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         assert out == b"\xff\xd8cached"

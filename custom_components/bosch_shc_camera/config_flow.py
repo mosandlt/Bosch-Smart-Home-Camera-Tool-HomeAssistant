@@ -90,7 +90,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
 }
 
 
-def _flatten_sections(user_input: dict) -> dict:
+def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
     """Flatten a section-grouped submit dict back into a single flat dict.
 
     Home Assistant's ``data_entry_flow.section`` helper returns sectioned input
@@ -111,7 +111,7 @@ def _flatten_sections(user_input: dict) -> dict:
 
     Pure helper, fully tested in ``tests/test_config_flow_sections.py``.
     """
-    flat: dict = {}
+    flat: dict[str, Any] = {}
     seen_section_keys: set[str] = set()
 
     for section_key, fields in OPTIONS_SECTIONS.items():
@@ -145,7 +145,7 @@ def _flatten_sections(user_input: dict) -> dict:
 
     return flat
 
-from . import DOMAIN, DEFAULT_OPTIONS
+from . import DOMAIN, DEFAULT_OPTIONS  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,10 +172,10 @@ def _pkce_pair() -> tuple[str, str]:
 
 # ── OAuth2 Implementation (automatic flow via my.home-assistant.io) ──────────
 
-class BoschOAuth2Implementation(AbstractOAuth2Implementation):
+class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[misc]
     """Bosch Keycloak OAuth2 implementation with PKCE."""
 
-    def __init__(self, hass) -> None:
+    def __init__(self, hass: Any) -> None:
         self.hass = hass
         self._last_verifier: str | None = None
 
@@ -210,7 +210,7 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):
         }
         return f"{KEYCLOAK_BASE}/auth?" + urlencode(params)
 
-    async def async_resolve_external_data(self, external_data: Any) -> dict:
+    async def async_resolve_external_data(self, external_data: Any) -> dict[str, Any]:
         """Exchange authorization code for tokens."""
         code = external_data["code"]
         redirect_uri = external_data["state"]["redirect_uri"]
@@ -231,9 +231,9 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):
                 body = await resp.text()
                 _LOGGER.error("Token exchange failed: HTTP %d — %s", resp.status, body[:200])
             resp.raise_for_status()
-            return await resp.json()
+            return await resp.json()  # type: ignore[no-any-return]
 
-    async def _async_refresh_token(self, token: dict) -> dict:
+    async def _async_refresh_token(self, token: dict[str, Any]) -> dict[str, Any]:
         """Refresh access token via Keycloak."""
         session = async_get_clientsession(self.hass, verify_ssl=False)
         async with session.post(
@@ -281,7 +281,7 @@ def _extract_code(redirect_url: str) -> str | None:
     return codes[0] if codes else None
 
 
-async def _exchange_code(session, code: str, verifier: str) -> dict | None:
+async def _exchange_code(session: Any, code: str, verifier: str) -> dict[str, Any] | None:
     """Exchange auth code for tokens (manual flow, bosch.com redirect)."""
     try:
         async with asyncio.timeout(15):
@@ -298,7 +298,7 @@ async def _exchange_code(session, code: str, verifier: str) -> dict | None:
                 ssl=False,
             ) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    return await resp.json()  # type: ignore[no-any-return]
                 _LOGGER.warning("Token exchange HTTP %d: %s", resp.status, await resp.text())
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token exchange error: %s", err)
@@ -320,7 +320,7 @@ def _detect_token_client_id(bearer_token: str) -> str | None:
             return None
         payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        return payload.get("azp")
+        return str(payload.get("azp")) if payload.get("azp") is not None else None
     except Exception:
         return None
 
@@ -342,7 +342,7 @@ class AuthServerOutageError(Exception):
     """
 
 
-async def _do_refresh(session, refresh_token: str) -> dict | None:
+async def _do_refresh(session: Any, refresh_token: str) -> dict[str, Any] | None:
     """Silent renewal via saved refresh_token.
 
     Returns the token dict on success.
@@ -366,7 +366,7 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
                 ssl=False,
             ) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    return await resp.json()  # type: ignore[no-any-return]
                 body = (await resp.text())[:300]
                 _LOGGER.warning(
                     "Token refresh HTTP %d — Keycloak response: %s",
@@ -386,7 +386,7 @@ async def _do_refresh(session, refresh_token: str) -> dict | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
+class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: ignore[misc, call-arg]
     """Handle the initial setup flow — automatic OAuth2 PKCE browser login."""
 
     DOMAIN = DOMAIN
@@ -396,7 +396,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     def logger(self) -> logging.Logger:
         return _LOGGER
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Start OAuth2 flow — register implementation, then delegate to parent."""
         # Only enforce unique_id uniqueness on fresh setup. Reauth + reconfigure
         # both reuse the existing entry.
@@ -415,7 +415,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         return await super().async_step_user(user_input)
 
     async def async_step_reauth(
-        self, entry_data: dict
+        self, entry_data: dict[str, Any]
     ) -> config_entries.ConfigFlowResult:
         """Start a reauth flow triggered by invalid_grant/expired refresh token.
 
@@ -427,7 +427,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
-        self, user_input: dict | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Show confirmation, then delegate to the OAuth2 user flow."""
         if user_input is None:
@@ -435,7 +435,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         return await self.async_step_user()
 
     async def async_step_reconfigure(
-        self, user_input: dict | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """User-initiated reconfiguration (Quality-Scale Gold rule).
 
@@ -447,7 +447,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             return self.async_show_form(step_id="reconfigure")
         return await self.async_step_user()
 
-    async def async_oauth_create_entry(self, data: dict) -> config_entries.ConfigFlowResult:
+    async def async_oauth_create_entry(self, data: dict[str, Any]) -> config_entries.ConfigFlowResult:
         """Handle completed OAuth2 flow — create new entry or update existing (reauth/reconfigure)."""
         token_data = data.get("token", {})
         new_data = {
@@ -472,23 +472,23 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         )
 
     @staticmethod
-    @callback
-    def async_get_options_flow(config_entry):
+    @callback  # type: ignore[untyped-decorator]
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
         return BoschCameraOptionsFlow(config_entry)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschCameraOptionsFlow(config_entries.OptionsFlow):
+class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
     """Handle options: feature toggles + optional re-login."""
 
-    def __init__(self, config_entry) -> None:
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry  = config_entry
         self._verifier: str = ""
         self._auth_url: str = ""
-        self._pending_options: dict = {}
+        self._pending_options: dict[str, Any] = {}
 
-    async def async_step_init(self, user_input=None):
-        opts = dict(DEFAULT_OPTIONS)
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
+        opts: dict[str, Any] = dict(DEFAULT_OPTIONS)
         opts.update(self._config_entry.options)
 
         current_client = _detect_token_client_id(
@@ -547,7 +547,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
         # picked from `_field_schema_for(opts, key)` so a single source of
         # truth (OPTIONS_SECTIONS + this helper) controls both layout AND
         # field-level types.
-        sectioned_schema: dict = {}
+        sectioned_schema: dict[Any, Any] = {}
 
         # Polling intervals — open by default (most-touched group).
         sectioned_schema[vol.Required("polling")] = section(
@@ -791,7 +791,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             {"collapsed": True},
         )
 
-        auth_inner: dict = {
+        auth_inner: dict[Any, Any] = {
             vol.Optional("force_relogin", default=False): bool,
         }
         if is_legacy_client:
@@ -819,7 +819,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             },
         )
 
-    async def async_step_relogin_show(self, user_input=None):
+    async def async_step_relogin_show(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Show login URL as a pre-filled text field. PKCE already generated in init."""
         if user_input is not None:
             return await self.async_step_relogin_paste()
@@ -831,9 +831,9 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):
             }),
         )
 
-    async def async_step_relogin_paste(self, user_input=None):
+    async def async_step_relogin_paste(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Paste the redirect URL and exchange for new tokens."""
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             redirect_url = user_input.get("redirect_url", "").strip()

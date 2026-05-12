@@ -44,7 +44,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Installation](#installation)
 - [Setup](#setup)
 - [Architecture](#architecture)
-- [Quality Scale: Gold](#quality-scale-gold)
+- [Quality Scale: Platinum](#quality-scale-platinum)
 - [Features](#features)
   - [Entities](#entities)
   - [Built-in 3-Step Alert System](#built-in-3-step-alert-system)
@@ -329,9 +329,9 @@ stateDiagram-v2
 
 ---
 
-## Quality Scale: Gold
+## Quality Scale: Platinum
 
-Verified rule-by-rule against the [Home Assistant Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) — Bronze foundation + Silver stability + Gold comprehensiveness. The full per-rule breakdown lives in [`custom_components/bosch_shc_camera/quality_scale.yaml`](custom_components/bosch_shc_camera/quality_scale.yaml).
+Verified rule-by-rule against the [Home Assistant Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) — all 52 rules across Bronze, Silver, Gold, and Platinum tiers satisfied. The full per-rule breakdown lives in [`custom_components/bosch_shc_camera/quality_scale.yaml`](custom_components/bosch_shc_camera/quality_scale.yaml).
 
 ```mermaid
 graph LR
@@ -341,8 +341,8 @@ graph LR
 
     style Bronze fill:#cd7f32,color:#fff
     style Silver fill:#a0a0a0,color:#fff
-    style Gold fill:#ffd700,color:#000,stroke-width:3px
-    style Plat fill:#666,color:#aaa,stroke-dasharray:5
+    style Gold fill:#ffd700,color:#000
+    style Plat fill:#a0c4ff,color:#000,stroke-width:3px
 ```
 
 **What the Gold tier delivers (visible to users):**
@@ -360,10 +360,10 @@ graph LR
 - **Service-action exceptions instead of silent log warnings** — clicking a button that hits HTTP 500 now shows a red error notification with cause; previously failures looked like nothing happened.
 - **Coordinator raises `UpdateFailed`** consistently → HA framework provides `log-when-unavailable` automatically, no manual log-spam guards.
 
-**Open `todo` items** (tracked in `quality_scale.yaml`):
+**Platinum tier (v12.0.0, 2026-05-12):**
 
-- `test-coverage` — **95 % total line coverage** across 111 test files / 2978 tests. Covers all coordinator methods, entity turn_on/off paths, token refresh, stream lifecycle, FCM alerts, SMB/NVR helpers, and cloud-API paths via aiohttp mocking. Remaining 5 % is HA-framework-bound (`async_setup_entry` lifecycle requires a live `hass` runtime).
-- Platinum-tier rules (`async-dependency`, `strict-typing`) — partial typing exists; full strict-typing entry in HA core's `.strict-typing` is N/A for custom integrations.
+- `strict-typing` — mypy --strict green across all 24 source files (was 593 errors). `pyproject.toml` strict config added; ~80 targeted `# type: ignore` for unavoidable HA-stub gaps.
+- `async-dependency` — all `requests` imports removed. HTTP Digest auth via `auth_utils.async_digest_request` (aiohttp); sync cloud downloads via stdlib `urllib.request`. `requests>=2.28.0,<3` removed from runtime requirements.
 
 ### Operational reliability — token recovery flow
 
@@ -1422,8 +1422,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v11.2.7** — see the GitHub release page for full notes:
-[**v11.2.7 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v11.2.7)
+Latest: **v12.0.0** — see the GitHub release page for full notes:
+[**v12.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.0)
 
 | | |
 |---|---|

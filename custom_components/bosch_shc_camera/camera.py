@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any
 import urllib3
 
 import aiohttp
@@ -38,7 +39,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator
+from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
+from .auth_utils import async_digest_request
 from .const import TIMEOUT_SNAP
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,7 +92,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschCamera(CoordinatorEntity, Camera):
+class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     """Represents a single Bosch Smart Home camera in Home Assistant.
 
     • Shows the latest motion-triggered JPEG snapshot (refreshed every scan_interval)
@@ -244,8 +246,8 @@ class BoschCamera(CoordinatorEntity, Camera):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @property
-    def _cam_data(self) -> dict:
-        return self.coordinator.data.get(self._cam_id, {})
+    def _cam_data(self) -> dict[str, Any]:
+        return self.coordinator.data.get(self._cam_id, {})  # type: ignore[no-any-return]
 
     # ── Streaming state ───────────────────────────────────────────────────────
     @property
@@ -272,9 +274,9 @@ class BoschCamera(CoordinatorEntity, Camera):
         settings = self.coordinator.motion_settings(self._cam_id)
         if not settings:
             return False
-        return settings.get("enabled", False)
+        return bool(settings.get("enabled", False))
 
-    async def async_enable_motion_detection(self, **kwargs) -> None:
+    async def async_enable_motion_detection(self, **kwargs: Any) -> None:
         """Enable motion detection via standard HA camera service."""
         settings = self.coordinator.motion_settings(self._cam_id)
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
@@ -284,7 +286,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         )
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
-    async def async_disable_motion_detection(self, **kwargs) -> None:
+    async def async_disable_motion_detection(self, **kwargs: Any) -> None:
         """Disable motion detection via standard HA camera service."""
         settings = self.coordinator.motion_settings(self._cam_id)
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
@@ -319,7 +321,7 @@ class BoschCamera(CoordinatorEntity, Camera):
 
     @property
     def _token(self) -> str:
-        return self._entry.data.get("bearer_token", "")
+        return self._entry.data.get("bearer_token", "")  # type: ignore[no-any-return]
 
     # ── HA metadata ───────────────────────────────────────────────────────────
     @property
@@ -328,11 +330,11 @@ class BoschCamera(CoordinatorEntity, Camera):
 
     @property
     def model(self) -> str:
-        return self._model
+        return self._model  # type: ignore[no-any-return]
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return bool(self.coordinator.last_update_success)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -346,7 +348,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         cam_data = self._cam_data
         events   = cam_data.get("events", [])
         latest   = events[0] if events else {}
@@ -404,7 +406,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
-    async def async_create_stream(self):
+    async def async_create_stream(self) -> Any:
         """Auto-open live connection when play_stream / Cast is requested.
 
         HA calls this when camera.play_stream is invoked (e.g. Cast to Chromecast).
@@ -437,7 +439,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         live = self.coordinator._live_connections.get(self._cam_id, {})
         if not live:
             return None
-        url = live.get("rtspsUrl") or live.get("rtspUrl") or None
+        url: str | None = live.get("rtspsUrl") or live.get("rtspUrl") or None
         if not url:
             return None
         # LOCAL streams go through our TLS proxy (plain TCP → TLS). HA 2026.4 /
@@ -510,7 +512,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
 
         # Try 320×180 JPEG via RCP 0x099e (resolution confirmed by 0x0a88 = 320×180)
-        raw = await self.coordinator._rcp_read(rcp_base, "0x099e", session_id)
+        raw: bytes | None = await self.coordinator._rcp_read(rcp_base, "0x099e", session_id)
         if raw and raw[:2] == b"\xff\xd8":
             _LOGGER.debug(
                 "%s: Using RCP thumbnail fallback (320×180) — %d bytes",
@@ -619,20 +621,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                 local_user = live.get("_local_user", "")
                 local_pass = live.get("_local_password", "")
                 if local_user and local_pass:
-                    def _fetch_local_snap() -> bytes | None:
-                        import requests as req
-                        try:
-                            r = req.get(
-                                proxy_url,
-                                auth=req.auth.HTTPDigestAuth(local_user, local_pass),
-                                verify=False,
-                                timeout=TIMEOUT_SNAP,
-                            )
-                            if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
-                                return r.content
-                        except req.RequestException as err:
-                            _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
-                        return None
+                    data: bytes | None = None
                     try:
                         # Tightened from 12 s to 6 s: HA's CameraImageView wraps
                         # async_camera_image() with CAMERA_IMAGE_TIMEOUT (10 s);
@@ -644,17 +633,23 @@ class BoschCamera(CoordinatorEntity, Camera):
                         # round-trip; if it fails, return cached/placeholder
                         # immediately rather than racing HA's outer timeout.
                         async with asyncio.timeout(6):
-                            data = await self.hass.async_add_executor_job(_fetch_local_snap)
-                        if data:
-                            self._cached_image = data
-                            self._last_image_fetch = time.monotonic()
-                            _LOGGER.debug(
-                                "%s: LOCAL live snap %d bytes",
-                                self._display_name, len(data),
-                            )
-                            return self._cached_image
-                    except asyncio.TimeoutError:
-                        pass
+                            async with await async_digest_request(
+                                session, "GET", proxy_url, local_user, local_pass,
+                                timeout=TIMEOUT_SNAP, ssl=False,
+                            ) as resp:
+                                if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
+                                    data = await resp.read()
+                    except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                        _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
+                        data = None
+                    if data:
+                        self._cached_image = data
+                        self._last_image_fetch = time.monotonic()
+                        _LOGGER.debug(
+                            "%s: LOCAL live snap %d bytes",
+                            self._display_name, len(data),
+                        )
+                        return self._cached_image
                     # LOCAL conn: skip the aiohttp fallback below. The proxy_url
                     # for LOCAL is `https://<lan-ip>:443/snap.jpg` which requires
                     # the Digest auth we just tried — aiohttp without auth would
@@ -777,7 +772,7 @@ class BoschCamera(CoordinatorEntity, Camera):
                             self._display_name, len(rcp_img),
                         )
                         return rcp_img
-                fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                fresh: bytes | None = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
                 if not fresh:
                     # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
                     fresh = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
@@ -806,14 +801,14 @@ class BoschCamera(CoordinatorEntity, Camera):
                         self._cached_image = rcp_img
                         self._last_image_fetch = now
                         return rcp_img
-                fresh = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
-                if not fresh:
+                fresh2: bytes | None = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
+                if not fresh2:
                     # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
-                    fresh = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
-                if fresh:
-                    self._cached_image = fresh
+                    fresh2 = await self.coordinator.async_fetch_live_snapshot_local(self._cam_id)
+                if fresh2:
+                    self._cached_image = fresh2
                     self._last_image_fetch = now
-                    return fresh
+                    return fresh2
                 # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping
                 self._last_image_fetch = now
                 _LOGGER.debug(
@@ -839,33 +834,26 @@ class BoschCamera(CoordinatorEntity, Camera):
             port = creds.get("port", 443)
             if local_user and local_pass and host:
                 snap_url = f"https://{host}:{port}/snap.jpg?JpegSize=1206"
-                def _fetch_outage_snap() -> bytes | None:
-                    import requests as req
-                    try:
-                        r = req.get(
-                            snap_url,
-                            auth=req.auth.HTTPDigestAuth(local_user, local_pass),
-                            verify=False,
-                            timeout=TIMEOUT_SNAP,
-                        )
-                        if r.status_code == 200 and "image" in r.headers.get("Content-Type", ""):
-                            return r.content
-                    except req.RequestException as err:
-                        _LOGGER.debug("LOCAL outage snap failed: %s", err)
-                    return None
+                outage_data: bytes | None = None
                 try:
                     async with asyncio.timeout(12):
-                        data = await self.hass.async_add_executor_job(_fetch_outage_snap)
-                    if data:
-                        self._cached_image = data
-                        self._last_image_fetch = time.monotonic()
-                        _LOGGER.info(
-                            "%s: outage fallback — LOCAL snap.jpg %d bytes via cached Digest creds",
-                            self._display_name, len(data),
-                        )
-                        return self._cached_image
-                except asyncio.TimeoutError:
-                    pass
+                        async with await async_digest_request(
+                            session, "GET", snap_url, local_user, local_pass,
+                            timeout=TIMEOUT_SNAP, ssl=False,
+                        ) as resp:
+                            if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
+                                outage_data = await resp.read()
+                except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                    _LOGGER.debug("LOCAL outage snap failed: %s", err)
+                    outage_data = None
+                if outage_data:
+                    self._cached_image = outage_data
+                    self._last_image_fetch = time.monotonic()
+                    _LOGGER.info(
+                        "%s: outage fallback — LOCAL snap.jpg %d bytes via cached Digest creds",
+                        self._display_name, len(outage_data),
+                    )
+                    return self._cached_image
 
         # ── 3. Cached image (fallback for cameras whose REMOTE snap.jpg needs auth) ──
         # For cameras like CAMERA_360 the cloud fetch above returns None;

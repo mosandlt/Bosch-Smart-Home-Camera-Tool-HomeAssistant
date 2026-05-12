@@ -4,16 +4,17 @@ Pins the executor-side Exception swallows that no other test file covers:
   - L58  : sync_local_save bails out when download_path is empty (toggle on).
   - L95-96  : sync_local_save folder_pattern raises KeyError/ValueError → falls back to cam_safe.
   - L103-104: sync_local_save file_pattern raises KeyError/ValueError → falls back to "{cam}_{date}_{time}_{type}_{id}".
-  - L244-245: sync_smb_upload session.get for snapshot raises → warning, no open_file.
-  - L269-270: sync_smb_upload session.get for clip raises → warning, no open_file.
+  - L244-245: sync_smb_upload urlopen for snapshot raises → warning, no open_file.
+  - L269-270: sync_smb_upload urlopen for clip raises → warning, no open_file.
   - L333-334: sync_smb_cleanup _walk_and_delete scandir raises → recursion returns silently.
   - L388-389: _async_cleanup_alert services.async_call raises → debug log, no crash.
-  - L505-506: _sync_ftp_upload session.get for snapshot raises → warning, no storbinary.
-  - L524-525: _sync_ftp_upload session.get for clip raises → warning, no storbinary.
+  - L505-506: _sync_ftp_upload urlopen for snapshot raises → warning, no storbinary.
+  - L524-525: _sync_ftp_upload urlopen for clip raises → warning, no storbinary.
   - L532-533: _sync_ftp_upload ftp.quit + ftp.close BOTH raise → finally swallows, no crash.
 
 All sockets/HTTP are mocked. No filesystem writes (sync_local_save uses
 tmp_path) and no live HA event loop is required for the executor functions.
+urllib.request.urlopen is patched instead of requests.Session (removed).
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import pytest
 
 MODULE = "custom_components.bosch_shc_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
+URLOPEN = f"{MODULE}.urllib.request.urlopen"
 
 
 def _coord(options: dict | None = None):
@@ -34,24 +36,15 @@ def _coord(options: dict | None = None):
     return SimpleNamespace(options=opts, hass=MagicMock(), _download_started_at=0.0)
 
 
-def _fake_requests(status: int = 200, content: bytes = b"X", raises: Exception | None = None):
-    """Build fake requests module + session. If raises is set, session.get raises it."""
-    fake_response = MagicMock()
-    fake_response.status_code = status
-    fake_response.content = content
-    fake_response.iter_content.return_value = [content]
-    fake_response.raw = MagicMock()
-
-    fake_session = MagicMock()
-    if raises is not None:
-        fake_session.get.side_effect = raises
-    else:
-        fake_session.get.return_value = fake_response
-    fake_session.headers = {}
-
-    fake_req = MagicMock()
-    fake_req.Session.return_value = fake_session
-    return fake_req, fake_session, fake_response
+def _urlopen_resp(status: int = 200, content: bytes = b"X",
+                  raises: Exception | None = None) -> MagicMock:
+    """Build a fake urlopen context-manager response."""
+    resp = MagicMock()
+    resp.status = status
+    resp.read.side_effect = [content, b""]
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
 
 
 def _fake_smb():
@@ -82,9 +75,9 @@ def _smb_event(image_url="https://cdn.bosch.com/snap.jpg", clip_url=None):
 
 
 class TestLocalSaveEmptyDownloadPath:
-    """Toggle on + download_path empty must short-circuit before requests session."""
+    """Toggle on + download_path empty must short-circuit before urlopen call."""
 
-    def test_empty_download_path_returns_without_session(self):
+    def test_empty_download_path_returns_without_urlopen(self):
         """`download_path=""` after strip → early return (line 58)."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -92,11 +85,10 @@ class TestLocalSaveEmptyDownloadPath:
             "enable_local_save": True,
             "download_path": "   ",  # whitespace only → strip empties
         })
-        fake_req = MagicMock()
         ev = _smb_event()
-        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+        with patch(URLOPEN) as mock_urlopen:
             sync_local_save(coord, ev, "tok", "Terrasse")
-        fake_req.Session.assert_not_called()
+        mock_urlopen.assert_not_called()
 
 
 # ── L95-96 / L103-104 — pattern format errors ──────────────────────────────
@@ -107,11 +99,7 @@ class TestLocalSavePatternFormatErrors:
     a sensible fallback path is used instead."""
 
     def test_folder_pattern_unknown_key_falls_back_to_cam(self, tmp_path):
-        """`{nonexistent}` in folder_pattern → KeyError caught → sub = cam_safe (L95-96).
-
-        Verify by checking the file is written under <download_path>/<cam_safe>/...
-        instead of crashing the executor.
-        """
+        """`{nonexistent}` in folder_pattern → KeyError caught → sub = cam_safe (L95-96)."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
         coord = _coord({
@@ -119,9 +107,9 @@ class TestLocalSavePatternFormatErrors:
             "download_path": str(tmp_path),
             "folder_pattern": "{nonexistent}/{year}",
         })
-        fake_req, fake_session, fake_resp = _fake_requests(status=200, content=b"JPG")
+        resp = _urlopen_resp(200, b"JPG")
         ev = _smb_event(image_url="https://cdn.bosch.com/snap.jpg")
-        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+        with patch(URLOPEN, return_value=resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         # File landed somewhere under Terrasse/ (cam_safe fallback)
@@ -137,9 +125,9 @@ class TestLocalSavePatternFormatErrors:
             "download_path": str(tmp_path),
             "file_pattern": "{nonexistent}_{date}",
         })
-        fake_req, fake_session, fake_resp = _fake_requests(status=200, content=b"JPG")
+        resp = _urlopen_resp(200, b"JPG")
         ev = _smb_event(image_url="https://cdn.bosch.com/snap.jpg")
-        with patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+        with patch(URLOPEN, return_value=resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         # Fallback stem is `{cam}_{date}_{time}_{type}_{id}` — must contain MOVEMENT + date
@@ -152,11 +140,11 @@ class TestLocalSavePatternFormatErrors:
 
 
 class TestSmbSnapshotUploadException:
-    """session.get() raising during snapshot fetch must not crash the worker;
+    """urlopen() raising during snapshot fetch must not crash the worker;
     a warning is logged and execution continues (L244-245)."""
 
-    def test_snapshot_request_exception_logged_no_crash(self):
-        """ConnectionError on snapshot GET → except branch (L244-245) → no upload, no exception."""
+    def test_snapshot_urlopen_exception_logged_no_crash(self):
+        """ConnectionError on snapshot urlopen → except branch (L244-245) → no upload, no exception."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
 
         coord = _coord({
@@ -170,19 +158,16 @@ class TestSmbSnapshotUploadException:
             "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
         fake_smb = _fake_smb()
-        fake_req, fake_session, _ = _fake_requests(raises=ConnectionError("link down"))
 
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "urllib3": MagicMock()}), \
-             patch.dict(sys.modules, {"requests": fake_req}), \
+        with patch.dict(sys.modules, {"smbclient": fake_smb}), \
              patch(f"{MODULE}.socket"), \
-             patch(f"{MODULE}.smb_makedirs"):
+             patch(f"{MODULE}.smb_makedirs"), \
+             patch(URLOPEN, side_effect=ConnectionError("link down")):
             ev = _smb_event(image_url="https://cdn.bosch.com/snap.jpg")
             data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
             # Must not raise
             sync_smb_upload(coord, data, "tok")
 
-        # GET was attempted (and failed); no write to share
-        fake_session.get.assert_called_once()
         fake_smb.open_file.assert_not_called()
 
 
@@ -190,10 +175,10 @@ class TestSmbSnapshotUploadException:
 
 
 class TestSmbClipUploadException:
-    """session.get() raising during clip fetch must not crash (L269-270)."""
+    """urlopen() raising during clip fetch must not crash (L269-270)."""
 
-    def test_clip_request_exception_logged_no_crash(self):
-        """Timeout on clip GET → warning, no open_file for .mp4."""
+    def test_clip_urlopen_exception_logged_no_crash(self):
+        """Timeout on clip urlopen → warning, no open_file for .mp4."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
 
         coord = _coord({
@@ -207,18 +192,16 @@ class TestSmbClipUploadException:
             "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
         fake_smb = _fake_smb()
-        fake_req, fake_session, _ = _fake_requests(raises=TimeoutError("read timeout"))
 
-        with patch.dict(sys.modules, {"smbclient": fake_smb, "urllib3": MagicMock()}), \
-             patch.dict(sys.modules, {"requests": fake_req}), \
+        with patch.dict(sys.modules, {"smbclient": fake_smb}), \
              patch(f"{MODULE}.socket"), \
-             patch(f"{MODULE}.smb_makedirs"):
+             patch(f"{MODULE}.smb_makedirs"), \
+             patch(URLOPEN, side_effect=TimeoutError("read timeout")):
             # No image → only clip path executes
             ev = _smb_event(image_url=None, clip_url="https://cdn.bosch.com/clip.mp4")
             data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
             sync_smb_upload(coord, data, "tok")
 
-        fake_session.get.assert_called_once()
         fake_smb.open_file.assert_not_called()
 
 
@@ -279,10 +262,10 @@ class TestAsyncCleanupAlertException:
 
 
 class TestFtpSnapshotUploadException:
-    """session.get for FTP snapshot raising must log + continue (L505-506)."""
+    """urlopen for FTP snapshot raising must log + continue (L505-506)."""
 
     def test_ftp_snapshot_exception_logged_no_crash(self):
-        """ConnectionError on FTP snapshot GET → except branch, no storbinary."""
+        """ConnectionError on FTP snapshot urlopen → except branch, no storbinary."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
 
         coord = _coord({
@@ -294,17 +277,15 @@ class TestFtpSnapshotUploadException:
             "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
         fake_ftp = MagicMock()
-        fake_req, fake_session, _ = _fake_requests(raises=ConnectionError("link down"))
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp), \
              patch(f"{MODULE}._ftp_makedirs"), \
              patch(f"{MODULE}._ftp_exists", return_value=False), \
-             patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+             patch(URLOPEN, side_effect=ConnectionError("link down")):
             ev = _smb_event(image_url="https://cdn.bosch.com/snap.jpg")
             data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
             _sync_ftp_upload(coord, data, "tok")
 
-        fake_session.get.assert_called_once()
         fake_ftp.storbinary.assert_not_called()
 
 
@@ -312,10 +293,10 @@ class TestFtpSnapshotUploadException:
 
 
 class TestFtpClipUploadException:
-    """session.get for FTP clip raising must log + continue (L524-525)."""
+    """urlopen for FTP clip raising must log + continue (L524-525)."""
 
     def test_ftp_clip_exception_logged_no_crash(self):
-        """TimeoutError on FTP clip GET → except branch, no storbinary."""
+        """TimeoutError on FTP clip urlopen → except branch, no storbinary."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
 
         coord = _coord({
@@ -327,17 +308,15 @@ class TestFtpClipUploadException:
             "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
         })
         fake_ftp = MagicMock()
-        fake_req, fake_session, _ = _fake_requests(raises=TimeoutError("read timeout"))
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp), \
              patch(f"{MODULE}._ftp_makedirs"), \
              patch(f"{MODULE}._ftp_exists", return_value=False), \
-             patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+             patch(URLOPEN, side_effect=TimeoutError("read timeout")):
             ev = _smb_event(image_url=None, clip_url="https://cdn.bosch.com/clip.mp4")
             data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
             _sync_ftp_upload(coord, data, "tok")
 
-        fake_session.get.assert_called_once()
         fake_ftp.storbinary.assert_not_called()
 
 
@@ -362,12 +341,10 @@ class TestFtpFinallyBothQuitAndCloseRaise:
         fake_ftp = MagicMock()
         fake_ftp.quit.side_effect = Exception("connection reset")
         fake_ftp.close.side_effect = Exception("socket already gone")
-        fake_req, _, _ = _fake_requests()
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp), \
              patch(f"{MODULE}._ftp_makedirs"), \
-             patch(f"{MODULE}._ftp_exists", return_value=True), \
-             patch.dict(sys.modules, {"requests": fake_req, "urllib3": MagicMock()}):
+             patch(f"{MODULE}._ftp_exists", return_value=True):
             # Empty data → just exercises connect → finally block
             _sync_ftp_upload(coord, {}, "tok")
 

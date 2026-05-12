@@ -16,7 +16,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 from urllib.parse import urlparse
@@ -65,7 +65,7 @@ class _FCMNoiseFilter(logging.Filter):
          log has a heartbeat marker without flooding.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._last_passed = float("-inf")  # monotonic ts of last record we let through
 
@@ -107,7 +107,7 @@ FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
 
 # ── Firebase config ──────────────────────────────────────────────────────────
 
-async def fetch_firebase_config(hass: HomeAssistant) -> dict:
+async def fetch_firebase_config(hass: "HomeAssistant") -> dict[str, str]:
     """Return Firebase config for the Bosch Smart Camera app.
 
     These are public app-level identifiers embedded in every copy of the
@@ -128,7 +128,7 @@ async def fetch_firebase_config(hass: HomeAssistant) -> dict:
 
 # ── FCM start / stop ────────────────────────────────────────────────────────
 
-async def async_start_fcm_push(coordinator) -> None:
+async def async_start_fcm_push(coordinator: Any) -> None:
     """Start the FCM push listener for near-instant motion/audio event detection.
 
     Flow:
@@ -163,7 +163,7 @@ async def async_start_fcm_push(coordinator) -> None:
     push_mode = coordinator.options.get("fcm_push_mode", "auto")
 
     # Build FCM config based on mode
-    async def _build_fcm_cfg(mode: str) -> dict:
+    async def _build_fcm_cfg(mode: str) -> dict[str, str]:
         """Return FCM config dict for the given mode (android or ios)."""
         if mode == "ios":
             import base64
@@ -201,7 +201,7 @@ async def async_start_fcm_push(coordinator) -> None:
         # Load saved FCM credentials from config entry (survives HA restarts)
         saved_fcm_creds = coordinator._entry.data.get("fcm_credentials")
 
-        def _on_creds_updated(creds):
+        def _on_creds_updated(creds: Any) -> None:
             """Save FCM credentials to config entry for persistence.
 
             WHY threadsafe: this callback fires from the FCM client's own
@@ -210,13 +210,13 @@ async def async_start_fcm_push(coordinator) -> None:
             HA's internal state. `call_soon_threadsafe` hops back onto
             the loop before scheduling the async task.
             """
-            def _persist():
+            def _persist() -> None:
                 coordinator.hass.async_create_task(
                     _async_persist_fcm_creds(coordinator, creds)
                 )
             coordinator.hass.loop.call_soon_threadsafe(_persist)
 
-        def _on_push(notification: dict, persistent_id: str, obj=None) -> None:
+        def _on_push(notification: dict[str, Any], persistent_id: str, obj: Any = None) -> None:
             """Called when a push notification arrives from Bosch CBS."""
             _on_fcm_push(coordinator, notification, persistent_id, obj)
 
@@ -287,7 +287,7 @@ async def async_start_fcm_push(coordinator) -> None:
         await _try_fcm_with_mode("ios")
 
 
-async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
+async def register_fcm_with_bosch(coordinator: Any, mode: str | None = None) -> bool:
     """Register our FCM token with Bosch CBS so it sends us push notifications.
 
     Endpoint: POST /v11/devices {"deviceType": "ANDROID"|"IOS", "deviceToken": token}
@@ -354,7 +354,7 @@ async def register_fcm_with_bosch(coordinator, mode: str | None = None) -> bool:
     return False
 
 
-async def async_stop_fcm_push(coordinator) -> None:
+async def async_stop_fcm_push(coordinator: Any) -> None:
     """Stop the FCM push listener."""
     with coordinator._fcm_lock:
         client = coordinator._fcm_client
@@ -374,7 +374,7 @@ async def async_stop_fcm_push(coordinator) -> None:
         _LOGGER.info("FCM push listener stopped")
 
 
-async def _async_persist_fcm_creds(coordinator, creds: dict) -> None:
+async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:
     """Write FCM credentials into the config entry (must run in event loop)."""
     try:
         coordinator.hass.config_entries.async_update_entry(
@@ -388,7 +388,7 @@ async def _async_persist_fcm_creds(coordinator, creds: dict) -> None:
 
 # ── FCM push callback ───────────────────────────────────────────────────────
 
-def _on_fcm_push(coordinator, notification: dict, persistent_id: str, obj=None) -> None:
+def _on_fcm_push(coordinator: Any, notification: dict[str, Any], persistent_id: str, obj: Any = None) -> None:
     """Called when a push notification arrives from Bosch CBS.
 
     The push is a silent wake-up signal with no event payload.
@@ -413,7 +413,7 @@ def _on_fcm_push(coordinator, notification: dict, persistent_id: str, obj=None) 
     )
 
 
-async def async_handle_fcm_push(coordinator) -> None:
+async def async_handle_fcm_push(coordinator: Any) -> None:
     """Handle an FCM push — fetch fresh events for all cameras and fire HA events."""
     token = coordinator.token
     if not token:
@@ -594,7 +594,7 @@ async def async_handle_fcm_push(coordinator) -> None:
 
 # ── Alert routing helpers ────────────────────────────────────────────────────
 
-def get_alert_services(coordinator, type_key: str) -> list[str]:
+def get_alert_services(coordinator: Any, type_key: str) -> list[str]:
     """Return notify services for a given alert type key.
 
     "system" and "information" fall back to alert_notify_service when empty.
@@ -610,14 +610,14 @@ def get_alert_services(coordinator, type_key: str) -> list[str]:
 
 def build_notify_data(
     svc: str, message: str, file_path: str | None = None, title: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build notify service call data with correct attachment format per service type.
 
     mobile_app (iOS + Android HA Companion): image served from /local/bosch_alerts/
     telegram_bot: uses photo field
     All others (Signal, email, ...): file path in data.attachments
     """
-    data: dict = {"message": message}
+    data: dict[str, Any] = {"message": message}
     if title:
         data["title"] = title
     if not file_path:
@@ -626,7 +626,7 @@ def build_notify_data(
     if "mobile_app" in svc:
         # HA Companion App — image URL served without auth from /config/www/
         # Files deleted within seconds when alert_delete_after_send=True
-        notify_data: dict = {
+        notify_data: dict[str, Any] = {
             "image": f"/local/bosch_alerts/{fname}",
             "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
         }
@@ -648,7 +648,7 @@ def _write_file(path: str, data: bytes) -> None:
 # ── 3-step alert pipeline ───────────────────────────────────────────────────
 
 async def async_send_alert(
-    coordinator,
+    coordinator: Any,
     cam_name: str, event_type: str, timestamp: str,
     image_url: str, clip_url: str = "", clip_status: str = "",
     event_id: str = "",
@@ -969,7 +969,7 @@ async def async_send_alert(
 
 # ── Mark events as read ──────────────────────────────────────────────────────
 
-async def async_mark_events_read(coordinator, event_ids: list[str]) -> bool:
+async def async_mark_events_read(coordinator: Any, event_ids: list[str]) -> bool:
     """Mark events as read/seen on the Bosch cloud via PUT /v11/events.
 
     The /v11/events/bulk endpoint only supports `{ids, action: "DELETE"}` —

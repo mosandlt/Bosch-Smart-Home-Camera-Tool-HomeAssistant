@@ -2,17 +2,16 @@
 
 local_rcp.py provides:
   _parse_rcp_xml(text, type_)  — pure XML parser for RCP+ read responses
-  rcp_read_local_sync(...)     — Digest-auth GET to camera LAN IP
-  rcp_read_remote_sync(...)    — empty-auth GET via cloud proxy
+  rcp_read_local_sync(...)     — Digest-auth GET to camera LAN IP (urllib.request)
+  rcp_read_remote_sync(...)    — empty-auth GET via cloud proxy (urllib.request)
 
 The parser is the only testable unit without network. _parse_rcp_xml handles
 five type codes (T_WORD, T_DWORD, T_BYTE, P_STRING, P_OCTET), error elements,
 and malformed XML. Tests pin all branches so a protocol change surfaces here.
 
-Note: rcp_read_local_sync / rcp_read_remote_sync are thin wrappers around
-`requests` + _parse_rcp_xml. Their network paths are not unit-tested (they
-require a live camera) — only the error/fallback paths are pinned here via
-mock.
+Note: rcp_read_local_sync / rcp_read_remote_sync use urllib.request under the
+hood. Their network paths are not unit-tested (they require a live camera) —
+only the error/fallback paths are pinned here via mock.
 
 Historical note: field-specific helpers for 0x0d00 (privacy mask) and 0x0c22
 (LED dimmer) were removed in v10.4.9 after A/B testing proved they did NOT
@@ -22,6 +21,7 @@ verification (see the RETIRED section in local_rcp.py).
 
 from __future__ import annotations
 
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 
@@ -166,6 +166,18 @@ class TestParseRcpXml:
 # ── rcp_read_local_sync error-path ────────────────────────────────────────────
 
 
+def _make_opener_mock(status: int = 200, body: bytes = b"") -> MagicMock:
+    """Build a mock urllib opener whose open() returns a response-like context manager."""
+    resp = MagicMock()
+    resp.status = status
+    resp.read = MagicMock(return_value=body)
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    opener = MagicMock()
+    opener.open = MagicMock(return_value=resp)
+    return opener
+
+
 class TestRcpReadLocalSyncErrors:
     """Pin the error/fallback paths of rcp_read_local_sync without network."""
 
@@ -173,43 +185,38 @@ class TestRcpReadLocalSyncErrors:
         """Non-200 HTTP response → None (not a crash)."""
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_local_sync
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        with patch("custom_components.bosch_shc_camera.local_rcp.rcp_read_local_sync.__module__"):
-            pass  # structural — just import check
-        import requests as req
-        with patch.object(req, "get", return_value=mock_resp):
+        opener = _make_opener_mock(status=403, body=b"Forbidden")
+        with patch("urllib.request.build_opener", return_value=opener):
             result = rcp_read_local_sync("10.0.0.1:443", "cbs-user", "pass", "0x0c22", "T_WORD")
         assert result is None, "HTTP 403 must return None"
 
     def test_connection_error_returns_none(self):
-        """Connection error → None (camera offline)."""
+        """URLError → None (camera offline)."""
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_local_sync
 
-        import requests as req
-        with patch.object(req, "get", side_effect=req.exceptions.ConnectionError("refused")):
+        opener = MagicMock()
+        opener.open = MagicMock(side_effect=urllib.error.URLError("Connection refused"))
+        with patch("urllib.request.build_opener", return_value=opener):
             result = rcp_read_local_sync("10.0.0.1:443", "cbs-user", "pass", "0x0c22", "T_WORD")
         assert result is None
 
     def test_timeout_returns_none(self):
-        """Timeout → None (slow camera response)."""
+        """OSError (timeout) → None (slow camera response)."""
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_local_sync
 
-        import requests as req
-        with patch.object(req, "get", side_effect=req.exceptions.Timeout("timeout")):
+        opener = MagicMock()
+        opener.open = MagicMock(side_effect=OSError("timed out"))
+        with patch("urllib.request.build_opener", return_value=opener):
             result = rcp_read_local_sync("10.0.0.1:443", "cbs-user", "pass", "0x0c22", "T_WORD")
         assert result is None
 
     def test_success_delegates_to_parse(self):
-        """200 response → _parse_rcp_xml called with response text."""
+        """200 response → _parse_rcp_xml called with decoded body text."""
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_local_sync
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.text = "<rcp><result><dec>77</dec></result></rcp>"
-
-        import requests as req
-        with patch.object(req, "get", return_value=mock_resp):
+        xml_body = b"<rcp><result><dec>77</dec></result></rcp>"
+        opener = _make_opener_mock(status=200, body=xml_body)
+        with patch("urllib.request.build_opener", return_value=opener):
             result = rcp_read_local_sync("10.0.0.1:443", "u", "p", "0x0c22", "T_WORD")
         assert result == 77, "200 response body must be parsed via _parse_rcp_xml"
 
@@ -223,29 +230,29 @@ class TestRcpReadRemoteSyncErrors:
     def test_http_non_200_returns_none(self):
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_remote_sync
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 503
-        import requests as req
-        with patch.object(req, "get", return_value=mock_resp):
+        opener = _make_opener_mock(status=503, body=b"Service Unavailable")
+        with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError(
+            url=None, code=503, msg="Service Unavailable", hdrs=None, fp=None  # type: ignore[arg-type]
+        )):
             result = rcp_read_remote_sync("proxy-20.live.cbs.boschsecurity.com:42090/abc123", "0x0c22", "T_WORD")
         assert result is None
 
     def test_connection_error_returns_none(self):
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_remote_sync
 
-        import requests as req
-        with patch.object(req, "get", side_effect=req.exceptions.ConnectionError("refused")):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
             result = rcp_read_remote_sync("proxy-20.live.cbs.boschsecurity.com:42090/abc123", "0x0c22", "T_WORD")
         assert result is None
 
     def test_success_delegates_to_parse(self):
         from custom_components.bosch_shc_camera.local_rcp import rcp_read_remote_sync
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.text = "<rcp><result><str>48 65 6c 6c 6f</str></result></rcp>"
-
-        import requests as req
-        with patch.object(req, "get", return_value=mock_resp):
+        xml_body = b"<rcp><result><str>48 65 6c 6c 6f</str></result></rcp>"
+        resp = MagicMock()
+        resp.status = 200
+        resp.read = MagicMock(return_value=xml_body)
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = rcp_read_remote_sync("proxy-20.live.cbs.boschsecurity.com:42090/abc123", "0x0c22", "P_OCTET")
         assert result == b"\x48\x65\x6c\x6c\x6f"  # "Hello"

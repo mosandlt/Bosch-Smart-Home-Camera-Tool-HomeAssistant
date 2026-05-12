@@ -52,7 +52,7 @@ def start_tls_proxy(
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", 0))
-    port = srv.getsockname()[1]
+    port: int = int(srv.getsockname()[1])
     srv.listen(4)
     srv.settimeout(None)
     _proxy_servers[cam_id] = srv
@@ -83,7 +83,7 @@ def start_tls_proxy(
                 # TCP keep-alive: prevent OS from dropping idle connections.
                 raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 try:
-                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)  # type: ignore[attr-defined]
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 except (AttributeError, OSError):
@@ -96,7 +96,7 @@ def start_tls_proxy(
                 _LOGGER.debug(
                     "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
                     cam_id[:8], cam_host, cam_port,
-                    tls.version(), tls.cipher()[0] if tls.cipher() else "?",
+                    tls.version(), (tls.cipher() or ("?",))[0],
                 )
                 # Reset failure burst — a successful connect proves the
                 # camera is reachable again.
@@ -132,7 +132,7 @@ def start_tls_proxy(
             # TCP keep-alive on client socket too (FFmpeg side)
             client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             try:
-                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)  # type: ignore[attr-defined]
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
             except (AttributeError, OSError):

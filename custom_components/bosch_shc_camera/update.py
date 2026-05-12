@@ -6,6 +6,7 @@ Response: {current, upToDate, update, updating, status}
 """
 
 import logging
+from typing import Any
 
 from homeassistant.components.update import UpdateEntity, UpdateDeviceClass
 from homeassistant.config_entries import ConfigEntry
@@ -14,7 +15,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,13 +34,13 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
+class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):  # type: ignore[misc]
     """Update entity showing camera firmware status."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry = entry
@@ -58,7 +59,7 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
@@ -70,17 +71,17 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
 
     @property
     def installed_version(self) -> str | None:
-        fw = self.coordinator._firmware_cache.get(self._cam_id, {})
+        fw: dict[str, Any] = self.coordinator._firmware_cache.get(self._cam_id, {})
         return fw.get("current") or self._fw or None
 
     @property
     def latest_version(self) -> str | None:
-        fw = self.coordinator._firmware_cache.get(self._cam_id, {})
+        fw: dict[str, Any] = self.coordinator._firmware_cache.get(self._cam_id, {})
         if not fw:
             return self.installed_version
         if fw.get("upToDate", True):
             return self.installed_version
-        update_ver = fw.get("update")
+        update_ver: str | None = fw.get("update")
         if update_ver:
             return update_ver
         # Not up to date but no update version specified
@@ -88,16 +89,16 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):
 
     @property
     def in_progress(self) -> bool:
-        fw = self.coordinator._firmware_cache.get(self._cam_id, {})
-        return fw.get("updating", False)
+        fw: dict[str, Any] = self.coordinator._firmware_cache.get(self._cam_id, {})
+        return bool(fw.get("updating", False))
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return bool(self.coordinator.last_update_success)
 
     @property
-    def extra_state_attributes(self) -> dict:
-        fw = self.coordinator._firmware_cache.get(self._cam_id, {})
+    def extra_state_attributes(self) -> dict[str, Any]:
+        fw: dict[str, Any] = self.coordinator._firmware_cache.get(self._cam_id, {})
         return {
             "up_to_date": fw.get("upToDate"),
             "updating": fw.get("updating", False),

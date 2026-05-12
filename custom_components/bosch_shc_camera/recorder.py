@@ -27,7 +27,7 @@ import re
 import shutil
 import signal
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .smb import _safe_name
 
@@ -115,7 +115,7 @@ def _failed_dir(base_path: str, cam_name: str) -> str:
     return os.path.join(base_path, _FAILED_DIRNAME, _safe_name(cam_name))
 
 
-def _remote_smb_path(opts: dict, cam_name: str, date: str, fname: str) -> str:
+def _remote_smb_path(opts: dict[str, Any], cam_name: str, date: str, fname: str) -> str:
     """Build the SMB destination path for one finalized segment.
 
     Layout: ``\\\\{server}\\{share}\\{smb_base_path}\\{nvr_smb_subpath}\\{cam}\\{date}\\{fname}``.
@@ -129,7 +129,7 @@ def _remote_smb_path(opts: dict, cam_name: str, date: str, fname: str) -> str:
     return f"\\\\{server}\\{share}\\{base}\\{sub}\\{cam}\\{date}\\{fname}".replace("/", "\\")
 
 
-def _remote_ftp_path(opts: dict, cam_name: str, date: str, fname: str) -> str:
+def _remote_ftp_path(opts: dict[str, Any], cam_name: str, date: str, fname: str) -> str:
     """Build the FTP destination path for one finalized segment.
 
     Layout: ``/{smb_base_path}/{nvr_smb_subpath}/{cam}/{date}/{fname}`` — FTP
@@ -212,9 +212,9 @@ def _preroll_pattern(cache_dir: str, cam_name: str) -> str:
     return os.path.join(_preroll_dir(cache_dir, cam_name), "%H%M%S.mp4")
 
 
-def _list_preroll_segments(cam_dir: str) -> list:
+def _list_preroll_segments(cam_dir: str) -> list[tuple[str, float]]:
     """Return [(path, mtime)] sorted oldest-first for one camera's cache dir."""
-    out = []
+    out: list[tuple[str, float]] = []
     if not os.path.isdir(cam_dir):
         return out
     try:
@@ -402,7 +402,7 @@ async def stop_all_preroll(coordinator: "BoschCameraCoordinator") -> None:
         await stop_preroll_recorder(coordinator, cam_id)
 
 
-def list_preroll_files(coordinator: "BoschCameraCoordinator", cam_id: str) -> list:
+def list_preroll_files(coordinator: "BoschCameraCoordinator", cam_id: str) -> list[str]:
     """Return list of pre-roll segment paths for cam_id, sorted oldest-first."""
     opts = coordinator.options
     cache_dir = (opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache").strip()
@@ -413,7 +413,7 @@ def list_preroll_files(coordinator: "BoschCameraCoordinator", cam_id: str) -> li
     return [path for path, _ in _list_preroll_segments(cam_dir)]
 
 
-def create_motion_clip_args(preroll_paths: list, output_path: str) -> list:
+def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[str]:
     """Return ffmpeg argv to concat preroll_paths into one MP4 clip."""
     # Build concat list in memory via pipe — use -f concat -safe 0
     # The actual concat file is written by create_motion_clip before calling ffmpeg.
@@ -443,7 +443,7 @@ async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str,
     concat_file = output_path + ".concat.txt"
     concat_content = "\n".join(f"file '{p}'" for p in paths) + "\n"
 
-    def _write_concat():
+    def _write_concat() -> None:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(concat_file, "w") as f:
             f.write(concat_content)
@@ -827,7 +827,7 @@ def _upload_smb(coordinator: "BoschCameraCoordinator",
     uploads stay in their own branch.
     """
     try:
-        from smbclient import register_session, open_file
+        from smbclient import register_session, open_file  # type: ignore[import-not-found]
     except ImportError:
         _LOGGER.warning(
             "NVR drain (smb): smbprotocol not installed — install or set "
@@ -1032,7 +1032,7 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
 
     # Persist the latest drain stats on the coordinator so the sensor can
     # render them. ``_nvr_drain_state`` is created on first tick.
-    state: dict = getattr(coordinator, "_nvr_drain_state", None) or {}
+    state: dict[str, Any] = getattr(coordinator, "_nvr_drain_state", None) or {}
     state["target"] = target
     state["pending"] = pending
     state["promoted"] = promoted

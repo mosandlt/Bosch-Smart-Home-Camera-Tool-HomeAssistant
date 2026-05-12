@@ -16,6 +16,7 @@ Creates sensor entities per camera:
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.util import dt as dt_util
@@ -25,7 +26,8 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, get_options
+from .const import DOMAIN
+from . import BoschCameraCoordinator, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,12 +105,12 @@ async def async_setup_entry(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class _BoschSensorBase(CoordinatorEntity, SensorEntity):
+class _BoschSensorBase(CoordinatorEntity, SensorEntity):  # type: ignore[misc]
     """Shared base for all Bosch camera sensors."""
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry  = entry
@@ -122,11 +124,11 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):
         self._mac       = info.get("macAddress", "")
 
     @property
-    def _cam_data(self) -> dict:
-        return self.coordinator.data.get(self._cam_id, {})
+    def _cam_data(self) -> dict[str, Any]:
+        return self.coordinator.data.get(self._cam_id, {})  # type: ignore[no-any-return]
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         return {
             "identifiers":  {(DOMAIN, self._cam_id)},
             "name":         f"Bosch {self._cam_title}",
@@ -141,7 +143,7 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):
 class BoschCameraStatusSensor(_BoschSensorBase):
     """Sensor: online / offline / unknown."""
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_status_{cam_id.lower()}"
         self._attr_translation_key = "status"
@@ -150,14 +152,14 @@ class BoschCameraStatusSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> str:
-        return self._cam_data.get("status", "UNKNOWN").lower()
+        return str(self._cam_data.get("status", "UNKNOWN")).lower()
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         info = self._cam_data.get("info", {})
         comm = self.coordinator._commissioned_cache.get(self._cam_id, {})
         fw = self.coordinator._firmware_cache.get(self._cam_id, {})
-        attrs = {
+        attrs: dict[str, Any] = {
             "camera_id": self._cam_id,
             "model":     info.get("hardwareVersion", ""),
             "firmware":  info.get("firmwareVersion", ""),
@@ -178,7 +180,7 @@ class BoschCameraStatusSensor(_BoschSensorBase):
 class BoschCameraLastEventSensor(_BoschSensorBase):
     """Sensor: datetime of the most recent motion event."""
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_last_event_{cam_id.lower()}"
         self._attr_device_class    = SensorDeviceClass.TIMESTAMP
@@ -205,7 +207,7 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
             return None
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         events = self._cam_data.get("events", [])
         latest = events[0] if events else {}
         return {
@@ -221,7 +223,7 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
 class BoschCameraEventsTodaySensor(_BoschSensorBase):
     """Sensor: count of motion events that occurred today."""
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id                   = f"bosch_shc_events_today_{cam_id.lower()}"
         self._attr_icon                        = "mdi:counter"
@@ -236,7 +238,7 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
         return sum(1 for ev in events if ev.get("timestamp", "").startswith(today))
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         events = self._cam_data.get("events", [])
         today  = dt_util.now().strftime("%Y-%m-%d")
         today_events = [ev for ev in events if ev.get("timestamp", "").startswith(today)]
@@ -256,7 +258,7 @@ class BoschWifiSignalSensor(_BoschSensorBase):
     Attributes: ssid, ip_address, mac_address.
     """
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id                  = f"bosch_shc_wifi_signal_{cam_id.lower()}"
         # No device_class — Bosch API returns percentage (0-100), not dBm
@@ -283,9 +285,9 @@ class BoschWifiSignalSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         wifi = self.coordinator._wifiinfo_cache.get(self._cam_id, {})
-        attrs = {
+        attrs: dict[str, Any] = {
             "ssid":        wifi.get("ssid", ""),
             "ip_address":  wifi.get("ipAddress", ""),
             "mac_address": wifi.get("macAddress", ""),
@@ -308,7 +310,7 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
     Attributes: up_to_date (bool from featureSupport.upToDate or similar field).
     """
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_firmware_{cam_id.lower()}"
         self._attr_icon            = "mdi:chip"
@@ -328,13 +330,13 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         info = self._cam_data.get("info", {})
         # upToDate may be a top-level field or inside featureSupport
         up_to_date = info.get("upToDate")
         if up_to_date is None:
             up_to_date = info.get("featureSupport", {}).get("upToDate")
-        attrs = {
+        attrs: dict[str, Any] = {
             "up_to_date": up_to_date,
             "hardware_version": info.get("hardwareVersion", ""),
         }
@@ -352,7 +354,7 @@ class BoschAmbientLightSensor(_BoschSensorBase):
     The API returns a float 0.0–1.0 which is converted to 0–100%.
     """
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id                         = f"bosch_shc_ambient_light_{cam_id.lower()}"
         self._attr_state_class                       = SensorStateClass.MEASUREMENT
@@ -385,7 +387,7 @@ class BoschLedDimmerSensor(_BoschSensorBase):
     State is None (unavailable) when RCP session could not be established.
     """
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id                         = f"bosch_shc_led_dimmer_{cam_id.lower()}"
         self._attr_state_class                       = SensorStateClass.MEASUREMENT
@@ -396,7 +398,7 @@ class BoschLedDimmerSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int | None:
-        return self.coordinator._rcp_dimmer_cache.get(self._cam_id)
+        return self.coordinator._rcp_dimmer_cache.get(self._cam_id)  # type: ignore[no-any-return]
 
     @property
     def available(self) -> bool:
@@ -416,14 +418,14 @@ class BoschClockOffsetSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_clock_offset"
         self._attr_translation_key = "clock_offset"
 
     @property
-    def native_value(self):
-        return self.coordinator.clock_offset(self._cam_id)
+    def native_value(self) -> float | None:
+        return self.coordinator.clock_offset(self._cam_id)  # type: ignore[no-any-return]
 
     @property
     def available(self) -> bool:
@@ -433,7 +435,7 @@ class BoschClockOffsetSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         val = self.coordinator.clock_offset(self._cam_id)
         if val is None:
             return {}
@@ -468,17 +470,17 @@ class BoschMotionSensitivitySensor(_BoschSensorBase):
         return f"bosch_shc_camera_{self._cam_id}_motion_sensitivity"
 
     @property
-    def native_value(self):
+    def native_value(self) -> str | None:
         settings = self.coordinator.motion_settings(self._cam_id)
         if not settings:
             return None
         enabled = settings.get("enabled", False)
         if not enabled:
             return "disabled"
-        return settings.get("motionAlarmConfiguration", "UNKNOWN").lower().replace("_", " ")
+        return str(settings.get("motionAlarmConfiguration", "UNKNOWN")).lower().replace("_", " ")
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         settings = self.coordinator.motion_settings(self._cam_id)
         if not settings:
             return {}
@@ -506,14 +508,14 @@ class BoschAudioAlarmSensor(_BoschSensorBase):
         return f"bosch_shc_camera_{self._cam_id}_audio_alarm"
 
     @property
-    def native_value(self):
+    def native_value(self) -> str | None:
         settings = self.coordinator.audio_alarm_settings(self._cam_id)
         if not settings:
             return None
         return "enabled" if settings.get("enabled", False) else "disabled"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         settings = self.coordinator.audio_alarm_settings(self._cam_id)
         if not settings:
             return {}
@@ -544,15 +546,15 @@ class BoschLastEventTypeSensor(_BoschSensorBase):
         return f"bosch_shc_camera_{self._cam_id}_last_event_type"
 
     @property
-    def native_value(self):
+    def native_value(self) -> str:
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         if not events:
             return "none"
         latest = events[0]
-        return latest.get("eventType", "unknown").lower()
+        return str(latest.get("eventType", "unknown")).lower()
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         if not events:
             return {}
@@ -583,7 +585,7 @@ class BoschMovementEventsTodaySensor(_BoschSensorBase):
         return f"bosch_shc_camera_{self._cam_id}_movement_events_today"
 
     @property
-    def native_value(self):
+    def native_value(self) -> int:
         today = dt_util.now().strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
@@ -612,7 +614,7 @@ class BoschAudioEventsTodaySensor(_BoschSensorBase):
         return f"bosch_shc_camera_{self._cam_id}_audio_events_today"
 
     @property
-    def native_value(self):
+    def native_value(self) -> int:
         today = dt_util.now().strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
@@ -655,9 +657,9 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
         return "polling"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         import time as _time
-        attrs = {
+        attrs: dict[str, Any] = {
             "fcm_enabled": self.coordinator.options.get("enable_fcm_push", False),
             "fcm_running": self.coordinator._fcm_running,
             "fcm_healthy": self.coordinator._fcm_healthy,
@@ -683,14 +685,14 @@ class BoschUnreadEventsCountSensor(_BoschSensorBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_unread_events"
         self._attr_translation_key = "unread_events"
 
     @property
     def native_value(self) -> int | None:
-        return self.coordinator._unread_events_cache.get(self._cam_id)
+        return self.coordinator._unread_events_cache.get(self._cam_id)  # type: ignore[no-any-return]
 
     @property
     def available(self) -> bool:
@@ -713,7 +715,7 @@ class BoschCommissionedSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_commissioned"
         self._attr_translation_key = "commissioned"
@@ -739,7 +741,7 @@ class BoschCommissionedSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator._commissioned_cache.get(self._cam_id)
         if not data:
             return {}
@@ -763,7 +765,7 @@ class BoschRulesCountSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_rules_count"
         self._attr_translation_key = "schedule_rules"
@@ -783,7 +785,7 @@ class BoschRulesCountSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         rules = self.coordinator._rules_cache.get(self._cam_id, [])
         return {
             "rules": [
@@ -814,7 +816,7 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_catalog"
         self._attr_translation_key = "alarm_catalog"
@@ -838,7 +840,7 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         alarms = self.coordinator._rcp_alarm_catalog_cache.get(self._cam_id, [])
         return {
             "alarm_types": [a["name"] for a in alarms],
@@ -861,7 +863,7 @@ class BoschMotionZonesSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_motion_zones"
         self._attr_translation_key = "motion_zones"
@@ -885,12 +887,12 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         return "zones"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
         coords = self.coordinator._rcp_motion_coords_cache.get(self._cam_id, [])
         cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
         gen2_zones = self.coordinator._gen2_zones_cache.get(self._cam_id, [])
-        attrs = {
+        attrs: dict[str, Any] = {
             "zones": zones,
             "coordinates": coords,
             "coordinate_count": len(coords),
@@ -919,7 +921,7 @@ class BoschTlsCertSensor(_BoschSensorBase):
     _attr_entity_registry_enabled_default = False
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_tls_cert"
         self._attr_translation_key = "tls_cert"
@@ -942,7 +944,7 @@ class BoschTlsCertSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         cert = self.coordinator._rcp_tls_cert_cache.get(self._cam_id, {})
         return {
             "issuer": cert.get("issuer", ""),
@@ -966,7 +968,7 @@ class BoschNetworkServicesSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_network_services"
         self._attr_translation_key = "network_services"
@@ -990,7 +992,7 @@ class BoschNetworkServicesSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         services = self.coordinator._rcp_network_services_cache.get(self._cam_id, [])
         return {"services": services}
 
@@ -1006,7 +1008,7 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_iva_catalog"
         self._attr_translation_key = "iva_analytics"
@@ -1030,7 +1032,7 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         modules = self.coordinator._rcp_iva_catalog_cache.get(self._cam_id, [])
         active = [m for m in modules if m.get("active")]
         return {
@@ -1054,7 +1056,7 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_privacy_masks"
         self._attr_translation_key = "privacy_masks"
@@ -1074,10 +1076,10 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
         return "masks"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
         gen2_areas = self.coordinator._gen2_private_areas_cache.get(self._cam_id, [])
-        attrs = {
+        attrs: dict[str, Any] = {
             "cloud_privacy_masks": cloud_masks,
             "cloud_mask_count": len(cloud_masks),
             "gen2_private_areas": gen2_areas,
@@ -1105,7 +1107,7 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_ambient_schedule"
         self._attr_translation_key = "ambient_schedule"
@@ -1136,7 +1138,7 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
         )
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
         if not cache:
             return {}
@@ -1145,7 +1147,7 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
             schedule_str = schedule.get("type", "ENVIRONMENT")
         else:
             schedule_str = schedule
-        attrs = {
+        attrs: dict[str, Any] = {
             "enabled": cache.get("ambientLightEnabled", False),
             "schedule_type": schedule_str,
         }
@@ -1190,7 +1192,7 @@ class BoschAlarmStateSensor(_BoschSensorBase):
 
     _attr_icon = "mdi:alarm-light-outline"
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_state"
         self._attr_translation_key = "alarm_state"
@@ -1215,10 +1217,10 @@ class BoschAlarmStateSensor(_BoschSensorBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return self.coordinator.last_update_success  # type: ignore[no-any-return]
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         settings = self.coordinator._alarm_settings_cache.get(self._cam_id, {})
         status   = self.coordinator._alarm_status_cache.get(self._cam_id, {})
         return {
@@ -1236,7 +1238,7 @@ class BoschAlarmStateSensor(_BoschSensorBase):
 class BoschStreamStatusSensor(_BoschSensorBase):
     """Sensor: live stream state — idle / warming_up / connecting / streaming / streaming_remote."""
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_stream_status_{cam_id.lower()}"
         self._attr_icon            = "mdi:video-wireless"
@@ -1262,7 +1264,7 @@ class BoschStreamStatusSensor(_BoschSensorBase):
         return "idle"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         live = self.coordinator._live_connections.get(self._cam_id, {})
         return {
             "connection_type": live.get("_connection_type", ""),
@@ -1296,7 +1298,7 @@ class BoschNvrStateSensor(_BoschSensorBase):
 
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_nvr_state_{cam_id.lower()}"
         self._attr_translation_key = "nvr_state"
@@ -1314,7 +1316,7 @@ class BoschNvrStateSensor(_BoschSensorBase):
         return "idle"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         state = getattr(self.coordinator, "_nvr_drain_state", {}) or {}
         # Camera title is used as the staging-folder key (sanitized via
         # _safe_name in recorder._staging_dir). Read with the same sanitization

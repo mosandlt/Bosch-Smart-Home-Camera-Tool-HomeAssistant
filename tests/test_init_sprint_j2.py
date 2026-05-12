@@ -1,7 +1,7 @@
 """Sprint J-2 coverage tests for `__init__.py`.
 
 Targets:
-- async_fetch_live_snapshot_local: _fetch_digest closure (lines 3162-3185)
+- async_fetch_live_snapshot_local: async Digest snap via async_digest_request
 - _check_and_recover_webrtc: direct-refresh exception + _last_go2rtc_reload init (lines 3310-3314)
 - _check_and_recover_webrtc: go2rtc reload exception + async_refresh_providers exception (lines 3335-3346)
 - _ensure_go2rtc_schemes_fresh: full flow (lines 3366-3412)
@@ -17,10 +17,10 @@ via `BoschCameraCoordinator.method(coord, ...)` — no HA runtime required.
 from __future__ import annotations
 
 import asyncio
-import sys
 import time
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -64,20 +64,35 @@ def _make_coord(**overrides):
     return SimpleNamespace(**base)
 
 
-# ── 1. async_fetch_live_snapshot_local / _fetch_digest ───────────────────────
+# ── 1. async_fetch_live_snapshot_local ───────────────────────────────────────
+
+
+def _make_digest_resp_cm(status: int, content_type: str = "image/jpeg", body: bytes = b"") -> MagicMock:
+    """Return an async context-manager mock for async_digest_request."""
+    resp = MagicMock()
+    resp.status = status
+    resp.headers = {"Content-Type": content_type}
+    resp.read = AsyncMock(return_value=body)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    # async_digest_request returns a coroutine that yields the cm
+    future: asyncio.Future[MagicMock] = asyncio.get_event_loop().create_future()
+    future.set_result(cm)
+    return future
 
 
 class TestFetchDigestClosure:
-    """Tests for the _fetch_digest inner function (lines 3162-3185).
+    """Tests for async_fetch_live_snapshot_local using async_digest_request.
 
-    Strategy: patch aiohttp so PUT /connection succeeds with user/password/urls,
-    then make hass.async_add_executor_job actually CALL the executor function
-    (the inner _fetch_digest closure) so we exercise its body.
+    Strategy: patch PUT /connection to return user/password/urls, then patch
+    async_digest_request to return controlled responses — no real network.
     """
 
     @staticmethod
-    async def _run_with_mock_put(coord, cam_id, *, requests_mock):
-        """Wire aiohttp + executor so _fetch_digest runs synchronously in tests."""
+    async def _run_with_mock_put(coord, cam_id, *, digest_cm_or_exc=None):
+        """Wire aiohttp PUT mock + digest_request mock so the full method runs."""
+        import aiohttp as _aiohttp
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         put_resp = MagicMock()
@@ -93,75 +108,160 @@ class TestFetchDigestClosure:
         session_mock.__aexit__ = AsyncMock(return_value=None)
         session_mock.put = MagicMock(return_value=put_resp)
 
-        # async_add_executor_job: call the passed-in callable synchronously
-        async def _exec(fn, *args):
-            return fn(*args) if args else fn()
+        # async_get_clientsession returns a plain MagicMock (not the aiohttp session above)
+        client_session = MagicMock()
 
-        coord.hass.async_add_executor_job = _exec
-
-        with patch.dict(sys.modules, {"requests": requests_mock, "urllib3": MagicMock()}), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
+             patch("aiohttp.ClientSession", return_value=session_mock), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch("custom_components.bosch_shc_camera.async_digest_request",
+                   side_effect=digest_cm_or_exc if isinstance(digest_cm_or_exc, type) and issubclass(digest_cm_or_exc, Exception) else None,
+                   new_callable=None if isinstance(digest_cm_or_exc, type) and issubclass(digest_cm_or_exc, Exception) else lambda: _make_patch_digest(digest_cm_or_exc)):
             return await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, cam_id
             )
 
     @pytest.mark.asyncio
     async def test_200_image_returns_bytes(self):
-        """200 + image Content-Type → returns r.content (bytes)."""
+        """200 + image Content-Type → returns bytes."""
+        import aiohttp as _aiohttp
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        img_bytes = b"\xff\xd8\xff" * 10
+        resp = MagicMock()
+        resp.status = 200
+        resp.headers = {"Content-Type": "image/jpeg"}
+        resp.read = AsyncMock(return_value=img_bytes)
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+
+        put_resp = MagicMock()
+        put_resp.status = 200
+        put_resp.__aenter__ = AsyncMock(return_value=put_resp)
+        put_resp.__aexit__ = AsyncMock(return_value=None)
+        put_resp.text = AsyncMock(
+            return_value='{"user":"u","password":"p","urls":["192.168.0.1:443"]}'
+        )
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.put = MagicMock(return_value=put_resp)
+        client_session = MagicMock()
+
         coord = _make_coord()
-
-        req_mock = MagicMock()
-        resp_mock = MagicMock()
-        resp_mock.status_code = 200
-        resp_mock.headers = {"Content-Type": "image/jpeg"}
-        resp_mock.content = b"\xff\xd8\xff" * 10
-        req_mock.get.return_value = resp_mock
-        req_mock.auth.HTTPDigestAuth = MagicMock(return_value=MagicMock())
-
-        result = await self._run_with_mock_put(coord, CAM_A, requests_mock=req_mock)
-        assert result == resp_mock.content
+        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
+             patch("aiohttp.ClientSession", return_value=session_mock), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
+        assert result == img_bytes
 
     @pytest.mark.asyncio
     async def test_non_200_returns_none(self):
-        """Non-200 status → _fetch_digest returns None."""
+        """Non-200 status → None."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        resp = MagicMock()
+        resp.status = 401
+        resp.headers = {"Content-Type": "text/plain"}
+        resp.read = AsyncMock(return_value=b"")
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+
+        put_resp = MagicMock()
+        put_resp.status = 200
+        put_resp.__aenter__ = AsyncMock(return_value=put_resp)
+        put_resp.__aexit__ = AsyncMock(return_value=None)
+        put_resp.text = AsyncMock(
+            return_value='{"user":"u","password":"p","urls":["192.168.0.1:443"]}'
+        )
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.put = MagicMock(return_value=put_resp)
+        client_session = MagicMock()
+
         coord = _make_coord()
-
-        req_mock = MagicMock()
-        resp_mock = MagicMock()
-        resp_mock.status_code = 401
-        resp_mock.headers = {"Content-Type": "text/plain"}
-        req_mock.get.return_value = resp_mock
-        req_mock.auth.HTTPDigestAuth = MagicMock(return_value=MagicMock())
-
-        result = await self._run_with_mock_put(coord, CAM_A, requests_mock=req_mock)
+        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
+             patch("aiohttp.ClientSession", return_value=session_mock), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_200_but_not_image_content_type_returns_none(self):
-        """200 + non-image Content-Type → _fetch_digest returns None."""
+        """200 + non-image Content-Type → None."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.headers = {"Content-Type": "text/html"}
+        resp.read = AsyncMock(return_value=b"<html/>")
+
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+
+        put_resp = MagicMock()
+        put_resp.status = 200
+        put_resp.__aenter__ = AsyncMock(return_value=put_resp)
+        put_resp.__aexit__ = AsyncMock(return_value=None)
+        put_resp.text = AsyncMock(
+            return_value='{"user":"u","password":"p","urls":["192.168.0.1:443"]}'
+        )
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.put = MagicMock(return_value=put_resp)
+        client_session = MagicMock()
+
         coord = _make_coord()
-
-        req_mock = MagicMock()
-        resp_mock = MagicMock()
-        resp_mock.status_code = 200
-        resp_mock.headers = {"Content-Type": "text/html"}
-        req_mock.get.return_value = resp_mock
-        req_mock.auth.HTTPDigestAuth = MagicMock(return_value=MagicMock())
-
-        result = await self._run_with_mock_put(coord, CAM_A, requests_mock=req_mock)
+        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
+             patch("aiohttp.ClientSession", return_value=session_mock), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_requests_exception_returns_none(self):
-        """requests.get raises → _fetch_digest catches exception and returns None."""
+    async def test_aiohttp_error_returns_none(self):
+        """aiohttp.ClientError → None."""
+        import aiohttp as _aiohttp
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        put_resp = MagicMock()
+        put_resp.status = 200
+        put_resp.__aenter__ = AsyncMock(return_value=put_resp)
+        put_resp.__aexit__ = AsyncMock(return_value=None)
+        put_resp.text = AsyncMock(
+            return_value='{"user":"u","password":"p","urls":["192.168.0.1:443"]}'
+        )
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.put = MagicMock(return_value=put_resp)
+        client_session = MagicMock()
+
         coord = _make_coord()
-
-        req_mock = MagicMock()
-        req_mock.get.side_effect = ConnectionError("network error")
-        req_mock.auth.HTTPDigestAuth = MagicMock(return_value=MagicMock())
-
-        result = await self._run_with_mock_put(coord, CAM_A, requests_mock=req_mock)
+        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
+             patch("aiohttp.ClientSession", return_value=session_mock), \
+             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                   return_value=client_session), \
+             patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock(side_effect=_aiohttp.ClientError("network error"))):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
         assert result is None
 
     @pytest.mark.asyncio
@@ -172,11 +272,13 @@ class TestFetchDigestClosure:
         coord = _make_coord(
             _shc_state_cache={CAM_A: {"privacy_mode": True}},
         )
-        result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
-            coord, CAM_A
-        )
+        with patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock()) as mock_digest:
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result is None
-        coord.hass.async_add_executor_job.assert_not_called()
+        mock_digest.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_token_returns_none(self):
@@ -184,10 +286,13 @@ class TestFetchDigestClosure:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(token=None)
-        result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
-            coord, CAM_A
-        )
+        with patch("custom_components.bosch_shc_camera.async_digest_request",
+                   new=AsyncMock()) as mock_digest:
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result is None
+        mock_digest.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_missing_credentials_in_put_response_returns_none(self):

@@ -424,27 +424,26 @@ def _make_camera_for_snap(**overrides):
     return cam
 
 
-class TestFetchLocalSnapClosure:
-    """camera.py 606-618: _fetch_local_snap inner function body.
+def _digest_cm_snap(status: int, body: bytes = b"", content_type: str = "image/jpeg") -> MagicMock:
+    """Async CM for async_digest_request returning a controlled response."""
+    resp = MagicMock()
+    resp.status = status
+    resp.headers = {"Content-Type": content_type}
+    resp.read = AsyncMock(return_value=body)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
 
-    The function is invoked via async_add_executor_job; we make the executor
-    actually call it synchronously to exercise the requests.get path.
-    """
+
+class TestFetchLocalSnapClosure:
+    """camera.py LOCAL snap path: uses async_digest_request (no executor)."""
 
     @pytest.mark.asyncio
     async def test_local_snap_200_returns_bytes(self):
-        """LOCAL live connection + requests.get 200 + image/jpeg → returns bytes."""
+        """LOCAL live connection + async_digest_request 200 + image/jpeg → returns bytes."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Type": "image/jpeg"}
-        mock_resp.content = b"\xff\xd8\xff"
-
-        mock_requests = MagicMock()
-        mock_requests.get = MagicMock(return_value=mock_resp)
-        mock_requests.auth.HTTPDigestAuth = MagicMock()
-        mock_requests.RequestException = Exception
+        import aiohttp
 
         cam = _make_camera_for_snap()
         cam.coordinator._live_connections = {CAM_ID: {
@@ -453,16 +452,12 @@ class TestFetchLocalSnapClosure:
             "_local_user": "digest_user",
             "_local_password": "digest_pass",
         }}
-
-        # Make executor actually call the closure
-        async def real_executor(fn, *args):
-            with patch.dict(sys.modules, {"requests": mock_requests}):
-                return fn()
-
-        cam.hass.async_add_executor_job = real_executor
+        cm = _digest_cm_snap(200, b"\xff\xd8\xff", "image/jpeg")
 
         with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == b"\xff\xd8\xff", (
@@ -472,16 +467,9 @@ class TestFetchLocalSnapClosure:
 
     @pytest.mark.asyncio
     async def test_local_snap_request_exception_returns_none(self):
-        """requests.RequestException in _fetch_local_snap → returns None (not crash)."""
+        """aiohttp.ClientError in LOCAL snap → returns cached/placeholder (not crash)."""
+        import aiohttp as _aiohttp
         from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        class FakeRequestException(Exception):
-            pass
-
-        mock_requests = MagicMock()
-        mock_requests.get = MagicMock(side_effect=FakeRequestException("timeout"))
-        mock_requests.auth.HTTPDigestAuth = MagicMock()
-        mock_requests.RequestException = FakeRequestException
 
         cam = _make_camera_for_snap()
         cam.coordinator._live_connections = {CAM_ID: {
@@ -491,37 +479,21 @@ class TestFetchLocalSnapClosure:
             "_local_password": "p",
         }}
 
-        async def real_executor(fn, *args):
-            with patch.dict(sys.modules, {"requests": mock_requests}):
-                return fn()
-
-        cam.hass.async_add_executor_job = real_executor
-
         with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
+                   new=AsyncMock(side_effect=_aiohttp.ClientError("timeout"))):
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        # RequestException is caught and logged; LOCAL path hits line 646:
-        # return self._cached_image or self._PLACEHOLDER_JPEG
         from custom_components.bosch_shc_camera.camera import BoschCamera as _Cam
         assert result is None or result is cam._cached_image or result is _Cam._PLACEHOLDER_JPEG, (
-            "RequestException in _fetch_local_snap must not raise; returns cached/placeholder"
+            "aiohttp.ClientError in LOCAL snap must not raise; returns cached/placeholder"
         )
 
     @pytest.mark.asyncio
     async def test_local_snap_non_image_content_type_returns_none(self):
-        """requests.get 200 but non-image content-type → _fetch_local_snap returns None."""
+        """async_digest_request 200 but non-image content-type → placeholder."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Type": "text/html"}
-        mock_resp.content = b"<html>error</html>"
-
-        mock_requests = MagicMock()
-        mock_requests.get = MagicMock(return_value=mock_resp)
-        mock_requests.auth.HTTPDigestAuth = MagicMock()
-        mock_requests.RequestException = Exception
 
         cam = _make_camera_for_snap()
         cam.coordinator._live_connections = {CAM_ID: {
@@ -530,36 +502,30 @@ class TestFetchLocalSnapClosure:
             "_local_user": "u",
             "_local_password": "p",
         }}
-
-        async def real_executor(fn, *args):
-            with patch.dict(sys.modules, {"requests": mock_requests}):
-                return fn()
-
-        cam.hass.async_add_executor_job = real_executor
+        cm = _digest_cm_snap(200, b"<html>error</html>", "text/html")
 
         with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        # non-image content-type → _fetch_local_snap returns None → cached_image or None
-        # We just verify it didn't crash
+        # non-image content-type → data=None → placeholder
         assert True, "non-image content type must not raise"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# camera.py — _fetch_outage_snap executor closure (lines 826-838)
+# camera.py — outage snap fallback (uses async_digest_request directly)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestFetchOutageSnapClosure:
-    """camera.py 826-838: _fetch_outage_snap inner function body.
+    """camera.py outage snap path: async_digest_request called directly.
 
     Triggered when _auth_outage_count > 0 and _local_creds_cache has cached creds.
     """
 
-    def _make_outage_cam(self, requests_mock):
-        """Camera with outage creds and real executor."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
+    def _make_outage_cam(self) -> "MagicMock":
+        """Camera with outage creds."""
         cam = _make_camera_for_snap()
         cam.coordinator._auth_outage_count = 2  # triggers outage path
         cam.coordinator._local_creds_cache = {CAM_ID: {
@@ -570,12 +536,6 @@ class TestFetchOutageSnapClosure:
             "ts": time.monotonic(),
         }}
         cam.coordinator._live_connections = {}  # no active stream → skip path 1
-
-        async def real_executor(fn, *args):
-            with patch.dict(sys.modules, {"requests": requests_mock}):
-                return fn()
-
-        cam.hass.async_add_executor_job = real_executor
         return cam
 
     @pytest.mark.asyncio
@@ -583,20 +543,13 @@ class TestFetchOutageSnapClosure:
         """Cloud outage + cached Digest creds + 200 → returns bytes."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Type": "image/jpeg"}
-        mock_resp.content = b"\xff\xd8outage"
-
-        mock_requests = MagicMock()
-        mock_requests.get = MagicMock(return_value=mock_resp)
-        mock_requests.auth.HTTPDigestAuth = MagicMock()
-        mock_requests.RequestException = Exception
-
-        cam = self._make_outage_cam(mock_requests)
+        cam = self._make_outage_cam()
+        cm = _digest_cm_snap(200, b"\xff\xd8outage", "image/jpeg")
 
         with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
+                   new=AsyncMock(return_value=cm)):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == b"\xff\xd8outage", (
@@ -606,24 +559,19 @@ class TestFetchOutageSnapClosure:
 
     @pytest.mark.asyncio
     async def test_outage_snap_request_exception_returns_none(self):
-        """requests.RequestException in _fetch_outage_snap → returns None."""
+        """aiohttp.ClientError in outage snap → returns cached/placeholder."""
+        import aiohttp as _aiohttp
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        class FakeRequestException(Exception):
-            pass
-
-        mock_requests = MagicMock()
-        mock_requests.get = MagicMock(side_effect=FakeRequestException("LAN unreachable"))
-        mock_requests.auth.HTTPDigestAuth = MagicMock()
-        mock_requests.RequestException = FakeRequestException
-
-        cam = self._make_outage_cam(mock_requests)
+        cam = self._make_outage_cam()
 
         with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
+                   new=AsyncMock(side_effect=_aiohttp.ClientError("LAN unreachable"))):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         from custom_components.bosch_shc_camera.camera import BoschCamera as _Cam
         assert result is None or result is cam._cached_image or result is _Cam._PLACEHOLDER_JPEG, (
-            "RequestException in outage snap must not raise; returns cached/placeholder"
+            "aiohttp.ClientError in outage snap must not raise; returns cached/placeholder"
         )

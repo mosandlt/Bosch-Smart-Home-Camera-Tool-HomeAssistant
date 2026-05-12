@@ -47,10 +47,10 @@ async def get_cached_rcp_session(
             return session_id
         del session_cache[proxy_hash]
 
-    session_id = await rcp_session(session_cache, proxy_host, proxy_hash)
-    if session_id:
-        session_cache[proxy_hash] = (session_id, now + 300.0)  # 5-min TTL
-    return session_id
+    new_session_id: str | None = await rcp_session(session_cache, proxy_host, proxy_hash)
+    if new_session_id:
+        session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
+    return new_session_id
 
 
 async def rcp_session(
@@ -198,7 +198,7 @@ async def rcp_local_read(
                 if payload_m:
                     return bytes.fromhex(payload_m.group(1).decode("ascii"))
                 if raw and not raw.startswith(b"<"):
-                    return raw
+                    return bytes(raw)
     except (asyncio.TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.debug("rcp_local_read: %s@%s %s", command, cam_ip, err)
     return None
@@ -361,7 +361,7 @@ async def rcp_read(
 
                 # Fallback: raw binary response (non-XML, e.g. JPEG)
                 if raw and not raw.startswith(b"<"):
-                    return raw
+                    return bytes(raw)
 
                 _LOGGER.debug(
                     "rcp_read: command=%s no payload in response (%d bytes): %.100s",
@@ -423,7 +423,7 @@ async def async_update_rcp_data(
     _failures = getattr(coordinator, "_rcp_cmd_failures", {}).setdefault(cam_id, {})
 
     def _skip(cmd: str) -> bool:
-        return _failures.get(cmd, 0) >= 3
+        return bool(_failures.get(cmd, 0) >= 3)
 
     def _mark_fail(cmd: str) -> None:
         _failures[cmd] = _failures.get(cmd, 0) + 1
@@ -657,12 +657,12 @@ async def async_update_rcp_data(
 # ── Phase 2 parsers ─────────────────────────────────────────────────────────
 
 
-def _parse_alarm_catalog(raw: bytes) -> list[dict]:
+def _parse_alarm_catalog(raw: bytes) -> list[dict[str, Any]]:
     """Parse alarm catalog (0x0c38) from UTF-16-BE encoded TLV data.
 
     Returns list of dicts: [{"id": 0, "name": "Virtual Alarm 0", "type": "virtual"}, ...]
     """
-    alarms = []
+    alarms: list[dict[str, Any]] = []
     try:
         # The raw data contains TLV entries with alarm names in UTF-16-BE.
         # Each entry: 2B id + 2B length + UTF-16-BE name
@@ -704,12 +704,12 @@ def _parse_alarm_catalog(raw: bytes) -> list[dict]:
     return alarms
 
 
-def _parse_motion_zones(raw: bytes) -> list[dict]:
+def _parse_motion_zones(raw: bytes) -> list[dict[str, Any]]:
     """Parse motion detection zones (0x0c00) — 5 zones × 28 bytes each.
 
     Returns list of dicts with zone info (id, enabled, sensitivity fields).
     """
-    zones = []
+    zones: list[dict[str, Any]] = []
     zone_size = 28
     n_zones = min(len(raw) // zone_size, 5)
     for i in range(n_zones):
@@ -726,13 +726,13 @@ def _parse_motion_zones(raw: bytes) -> list[dict]:
     return zones
 
 
-def _parse_motion_coords(raw: bytes) -> list[dict]:
+def _parse_motion_coords(raw: bytes) -> list[dict[str, float]]:
     """Parse motion region boundary coordinates (0x0c0a).
 
     Each zone is 8 bytes: x1(2B) y1(2B) x2(2B) y2(2B) in 0-10000 units.
     Returns list of zone rectangles as {x1, y1, x2, y2} in percent (0-100).
     """
-    zones = []
+    zones: list[dict[str, float]] = []
     zone_size = 8
     n_zones = len(raw) // zone_size
     for z in range(n_zones):
@@ -753,12 +753,12 @@ def _parse_motion_coords(raw: bytes) -> list[dict]:
     return zones
 
 
-def _parse_tls_cert(raw: bytes) -> dict:
+def _parse_tls_cert(raw: bytes) -> dict[str, Any]:
     """Parse DER X.509 certificate (0x0b91) and extract key info.
 
     Falls back to raw hex if pyOpenSSL/cryptography is not available.
     """
-    info: dict = {"raw_size": len(raw)}
+    info: dict[str, Any] = {"raw_size": len(raw)}
     try:
         from cryptography import x509
         cert = x509.load_der_x509_certificate(raw)
@@ -797,12 +797,12 @@ def _parse_network_services(raw: bytes) -> list[str]:
     return services
 
 
-def _parse_iva_catalog(raw: bytes) -> list[dict]:
+def _parse_iva_catalog(raw: bytes) -> list[dict[str, Any]]:
     """Parse IVA analytics module catalog (0x0b60) — 65 entries × 6B.
 
     Returns list of dicts with module info.
     """
-    modules = []
+    modules: list[dict[str, Any]] = []
     entry_size = 6
     n = min(len(raw) // entry_size, 65)
     for i in range(n):

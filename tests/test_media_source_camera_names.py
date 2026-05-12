@@ -252,8 +252,7 @@ class TestSyncLocalSaveOldEventGuard:
             "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
         }
 
-        with patch.dict(sys.modules, {"requests": MagicMock(), "urllib3": MagicMock()}):
-            sync_local_save(coord, ev, "tok", "Terrasse")
+        sync_local_save(coord, ev, "tok", "Terrasse")
 
         assert list(tmp_path.rglob("*.jpg")) == [], (
             "Old event (2 h before session start) must not create any file"
@@ -271,8 +270,7 @@ class TestSyncLocalSaveOldEventGuard:
             "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
         }
 
-        with patch.dict(sys.modules, {"requests": MagicMock(), "urllib3": MagicMock()}):
-            sync_local_save(coord, ev, "tok", "Terrasse")
+        sync_local_save(coord, ev, "tok", "Terrasse")
 
         assert list(tmp_path.rglob("*.jpg")) == [], (
             "Event 90 s before session start must be skipped"
@@ -294,15 +292,12 @@ class TestSyncLocalSaveOldEventGuard:
         }
 
         fake_resp = MagicMock()
-        fake_resp.status_code = 200
-        fake_resp.iter_content.return_value = [b"JPEG"]
-        fake_session = MagicMock()
-        fake_session.get.return_value = fake_resp
-        fake_session.headers = {}
-        fake_requests = MagicMock()
-        fake_requests.Session.return_value = fake_session
+        fake_resp.status = 200
+        fake_resp.read.side_effect = [b"JPEG", b""]
+        fake_resp.__enter__ = MagicMock(return_value=fake_resp)
+        fake_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch.dict(sys.modules, {"requests": fake_requests, "urllib3": MagicMock()}):
+        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=fake_resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         written = list(tmp_path.rglob("*.jpg"))
@@ -324,15 +319,12 @@ class TestSyncLocalSaveOldEventGuard:
         }
 
         fake_resp = MagicMock()
-        fake_resp.status_code = 200
-        fake_resp.iter_content.return_value = [b"JPEG"]
-        fake_session = MagicMock()
-        fake_session.get.return_value = fake_resp
-        fake_session.headers = {}
-        fake_requests = MagicMock()
-        fake_requests.Session.return_value = fake_session
+        fake_resp.status = 200
+        fake_resp.read.side_effect = [b"JPEG", b""]
+        fake_resp.__enter__ = MagicMock(return_value=fake_resp)
+        fake_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch.dict(sys.modules, {"requests": fake_requests, "urllib3": MagicMock()}):
+        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=fake_resp):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         written = list(tmp_path.rglob("*.jpg"))
@@ -358,9 +350,8 @@ class TestSyncLocalSaveOldEventGuard:
         }
 
         # Should not raise; getattr default is 0.0 which disables the guard
-        with patch.dict(sys.modules, {"requests": MagicMock(), "urllib3": MagicMock()}):
-            sync_local_save(coord, ev, "tok", "Terrasse")
-        # No assertion on file — guard disabled, behaviour depends on requests mock
+        sync_local_save(coord, ev, "tok", "Terrasse")
+        # No assertion on file — guard disabled, behaviour depends on network (now blocked)
 
 
 # ── _browse path auto-detection (single_source vs multi_source) ───────────────

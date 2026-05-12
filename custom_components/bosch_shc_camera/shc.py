@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
@@ -101,8 +101,8 @@ async def async_shc_request(
     coordinator: BoschCameraCoordinator,
     method: str,
     path: str,
-    body: dict | None = None,
-) -> dict | list | None:
+    body: dict[str, Any] | None = None,
+) -> dict[Any, Any] | list[Any] | None:
     """Make a request to the SHC local API using mutual TLS.
 
     Returns parsed JSON on success, None on failure.
@@ -138,7 +138,7 @@ async def async_shc_request(
                     async with s.get(url, headers=headers) as r:
                         if r.status == 200:
                             _shc_mark_success(coordinator)
-                            return await r.json()
+                            return await r.json()  # type: ignore[no-any-return]
                         _LOGGER.debug("SHC GET %s -> HTTP %d", path, r.status)
                         _shc_mark_failure(coordinator)
                 elif method == "PUT":
@@ -164,7 +164,7 @@ async def async_shc_request(
 # ── SHC state polling ────────────────────────────────────────────────────────
 
 async def async_update_shc_states(
-    coordinator: BoschCameraCoordinator, data: dict
+    coordinator: BoschCameraCoordinator, data: dict[str, Any]
 ) -> None:
     """Fetch CameraLight and PrivacyMode states from SHC for each camera.
 
@@ -260,7 +260,7 @@ async def async_update_shc_states(
                     "privacy_mode write-lock active for %s — keeping cached "
                     "value %s, ignoring SHC value %s (lock_age=%.1fs ttl=%.1fs)",
                     cam_id[:8], old_priv, new_priv,
-                    time.monotonic() - lock_ts, ttl,
+                    time.monotonic() - lock_ts if lock_ts is not None else 0.0, ttl,
                 )
             else:
                 entry["privacy_mode"] = new_priv
@@ -282,7 +282,7 @@ async def async_shc_set_camera_light(
         f"/devices/{device_id}/services/CameraLight/state",
         {"@type": "cameraLightState", "value": "ON" if on else "OFF"},
     )
-    if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
+    if result and isinstance(result, dict) and result.get("ok", result.get("status", 0) in (200, 201, 204)):
         coordinator._shc_state_cache[cam_id]["camera_light"] = on
         coordinator.async_update_listeners()
         coordinator.hass.async_create_task(coordinator.async_request_refresh())
@@ -304,7 +304,7 @@ async def async_shc_set_privacy_mode(
         f"/devices/{device_id}/services/PrivacyMode/state",
         {"@type": "privacyModeState", "value": "ENABLED" if enabled else "DISABLED"},
     )
-    if result and result.get("ok", result.get("status", 0) in (200, 201, 204)):
+    if result and isinstance(result, dict) and result.get("ok", result.get("status", 0) in (200, 201, 204)):
         coordinator._shc_state_cache[cam_id]["privacy_mode"] = enabled
         coordinator._privacy_set_at[cam_id] = time.monotonic()
         coordinator.async_update_listeners()
@@ -587,7 +587,7 @@ async def async_cloud_set_camera_light(
 
 
 async def async_cloud_set_light_component(
-    coordinator: BoschCameraCoordinator, cam_id: str, component: str, value
+    coordinator: BoschCameraCoordinator, cam_id: str, component: str, value: Any
 ) -> bool:
     """Set individual light component.
 

@@ -11,17 +11,20 @@ Provides:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import BoschCameraCoordinator, DOMAIN, get_options
+from .const import DOMAIN
+from . import BoschCameraCoordinator, get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
+class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # type: ignore[misc]
     """Select entity to choose the RTSPS stream quality (inst + highQualityVideo)."""
 
     _attr_has_entity_name = True
@@ -102,7 +105,7 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
                 _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict[str, Any]:
         cam_data = self.coordinator.data.get(self._cam_id, {})
         cam_info = cam_data.get("info", {})
         return {
@@ -138,7 +141,7 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
+class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity to set motion detection sensitivity for a camera.
 
     Options: SUPER_HIGH / HIGH / MEDIUM / MEDIUM_LOW / LOW
@@ -172,7 +175,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
         self._attr_entity_category = EntityCategory.CONFIG
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         cam_data = self.coordinator.data.get(self._cam_id, {})
         cam_info = cam_data.get("info", {})
         return {
@@ -189,7 +192,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
         settings = self.coordinator.motion_settings(self._cam_id)
         val = settings.get("motionAlarmConfiguration")
         if val:
-            lower = val.lower()
+            lower = str(val).lower()
             if lower in MOTION_SENSITIVITY_OPTIONS:
                 return lower
         return None
@@ -230,7 +233,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
+class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity to choose the FCM push notification mode.
 
     Options: Auto (ios→android→polling fallback), Android, iOS, Polling.
@@ -257,7 +260,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
         self._attr_translation_key = "fcm_push_mode"
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         cam_data = self.coordinator.data.get(self._cam_id, {})
         cam_info = cam_data.get("info", {})
         cam_title = cam_info.get("title", self._cam_id)
@@ -300,7 +303,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
+class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity to choose the live stream connection mode.
 
     Options:
@@ -334,7 +337,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
         self._attr_translation_key = "stream_mode"
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         cam_data = self.coordinator.data.get(self._cam_id, {})
         cam_info = cam_data.get("info", {})
         return {
@@ -361,7 +364,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
+class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity: intrusion detection mode (Gen2 only).
 
     Options: ALL_MOTIONS / PERSON_DETECTION
@@ -391,7 +394,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
         self._attr_entity_category = EntityCategory.CONFIG
 
     @property
-    def device_info(self) -> dict:
+    def device_info(self) -> dict[str, Any]:
         cam_data = self.coordinator.data.get(self._cam_id, {})
         cam_info = cam_data.get("info", {})
         return {
@@ -407,7 +410,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):
         cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
         val = cfg.get("detectionMode")
         if val:
-            lower = val.lower()
+            lower = str(val).lower()
             if lower in DETECTION_MODE_OPTIONS:
                 return lower
         return None
