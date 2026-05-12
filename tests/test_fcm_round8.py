@@ -832,7 +832,7 @@ class TestOnFcmPushDroppedWhenNotRunning:
         coord = _make_push_coord()
         coord._fcm_running = True
         coord._fcm_healthy = False
-        coord._fcm_last_push = 0.0
+        coord._fcm_last_push = float("-inf")
         coord._fcm_lock = __import__("threading").Lock()
 
         _on_fcm_push(coord, {"from": "test"}, "pid-2")

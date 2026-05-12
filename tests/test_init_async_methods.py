@@ -89,7 +89,7 @@ def _make_coord(**overrides):
         _light_set_at={},
         _offline_since={},
         _per_cam_status_at={},
-        _last_status=0.0,
+        _last_status=-86400.0,
         _OFFLINE_EXTENDED_INTERVAL=900,
         _WRITE_LOCK_SECS=30.0,
         _token_refresh_handle=None,

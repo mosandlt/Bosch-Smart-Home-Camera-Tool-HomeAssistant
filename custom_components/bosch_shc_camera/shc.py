@@ -364,9 +364,17 @@ async def async_cloud_set_privacy_mode(
     handshake per request on an embedded controller.
     SHC fallback ensures control when cloud is unreachable (offline mode).
     """
+    # Skip cloud for known-offline cams: Bosch closes with HTTP 444 → log spam.
+    cam_offline = coordinator._cached_status.get(cam_id) == "OFFLINE"
+    if cam_offline:
+        _LOGGER.debug(
+            "cloud_set_privacy_mode: cam %s offline — skipping cloud, trying fallbacks",
+            cam_id,
+        )
+
     # -- Cloud API (primary -- fast) -------------------------------------------
     token = coordinator.token
-    if token:
+    if token and not cam_offline:
         session = async_get_clientsession(coordinator.hass, verify_ssl=False)
         headers = {
             "Authorization": f"Bearer {token}",

@@ -41,6 +41,13 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "19
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
         _shc_state_cache={CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}},
+        # _cached_status added 2026-05-12: production async_cloud_set_privacy_mode
+        # reads coordinator._cached_status.get(cam_id) to skip cloud for OFFLINE cams
+        # (HTTP 444 spam guard). The stub was missing this attribute, so the
+        # 5 TestCloudSetPrivacyModeBranches tests crashed with AttributeError on
+        # the very first line of the function under test. Empty dict = "no status
+        # cached" → cam_offline=False → normal code path executes.
+        _cached_status={},
         _privacy_set_at={},
         _light_set_at={},
         _notif_set_at={},
@@ -51,10 +58,10 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "19
         _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
         _auth_outage_count=0,
         _shc_devices_raw=[],
-        _last_shc_fetch=0,
+        _last_shc_fetch=float("-inf"),
         _shc_available=True,
         _shc_fail_count=0,
-        _shc_last_check=0.0,
+        _shc_last_check=float("-inf"),
         _SHC_MAX_FAILS=3,
         _SHC_RETRY_INTERVAL=60,
         _lighting_switch_cache={},
@@ -238,7 +245,7 @@ class TestAsyncUpdateShcStates:
     async def test_device_fetch_updates_shc_devices_raw(self):
         from custom_components.bosch_shc_camera.shc import async_update_shc_states
         coord = _stub_coord()
-        coord._last_shc_fetch = 0  # force refresh
+        coord._last_shc_fetch = float("-inf")  # force refresh
         devices = [
             {"id": "shc-dev-1", "name": "terrasse",
              "services": [

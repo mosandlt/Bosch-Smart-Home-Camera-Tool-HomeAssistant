@@ -58,6 +58,7 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True):
         _pan_cache={},
         _camera_entities={},  # used by _schedule_privacy_off_snapshot
         _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
+        _cached_status={},
         _auth_outage_count=0,
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
@@ -128,6 +129,27 @@ class TestCloudSetPrivacyMode:
             session_factory.return_value = session
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is False
+        assert CAM_ID not in coord._privacy_set_at
+
+    @pytest.mark.asyncio
+    async def test_offline_cam_skips_cloud_call(self):
+        """Cam status OFFLINE → no cloud HTTP attempt (silences HTTP 444 spam).
+
+        Regression: offline Gen1 cams (Kamera 44444444, Eingang 33333333)
+        triggered 7× WARNING/day from Bosch cloud returning HTTP 444 on
+        cloud_set_privacy_mode. Source: user-reported log noise 2026-05-11.
+        """
+        coord = _stub_coord(gen2=False)
+        coord._cached_status[CAM_ID] = "OFFLINE"
+        from custom_components.bosch_shc_camera import shc
+        with patch.object(shc, "async_get_clientsession") as session_factory, \
+             patch.object(shc, "shc_ready", return_value=False):
+            session = MagicMock()
+            session.put = MagicMock(return_value=_mock_response(444))
+            session_factory.return_value = session
+            ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
+        assert ok is False
+        assert session.put.called is False  # cloud call never attempted
         assert CAM_ID not in coord._privacy_set_at
 
 

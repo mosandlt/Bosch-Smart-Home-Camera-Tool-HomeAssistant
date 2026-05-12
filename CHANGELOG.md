@@ -5,6 +5,25 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v11.2.7
+
+### Fixed
+
+- **SENTINEL_RULE violations: 2 production-code fixes** (`__init__.py`, `camera.py`, `sensor.py`):
+  - `_fcm_last_push` initialised to `0.0` → on hosts with `time.monotonic() < boot_threshold`, the `> 0` check in `sensor.py` reported a stale boot-time delta instead of "never received". Now initialised to `float("-inf")`; sensor guard updated to `!= float("-inf")`.
+  - `_last_image_fetch` initialised to `0.0` → on CI / fresh-VM hosts with monotonic uptime < `IMAGE_REFRESH_INTERVAL` (1800 s), the proactive image-refresh tick was suppressed for the first 30 min after boot. Now initialised to `-86400.0` (finite, handles `int(cache_age)` conversion safely).
+
+### Tested
+
+- **Coverage sprint: 95 % → 99.79 %** (3232 → 3604 tests, 118 → 141 test files).
+  All entity platforms now at 100 %: camera, switch, sensor, binary_sensor, light, number, select, button, update. Also 100 %: config_flow, diagnostics, fcm, rcp, shc, smb, media_source, recorder (-4 lines), local_rcp, cf_unbuffer, models. Remaining gap: `__init__.py` 9 module-load / setup-closure lines (tested in isolation) and `tls_proxy.py` 8 daemon-thread lines (known coverage-tool limitation on macOS for newly-spawned daemons). Bug-hunt agents confirmed: zero further production bugs.
+
+## v11.2.6
+
+### Fixed
+
+- **Log noise: `cloud_set_privacy_mode: HTTP 444` for offline cams** (`shc.py`): Bosch cloud responds with HTTP 444 (silent connection close) when privacy mode is set on an offline camera. For users with a permanently offline cam (e.g. uninstalled / not yet commissioned), every privacy-mode toggle on any other cam triggered a cosmetic WARNING for the offline ones. The cloud HTTP call is now skipped when `_cached_status[cam_id] == "OFFLINE"`; local fallbacks (Gen2 LOCAL RCP / SHC) still run in case the cam recovered between status ticks.
+
 ## v11.2.5
 
 ### Fixed

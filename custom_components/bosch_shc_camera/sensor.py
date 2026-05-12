@@ -664,7 +664,7 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
             "fcm_push_mode": self.coordinator._fcm_push_mode,
             "fcm_push_mode_config": self.coordinator.options.get("fcm_push_mode", "auto"),
         }
-        if self.coordinator._fcm_last_push > 0:
+        if self.coordinator._fcm_last_push != float("-inf"):
             age = _time.monotonic() - self.coordinator._fcm_last_push
             attrs["last_push_seconds_ago"] = round(age)
         return attrs

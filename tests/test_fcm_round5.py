@@ -41,7 +41,7 @@ def _stub_coord(**overrides):
         _fcm_running=False,
         _fcm_healthy=False,
         _fcm_client=None,
-        _fcm_last_push=0.0,
+        _fcm_last_push=float("-inf"),
         _entry=SimpleNamespace(data={}),
         data={},
         hass=SimpleNamespace(

@@ -390,7 +390,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):
         self._fcm_client = None        # FcmPushClient instance (or None if disabled)
         self._fcm_token: str = ""      # FCM registration token
         self._fcm_running: bool = False
-        self._fcm_last_push: float = 0.0  # monotonic time of last received push
+        self._fcm_last_push: float = float("-inf")  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
         self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
         # Lock serializing cross-thread FCM state writes.

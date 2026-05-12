@@ -39,7 +39,7 @@ def _make_coord(**overrides):
         _tls_proxy_ports={},
         _tls_ssl_ctx=None,
         _last_schemes_refresh=0.0,
-        _last_go2rtc_reload=0.0,
+        _last_go2rtc_reload=float("-inf"),
         debug=False,
         hass=SimpleNamespace(
             config=SimpleNamespace(config_dir="/tmp/ha_test"),

@@ -121,7 +121,7 @@ class BoschCamera(CoordinatorEntity, Camera):
         self._entry  = entry
         self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
-        self._last_image_fetch: float = 0.0      # monotonic timestamp of last fetch
+        self._last_image_fetch: float = -86400.0  # monotonic timestamp of last fetch (large-negative = never fetched)
         self._was_streaming: bool = False
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
