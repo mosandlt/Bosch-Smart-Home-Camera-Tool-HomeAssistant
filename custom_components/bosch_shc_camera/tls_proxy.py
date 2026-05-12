@@ -36,7 +36,6 @@ def start_tls_proxy(
     cam_host: str,
     cam_port: int,
     port_cache: dict[str, int],
-    debug: bool = False,
     is_renewal: bool = False,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
@@ -162,7 +161,7 @@ def start_tls_proxy(
                         if not data:
                             break
                         # Debug: log first RTSP exchanges (text only, skip binary RTP)
-                        if debug and _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":
+                        if _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":
                             _dbg_count[0] += 1
                             preview = data[:500].decode("utf-8", errors="replace").replace("\r\n", "\\r\\n")
                             _LOGGER.debug(
@@ -189,7 +188,7 @@ def start_tls_proxy(
                     # expected during session teardown (e.g. after credential
                     # rotation) — not a real error, so don't log it.
                     is_ebadf = isinstance(exc, OSError) and exc.errno == errno.EBADF
-                    if debug and str(exc) and not is_ebadf:
+                    if str(exc) and not is_ebadf:
                         _LOGGER.debug("TLS proxy %s [%s] pipe error: %s", cam_id[:8], direction, exc)
                 finally:
                     try:

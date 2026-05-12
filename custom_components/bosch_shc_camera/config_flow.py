@@ -84,9 +84,6 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "auth": [
         "force_relogin", "migrate_to_oss_client",
     ],
-    "debug": [
-        "debug_logging",
-    ],
 }
 
 
@@ -513,8 +510,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                       "enable_intercom",
                       "enable_smb_upload",
                       "enable_nvr",
-                      "enable_go2rtc",
-                      "debug_logging"]:
+                      "enable_go2rtc"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -798,16 +794,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
         sectioned_schema[vol.Required("auth")] = section(
             vol.Schema(auth_inner),
-            {"collapsed": True},
-        )
-
-        sectioned_schema[vol.Required("debug")] = section(
-            vol.Schema({
-                vol.Optional(
-                    "debug_logging",
-                    default=bool(opts.get("debug_logging", False)),
-                ): bool,
-            }),
             {"collapsed": True},
         )
 

@@ -109,6 +109,7 @@ def _make_coord(**overrides):
         ),
         is_camera_online=lambda cid: True,
         token="tok-A",
+        debug=False,
         hass=SimpleNamespace(
             async_create_task=MagicMock(side_effect=_create_task),
             async_add_executor_job=AsyncMock(),
@@ -119,7 +120,6 @@ def _make_coord(**overrides):
             services=SimpleNamespace(async_call=AsyncMock()),
             config=SimpleNamespace(path=lambda *a: "/tmp/x"),
         ),
-        debug=False,
     )
     base.update(overrides)
     ns = SimpleNamespace(**base)
@@ -200,15 +200,14 @@ class TestIntegrationVersionFallback:
 
 
 class TestRefreshLocalCredsDebugLog:
-    """debug=True branch emits a debug log after successful cred rotation.
+    """Debug log is emitted unconditionally after successful cred rotation.
 
-    Lines 716-717: `if self.debug: _LOGGER.debug(...)` — only reachable when the
-    full update path succeeds (user+pass changed, proxy port present, cam entity
-    lookup, stream.update_source ok). We mock all collaborators minimally.
+    The log is `_LOGGER.debug(...)` so it only appears when HA sets the logger
+    to DEBUG level — no custom toggle needed.
     """
 
-    def test_debug_log_emitted_when_debug_true(self, caplog):
-        """When debug=True the method logs the cred rotation summary."""
+    def test_debug_log_emitted_on_cred_rotation(self, caplog):
+        """The method always emits a debug log after successful cred rotation."""
         import logging
 
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
@@ -218,7 +217,6 @@ class TestRefreshLocalCredsDebugLog:
         cam_entity = SimpleNamespace(stream=stream_mock)
 
         coord = _make_coord(
-            debug=True,
             _tls_proxy_ports={CAM_A: 17000},
             _audio_enabled={CAM_A: False},
             _local_creds_cache={},
@@ -246,42 +244,6 @@ class TestRefreshLocalCredsDebugLog:
         assert any("Heartbeat refreshed creds" in m for m in debug_msgs), (
             f"Expected debug log about heartbeat cred refresh, got: {debug_msgs}"
         )
-
-    def test_no_debug_log_when_debug_false(self, caplog):
-        """When debug=False the branch is skipped — no debug log for cred rotation."""
-        import logging
-
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        stream_mock = MagicMock()
-        cam_entity = SimpleNamespace(stream=stream_mock)
-
-        coord = _make_coord(
-            debug=False,
-            _tls_proxy_ports={CAM_A: 17001},
-            _audio_enabled={CAM_A: False},
-            _local_creds_cache={},
-            _live_connections={
-                CAM_A: {
-                    "_connection_type": "LOCAL",
-                    "_local_user": "old_u",
-                    "_local_password": "old_p",
-                    "rtspsUrl": "rtsp://old@127.0.0.1:17001/rtsp_tunnel?inst=1",
-                }
-            },
-            _camera_entities={CAM_A: cam_entity},
-            _nvr_processes={},
-        )
-
-        resp_text = json.dumps({"user": "new_u", "password": "new_p"})
-
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
-            BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-                coord, CAM_A, resp_text, generation=1, elapsed=30.0
-            )
-
-        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert not any("Heartbeat refreshed creds" in m for m in debug_msgs)
 
 
 # ── 3. record_stream_error — threshold and repeat logging (lines 742, 747) ───

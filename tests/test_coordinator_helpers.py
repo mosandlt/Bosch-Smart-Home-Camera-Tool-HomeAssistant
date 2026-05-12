@@ -165,16 +165,3 @@ def test_options_property_merges_defaults() -> None:
         assert key in opts
 
 
-def test_debug_default_off() -> None:
-    """debug follows the entry option; default is False."""
-    from custom_components.bosch_shc_camera import BoschCameraCoordinator
-    coord = _make_coord()
-    assert BoschCameraCoordinator.debug.fget(coord) is False
-
-
-def test_debug_on_when_option_true() -> None:
-    """The option key is `debug_logging` even though the property is `debug`."""
-    from custom_components.bosch_shc_camera import BoschCameraCoordinator
-    coord = _make_coord()
-    coord._entry.options = {"debug_logging": True}
-    assert BoschCameraCoordinator.debug.fget(coord) is True

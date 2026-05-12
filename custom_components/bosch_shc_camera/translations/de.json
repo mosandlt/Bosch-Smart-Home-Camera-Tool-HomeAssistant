@@ -194,16 +194,6 @@
               "force_relogin": "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten).",
               "migrate_to_oss_client": "Wechsle vom alten `residential_app`-Client zum dedizierten `oss_residential_app`-Client, den Bosch für Open-Source-Integrationen bereitstellt. Beim Aktivieren wird der Reauth-Flow gestartet — du musst dich einmalig über die Bosch SingleKey ID anmelden. Alle Entitäten, Automationen und Optionen bleiben erhalten."
             }
-          },
-          "debug": {
-            "name": "Debug",
-            "description": "Detailliertes Logging für Fehlersuche.",
-            "data": {
-              "debug_logging": "Debug-Protokollierung (detaillierte TLS-Proxy- und Stream-Logs)"
-            },
-            "data_description": {
-              "debug_logging": "Detailliertes Logging für TLS-Proxy-RTSP-Austausch, Stream-Timing und Pre-warm-Diagnose aktivieren. Nützlich zur Fehlersuche bei LOCAL-Stream-Problemen. Im Normalbetrieb ausgeschaltet lassen."
-            }
           }
         }
       },
@@ -692,6 +682,22 @@
     "auth_server_outage": {
       "title": "Bosch Kamera — Auth-Server Störung",
       "description": "Der Bosch-Authentifizierungsserver antwortet aktuell mit HTTP {error}. Das ist ein Problem auf Bosch-Seite, kein Fehler bei dir.\n\nDie Integration versucht automatisch weiter (Exponential Backoff bis 10 Minuten). Entitäten sind bis zur Wiederherstellung nicht verfügbar — kein Handlungsbedarf."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_cloud": "Bosch-Cloud erreichbar",
+      "fcm_push_active": "FCM-Push-Status",
+      "cameras_loaded": "Kameras geladen",
+      "last_fcm_push_ago": "Letzter FCM-Push",
+      "platinum_quality": "Quality-Scale"
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "bosch_shc_camera_motion": "Bewegung erkannt",
+      "bosch_shc_camera_audio_alarm": "Audio-Alarm erkannt",
+      "bosch_shc_camera_person": "Person erkannt"
     }
   }
 }

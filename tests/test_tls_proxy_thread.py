@@ -122,12 +122,12 @@ def _join_new_threads(threads_before: frozenset, timeout: float = 3.0) -> None:
         time.sleep(0.01)
 
 
-def _start_proxy(cam_id, cam_host, cam_port, debug=False):
+def _start_proxy(cam_id, cam_host, cam_port):
     """Thin wrapper: record threads-before, start proxy, return (port, cache, threads_before)."""
     threads_before = frozenset(threading.enumerate())
     port_cache: dict[str, int] = {}
     ctx = _plain_ssl_ctx()
-    port = start_tls_proxy(ctx, cam_id, cam_host, cam_port, port_cache, debug=debug)
+    port = start_tls_proxy(ctx, cam_id, cam_host, cam_port, port_cache)
     return port, port_cache, threads_before
 
 
@@ -566,7 +566,7 @@ class TestPipeRelay:
 
     @pytest.mark.asyncio
     async def test_debug_logging_on_first_exchanges(self, caplog):
-        """With debug=True the first exchanges are logged — no crash.
+        """First exchanges are always logged at DEBUG level — no crash.
         Covers lines 164-170 (debug log path in _pipe).
         """
         import logging
@@ -592,7 +592,7 @@ class TestPipeRelay:
         srv = await asyncio.start_server(_echo_handle, "127.0.0.1", 0)
         echo_port = srv.sockets[0].getsockname()[1]
 
-        port, port_cache, _ = _start_proxy(cam_id, "127.0.0.1", echo_port, debug=True)
+        port, port_cache, _ = _start_proxy(cam_id, "127.0.0.1", echo_port)
         try:
             await asyncio.sleep(0.05)
             with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera.tls_proxy"):

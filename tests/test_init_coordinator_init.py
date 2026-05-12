@@ -87,11 +87,10 @@ async def test_options_snapshot_is_deep_enough_copy(hass: HomeAssistant) -> None
     entry.options must not silently change the snapshot. Used by
     `_async_options_updated` to detect real edits vs. token-refresh
     data-only updates."""
-    entry = _make_entry(hass, options={"scan_interval": 90, "debug_logging": True})
+    entry = _make_entry(hass, options={"scan_interval": 90})
     coord = BoschCameraCoordinator(hass, entry)
     # Snapshot reflects merged options (DEFAULT_OPTIONS + entry.options)
     assert coord._options_snapshot["scan_interval"] == 90
-    assert coord._options_snapshot["debug_logging"] is True
     # Mutating the live entry.options must not bleed into the snapshot.
     # MockConfigEntry.options is a dict — we mutate via hass API.
     hass.config_entries.async_update_entry(entry, options={"scan_interval": 30})
@@ -331,13 +330,12 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
 
 
 async def test_options_path_overrides_default_options(hass: HomeAssistant) -> None:
-    """A handful of opt keys: snapshot, NVR, debug — must propagate via
+    """A handful of opt keys: snapshot, NVR — must propagate via
     `get_options(entry)` (DEFAULT_OPTIONS merged with entry.options)."""
     entry = _make_entry(
         hass,
         options={
             "scan_interval": 45,
-            "debug_logging": True,
             "enable_nvr": True,
             "nvr_retention_days": 7,
         },
@@ -346,14 +344,11 @@ async def test_options_path_overrides_default_options(hass: HomeAssistant) -> No
     # Snapshot captures the merge result, not the raw entry.options.
     snap = coord._options_snapshot
     assert snap["scan_interval"] == 45
-    assert snap["debug_logging"] is True
     assert snap["enable_nvr"] is True
     assert snap["nvr_retention_days"] == 7
     # DEFAULT_OPTIONS values still present for unspecified keys.
     assert snap["interval_status"] == 300
     assert snap["enable_snapshots"] is True
-    # debug property mirrors options.debug_logging.
-    assert coord.debug is True
 
 
 async def test_data_only_entry_does_not_break_init(hass: HomeAssistant) -> None:
@@ -361,8 +356,6 @@ async def test_data_only_entry_does_not_break_init(hass: HomeAssistant) -> None:
     still load — empty options must yield the defaults, not crash."""
     entry = _make_entry(hass, options={})
     coord = BoschCameraCoordinator(hass, entry)
-    # debug=False since DEFAULT_OPTIONS["debug_logging"] is False
-    assert coord.debug is False
     # All NVR fields default to disabled / safe values
     assert coord._options_snapshot["enable_nvr"] is False
     assert coord._options_snapshot["nvr_storage_target"] == "local"
@@ -475,21 +468,3 @@ async def test_two_coordinators_have_independent_state(hass: HomeAssistant) -> N
     assert coord2.update_interval.total_seconds() == 90.0
 
 
-# ─── Bug guard — `debug` property reads live entry, not the snapshot ───────
-
-
-async def test_debug_property_reflects_live_entry_options(hass: HomeAssistant) -> None:
-    """`coord.debug` reads `get_options(self._entry)` LIVE — not the snapshot.
-    Toggling debug in the options flow must take effect on the next access,
-    without needing to recreate the coordinator. (The snapshot is for the
-    options-changed listener — it intentionally lags.)"""
-    entry = _make_entry(hass, options={"debug_logging": False})
-    coord = BoschCameraCoordinator(hass, entry)
-    assert coord.debug is False
-    hass.config_entries.async_update_entry(
-        entry,
-        options={"debug_logging": True},
-    )
-    # Live read: True now; snapshot still False (snapshot is set-once).
-    assert coord.debug is True
-    assert coord._options_snapshot["debug_logging"] is False

@@ -1134,17 +1134,6 @@ class TestCoordinatorProperties:
         )
         assert BoschCameraCoordinator.options.fget(coord) == get_options(coord._entry)
 
-    def test_debug_property_default_false(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord()
-        coord._entry = SimpleNamespace(data={}, options={})
-        assert BoschCameraCoordinator.debug.fget(coord) is False
-
-    def test_debug_property_true_when_option_set(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord()
-        coord._entry = SimpleNamespace(data={}, options={"debug_logging": True})
-        assert BoschCameraCoordinator.debug.fget(coord) is True
 
 
 # ── _token_still_valid pure check ────────────────────────────────────────

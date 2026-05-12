@@ -332,7 +332,6 @@ class TestFeatureFlagCoverage:
         "audio_default_on",
         "mark_events_read",
         "alert_save_snapshots",
-        "debug_logging",
     ]
 
     def test_each_flag_referenced_in_tests(self):

@@ -114,7 +114,6 @@ async def async_get_config_entry_diagnostics(
         "coordinator": {
             "running": coord is not None,
             "last_update_success": getattr(coord, "last_update_success", None),
-            "debug_logging": getattr(coord, "debug", False),
             "fcm_running": getattr(coord, "_fcm_running", None),
             "fcm_healthy": getattr(coord, "_fcm_healthy", None),
             "auth_outage_count": getattr(coord, "_auth_outage_count", None),

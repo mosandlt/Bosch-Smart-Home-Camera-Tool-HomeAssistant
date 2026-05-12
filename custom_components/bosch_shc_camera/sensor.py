@@ -228,7 +228,7 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
         self._attr_unique_id                   = f"bosch_shc_events_today_{cam_id.lower()}"
         self._attr_icon                        = "mdi:counter"
         self._attr_native_unit_of_measurement  = "events"
-        self._attr_state_class                 = "total"
+        self._attr_state_class                 = SensorStateClass.MEASUREMENT
         self._attr_translation_key             = "events_today"
 
     @property
@@ -1240,9 +1240,10 @@ class BoschStreamStatusSensor(_BoschSensorBase):
 
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id       = f"bosch_shc_stream_status_{cam_id.lower()}"
-        self._attr_icon            = "mdi:video-wireless"
-        self._attr_translation_key = "stream_status"
+        self._attr_unique_id          = f"bosch_shc_stream_status_{cam_id.lower()}"
+        self._attr_icon               = "mdi:video-wireless"
+        self._attr_translation_key    = "stream_status"
+        self._attr_entity_category    = EntityCategory.DIAGNOSTIC
         self._attr_options         = ["idle", "warming_up", "connecting", "streaming", "streaming_remote"]
         self._attr_device_class    = SensorDeviceClass.ENUM
 

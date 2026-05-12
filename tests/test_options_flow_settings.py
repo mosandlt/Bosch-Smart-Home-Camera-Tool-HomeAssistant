@@ -99,7 +99,7 @@ class TestPollingSection:
     async def test_defaults_applied_when_no_prior_options(self):
         flow = BoschCameraOptionsFlow(_make_entry())
         # Submit an unrelated section; polling fields should fall back to DEFAULT_OPTIONS.
-        data = await _submit(flow, {"debug": {"debug_logging": False}})
+        data = await _submit(flow, {"auth": {"force_relogin": False}})
         # scan_interval not in user_input → falls back to saved options (empty) → DEFAULT_OPTIONS
         assert "scan_interval" not in data or data["scan_interval"] == DEFAULT_OPTIONS["scan_interval"]
 
@@ -441,22 +441,6 @@ class TestAuthSection:
             )
 
 
-class TestDebugSection:
-    @pytest.mark.asyncio
-    async def test_debug_logging_toggle_saved(self):
-        flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {"debug": {"debug_logging": True}})
-        assert data["debug_logging"] is True
-
-    @pytest.mark.asyncio
-    async def test_debug_logging_off_saved(self):
-        flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {"debug": {"debug_logging": False}})
-        assert data["debug_logging"] is False
-
-    def test_debug_logging_default_false(self):
-        assert DEFAULT_OPTIONS["debug_logging"] is False
-
 
 # ── Cross-section round-trip tests ────────────────────────────────────────────
 
@@ -489,7 +473,6 @@ class TestFullRoundTrip:
                     "nvr_base_path": "/config/bosch_nvr", "nvr_smb_subpath": "NVR",
                     "nvr_retention_days": 3},
             "auth": {"force_relogin": False},
-            "debug": {"debug_logging": False},
         })
         # Spot-check a key from each section
         assert data["scan_interval"] == 45
@@ -499,20 +482,21 @@ class TestFullRoundTrip:
         assert data["fcm_push_mode"] == "ios"
         assert data["enable_local_save"] is True
         assert data["enable_nvr"] is False
-        assert data["debug_logging"] is False
 
     @pytest.mark.asyncio
     async def test_existing_options_not_lost_when_partial_submit(self):
-        """Only 'debug' submitted → prior scan_interval must survive in saved data
+        """Only 'polling' submitted → prior enable_go2rtc option survives in saved data
         because _flatten_sections passes through the flat submit dict and
         async_step_init merges with existing options first."""
-        prior = {"scan_interval": 999}
+        prior = {"enable_go2rtc": False}
         flow = BoschCameraOptionsFlow(_make_entry(options=prior))
-        data = await _submit(flow, {"debug": {"debug_logging": True}})
-        # The submitted 'debug' section was the only one sent.
-        # scan_interval not in the submit → not in data (HA merges externally)
-        # but debug_logging must have been saved.
-        assert data["debug_logging"] is True
+        data = await _submit(flow, {"polling": {"scan_interval": 45,
+                                                "interval_status": 300,
+                                                "interval_events": 300,
+                                                "snapshot_interval": 1800}})
+        # The submitted 'polling' section was the only one sent.
+        # enable_go2rtc not in the submit → but must be preserved via prior options merge.
+        assert data["scan_interval"] == 45
 
 
 # ── Coverage: all DEFAULT_OPTIONS keys are in OPTIONS_SECTIONS ────────────────

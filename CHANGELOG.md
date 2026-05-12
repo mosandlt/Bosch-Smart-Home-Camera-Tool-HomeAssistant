@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.0.1 — 2026-05-12
+
+**Platinum polish — consolidate on HA built-in mechanisms.**
+
+- Removed our own `Debug logging` checkbox from the Options flow — HA's built-in **Settings → Devices → Bosch Smart Home Camera → ⋮ → "Enable debug logging"** covers every sub-module via Python logger hierarchy (`tls_proxy`, `fcm`, `rcp`, etc.). Eliminates the dual-toggle UX confusion. `manifest.json` `loggers` corrected to `custom_components.bosch_shc_camera`.
+- **System Health integration** (new `system_health.py`): Settings → System → System Health now shows `bosch_cloud` reachability, FCM push status, camera count, time since last FCM push, and quality-scale version — alongside Hue/Nest/etc.
+- **Logbook custom events**: motion, audio-alarm, and person events from FCM push now appear in the HA Logbook with friendly messages like "Bosch Terrasse detected motion" instead of raw event dumps.
+- `BoschStreamStatusSensor` now has `EntityCategory.DIAGNOSTIC` — moves out of the default dashboard into the device's diagnostic group.
+- `BoschCameraEventsTodaySensor` `state_class` changed from string `"total"` to `SensorStateClass.MEASUREMENT` enum — correct semantic for a daily-resetting counter.
+- README: new "Recorder DB size" section with `recorder: exclude:` example for high-frequency diagnostic sensors.
+- Test suite: 3665 passing (was 3633 in v12.0.0). +24 logbook tests, +17 system_health tests.
+
 ## v12.0.0 — 2026-05-12
 
 **Quality Scale: Gold → Platinum.**

@@ -402,12 +402,10 @@ class TestPipeSelectEmptyBreak:
 
 
 class TestPipeDebugLogAndCloseException:
-    """Lines 192-193: when `debug=True` and the pipe loop catches a non-EBADF
-    exception, the error is logged at DEBUG level.
+    """Lines 192-193: non-EBADF pipe exceptions are always logged at DEBUG level.
 
-    Lines 195-198: regardless of debug, the finally block tries `src.close()`
-    and `dst.close()`; if either raises, the exception is swallowed so the
-    helper thread exits cleanly.
+    Lines 195-198: the finally block tries `src.close()` and `dst.close()`;
+    if either raises, the exception is swallowed so the helper thread exits cleanly.
     """
 
     def test_non_ebadf_exception_with_debug_logs_then_swallows_close(self, caplog):
@@ -442,7 +440,7 @@ class TestPipeDebugLogAndCloseException:
         ):
             with caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.tls_proxy"):
                 port = start_tls_proxy(
-                    ctx, cam_id, "127.0.0.1", up_port, port_cache, debug=True
+                    ctx, cam_id, "127.0.0.1", up_port, port_cache
                 )
                 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
@@ -460,8 +458,7 @@ class TestPipeDebugLogAndCloseException:
         # Lines 192-193: a "pipe error" debug record must have been emitted.
         pipe_errors = [r for r in caplog.records if "pipe error" in r.getMessage()]
         assert pipe_errors, (
-            "debug=True + non-EBADF exception in _pipe must emit a 'pipe error' "
-            "DEBUG log (lines 192-193)"
+            "Non-EBADF exception in _pipe must emit a 'pipe error' DEBUG log (lines 192-193)"
         )
 
 

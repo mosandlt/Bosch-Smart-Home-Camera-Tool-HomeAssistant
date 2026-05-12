@@ -83,6 +83,5 @@ DEFAULT_OPTIONS = {
     # Phase 4: pre-roll buffer — 0 = disabled; 10-60 s = keep rolling cache in tmpfs
     "nvr_preroll_seconds": 0,
     "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
-    "debug_logging": False,
     "enable_go2rtc": True,
 }

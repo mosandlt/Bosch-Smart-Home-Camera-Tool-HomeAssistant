@@ -194,16 +194,6 @@
               "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
               "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
             }
-          },
-          "debug": {
-            "name": "Debug",
-            "description": "Verbose logging for troubleshooting.",
-            "data": {
-              "debug_logging": "Debug logging (verbose TLS proxy & stream logs)"
-            },
-            "data_description": {
-              "debug_logging": "Enable verbose logging for TLS proxy RTSP exchanges, stream timing, and pre-warm diagnostics. Useful for troubleshooting LOCAL stream issues. Disable for normal use."
-            }
           }
         }
       },
@@ -692,6 +682,22 @@
     "auth_server_outage": {
       "title": "Bosch Camera — Auth server outage",
       "description": "The Bosch authentication server is currently returning HTTP {error}. This is a Bosch-side problem, not a configuration issue on your side.\n\nThe integration will retry automatically (exponential backoff up to 10 minutes). Entities are unavailable until the server recovers — no action needed."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_cloud": "Bosch Cloud reachable",
+      "fcm_push_active": "FCM push status",
+      "cameras_loaded": "Cameras loaded",
+      "last_fcm_push_ago": "Last FCM push",
+      "platinum_quality": "Quality Scale"
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "bosch_shc_camera_motion": "Motion detected",
+      "bosch_shc_camera_audio_alarm": "Audio alarm detected",
+      "bosch_shc_camera_person": "Person detected"
     }
   }
 }

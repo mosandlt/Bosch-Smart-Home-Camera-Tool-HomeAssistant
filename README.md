@@ -213,7 +213,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 | **Stream quality** | Per-camera quality preset for cloud/REMOTE streams: `Auto` (~7.5 Mbps), `High` (30 Mbps), `Low` (1.9 Mbps). LAN streams always use maximum quality regardless of this setting. Configurable at runtime via the **Video Quality** select entity (persists across restarts). | Auto |
 | **Audio default ON** | Whether the per-camera audio switch starts ON (stream with sound) or OFF (muted). | ON |
 | **Binary sensors** | Expose Motion / Audio / Person alarm binary sensors (ON for 30 s after each event). | ON |
-| **Debug logging** | Enable verbose logs (TLS-proxy RTSP exchanges, pre-warm timing, FCM payloads). Off by default to keep the log file readable. | OFF |
+| **Enable debug logging** | Open Settings → Devices & Services → Bosch Smart Home Camera → "⋮" menu → "Enable debug logging". HA Core auto-restores normal logging on next restart. To make it permanent, use the `logger:` integration in `configuration.yaml`. | — |
 
 ### Step 3 — Add a Lovelace Card
 
@@ -360,7 +360,7 @@ graph LR
 - **Service-action exceptions instead of silent log warnings** — clicking a button that hits HTTP 500 now shows a red error notification with cause; previously failures looked like nothing happened.
 - **Coordinator raises `UpdateFailed`** consistently → HA framework provides `log-when-unavailable` automatically, no manual log-spam guards.
 
-**Platinum tier (v12.0.0, 2026-05-12):**
+**Platinum tier (v12.0.1, 2026-05-12):**
 
 - `strict-typing` — mypy --strict green across all 24 source files (was 593 errors). `pyproject.toml` strict config added; ~80 targeted `# type: ignore` for unavoidable HA-stub gaps.
 - `async-dependency` — all `requests` imports removed. HTTP Digest auth via `auth_utils.async_digest_request` (aiohttp); sync cloud downloads via stdlib `urllib.request`. `requests>=2.28.0,<3` removed from runtime requirements.
@@ -1407,6 +1407,21 @@ curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
 
 Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.
 
+### Recorder DB size — exclude high-frequency sensors (optional)
+
+Several diagnostic sensors change state whenever the camera reconnects (e.g. `sensor.bosch_*_stream_status`, `sensor.bosch_*_last_image_fetch`). On busy homes these can write tens of thousands of state-change rows per day to the HA recorder database. If you don't need long-term history for them, add to `configuration.yaml`:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.bosch_*_stream_status
+      - sensor.bosch_*_last_image_fetch
+      - sensor.bosch_*_fcm_last_push
+```
+
+Existing automations and the camera card continue to work — HA still reads the current state from the in-memory state machine, only the persisted history is skipped.
+
 ## Roadmap
 
 Features investigated or intentionally parked — listed here so the direction is visible. Not planned for active development; **open an issue if any item matters to you** and we'll pick it up based on demand.
@@ -1422,8 +1437,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.0.0** — see the GitHub release page for full notes:
-[**v12.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.0)
+Latest: **v12.0.1** — see the GitHub release page for full notes:
+[**v12.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.1)
 
 | | |
 |---|---|

@@ -178,13 +178,12 @@ async def test_coordinator_section_exposes_health_signals(
     hass: HomeAssistant,
 ) -> None:
     """coordinator.running, fcm_running, fcm_healthy, auth_outage_count,
-    debug_logging and stream_warming_count are essential bug-report context."""
+    and stream_warming_count are essential bug-report context."""
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
     entry.runtime_data = type("Stub", (), {
         "data": {},
         "last_update_success": False,  # mid-incident
-        "debug": True,
         "_fcm_running": True,
         "_fcm_healthy": False,
         "_auth_outage_count": 4,
@@ -200,7 +199,6 @@ async def test_coordinator_section_exposes_health_signals(
     assert coord["fcm_healthy"] is False, "fcm_healthy must be exposed"
     assert coord["auth_outage_count"] == 4, "auth_outage_count must be exposed"
     assert coord["scan_interval"] == 60.0, "scan_interval must be exposed"
-    assert coord["debug_logging"] is True, "debug_logging must be exposed (shows if verbose data is available)"
     assert coord["stream_warming_count"] == 2, "stream_warming_count must reflect warming cameras"
 
 

@@ -611,11 +611,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # the entire integration.
         self._nvr_drain_task: asyncio.Task[None] | None = None
 
-    @property
-    def debug(self) -> bool:
-        """True when verbose debug logging is enabled in integration options."""
-        return bool(get_options(self._entry).get("debug_logging", False))
-
     def get_model_config(self, cam_id: str) -> Any:
         """Return CameraModelConfig for a camera (from models.py)."""
         from .models import get_model_config
@@ -742,8 +737,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     self._restart_recorder_if_active(cam_id),
                     name=f"bosch_nvr_restart_{cam_id[:8]}",
                 )
-            if self.debug:
-                _LOGGER.debug(
+            _LOGGER.debug(
                     "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
                     cam_id[:8], generation, elapsed, new_user,
                 )
@@ -3610,7 +3604,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         ssl_ctx: ssl.SSLContext = self._tls_ssl_ctx
         return start_tls_proxy(
             ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports,
-            debug=self.debug, is_renewal=is_renewal,
+            is_renewal=is_renewal,
         )
 
     @staticmethod
