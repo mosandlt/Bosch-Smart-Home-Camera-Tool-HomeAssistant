@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.0.2 — 2026-05-13
+
+**RCP cloud-proxy XML-leak hardening + Lovelace reauth banner.**
+
+- **RCP read robustness** (`rcp.py`): the Bosch cloud proxy occasionally returns the outer RCP XML envelope (`<rcp>…</rcp>`) as the P_OCTET payload bytes instead of the requested binary value. Gen2 FW 9.40 additionally prefixes that envelope with whitespace (`\n\n<rcp>…`). The previous `raw.startswith(b"<")` guard missed the whitespace-prefixed form, causing the 4-byte uint32 unpack to log noisy "out-of-range values [168442994, 1668300298, …]" messages on every coordinator update for bitrate (`0x0c81`), LED dimmer (`0x0c22`), and clock (`0x0a0f`) reads. New shared `_is_xml_envelope()` helper detects both the plain and whitespace-prefixed XML cases (plus the pure-whitespace truncation that happens when the proxy clips an XML response into a 2-byte T_WORD slot). All three readers now silently `_mark_fail()` when the envelope is detected, so retries are bounded by the existing 3-strike threshold instead of looping forever. Bitrate (`0x0c81`) gained the missing `_skip`/`_mark_fail` wrapping for consistency with the other readers.
+- **Lovelace card v2.12.6 — reauth banner** (`src/bosch-camera-card.js`): when the camera entity becomes `unavailable` (typically because the Bosch Cloud refresh token was rejected by Keycloak with `invalid_grant`), the card now shows an orange overlay with **"Anmeldung abgelaufen"** and a one-click **"Erneut anmelden"** button that deep-links to `/config/integrations/integration/bosch_shc_camera`. Z-index 9 places it over the existing offline overlay, and the offline overlay is suppressed while the auth banner is visible so the user sees the actionable re-login banner instead of a generic "offline" message. Covers all coordinator-down states, not just auth failures.
+- **Tests** (`tests/test_rcp_extended.py` +11): pinned helper behaviour (none/empty/plain XML/whitespace-prefixed XML/pure-whitespace/binary/ASCII), plus regressions for the dimmer/clock XML cases and the bitrate `_mark_fail` retry bound.
+
 ## v12.0.1 — 2026-05-12
 
 **Platinum polish — consolidate on HA built-in mechanisms.**

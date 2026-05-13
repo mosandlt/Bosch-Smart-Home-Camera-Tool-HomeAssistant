@@ -1299,6 +1299,132 @@ card_defaults:                  # base options applied to every tile (overrides 
 
 ---
 
+### Admin / Health Dashboard Example
+
+The integration exposes ~40 entities per camera covering status, firmware, WiFi, motion zones, alarm state, stream health, and more. A dedicated **Bosch view** in your admin dashboard lets you see every camera's health at a glance — useful for power-users monitoring Cloud reachability + FCM push + Gen1/Gen2 mix.
+
+#### Entities surfaced
+
+| Group | Entity pattern | Use |
+|---|---|---|
+| Online state | `sensor.bosch_<name>_status` | `online` / `offline` / `privacy_mode` |
+| Stream | `sensor.bosch_<name>_stream_status` (Diagnostic) | `idle` / `streaming` / `error` |
+| Firmware | `sensor.bosch_<name>_firmware_version` | matches the camera FW string |
+| WiFi | `sensor.bosch_<name>_wifi_signal` | 0-100 % (Gen2 only) |
+| Activity | `sensor.bosch_<name>_events_today` (Measurement) | daily-resetting motion counter |
+| Last event | `sensor.bosch_<name>_last_event` + `_last_event_type` | timestamp + type |
+| Ambient light | `sensor.bosch_<name>_ambient_light` | 0-100 % (Gen2 only) |
+| Alarm | `sensor.bosch_<name>_alarm_status` | Indoor II only |
+| Zones | `sensor.bosch_<name>_motion_zones` + `_privacy_masks` | configured count |
+| FCM push health | `sensor.bosch_camera_event_detection` | `fcm_push` / `polling` / `degraded` (integration-wide) |
+| Integration update | `update.bosch_smart_home_camera_update` | shows when a new release is available |
+
+#### Drop-in dashboard view YAML
+
+Add this as a new view to any existing dashboard (Settings → Dashboards → pick one → "Take control" → Raw config editor → paste at the end of the `views:` list). Rename `terrasse`/`innenbereich`/`kamera`/`garten` to match your own camera entity names:
+
+```yaml
+title: Bosch
+path: bosch
+icon: mdi:cctv
+type: sections
+max_columns: 3
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Integration
+        heading_style: title
+        icon: mdi:cctv
+      - type: markdown
+        content: |
+          ### 🏅 Quality Scale: **Platinum**
+          - System Health · Logbook · Diagnostics · Repair Issues · Update Entities
+          - mypy --strict green · 99% test coverage · 0 `requests` deps
+        grid_options: {columns: 12, rows: auto}
+      - type: tile
+        entity: update.bosch_smart_home_camera_update
+        name: Integration Update
+        icon: mdi:cloud-download
+        color: blue
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_camera_event_detection
+        name: FCM Push
+        icon: mdi:bell-ring
+        color: green
+        grid_options: {columns: 6, rows: 1}
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Terrasse (Gen2 Outdoor)
+        heading_style: title
+        icon: mdi:weather-sunny
+      - type: tile
+        entity: sensor.bosch_terrasse_status
+        name: Status
+        color: green
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_terrasse_stream_status
+        name: Stream
+        icon: mdi:video
+        color: cyan
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_terrasse_firmware_version
+        name: Firmware
+        icon: mdi:chip
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_terrasse_wifi_signal
+        name: WiFi
+        icon: mdi:wifi
+        color: blue
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_terrasse_events_today
+        name: Events today
+        icon: mdi:motion-sensor
+        color: amber
+        grid_options: {columns: 6, rows: 1}
+      - type: tile
+        entity: sensor.bosch_terrasse_ambient_light
+        name: Ambient light
+        icon: mdi:weather-sunny
+        color: yellow
+        grid_options: {columns: 6, rows: 1}
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Live Streams
+        heading_style: title
+        icon: mdi:cctv
+      - type: picture-entity
+        entity: camera.bosch_terrasse
+        camera_view: auto
+        show_state: false
+        grid_options: {columns: 6, rows: 4}
+      - type: picture-entity
+        entity: camera.bosch_innenbereich
+        camera_view: auto
+        show_state: false
+        grid_options: {columns: 6, rows: 4}
+```
+
+Repeat the per-camera grid for each camera you have. The view uses the standard `sections` layout — no custom cards required.
+
+#### Tips for own variants
+
+- **Picture-entity vs. picture-glance**: `picture-entity` shows a single live thumbnail (refreshes ~every 30 s per `image_refresh_interval`). `picture-glance` overlays state badges. Use the integration's own **`bosch-camera-card`** for full stream + controls (see [Lovelace Cards](#lovelace-cards)).
+- **Filter by area**: if you assign cameras to HA Areas, an `area` card with `navigation_path` gives a hierarchical entry point.
+- **Mobile-first**: set `column_span: 1` on grids to force single-column on phones; use `panel: true` on the view for full-width tablet layouts.
+- **Recorder DB**: if you don't need long-term history for the diagnostic sensors, see the *Recorder DB size* hint in **Known Limitations**.
+
+---
+
 ## Requirements
 
 - Home Assistant 2024.1+
@@ -1437,8 +1563,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.0.1** — see the GitHub release page for full notes:
-[**v12.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.1)
+Latest: **v12.0.2** — see the GitHub release page for full notes:
+[**v12.0.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.2)
 
 | | |
 |---|---|
@@ -1449,8 +1575,17 @@ Latest: **v12.0.1** — see the GitHub release page for full notes:
 
 ## Related Projects
 
-- [Bosch Smart Home Camera — Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) — standalone CLI with full API access, live stream, RCP protocol, FCM push
-- [Bosch Smart Home Camera — Python Frontend (concept)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — planned NiceGUI web dashboard — community interest welcome
+This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
+
+| Implementation | Repo | Status |
+|---|---|---|
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.0.2** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.1.0 · pre-alpha · npm |
+
+HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time per the [Cross-Platform Sync Strategy](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#cross-platform-sync) (linked internally, see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
+
+Also: [Bosch Smart Home Camera — Python Frontend (concept)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — planned NiceGUI web dashboard — community interest welcome
 
 ---
 

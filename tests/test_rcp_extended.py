@@ -659,6 +659,236 @@ class TestAsyncUpdateRcpDataBitrate:
             "XML-wrapped bitrate response must not be cached (starts with '<')"
         )
 
+    @pytest.mark.asyncio
+    async def test_whitespace_prefixed_xml_bitrate_not_cached(self):
+        """Gen2 FW 9.40 prefixes the XML envelope with whitespace (\\n\\n<rcp>...).
+
+        Real-world log (2026-05-13, Innenbereich 22222222 FW 9.40.25):
+            RCP bitrate for 22222222: out-of-range values
+            [168442994, 1668300298, 168377443, 1869442401] — cache skipped
+
+        Decoded big-endian those bytes spell '\\n\\n<rcp>\\n\\n\\t<comma' — the
+        camera returned its XML envelope as P_OCTET payload. The original guard
+        ``raw.startswith(b'<')`` did not catch this because byte 0 is 0x0A (\\n),
+        not '<'. Fixed by lstrip-ing whitespace before the XML-prefix check.
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c81</command>\n</rcp>"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                if cmd == "0x0c81":
+                    return xml_bytes
+                return None
+
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_bitrate_cache, (
+            "Whitespace-prefixed XML response must not be cached — Gen2 FW 9.40 "
+            "returns '\\n\\n<rcp>...' which the original startswith('<') guard missed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_xml_wrapped_bitrate_marks_failure(self):
+        """XML-wrapped bitrate response must call _mark_fail so retries are bounded.
+
+        Without _mark_fail, a permanently XML-returning cloud proxy would cause
+        the bitrate read to be retried on every coordinator update, polluting
+        logs forever. The _skip/_mark_fail threshold (3 strikes) silences it.
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c81</command>\n</rcp>"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                return xml_bytes if cmd == "0x0c81" else None
+            mock_read.side_effect = read_side
+
+            # Run 3 times — bitrate should be probed 3x then skipped
+            for _ in range(4):
+                await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        called_bitrate = [
+            call for call in mock_read.call_args_list if call.args[2] == "0x0c81"
+        ]
+        assert len(called_bitrate) == 3, (
+            f"Bitrate command 0x0c81 must be skipped after 3 XML-wrapped responses "
+            f"(got {len(called_bitrate)} retries — _mark_fail/_skip not wired up)"
+        )
+
+
+class TestIsXmlEnvelopeHelper:
+    """_is_xml_envelope: shared detection of cloud-proxy XML-leak responses.
+
+    Gen2 cloud proxy occasionally returns the outer RCP XML envelope as the
+    P_OCTET payload bytes (Bosch-side limitation). The envelope starts with
+    whitespace + '<rcp>...'. Short responses (T_WORD = 2 bytes) may contain
+    only the leading whitespace and never reach '<' — those are XML too.
+    """
+
+    def test_none_is_not_xml(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        assert _is_xml_envelope(None) is False
+
+    def test_empty_is_not_xml(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        assert _is_xml_envelope(b"") is False
+
+    def test_plain_xml_detected(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        assert _is_xml_envelope(b"<rcp><command>0x0c81</command></rcp>") is True
+
+    def test_whitespace_prefixed_xml_detected(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        assert _is_xml_envelope(b"\n\n<rcp>\n\n\t<command>0x0c81</command></rcp>") is True
+
+    def test_pure_whitespace_detected(self):
+        """T_WORD (2 bytes) truncates the XML envelope to just '\\n\\n'."""
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        assert _is_xml_envelope(b"\n\n") is True
+        assert _is_xml_envelope(b"\t ") is True
+        assert _is_xml_envelope(b"\r\n") is True
+
+    def test_binary_payload_not_xml(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        # Valid bitrate ladder uint32 big-endian: 1000, 2000 kbps
+        import struct as _struct
+        assert _is_xml_envelope(_struct.pack(">II", 1000, 2000)) is False
+        # Valid LED dimmer 50% as T_WORD
+        assert _is_xml_envelope(b"\x00\x32") is False
+        # Single byte of zero
+        assert _is_xml_envelope(b"\x00") is False
+
+    def test_ascii_text_not_xml(self):
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+        # Product name (legitimate ASCII), not XML
+        assert _is_xml_envelope(b"Bosch Smart Camera\x00") is False
+
+
+class TestAsyncUpdateRcpDataDimmerXmlGuard:
+    """async_update_rcp_data: LED dimmer (0x0c22) XML-wrapper handling.
+
+    Real-world log (2026-05-13, FW 9.40.25):
+        RCP LED dimmer for 11111111: out-of-range raw=2570 — cache skipped
+
+    raw=2570 (0x0A 0x0A) is the first two bytes of the cloud-proxy XML envelope
+    '\\n\\n<rcp>...'. The T_WORD num=1 read truncates to 2 bytes so '<' never
+    appears in the payload; _is_xml_envelope catches the pure-whitespace case.
+    """
+
+    @pytest.mark.asyncio
+    async def test_xml_envelope_truncated_to_2_bytes_not_cached(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        truncated_xml = b"\n\n"  # first 2 bytes of '\n\n<rcp>...'
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                return truncated_xml if cmd == "0x0c22" else None
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_dimmer_cache, (
+            "Truncated XML envelope must not be cached as a dimmer value"
+        )
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c22", 0) >= 1, (
+            "Dimmer XML-wrapper must call _mark_fail so retries are bounded"
+        )
+
+    @pytest.mark.asyncio
+    async def test_valid_dimmer_still_cached(self):
+        """Regression — ensure the XML guard doesn't reject valid 0-100 values."""
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        valid_50 = b"\x00\x32"  # uint16 big-endian = 50
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                return valid_50 if cmd == "0x0c22" else None
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_dimmer_cache.get(CAM_ID) == 50, (
+            "Valid 50% dimmer reading must still be cached after XML-guard refactor"
+        )
+
+
+class TestAsyncUpdateRcpDataClockXmlGuard:
+    """async_update_rcp_data: clock (0x0a0f) XML-wrapper handling.
+
+    Real-world log (2026-05-13, Terrasse 11111111 FW 9.40.25):
+        RCP clock for 11111111: unexpected layout
+        (Y=2570 M=60 D=114 h=99 m=112 s=62) — cache skipped
+
+    Decoded big-endian those bytes spell '\\n\\n<rcp>\\n\\n\\t<co' — the cloud
+    proxy returned its XML envelope as P_OCTET payload. The 8-byte struct unpack
+    happily parsed it as a (garbage) datetime and produced a confusing log line.
+    Fix: detect the XML prefix early and silently mark_fail.
+    """
+
+    @pytest.mark.asyncio
+    async def test_whitespace_prefixed_xml_clock_not_cached(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0a0f</command>\n</rcp>"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+            new_callable=AsyncMock,
+            return_value="fake-sid",
+        ), patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_read",
+            new_callable=AsyncMock,
+        ) as mock_read:
+            async def read_side(hass, base, cmd, sid, **kw):
+                return xml_bytes if cmd == "0x0a0f" else None
+            mock_read.side_effect = read_side
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_clock_offset_cache, (
+            "XML-wrapped clock response must not be cached"
+        )
+        # Ensures _mark_fail was called (counter incremented)
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0a0f", 0) >= 1, (
+            "Clock XML-wrapper must call _mark_fail so retries are bounded"
+        )
+
 
 # ── _skip / _mark_fail threshold logic ──────────────────────────────────────
 

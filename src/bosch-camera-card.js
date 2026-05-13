@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.5";
+const CARD_VERSION = "2.12.6";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -809,6 +809,46 @@ class BoschCameraCard extends HTMLElement {
           font-weight: 400; max-width: 80%; text-align: center; line-height: 1.4;
         }
 
+        /* Auth/integration overlay — shown when camera entity is unavailable
+           (coordinator failed, e.g. Bosch Cloud refresh token rejected) */
+        .auth-overlay {
+          position: absolute; inset: 0; z-index: 9;
+          display: none;
+          flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(20, 20, 20, 0.88);
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+          gap: 14px;
+          pointer-events: auto;
+        }
+        .auth-overlay.visible { display: flex; }
+        .auth-overlay svg {
+          width: 48px; height: 48px;
+          stroke: #ff9f0a; stroke-width: 2; fill: none;
+          filter: drop-shadow(0 0 8px rgba(255, 159, 10, 0.5));
+        }
+        .auth-overlay .auth-title {
+          font-size: 16px; font-weight: 700; color: #ff9f0a;
+          letter-spacing: 0.5px; text-align: center;
+          text-shadow: 0 0 10px rgba(255, 159, 10, 0.35);
+        }
+        .auth-overlay .auth-subtitle {
+          font-size: 12px; color: rgba(255,255,255,.75);
+          font-weight: 400; max-width: 85%; text-align: center; line-height: 1.45;
+        }
+        .auth-overlay .auth-btn {
+          margin-top: 4px;
+          padding: 8px 18px;
+          background: #ff9f0a; color: #1a1a1a;
+          border: none; border-radius: 8px;
+          font-size: 13px; font-weight: 600;
+          cursor: pointer;
+          text-decoration: none;
+          transition: filter .15s;
+        }
+        .auth-overlay .auth-btn:hover { filter: brightness(1.1); }
+        .auth-overlay .auth-btn:active { filter: brightness(0.9); }
+
         /* Image overlay (last event / events today) */
         .img-overlay {
           position: absolute; bottom: 0; left: 0; right: 0;
@@ -1081,6 +1121,16 @@ class BoschCameraCard extends HTMLElement {
             </svg>
             <div class="offline-title">Kamera Offline</div>
             <div class="offline-subtitle" id="offline-subtitle">Keine Verbindung zur Bosch Cloud</div>
+          </div>
+          <div class="auth-overlay" id="auth-overlay">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2L3 7v6c0 5 3.5 9.4 9 11 5.5-1.6 9-6 9-11V7l-9-5z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div class="auth-title">Anmeldung abgelaufen</div>
+            <div class="auth-subtitle">Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.</div>
+            <a class="auth-btn" id="auth-reauth-btn" href="/config/integrations/integration/bosch_shc_camera" target="_top">Erneut anmelden</a>
           </div>
           <div class="privacy-placeholder" id="privacy-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2794,9 +2844,19 @@ class BoschCameraCard extends HTMLElement {
       infoBuf.textContent = (typeof bufMs === "number" && bufMs > 0) ? `${bufMs} ms` : "—";
     }
 
-    // Offline overlay
+    // Auth/integration overlay — camera entity is `unavailable` when the
+    // Bosch integration's coordinator fails (typically: refresh token rejected
+    // by Keycloak after long sessions or server-side rotation). The overlay
+    // covers offline-overlay (z-index 9 vs 8) so the user sees the actionable
+    // re-login banner instead of a generic "offline" state.
+    const camState = hass.states[ents.camera]?.state;
+    const isIntegrationDown = camState === "unavailable" || camState === undefined;
+    const authOverlay = this.shadowRoot.getElementById("auth-overlay");
+    if (authOverlay) authOverlay.classList.toggle("visible", isIntegrationDown);
+
+    // Offline overlay (suppressed while auth-overlay is up to avoid double overlay)
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
-    const isOffline = statusState === "OFFLINE";
+    const isOffline = !isIntegrationDown && statusState === "OFFLINE";
     if (offlineOverlay) {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {

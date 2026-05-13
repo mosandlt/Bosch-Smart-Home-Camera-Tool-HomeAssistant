@@ -26,6 +26,21 @@ _LOGGER = logging.getLogger(__name__)
 # Type alias for the session cache: {proxy_hash: (session_id, expires_at_monotonic)}
 RcpSessionCache = dict[str, tuple[str, float]]
 
+
+def _is_xml_envelope(raw: bytes | None) -> bool:
+    """True if raw is (or starts with) a cloud-proxy XML envelope.
+
+    Gen2 cloud proxy occasionally returns the outer RCP XML envelope as the
+    P_OCTET payload bytes instead of the requested binary value. The envelope
+    starts with whitespace + ``<rcp>``. Short responses (e.g. T_WORD = 2 bytes)
+    may contain only the leading whitespace; treat pure-whitespace as XML too,
+    since no legitimate binary payload should start with bytes 0x0A/0x0D/0x09.
+    """
+    if not raw:
+        return False
+    stripped = raw.lstrip(b"\n\r\t ")
+    return not stripped or stripped.startswith(b"<")
+
 # ── Session management ───────────────────────────────────────────────────────
 
 
@@ -442,7 +457,11 @@ async def async_update_rcp_data(
     if not _skip("0x0c22"):
         try:
             raw = await _read("0x0c22", type_="T_WORD", num=1)
-            if raw and len(raw) >= 2:
+            if _is_xml_envelope(raw):
+                # Gen2 cloud proxy returned the XML envelope (or its whitespace
+                # prefix) — mark as fail silently so retries are bounded.
+                _mark_fail("0x0c22")
+            elif raw and len(raw) >= 2:
                 dimmer_val = struct.unpack(">H", raw[:2])[0]
                 if 0 <= dimmer_val <= 100:
                     coordinator._rcp_dimmer_cache[cam_id] = int(dimmer_val)
@@ -478,7 +497,9 @@ async def async_update_rcp_data(
     if not _skip("0x0a0f"):
         try:
             raw = await _read("0x0a0f", type_="P_OCTET")
-            if raw and len(raw) >= 8:
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0a0f")
+            elif raw and len(raw) >= 8:
                 year, month, day, hour, minute, second, _ = struct.unpack(
                     ">HBBBBBB", raw[:8]
                 )
@@ -562,22 +583,30 @@ async def async_update_rcp_data(
     # Read bitrate ladder (0x0c81) -- series of big-endian uint32 kbps values
     # Gen1/360 cameras return XML-wrapped responses via cloud proxy — guard against
     # interpreting XML as binary (produces garbage kbps values like 168442994).
-    try:
-        raw = await _read("0x0c81", type_="P_OCTET")
-        if raw and len(raw) >= 4 and not raw.startswith(b"<"):
-            n = len(raw) // 4
-            ladder = [struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
-            # Sanity-check: valid bitrate values are 100 – 50000 kbps
-            if all(100 <= v <= 50_000 for v in ladder):
-                coordinator._rcp_bitrate_cache[cam_id] = ladder
-                _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
-            else:
-                _LOGGER.debug(
-                    "RCP bitrate for %s: out-of-range values %s — cache skipped",
-                    cam_id, ladder[:4],
-                )
-    except Exception as err:
-        _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
+    # Gen2 FW 9.40 prefixes the XML with whitespace (\n\n<rcp>…), so lstrip first.
+    if not _skip("0x0c81"):
+        try:
+            raw = await _read("0x0c81", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0c81")
+            elif raw and len(raw) >= 4:
+                n = len(raw) // 4
+                ladder = [struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
+                # Sanity-check: valid bitrate values are 100 – 50000 kbps
+                if all(100 <= v <= 50_000 for v in ladder):
+                    coordinator._rcp_bitrate_cache[cam_id] = ladder
+                    _LOGGER.debug("RCP bitrate ladder for %s: %s", cam_id, ladder)
+                    _mark_ok("0x0c81")
+                else:
+                    _mark_fail("0x0c81")
+                    _LOGGER.debug(
+                        "RCP bitrate for %s: out-of-range values %s — cache skipped",
+                        cam_id, ladder[:4],
+                    )
+            elif raw is None:
+                _mark_fail("0x0c81")
+        except Exception as err:
+            _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
 
     # ── Phase 2 RCP reads ────────────────────────────────────────────────────
 
