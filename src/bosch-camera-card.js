@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.6";
+const CARD_VERSION = "2.12.7";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -460,8 +460,16 @@ class BoschCameraCard extends HTMLElement {
 
   _onVisibilityChange() {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
-      // Page just came to foreground — trigger fresh snapshot like on page load
-      this._triggerFreshSnapshot();
+      // Page just came to foreground — trigger fresh snapshot like on page load,
+      // but defer ~500ms so the Companion App's WebSocket has a chance to finish
+      // reconnecting. Calling trigger_snapshot before WS is ready makes Android
+      // show a native error popup (the `hass.connected` flag can lag the actual
+      // disconnect by a few hundred ms after resume from background).
+      setTimeout(() => {
+        if (document.visibilityState === "visible" && !this._liveVideoActive) {
+          this._triggerFreshSnapshot();
+        }
+      }, 500);
       // Also pull authoritative state for the toggleable switches via REST.
       // The HA-Companion-App suspends its WebSocket on backgrounding, and
       // when it resumes the local `hass.states` cache may briefly disagree
@@ -533,8 +541,13 @@ class BoschCameraCard extends HTMLElement {
     // _force_image_refresh makes frame_interval=0.1s so the next proxy request
     // actually calls async_camera_image instead of returning HA's internal cache.
     // Cloud API response varies (1.5–5s), so fetch at 1.5s and 4s.
-    // Guard: skip if service not yet registered (Android companion app startup race).
+    // Guard 1: skip if service not yet registered (Android companion app startup race).
     if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot) return;
+    // Guard 2: skip if WS is mid-reconnect. Companion App resume → cached services
+    // map still shows the service, but the WS call fails before reconnect completes
+    // → Android shows a native error popup even when JS catches the rejection.
+    if (this._hass.connected === false) return;
+    if (this._hass.connection && this._hass.connection.connected === false) return;
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);

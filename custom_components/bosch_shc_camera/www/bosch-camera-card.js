@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.6";
+const CARD_VERSION = "2.12.7";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -258,7 +258,11 @@ class BoschCameraCard extends HTMLElement {
   }
   _onVisibilityChange() {
     if (document.visibilityState === "visible" && !this._liveVideoActive) {
-      this._triggerFreshSnapshot();
+      setTimeout(() => {
+        if (document.visibilityState === "visible" && !this._liveVideoActive) {
+          this._triggerFreshSnapshot();
+        }
+      }, 500);
       this._pullFreshSwitchStates();
     }
     this._startRefreshTimer();
@@ -296,6 +300,8 @@ class BoschCameraCard extends HTMLElement {
   }
   _triggerFreshSnapshot() {
     if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot) return;
+    if (this._hass.connected === false) return;
+    if (this._hass.connection && this._hass.connection.connected === false) return;
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4e3);

@@ -5,6 +5,13 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.0.3 — 2026-05-13
+
+**trigger_snapshot — close residual race on Android Companion App resume.**
+
+- **Lovelace card v2.12.7** (`src/bosch-camera-card.js`): the proactive `bosch_shc_camera.trigger_snapshot` call that refreshes the camera image after the app returns from background occasionally still triggered an Android Companion App native error popup ("unknown error") even with the service-existence guard added in v11.2.2/v11.2.5. Root cause: when the app resumes, `hass.services` still shows the cached service entry (guard passes), but the actual WebSocket call fails because the WS is mid-reconnect. Two new safeguards: (1) explicit `hass.connected` + `hass.connection.connected` check before each call so we skip while reconnecting, (2) the visibility-change-resume path now defers the trigger by 500 ms so the WS has time to finish reconnecting. Reported by @Andreas74 (simon42).
+- No Python changes.
+
 ## v12.0.2 — 2026-05-13
 
 **RCP cloud-proxy XML-leak hardening + Lovelace reauth banner.**
