@@ -802,6 +802,17 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             data_schema=vol.Schema(sectioned_schema),
             description_placeholders={
                 "token_status": "active (auto-renews)" if has_refresh else "no refresh token",
+                # Pattern-variable literals — without these, formatjs/ICU parses
+                # {camera}, {year}, … in the events_storage descriptions as
+                # missing variables and renders the whole description blank.
+                "camera": "{camera}",
+                "year":   "{year}",
+                "month":  "{month}",
+                "day":    "{day}",
+                "type":   "{type}",
+                "date":   "{date}",
+                "time":   "{time}",
+                "id":     "{id}",
             },
         )
 

@@ -224,7 +224,18 @@ async def async_setup_entry(
             entities.append(BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschAudioAlarmSwitch(coordinator, cam_id, config_entry))
+            # BoschAudioAlarmSwitch parked v12.0.4: PUT body matches the iOS app
+            # byte-for-byte (verified via mitm capture) and Bosch returns 204, but
+            # the camera's mic processing does NOT activate. Re-toggling via the
+            # official app (with same body shape) does activate it. Difference
+            # not visible at the HTTP layer — possibly an implicit RCP local
+            # call or push-token-subscription side-effect that the app does over
+            # its LOCAL stream connection (binary, not in HTTP traffic).
+            # Re-enable once we know the actual trigger.
+        # Gen2 panic-alarm — manual siren trigger via PUT /panic_alarm.
+        # Gen1 keeps the auto-stop button in button.py (BoschAcousticAlarmButton).
+        if get_model_config(hw_version).generation >= 2:
+            entities.append(BoschPanicAlarmSwitch(coordinator, cam_id, config_entry))
         # Image rotation 180° — only for indoor cameras (Gen1 360 + Gen2 Indoor II).
         # Outdoor cameras have a fixed mounting orientation by design and don't
         # need this. The switch is purely client-side display state — the card
@@ -1356,6 +1367,9 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
         )
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            # Guard the next slow-tier poll (300 s) from overwriting the cache
+            # with the stale cloud value while propagation is still in flight.
+            self.coordinator._intrusion_config_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -1578,8 +1592,10 @@ class BoschAudioAlarmSwitch(_BoschSwitchBase):
     audioAlarmConfiguration is "CUSTOM" (free threshold-based detection); "OFF"
     fully disables sound detection.
 
-    PUT /v11/video_inputs/{id}/audioAlarm  body preserves sensitivity/threshold/config,
-    only toggles the enabled field.
+    PUT /v11/video_inputs/{id}/audioAlarm preserves sensitivity/threshold and
+    flips both `enabled` and `audioAlarmConfiguration` together — the cloud
+    accepts a mismatched pair (enabled=true + config="OFF") with 204 but never
+    applies it. Confirmed via mitm capture of the iOS app 2026-05-13.
     """
 
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -1625,11 +1641,24 @@ class BoschAudioAlarmSwitch(_BoschSwitchBase):
         if not current:
             return
         current["enabled"] = enabled
-        # Preserve all other fields — capture shows full body with sensitivity/threshold/config
+        # Bosch-Cloud silently 204s a PUT with enabled=true but
+        # audioAlarmConfiguration="OFF" — the value never actually flips.
+        # mitm capture (2026-05-13) of the iOS app confirms: app always pairs
+        # enabled=true with "CUSTOM" and enabled=false with "OFF". Also pin
+        # sensitivity to 0 (CGI default) when the GET response omitted it,
+        # since the app always sends it.
+        current["audioAlarmConfiguration"] = "CUSTOM" if enabled else "OFF"
+        current.setdefault("sensitivity", 0)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "audioAlarm", current
         )
         if success:
+            # is_on reads from coordinator._audio_alarm_cache (persistent across
+            # ticks), not data[cam_id]["audioAlarm"] (rebuilt every 60 s). Without
+            # updating the cache + write-lock, the next slow-tier poll within the
+            # eventual-consistency window reverts to the stale enabled=False.
+            self.coordinator._audio_alarm_cache[self._cam_id] = current
+            self.coordinator._audio_alarm_set_at[self._cam_id] = time.monotonic()
             cam_data = self.coordinator.data.get(self._cam_id)
             if cam_data is not None:
                 cam_data["audioAlarm"] = current
@@ -1702,6 +1731,70 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):  # type: ign
         self.coordinator._image_rotation_180[self._cam_id] = False
         self.async_write_ha_state()
         self.coordinator.async_update_listeners()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
+    """Switch: trigger the integrated 75 dB siren (Gen2 only).
+
+    PUT /v11/video_inputs/{id}/panic_alarm  body {"status": "ON" | "OFF"} → 204.
+    Confirmed via mitmproxy capture of the iOS app (2026-05-13).
+
+    Unlike the Gen1 acoustic_alarm endpoint (auto-stops after a hardware-defined
+    duration), panic_alarm is a stateful ON/OFF switch — the siren keeps blaring
+    until {"status":"OFF"} is sent or the user disarms via the app.
+
+    State is local-only: the cloud does not expose a "panic active" GET endpoint,
+    so we track the last-sent state in `coordinator._panic_alarm_cache`. After a
+    restart the switch defaults to OFF (siren has timed out / been silenced).
+
+    Disabled by default — too loud to be in a casual dashboard. User enables via
+    Settings → Entities when wiring an "alarm" automation.
+    """
+
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:alarm-light"
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name            = f"Bosch {self._cam_title} Sirene auslösen"
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_panic_alarm"
+        self._attr_translation_key = "panic_alarm"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def is_on(self) -> bool:
+        cache = getattr(self.coordinator, "_panic_alarm_cache", {})
+        return bool(cache.get(self._cam_id, False))
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.is_camera_online(self._cam_id)
+
+    async def _set(self, enabled: bool) -> None:
+        if not hasattr(self.coordinator, "_panic_alarm_cache"):
+            self.coordinator._panic_alarm_cache = {}  # lazy init for older coordinators
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "panic_alarm", {"status": "ON" if enabled else "OFF"}
+        )
+        if success:
+            self.coordinator._panic_alarm_cache[self._cam_id] = enabled
+            _LOGGER.info(
+                "Panic alarm %s for %s",
+                "TRIGGERED" if enabled else "stopped", self._cam_title,
+            )
+        else:
+            _LOGGER.warning(
+                "Panic alarm %s for %s — PUT /panic_alarm returned non-success",
+                "trigger" if enabled else "stop", self._cam_title,
+            )
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._set(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

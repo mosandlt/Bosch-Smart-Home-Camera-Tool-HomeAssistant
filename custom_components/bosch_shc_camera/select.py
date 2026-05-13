@@ -367,7 +367,8 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
 class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity: intrusion detection mode (Gen2 only).
 
-    Options: ALL_MOTIONS / PERSON_DETECTION
+    API values: ALL_MOTIONS / ONLY_HUMANS / ZONES — confirmed via mitm captures
+    of the iOS app 2026-04-08 + 2026-04-11.
     Reads from coordinator._intrusion_config_cache[cam_id]["detectionMode"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig.
     """

@@ -40,9 +40,13 @@ async def async_setup_entry(
     entities = []
     for cam_id in coordinator.data:
         entities.append(BoschRefreshSnapshotButton(coordinator, cam_id, config_entry))
-        # Acoustic alarm (siren) — available for all cameras (disabled by default).
-        # If the camera doesn't support it, the API returns HTTP 442 which is handled gracefully.
-        entities.append(BoschAcousticAlarmButton(coordinator, cam_id, config_entry))
+        # Acoustic alarm button removed 2026-05-13: Gen1 cameras (360 Indoor +
+        # Eyes Outdoor) have no integrated siren — confirmed with hardware
+        # owner. Gen2 siren is exposed as a stateful switch (panic_alarm) in
+        # switch.py because the endpoint is /panic_alarm with {"status":"ON/OFF"},
+        # not /acoustic_alarm — see mitm capture 2026-05-13_160946. The
+        # BoschAcousticAlarmButton class is kept for backward compat with the
+        # entity registry but is no longer instantiated.
     async_add_entities(entities, update_before_add=False)
 
 

@@ -9,7 +9,10 @@ Creates number entities per camera:
   • {Name} Audio Threshold  — audio alarm trigger threshold in dB (0–100).
     Available for all cameras.
     Reads from coordinator.audio_alarm_settings(cam_id)["threshold"].
-    Writes via PUT /v11/video_inputs/{id}/audioAlarm {"threshold": value, "enabled": true}.
+    Writes via PUT /v11/video_inputs/{id}/audioAlarm — sends full body
+    {"sensitivity":..., "threshold": value, "enabled":..., "audioAlarmConfiguration":...}.
+    The configuration field must pair with enabled ("CUSTOM"+true / "OFF"+false),
+    otherwise Bosch silently 204s the PUT without applying it.
     Disabled by default.
 """
 

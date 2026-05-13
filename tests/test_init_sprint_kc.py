@@ -120,6 +120,7 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _cloud_privacy_masks_cache={},
         _lighting_options_cache={},
         _intrusion_config_cache={},
+        _intrusion_config_set_at={},
         _alarm_settings_cache={},
         _alarm_status_cache={},
         _arming_cache={},

@@ -461,7 +461,7 @@ Before v11.0.0 these failure paths logged a WARNING and silently returned — cl
 | Unread events count | `sensor` | disabled by default |
 | Privacy sound (360 only) | `switch` | enabled (config category) |
 | Commissioned status | `sensor` | diagnostic, disabled by default |
-| Acoustic alarm (siren) | `button` | disabled by default — added for every camera; cameras without a built-in siren return HTTP 442 (handled gracefully) |
+| Trigger siren (Gen2 only) | `switch` | disabled by default — stateful ON/OFF via `PUT /panic_alarm`. Gen1 hardware has no integrated siren and gets no entity. |
 | Live stream (30fps H.264 + AAC) | `camera` | via Live Stream switch |
 | Timestamp overlay (clock on video) | `switch` | disabled by default |
 | Movement notifications | `switch` | disabled by default |
@@ -1442,9 +1442,9 @@ The Eyes Innenkamera II (Gen2) adds a built-in alarm system with integrated 75 d
 | Entity | Purpose |
 |---|---|
 | `switch.bosch_{name}_alarmanlage` | Arm / disarm the built-in intrusion system (`PUT /intrusionSystem/arming`). Derived state from `alarmStatus.intrusionSystem` (INACTIVE / ACTIVE). |
-| `switch.bosch_{name}_sirene` | Main 75 dB siren on/off (`alarm_settings.alarmMode`). Disabling this lets you use the other alarm features without actually firing the siren. |
+| `switch.bosch_{name}_sirene` | Main 75 dB siren *configuration* on/off (`alarm_settings.alarmMode`). When OFF, alarm triggers don't fire the siren. Does **not** trigger the siren itself — see the next entry. |
+| `switch.bosch_{name}_sirene_auslosen` | **Trigger** the 75 dB siren on demand (`PUT /panic_alarm` with `{"status":"ON|OFF"}`). Stateful — the siren keeps blaring until you flip the switch back to OFF. Disabled by default. |
 | `switch.bosch_{name}_pre_alarm` | Pre-alarm red-LED warning before the siren fires (`alarm_settings.preAlarmMode`). |
-| `switch.bosch_{name}_audio_plus` | Sound-level event detection (ambient-noise threshold — "Geräusche" toggle in the iOS app). Free tier — this is NOT the paid Audio+ premium (glass-break / smoke / CO). |
 | `sensor.bosch_{name}_alarm_status` | `INACTIVE` / `ACTIVE` / `UNKNOWN` — state machine for the alarm. Attributes include `alarm_type` (`NONE` when idle), `siren_duration_s`, `activation_delay_s`, `pre_alarm_duration_s`. |
 | `number.bosch_{name}_sirenen_dauer` | Siren duration in seconds (`alarm_settings.alarmDelayInSeconds`, 10–300). |
 | `number.bosch_{name}_alarm_verzogerung` | Activation delay in seconds (`alarmActivationDelaySeconds`, 0–600). |
@@ -1563,8 +1563,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.0.3** — see the GitHub release page for full notes:
-[**v12.0.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.3)
+Latest: **v12.0.4** — see the GitHub release page for full notes:
+[**v12.0.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.4)
 
 | | |
 |---|---|
@@ -1579,7 +1579,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.0.3** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.0.4** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.1.0 · pre-alpha · npm |
 

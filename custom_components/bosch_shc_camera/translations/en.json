@@ -298,6 +298,9 @@
       "audio_alarm": {
         "name": "Sound Detection"
       },
+      "panic_alarm": {
+        "name": "Trigger Siren"
+      },
       "nvr_recording": {
         "name": "Mini-NVR Recording"
       }

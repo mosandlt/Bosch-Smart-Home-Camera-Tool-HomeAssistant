@@ -184,8 +184,13 @@ class TestAcousticAlarmPress:
 
 class TestSetupEntry:
     @pytest.mark.asyncio
-    async def test_creates_two_buttons_per_camera(self, stub_coord, stub_entry):
-        """Default options → 2 button entities per camera (Refresh + Siren)."""
+    async def test_creates_one_button_per_camera(self, stub_coord, stub_entry):
+        """Default options → 1 button entity per camera (Refresh only).
+
+        BoschAcousticAlarmButton was removed from async_setup_entry in v12.0.4:
+        Gen1 cameras have no integrated siren, Gen2 cameras use the panic_alarm
+        endpoint via switch.py BoschPanicAlarmSwitch instead.
+        """
         from custom_components.bosch_shc_camera.button import (
             async_setup_entry, BoschRefreshSnapshotButton, BoschAcousticAlarmButton,
         )
@@ -195,8 +200,11 @@ class TestSetupEntry:
                                 async_add_entities=lambda e, update_before_add=False: captured.extend(e))
         types_ = {type(e) for e in captured}
         assert BoschRefreshSnapshotButton in types_
-        assert BoschAcousticAlarmButton in types_
-        assert len(captured) == 2
+        assert BoschAcousticAlarmButton not in types_, (
+            "AcousticAlarmButton must not be instantiated — Gen1 has no siren, "
+            "Gen2 uses BoschPanicAlarmSwitch via /panic_alarm endpoint"
+        )
+        assert len(captured) == 1
 
     @pytest.mark.asyncio
     async def test_skips_all_buttons_when_disabled_in_options(self, stub_coord, stub_entry):

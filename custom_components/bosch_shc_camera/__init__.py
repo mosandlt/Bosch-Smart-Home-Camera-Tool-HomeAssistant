@@ -522,6 +522,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._ledlights_set_at:     dict[str, float] = {}  # status LED write
         self._arming_set_at:        dict[str, float] = {}  # alarm system arm/disarm write
         self._audio_alarm_set_at:   dict[str, float] = {}  # audioAlarm config write
+        self._intrusion_config_set_at: dict[str, float] = {}  # intrusionDetectionConfig write
         self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
         # Used for model-specific timing (encoder warm-up) and feature gating.
@@ -2051,7 +2052,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         elif ep == "lighting":
                             self._global_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "intrusionDetectionConfig":
-                            self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            # Skip cache overwrite within the write-lock window —
+                            # otherwise a slow-tier poll hitting before the cloud
+                            # has caught up to the user's toggle reverts the
+                            # switch back to the stale enabled value.
+                            if not self._is_write_locked(cam_id_key, self._intrusion_config_set_at):
+                                self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "alarm_settings":
                             self._alarm_settings_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
                         elif ep == "alarmStatus":

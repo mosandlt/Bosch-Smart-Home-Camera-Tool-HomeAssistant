@@ -75,6 +75,7 @@ def _make_coord(**overrides):
         _soft_light_fading_cache={CAM_ID: False},
         _intrusion_detection_cache={CAM_ID: False},
         _audio_alarm_cache={CAM_ID: False},
+        _audio_alarm_set_at={},
         _intrusion_config_cache={CAM_ID: {}},
         audio_alarm_settings=lambda cid: {},
         _alarm_system_cache={CAM_ID: False},
@@ -315,7 +316,13 @@ async def test_setup_entry_audio_notification_when_sound_supported():
 
 @pytest.mark.asyncio
 async def test_setup_entry_gen2_indoor_alarm_switches():
-    """Lines 222-225: 4 alarm switches added for Gen2 Indoor cameras."""
+    """Lines 222-226: 3 alarm switches added for Gen2 Indoor cameras.
+
+    BoschAudioAlarmSwitch parked in v12.0.4 — Bosch cloud accepts the PUT but
+    the camera's mic processing doesn't actually activate; trigger not yet
+    found in HTTPS traffic. Switch class is kept but removed from setup until
+    the missing piece is identified.
+    """
     coord = _make_coord()
     coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
     entry = _make_entry()
@@ -329,4 +336,9 @@ async def test_setup_entry_gen2_indoor_alarm_switches():
     assert "BoschAlarmSystemArmSwitch" in classes
     assert "BoschAlarmModeSwitch" in classes
     assert "BoschPreAlarmSwitch" in classes
-    assert "BoschAudioAlarmSwitch" in classes
+    assert "BoschAudioAlarmSwitch" not in classes, (
+        "BoschAudioAlarmSwitch parked in v12.0.4 — see CHANGELOG"
+    )
+    assert "BoschPanicAlarmSwitch" in classes, (
+        "BoschPanicAlarmSwitch added in v12.0.4 for Gen2 siren trigger"
+    )

@@ -432,15 +432,21 @@ class TestAudioAlarmSwitch:
     @pytest.mark.asyncio
     async def test_turn_on_updates_enabled_in_cam_data(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        settings = {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"}
+        settings = {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "OFF"}
         stub_coord.audio_alarm_settings = lambda cid: dict(settings)
         stub_coord.data[CAM_ID]["audioAlarm"] = dict(settings)
+        # v12.0.4: switch also writes to _audio_alarm_cache + _audio_alarm_set_at
+        stub_coord._audio_alarm_cache = {CAM_ID: dict(settings)}
+        stub_coord._audio_alarm_set_at = {}
         stub_coord.async_put_camera = AsyncMock(return_value=True)
         entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
         entity.async_write_ha_state = MagicMock()
         await entity.async_turn_on()
         assert stub_coord.data[CAM_ID]["audioAlarm"]["enabled"] is True, \
             "coordinator.data audioAlarm must be updated on successful turn_on"
+        # v12.0.4: audioAlarmConfiguration must flip to "CUSTOM" when enabling
+        assert stub_coord.data[CAM_ID]["audioAlarm"]["audioAlarmConfiguration"] == "CUSTOM", \
+            "audioAlarmConfiguration must pair with enabled (Bosch silently 204s mismatched pairs)"
 
     @pytest.mark.asyncio
     async def test_gen2_indoor_privacy_blocks_turn_on(self, stub_coord, stub_entry):

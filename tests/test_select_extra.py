@@ -51,6 +51,7 @@ def stub_coord():
         _stream_type_override=None,
         _fcm_push_mode="auto",
         _intrusion_config_cache={},
+        _intrusion_config_set_at={},
         async_put_camera=AsyncMock(return_value=True),
         async_stop_fcm_push=AsyncMock(),
         async_start_fcm_push=AsyncMock(),

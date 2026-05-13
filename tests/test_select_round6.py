@@ -34,6 +34,7 @@ def _stub_coord(gen2: bool = True):
         last_update_success=True,
         _stream_type_override=None,
         _intrusion_config_cache={},
+        _intrusion_config_set_at={},
         _fcm_push_mode="unknown",
         motion_settings=lambda cam_id: {"motionAlarmConfiguration": "HIGH", "enabled": True},
         get_quality=lambda cam_id: "auto",
