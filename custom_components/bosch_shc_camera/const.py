@@ -9,7 +9,7 @@ CARD_VERSION = "2.12.7"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
-    "binary_sensor", "camera", "sensor", "button",
+    "binary_sensor", "camera", "image", "sensor", "button",
     "switch", "number", "select", "update", "light",
 ]
 

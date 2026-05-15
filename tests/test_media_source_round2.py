@@ -723,35 +723,7 @@ class TestBrowseEntryRootDispatch:
         assert "N" in kinds
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _SmbBackend._ensure_session — caching
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestSmbBackendSessionCache:
-
-    def test_session_registered_only_once(self):
-        from custom_components.bosch_shc_camera.media_source import _SmbBackend
-        hass = MagicMock()
-        hass.data = {}
-        b = _SmbBackend(hass, {
-            "smb_server": "nas", "smb_share": "M",
-            "smb_username": "u", "smb_password": "p", "smb_base_path": "",
-        })
-        fake = _fake_smbclient()
-        with patch.dict(sys.modules, {"smbclient": fake}):
-            b._ensure_session()
-            b._ensure_session()
-        fake.register_session.assert_called_once()
-
-    def test_session_key_stored_in_hass_data(self):
-        from custom_components.bosch_shc_camera.media_source import _SmbBackend, SMB_SESSION_KEY
-        hass = MagicMock()
-        hass.data = {}
-        b = _SmbBackend(hass, {
-            "smb_server": "nas2", "smb_share": "M2",
-            "smb_username": "bob", "smb_password": "x", "smb_base_path": "",
-        })
-        fake = _fake_smbclient()
-        with patch.dict(sys.modules, {"smbclient": fake}):
-            b._ensure_session()
-        assert ("nas2", "bob") in hass.data[SMB_SESSION_KEY]
+# Replaced by tests/test_smb_credit_starvation.py: the shared-session
+# caching pattern caused SMB2 credit-pool exhaustion under parallel
+# range-requests (production trace 2026-05-14). New contract = per-call
+# connection_cache. See knowledge-base/smb-credit-starvation.md.

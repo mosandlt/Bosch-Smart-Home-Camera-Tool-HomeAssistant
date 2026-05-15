@@ -44,7 +44,6 @@ _LOGGER = logging.getLogger(__name__)
 
 URL_PREFIX = f"/api/{DOMAIN}/event"
 VIEW_REGISTERED_KEY = f"{DOMAIN}_media_view_registered"
-SMB_SESSION_KEY = f"{DOMAIN}_smb_sessions"  # set of (server, username) already registered
 
 # Filename pattern: "{Camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID}.ext"
 _FILE_RE = re.compile(
@@ -272,7 +271,14 @@ class _LocalBackend:
 
 
 class _SmbBackend:
-    """Read events from an SMB share via smbclient (requirements pulls smbprotocol)."""
+    """Read events from an SMB share via smbclient (requirements pulls smbprotocol).
+
+    Each public read uses its own ``connection_cache`` dict so smbprotocol creates
+    a fresh ``Connection`` per call. Sharing one session across concurrent HTTP
+    range-requests exhausts the per-Connection SMB2 credit pool (~64 credits) and
+    raises ``Request requires 1 credits but only 0 credits are available``.
+    Per-call cache = per-call credit window. See knowledge-base/smb-credit-starvation.md.
+    """
 
     def __init__(self, hass: HomeAssistant, opts: dict[str, Any]) -> None:
         self.hass = hass
@@ -300,14 +306,34 @@ class _SmbBackend:
         path = f"\\{self.share}\\{base}" if base else f"\\{self.share}"
         return f"{self.protocol}:\\\\{self.server}{path}"
 
-    def _ensure_session(self) -> None:
-        sessions = self.hass.data.setdefault(SMB_SESSION_KEY, set())
-        key = (self.server, self.username)
-        if key in sessions:
-            return
+    def _new_session_cache(self) -> dict[str, Any]:
+        """Build a fresh connection_cache dict + register a session into it.
+
+        Returning a new dict per call forces smbclient to instantiate a new
+        ``Connection`` object (= new TCP socket + new SMB2 sequence_window),
+        so concurrent callers don't contend on one credit pool.
+        """
+        cache: dict[str, Any] = {}
         from smbclient import register_session  # type: ignore[import-not-found]
-        register_session(self.server, username=self.username, password=self.password)
-        sessions.add(key)
+        register_session(
+            self.server,
+            username=self.username,
+            password=self.password,
+            connection_cache=cache,
+        )
+        return cache
+
+    def _close_session_cache(self, cache: dict[str, Any]) -> None:
+        """Best-effort tear-down so the Connection's TCP socket can close.
+
+        Without this, sessions linger in ``cache`` (held by the fobj's connection
+        ref) and the NAS sees an ever-growing pile of half-idle sessions.
+        """
+        try:
+            from smbclient import delete_session  # type: ignore[import-not-found]
+            delete_session(self.server, connection_cache=cache)
+        except Exception:  # pragma: no cover — best-effort cleanup
+            pass
 
     def _path(self, *segments: str) -> str:
         all_parts = (self.share, *self.base_parts, *(s for s in segments if s))
@@ -315,15 +341,18 @@ class _SmbBackend:
 
     def _scandir_filtered(self, *segments: str, want_dirs: bool) -> Generator[str, None, None]:
         from smbclient import scandir
-        self._ensure_session()
-        path = self._path(*segments)
-        for e in scandir(path):
-            if _is_macos_junk(e.name):
-                continue
-            if want_dirs and e.is_dir():
-                yield e.name
-            elif not want_dirs and e.is_file():
-                yield e.name
+        cache = self._new_session_cache()
+        try:
+            path = self._path(*segments)
+            for e in scandir(path, connection_cache=cache):
+                if _is_macos_junk(e.name):
+                    continue
+                if want_dirs and e.is_dir():
+                    yield e.name
+                elif not want_dirs and e.is_file():
+                    yield e.name
+        finally:
+            self._close_session_cache(cache)
 
     # tree (camera-first: camera/year/month/day)
     def list_cameras(self) -> list[str]:
@@ -403,17 +432,30 @@ class _SmbBackend:
         return out
 
     def open_file(self, camera: str, year: str, month: str, day: str, filename: str) -> tuple[Any, int]:
-        """Return (file-like, size). Caller closes the file-like."""
+        """Return (file-like, size). Caller closes the file-like.
+
+        The returned fobj carries a ``_bosch_close_cache`` callable; the HTTP
+        streamer invokes it after fobj.close() so the per-request SMB session
+        is torn down.
+        """
         from smbclient import open_file, stat as smb_stat
-        self._ensure_session()
         # Re-validate filename to block path traversal
         if "/" in filename or "\\" in filename or filename in (".", "..") or _is_macos_junk(filename):
             raise FileNotFoundError(filename)
         if not _parse_filename(filename):
             raise FileNotFoundError(filename)
-        path = self._path(camera, year, month, day, filename)
-        st = smb_stat(path)
-        return open_file(path, mode="rb"), st.st_size
+        cache = self._new_session_cache()
+        try:
+            path = self._path(camera, year, month, day, filename)
+            st = smb_stat(path, connection_cache=cache)
+            # share_access="r": allow other readers (FRITZ.NAS opens exclusive
+            # by default → NtStatus 0xc0000043 on a 2nd parallel range-request).
+            fobj = open_file(path, mode="rb", share_access="r", connection_cache=cache)
+            fobj._bosch_close_cache = lambda: self._close_session_cache(cache)  # type: ignore[attr-defined]
+            return fobj, st.st_size
+        except Exception:
+            self._close_session_cache(cache)
+            raise
 
     # ── flat-file methods (files directly in camera/ folder on NAS) ──────────
     def list_flat_dates(self, camera: str) -> list[str]:
@@ -454,14 +496,21 @@ class _SmbBackend:
     def open_flat_file(self, camera: str, filename: str) -> tuple[Any, int]:
         """Return (file-like, size) for a file directly in camera/ folder."""
         from smbclient import open_file, stat as smb_stat
-        self._ensure_session()
         if "/" in filename or "\\" in filename or filename in (".", "..") or _is_macos_junk(filename):
             raise FileNotFoundError(filename)
         if not _parse_filename(filename):
             raise FileNotFoundError(filename)
-        path = self._path(camera, filename)
-        st = smb_stat(path)
-        return open_file(path, mode="rb"), st.st_size
+        cache = self._new_session_cache()
+        try:
+            path = self._path(camera, filename)
+            st = smb_stat(path, connection_cache=cache)
+            # share_access="r": allow other readers (see open_file for context).
+            fobj = open_file(path, mode="rb", share_access="r", connection_cache=cache)
+            fobj._bosch_close_cache = lambda: self._close_session_cache(cache)  # type: ignore[attr-defined]
+            return fobj, st.st_size
+        except Exception:
+            self._close_session_cache(cache)
+            raise
 
 
 class _NvrBackend:
@@ -1266,4 +1315,12 @@ class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
             await response.write_eof()
             return response
         finally:
-            await self.hass.async_add_executor_job(fobj.close)
+            close_cache = getattr(fobj, "_bosch_close_cache", None)
+            try:
+                await self.hass.async_add_executor_job(fobj.close)
+            finally:
+                if close_cache is not None:
+                    try:
+                        await self.hass.async_add_executor_job(close_cache)
+                    except Exception:  # pragma: no cover — best-effort cleanup
+                        pass

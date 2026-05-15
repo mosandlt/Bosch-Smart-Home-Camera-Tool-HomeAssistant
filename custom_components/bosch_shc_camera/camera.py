@@ -42,6 +42,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
 from .auth_utils import async_digest_request
 from .const import TIMEOUT_SNAP
+from .snapshot_store import load_snapshot, save_snapshot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -145,6 +146,26 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         await super().async_added_to_hass()
         # Register with coordinator so button/service can trigger image refresh
         self.coordinator._camera_entities[self._cam_id] = self
+
+        # Restore the last-persisted snapshot from disk so HA can serve a real
+        # image immediately — before the first live fetch completes (~2–4 s).
+        # This prevents the 1×1 black placeholder from flashing on a cold start.
+        persisted = await load_snapshot(self.hass, self._cam_id)
+        if persisted:
+            self._cached_image = persisted
+            # Back-date _last_image_fetch so the normal snapshot_interval still
+            # triggers a live refresh on schedule.  Using float('-inf') would
+            # trigger an immediate re-fetch; instead back-date by one full
+            # snapshot_interval so the first refresh fires normally.
+            from .const import DEFAULT_OPTIONS
+            opts = get_options(self._entry)
+            snap_interval = float(int(opts.get("snapshot_interval", DEFAULT_OPTIONS["snapshot_interval"])))
+            self._last_image_fetch = time.monotonic() - snap_interval
+            _LOGGER.debug(
+                "%s: restored %d-byte snapshot from disk",
+                self._display_name, len(persisted),
+            )
+
         # Fetch a real image shortly after startup (let coordinator settle first).
         self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
 
@@ -239,6 +260,16 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._display_name, len(image),
                 )
                 self.async_write_ha_state()
+
+                # Persist to disk (defence-in-depth: privacy gate at top of
+                # this method already prevents reaching here when privacy is ON)
+                shc_state = self.coordinator._shc_state_cache.get(self._cam_id, {})
+                if not shc_state.get("privacy_mode"):
+                    await save_snapshot(self.hass, self._cam_id, image)
+                    img_entity = self.coordinator._image_entities.get(self._cam_id)
+                    if img_entity is not None:
+                        await img_entity.async_notify_refreshed()
+
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("%s: image refresh failed: %s", self._display_name, err)
         finally:

@@ -36,8 +36,9 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 
 ---
 
-## Contents
+## Table of Contents
 
+- [Integration Comparison](#integration-comparison) — pick the right project for your platform
 - [Supported Cameras](#supported-cameras)
 - [Disclaimer](#disclaimer)
 - [Prerequisites — Setting Up a New Camera](#prerequisites--setting-up-a-new-camera)
@@ -61,6 +62,48 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
 - [Related Projects](#related-projects)
 - [License](#license)
+
+---
+
+## Integration Comparison
+
+The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling projects. Pick the one that fits your platform.
+
+| Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) |
+|---|---|---|---|
+| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.2+ stable | v0.5+ beta |
+| **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) |
+| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) |
+| **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
+| **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP |
+| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ❌ | ❌ |
+| **Dual-stream URL (main + sub)** | ❌ | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
+| **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option |
+| **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP |
+| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP |
+| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ✅ command | ✅ color + brightness DPs |
+| **Panic-alarm siren (Gen2)** | ✅ button entity | ✅ command | ✅ DP |
+| **Image rotation 180°** | ✅ switch | ✅ flag | ✅ DP |
+| **Motion / person / audio events** | ✅ FCM push + polling fallback | ✅ event-watch command | ✅ FCM push + polling fallback |
+| **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* |
+| **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* |
+| **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP |
+| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* |
+| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ❌ | ❌ |
+| **SMB / NAS clip upload** | ✅ | ❌ | ❌ |
+| **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ |
+| **Camera sharing (friends)** | ❌ | ✅ command | ❌ |
+| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ❌ |
+| **Two-way audio / intercom** | ❌ | ✅ command | ❌ |
+| **Custom Lovelace card** | ✅ 2 cards (single + grid) | n/a | n/a |
+| **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` |
+| **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* |
+| **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs |
+
+**Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
+
+> All three projects share the same reverse-engineered Cloud API + RCP protocol research, but evolve independently. The Home Assistant integration is the most feature-complete reference implementation; the Python CLI is the lowest-level / scriptable surface; the ioBroker adapter is the youngest of the three and currently focused on the core states most users need for VIS dashboards and Blockly automations.
+
 
 ---
 
@@ -501,6 +544,8 @@ No automations needed — the integration sends alerts directly:
 1. **Instant text:** `📷 Kamera: Bewegung (10:31:56)` — sent immediately
 2. **Snapshot image:** `📸 Kamera Snapshot` + JPEG — sent ~5s later
 3. **Video clip:** `🎬 Kamera Video (245 KB)` + MP4 — sent ~30-90s later (polls until Bosch uploads the clip)
+
+Steps 2 and 3 also include a clickable Media Browser link to that day's event folder (`📂 https://…`). Uses the configured external HA URL when set so the link works from outside the LAN; points to the SMB backend when SMB upload is enabled, otherwise the local backend.
 
 **Per-step routing** (v6.5.0+): each step can go to different services, multiple recipients at once. Supports Signal, Telegram, iOS/Android Companion App, or any HA notify service.
 
@@ -1554,8 +1599,7 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ### Parked
 
-- **Motion-zone editor (read-only)** — local read access via RCP+ (`0x0c0a` + `0x0c00`) is technically possible using the per-session `cbs-…` user from `PUT /connection LOCAL`. A read-only viewer is feasible today; full write support requires capabilities not yet exposed locally.
-
+- **Motion-zone editor (read-only)** — local read access via RCP+ (`0x0c0a` + `0x0c00`) is technically possible using the per-session `cbs-…` user from `PUT /connection LOCAL`. A read-only viewer is feasible today; write support is not currently exposed in any documented API.
 - **Rules editor** (`/v11/video_inputs/{id}/rules`) — adjust event rules from the HA UI
 - **Camera sharing** (`/v11/friends`) — manage shared access from HA
 - **Live thumbnail via local RCP+** — opcode `0x099e` is reachable, but the local XML endpoint returns `<err>0x60</err>` for the `F_DATA` reads we tried (the cloud proxy uses binary TLV on the same path). Use case is narrow anyway: the card already shows live HLS as soon as the LOCAL session is up.
@@ -1581,7 +1625,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 |---|---|---|
 | 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.0.4** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.1.0 · pre-alpha · npm |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.4.0 · alpha · npm |
 
 HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time per the [Cross-Platform Sync Strategy](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#cross-platform-sync) (linked internally, see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
 

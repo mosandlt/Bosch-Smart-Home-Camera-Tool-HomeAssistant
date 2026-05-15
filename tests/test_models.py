@@ -132,3 +132,23 @@ def test_models_registry_has_no_aliases_to_default() -> None:
             f"MODELS[{hw!r}] points to DEFAULT_MODEL — remove the entry "
             f"or replace with a model-specific config."
         )
+
+
+def test_no_gen2_360_in_registry() -> None:
+    """Bosch never released a Gen2 360° camera. The lineup is:
+      Gen1: Eyes Außenkamera, 360 Innenkamera
+      Gen2: Eyes Außenkamera II (outdoor), Eyes Innenkamera II (regular indoor — NOT a 360°)
+
+    If MODELS ever gains an entry where "360" appears in the hw_id or display_name
+    AND generation >= 2, that's almost certainly a copy-paste error from a public
+    post / docs PR — not a real hardware release. Catch it before it ships.
+    """
+    for hw_id, cfg in MODELS.items():
+        mentions_360 = "360" in hw_id.lower() or "360" in cfg.display_name.lower()
+        if mentions_360:
+            assert cfg.generation == 1, (
+                f"MODELS[{hw_id!r}] (display_name={cfg.display_name!r}) "
+                f"claims generation={cfg.generation} — but no Gen2 360° camera "
+                f"exists in Bosch's lineup. If Bosch actually ships a Gen2 360°, "
+                f"remove this guard in the same PR that adds the hardware."
+            )

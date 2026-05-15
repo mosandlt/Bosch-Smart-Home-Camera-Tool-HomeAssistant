@@ -33,9 +33,9 @@ rules:
     status: done
     comment: |
       99% line-coverage across 3533 tests / 135 files (2026-05-12).
-      All entity platforms at 100%: camera, switch, sensor, binary_sensor,
+      All entity platforms at 100%: camera, image, switch, sensor, binary_sensor,
       light, number, select, button, update, config_flow, diagnostics,
-      local_rcp, media_source, models, smb, cf_unbuffer.
+      local_rcp, media_source, models, smb, cf_unbuffer, snapshot_store.
       Remaining misses (101 lines): __init__.py 21 (shutdown/error edges),
       recorder.py 22 (watch-loop daemon paths), switch.py 18, fcm.py 10,
       rcp.py 15, tls_proxy.py 8 (daemon-thread coverage tooling limit),

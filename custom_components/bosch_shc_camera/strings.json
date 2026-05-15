@@ -211,6 +211,11 @@
     }
   },
   "entity": {
+    "image": {
+      "last_snapshot": {
+        "name": "Last snapshot"
+      }
+    },
     "switch": {
       "privacy_sound": {
         "name": "Privacy Sound"

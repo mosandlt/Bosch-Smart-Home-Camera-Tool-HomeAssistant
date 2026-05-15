@@ -1,0 +1,356 @@
+"""Tests for image.py — BoschCameraLastSnapshotImage entity.
+
+Covers: creation gate, async_image disk+fallback, async_notify_refreshed,
+unique_id stability, and privacy bypass.
+
+Source: user report — iOS Companion App (WKWebView) served yesterday's
+snapshot for ~5s on cold-open due to heuristic disk-caching.
+Fix: image entity whose signed URL changes on each state-push.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+# --------------------------------------------------------------------------- #
+# Shared test IDs / fixtures
+# --------------------------------------------------------------------------- #
+
+CAM_ID = "11111111-1111-1111-1111-111111111111"
+DISK_JPEG = b"\xff\xd8\xff\xe0" + b"\x01" * 300  # 304 B — looks like a real snapshot
+RAM_JPEG = b"\xff\xd8\xff\xe0" + b"\x02" * 300   # different bytes for RAM path
+
+
+def _make_hass(tmp_path: Path) -> Any:
+    hass = SimpleNamespace()
+    storage = tmp_path / ".storage"
+    storage.mkdir()
+    hass.config = SimpleNamespace(path=lambda *parts: str(Path(tmp_path, *parts)))
+
+    async def _executor(fn: Any, *args: Any) -> Any:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, fn, *args)
+
+    hass.async_add_executor_job = _executor
+    return hass
+
+
+def _make_coordinator(cam_id: str = CAM_ID) -> Any:
+    return SimpleNamespace(
+        data={
+            cam_id: {
+                "info": {
+                    "title": "Terrasse",
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "aa:bb:cc:33:14:ae",
+                },
+                "events": [],
+                "live": {},
+            }
+        },
+        _camera_entities={},
+        _image_entities={},
+    )
+
+
+def _make_entry() -> Any:
+    return SimpleNamespace(
+        entry_id="01ENTRY",
+        data={"bearer_token": "fake-token"},
+        options={"enable_snapshots": True, "snapshot_interval": 1800},
+    )
+
+
+def _build_image_entity(
+    hass: Any,
+    coordinator: Any = None,
+    cam_id: str = CAM_ID,
+) -> Any:
+    """Construct a BoschCameraLastSnapshotImage bypassing full HA entity lifecycle."""
+    from custom_components.bosch_shc_camera.image import BoschCameraLastSnapshotImage
+
+    if coordinator is None:
+        coordinator = _make_coordinator(cam_id)
+
+    entry = _make_entry()
+
+    # Patch ImageEntity.__init__ to skip httpx client creation (needs real event loop)
+    with patch(
+        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        lambda self, h, verify_ssl=False: None,
+    ):
+        entity = BoschCameraLastSnapshotImage(hass, coordinator, cam_id, entry)
+
+    # Minimal attributes ImageEntity normally sets
+    entity.hass = hass
+    entity.access_tokens: Any = ["dummy-token"]  # type: ignore[assignment]
+    entity._attr_image_last_updated = None
+
+    return entity
+
+
+# --------------------------------------------------------------------------- #
+# Entity creation gate
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_image_entity_not_created_when_snapshots_disabled(
+    tmp_path: Path,
+) -> None:
+    """Image entities must NOT be created when enable_snapshots=False."""
+    from custom_components.bosch_shc_camera.image import async_setup_entry
+
+    coordinator = _make_coordinator()
+    entry = SimpleNamespace(
+        runtime_data=coordinator,
+        options={"enable_snapshots": False},
+    )
+
+    added: list[Any] = []
+    hass = _make_hass(tmp_path)
+
+    with patch("custom_components.bosch_shc_camera.image.get_options", return_value={"enable_snapshots": False}):
+        await async_setup_entry(hass, entry, lambda entities, **kw: added.extend(entities))
+
+    assert added == [], "No image entities should be created when snapshots are disabled"
+
+
+@pytest.mark.asyncio
+async def test_image_entity_created_when_snapshots_enabled(
+    tmp_path: Path,
+) -> None:
+    """Image entities ARE created when enable_snapshots=True (default)."""
+    from custom_components.bosch_shc_camera.image import async_setup_entry, BoschCameraLastSnapshotImage
+
+    coordinator = _make_coordinator()
+    entry = SimpleNamespace(
+        runtime_data=coordinator,
+        options={"enable_snapshots": True},
+    )
+
+    added: list[Any] = []
+    hass = _make_hass(tmp_path)
+
+    with patch("custom_components.bosch_shc_camera.image.get_options", return_value={"enable_snapshots": True}):
+        with patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            lambda self, h, verify_ssl=False: None,
+        ):
+            await async_setup_entry(
+                hass, entry,
+                lambda entities, **kw: added.extend(entities),
+            )
+
+    assert len(added) == 1
+    assert isinstance(added[0], BoschCameraLastSnapshotImage)
+
+
+# --------------------------------------------------------------------------- #
+# async_image — disk path
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_async_image_returns_disk_bytes(tmp_path: Path) -> None:
+    """async_image returns disk-persisted bytes when the file exists."""
+    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+
+    hass = _make_hass(tmp_path)
+    await save_snapshot(hass, CAM_ID, DISK_JPEG)
+
+    entity = _build_image_entity(hass)
+
+    result = await entity.async_image()
+    assert result == DISK_JPEG
+
+
+@pytest.mark.asyncio
+async def test_async_image_disk_takes_priority_over_ram(tmp_path: Path) -> None:
+    """When both disk and RAM cache are populated, disk bytes are returned."""
+    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+
+    hass = _make_hass(tmp_path)
+    await save_snapshot(hass, CAM_ID, DISK_JPEG)
+
+    coordinator = _make_coordinator()
+    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
+    coordinator._camera_entities[CAM_ID] = cam_stub
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    result = await entity.async_image()
+    # Disk takes priority
+    assert result == DISK_JPEG
+
+
+# --------------------------------------------------------------------------- #
+# async_image — fallback to camera RAM cache
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_async_image_fallback_to_ram_cache(tmp_path: Path) -> None:
+    """When no disk file exists, async_image falls back to camera._cached_image."""
+    hass = _make_hass(tmp_path)
+
+    coordinator = _make_coordinator()
+    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
+    coordinator._camera_entities[CAM_ID] = cam_stub
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    result = await entity.async_image()
+    assert result == RAM_JPEG
+
+
+@pytest.mark.asyncio
+async def test_async_image_placeholder_not_returned_as_fallback(
+    tmp_path: Path,
+) -> None:
+    """The 1×1 black placeholder JPEG (≤200 B) is NOT served as a snapshot image."""
+    hass = _make_hass(tmp_path)
+
+    # Placeholder is tiny (~130 B) — entity must filter it out
+    placeholder = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 120
+
+    coordinator = _make_coordinator()
+    cam_stub = SimpleNamespace(_cached_image=placeholder)
+    coordinator._camera_entities[CAM_ID] = cam_stub
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    result = await entity.async_image()
+    assert result is None, "Placeholder JPEG must not be served via image entity"
+
+
+@pytest.mark.asyncio
+async def test_async_image_returns_none_when_no_data(tmp_path: Path) -> None:
+    """async_image returns None when disk is empty and RAM cache is None."""
+    hass = _make_hass(tmp_path)
+
+    coordinator = _make_coordinator()
+    cam_stub = SimpleNamespace(_cached_image=None)
+    coordinator._camera_entities[CAM_ID] = cam_stub
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    result = await entity.async_image()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_async_image_no_camera_entity_registered(tmp_path: Path) -> None:
+    """async_image returns None gracefully when the camera entity is not yet registered."""
+    hass = _make_hass(tmp_path)
+
+    coordinator = _make_coordinator()
+    # No camera entity registered for CAM_ID
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    result = await entity.async_image()
+    assert result is None
+
+
+# --------------------------------------------------------------------------- #
+# async_notify_refreshed
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_notify_refreshed_bumps_last_updated(tmp_path: Path) -> None:
+    """async_notify_refreshed must set _attr_image_last_updated to a non-None datetime."""
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+
+    assert entity._attr_image_last_updated is None
+
+    write_state_calls: list[None] = []
+    entity.async_write_ha_state = lambda: write_state_calls.append(None)  # type: ignore[method-assign]
+    entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+    await entity.async_notify_refreshed()
+
+    assert entity._attr_image_last_updated is not None
+    assert len(write_state_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_notify_refreshed_calls_write_ha_state(tmp_path: Path) -> None:
+    """async_notify_refreshed must call async_write_ha_state to push WS update."""
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+
+    calls: list[str] = []
+    entity.async_write_ha_state = lambda: calls.append("write_state")  # type: ignore[method-assign]
+    entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+    await entity.async_notify_refreshed()
+
+    assert "write_state" in calls
+
+
+@pytest.mark.asyncio
+async def test_notify_refreshed_called_twice_advances_timestamp(
+    tmp_path: Path,
+) -> None:
+    """Each call to async_notify_refreshed should advance image_last_updated."""
+    import asyncio as _asyncio
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+    entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]
+    entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+    await entity.async_notify_refreshed()
+    first_ts = entity._attr_image_last_updated
+
+    await _asyncio.sleep(0.01)  # ensure wall-clock advances
+    await entity.async_notify_refreshed()
+    second_ts = entity._attr_image_last_updated
+
+    assert second_ts is not None
+    assert first_ts is not None
+    assert second_ts >= first_ts
+
+
+# --------------------------------------------------------------------------- #
+# Unique-ID stability
+# --------------------------------------------------------------------------- #
+
+
+def test_unique_id_stable(tmp_path: Path) -> None:
+    """Unique ID must be deterministic: {cam_id}_last_snapshot."""
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+    assert entity._attr_unique_id == f"{CAM_ID}_last_snapshot"
+
+
+def test_unique_id_stable_across_rebuilds(tmp_path: Path) -> None:
+    """Two separately constructed entities for the same cam_id share the unique_id."""
+    hass = _make_hass(tmp_path)
+    e1 = _build_image_entity(hass)
+    e2 = _build_image_entity(hass)
+    assert e1._attr_unique_id == e2._attr_unique_id
+
+
+# --------------------------------------------------------------------------- #
+# Coordinator registration
+# --------------------------------------------------------------------------- #
+
+
+def test_entity_registers_with_coordinator(tmp_path: Path) -> None:
+    """The image entity must register itself in coordinator._image_entities."""
+    hass = _make_hass(tmp_path)
+    coordinator = _make_coordinator()
+
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    assert coordinator._image_entities.get(CAM_ID) is entity

@@ -308,6 +308,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._auto_renew_generation: dict[str, int] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict[str, Any] = {}
+        # Image entity references — registered on image platform setup
+        # Keyed by cam_id; image entities call async_notify_refreshed() after
+        # each disk-persist so WKWebView gets a fresh signed URL.
+        self._image_entities: dict[str, Any] = {}
         # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
         self._last_status: float = -86400.0  # force status check on first tick
         self._last_events: float = -86400.0  # force event check on first tick

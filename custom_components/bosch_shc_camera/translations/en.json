@@ -228,6 +228,11 @@
     }
   },
   "entity": {
+    "image": {
+      "last_snapshot": {
+        "name": "Last snapshot"
+      }
+    },
     "switch": {
       "live_stream": {
         "name": "Live Stream"

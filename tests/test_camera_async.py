@@ -115,7 +115,14 @@ def _make_camera(coord=None, entry=None, **camera_overrides):
         except (AttributeError, RuntimeError):
             pass
         return MagicMock()
-    cam.hass = SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task))
+    # async_add_executor_job needed by load_snapshot in async_added_to_hass
+    async def _noop_executor(fn, *args):
+        return None
+    cam.hass = SimpleNamespace(
+        async_create_task=MagicMock(side_effect=_create_task),
+        async_add_executor_job=_noop_executor,
+        config=SimpleNamespace(path=lambda *p: "/tmp/bosch_test"),
+    )
     for k, v in camera_overrides.items():
         setattr(cam, k, v)
     return cam
