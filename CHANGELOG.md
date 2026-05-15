@@ -5,6 +5,23 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.2.1 — 2026-05-15
+
+**Hassfest fix — rewrite `folder_pattern` / `file_pattern` helper text as prose to satisfy both formatjs and HA's validator.**
+
+- v12.2.0 wrapped the literal `{camera}` placeholders in ICU single-quote escapes (`'{camera}'`) to stop the French frontend's `formatjs MISSING_VALUE` errors. That worked at render time but **Hassfest** (HA's official translation validator, runs in CI on every push) rejected the escape syntax with:
+
+  ```
+  [ERROR] [TRANSLATIONS] Invalid strings.json: the string should not
+  contain placeholders inside single quotes
+  ```
+
+  → CI Validate workflow failed on v12.2.0.
+- Both ``{name}`` and ``'{name}'`` are forbidden in helper-text strings. The only safe form is **prose**: list the variable names plain-text and explain in words that the user wraps them in curly braces when entering the actual pattern field.
+- Updated wording in `strings.json`, `translations/en.json`, and `translations/de.json` for both `folder_pattern` and `file_pattern` descriptions. All variable names are still listed (backticks for monospace rendering).
+- Regression test in `tests/test_translations_icu_escape.py` rewritten: now asserts **zero curly-brace tokens** (any form, escaped or not) in any `data_description` pattern string, plus a positive check that every variable name still appears in prose.
+- Functional impact: none. The pattern field accepts the same `{camera}` syntax; only the helper text below the field is rephrased.
+
 ## v12.2.0 — 2026-05-15
 
 **Event-driven snapshot refresh; per-camera-model settle delay; French frontend ICU-escape fix.**
