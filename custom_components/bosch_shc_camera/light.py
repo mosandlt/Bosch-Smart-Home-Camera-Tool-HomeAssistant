@@ -381,7 +381,7 @@ class BoschTopLedLight(_BoschRgbLedLight):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Oberes Licht"
+        self._attr_name            = "Oberes Licht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_top_led_light"
         self._attr_icon            = "mdi:arrow-up-bold-circle"
         self._attr_translation_key = "top_led_light"
@@ -395,7 +395,7 @@ class BoschBottomLedLight(_BoschRgbLedLight):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Unteres Licht"
+        self._attr_name            = "Unteres Licht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_bottom_led_light"
         self._attr_icon            = "mdi:arrow-down-bold-circle"
         self._attr_translation_key = "bottom_led_light"
@@ -418,7 +418,7 @@ class BoschFrontLight(_BoschLightBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Frontlicht"
+        self._attr_name            = "Frontlicht"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_front_light_entity"
         self._attr_icon            = "mdi:spotlight-beam"
         self._attr_translation_key = "front_light_entity"

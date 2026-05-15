@@ -690,6 +690,10 @@
     "auth_server_outage": {
       "title": "Bosch Kamera — Auth-Server Störung",
       "description": "Der Bosch-Authentifizierungsserver antwortet aktuell mit HTTP {error}. Das ist ein Problem auf Bosch-Seite, kein Fehler bei dir.\n\nDie Integration versucht automatisch weiter (Exponential Backoff bis 10 Minuten). Entitäten sind bis zur Wiederherstellung nicht verfügbar — kein Handlungsbedarf."
+    },
+    "doubled_prefix_entity_ids_migrated": {
+      "title": "Bosch Kamera — Entity-IDs umbenannt",
+      "description": "**{count}** Bosch-Kamera-Entity-IDs hatten einen doppelten `bosch_NAME_bosch_NAME_`-Prefix (Bug aus v11.0.0–v12.2.1) und wurden korrigiert.\n\nBeispiele: {examples}\n\n**Bitte aktualisiere alle Automationen, Skripte, Szenen und Lovelace-Karten, die die alten IDs referenzieren.** Home Assistant ersetzt YAML-Dateien und Lovelace-Karten nicht automatisch. Verlauf und Statistik werden automatisch übernommen.\n\nVollständige Liste in den v12.3.0 Release-Notes."
     }
   },
   "system_health": {

@@ -53,7 +53,7 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):  # type: ignore[misc
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
-        self._attr_name            = f"Bosch {self._cam_title} Firmware"
+        self._attr_name            = "Firmware"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_firmware_update"
         self._attr_translation_key = "firmware_update"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC

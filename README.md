@@ -1607,8 +1607,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.0.4** — see the GitHub release page for full notes:
-[**v12.0.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.0.4)
+Latest: **v12.3.0** — see the GitHub release page for full notes:
+[**v12.3.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.3.0)
 
 | | |
 |---|---|
@@ -1623,7 +1623,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.0.4** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.3.0** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.4.0 · alpha · npm |
 

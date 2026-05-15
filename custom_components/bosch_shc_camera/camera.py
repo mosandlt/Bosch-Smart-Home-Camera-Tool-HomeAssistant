@@ -670,7 +670,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             ) as resp:
                                 if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
                                     data = await resp.read()
-                    except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                        # ValueError: malformed/missing WWW-Authenticate header
+                        # from auth_utils.async_digest_request — forum 998974/15.
                         _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         data = None
                     if data:

@@ -45,7 +45,10 @@ def test_refresh_button_construction(stub_coord, stub_entry):
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     assert btn._attr_unique_id.startswith("bosch_shc_refresh_")
     assert btn._attr_translation_key == "refresh_snapshot"
-    assert "Terrasse" in btn._attr_name
+    # v12.3.0 — `_attr_name` is the bare suffix; HA prepends the device
+    # name automatically via `_attr_has_entity_name=True`. The cam title
+    # lives only in `device_info["name"]`.
+    assert btn._attr_name == "Refresh Snapshot"
 
 
 def test_refresh_button_device_info(stub_coord, stub_entry):

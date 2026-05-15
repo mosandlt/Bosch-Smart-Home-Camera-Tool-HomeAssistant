@@ -86,7 +86,7 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
         self._entry = entry
-        self._attr_name            = f"Bosch {self._cam_title} Video Quality"
+        self._attr_name            = "Video Quality"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_video_quality"
         self._attr_translation_key = "video_quality"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -169,7 +169,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
 
-        self._attr_name            = f"Bosch {self._cam_title} Motion Sensitivity"
+        self._attr_name            = "Motion Sensitivity"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_motion_sensitivity_select"
         self._attr_translation_key = "motion_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -255,7 +255,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry  = entry
-        self._attr_name            = "Bosch Camera FCM Push Mode"
+        self._attr_name            = "FCM Push Mode"
         self._attr_unique_id       = "bosch_shc_camera_fcm_push_mode"
         self._attr_translation_key = "fcm_push_mode"
 
@@ -332,7 +332,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         self._entry  = entry
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name            = "Bosch Camera Stream Modus"
+        self._attr_name            = "Stream Modus"
         self._attr_unique_id       = "bosch_shc_camera_stream_mode"
         self._attr_translation_key = "stream_mode"
 
@@ -389,7 +389,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         cam_data = coordinator.data.get(cam_id, {})
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name            = f"Bosch {self._cam_title} Erkennungsmodus"
+        self._attr_name            = "Erkennungsmodus"
         self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_detection_mode"
         self._attr_translation_key = "detection_mode"
         self._attr_entity_category = EntityCategory.CONFIG

@@ -3231,7 +3231,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         "fetch_live_snapshot_local: Digest snap.jpg → HTTP %d for %s",
                         resp.status, cam_id,
                     )
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            # ValueError: malformed/missing WWW-Authenticate (cam Digest state
+            # may be half-rotated during FCM flap). Forum 998974/15 (Andrew75).
             _LOGGER.debug("fetch_live_snapshot_local: aiohttp error for %s: %s", cam_id, err)
         return None
 
@@ -4330,10 +4332,92 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     return True
 
 
+# Regex for the v11.0.0 doubled-prefix bug. A buggy entity_id looks like
+# `button.bosch_est_bosch_est_refresh_snapshot`: domain, dot, two identical
+# `bosch_<slug>_` runs, then the suffix. The backreference `\2` makes the
+# match require the slug to literally repeat, so single-prefix entities
+# (e.g. `switch.bosch_est_live_stream`) are never touched.
+_DOUBLED_PREFIX_RE = _re_mod.compile(
+    r"^(button|number|select|update|binary_sensor|light)"
+    r"\.bosch_([a-z0-9_]+?)_bosch_\2_(.+)$"
+)
+
+
+async def _migrate_doubled_prefix_entity_ids(
+    hass: HomeAssistant, config_entry_id: str
+) -> int:
+    """Rename entity_ids carrying the v11.0.0 doubled-prefix bug.
+
+    v11.0.0 Gold-Compliance migration added `_attr_has_entity_name = True`
+    to 30+ entity classes without removing the device-name prefix from
+    their `_attr_name`, so HA prepended the device name a second time and
+    the buggy entity_id stuck in the registry. v12.3.0 fixes the source;
+    this helper renames the surviving entries so they match what the
+    corrected code now produces.
+
+    Reported in forum 998974/15 (Andrew75, 2026-05-15).
+    """
+    from homeassistant.helpers import entity_registry as er
+    ent_reg = er.async_get(hass)
+    renamed: list[tuple[str, str]] = []
+
+    def _cb(reg_entry: er.RegistryEntry) -> dict[str, Any] | None:
+        m = _DOUBLED_PREFIX_RE.match(reg_entry.entity_id)
+        if not m:
+            return None
+        domain_part, slug, rest = m.group(1), m.group(2), m.group(3)
+        new_eid = f"{domain_part}.bosch_{slug}_{rest}"
+        # Skip if the new entity_id is already taken — avoid the ValueError
+        # async_update_entity would raise. Shouldn't happen in practice (the
+        # old entity owned the unique_id), but guard anyway.
+        if ent_reg.async_get(new_eid):
+            return None
+        renamed.append((reg_entry.entity_id, new_eid))
+        return {"new_entity_id": new_eid}
+
+    await er.async_migrate_entries(hass, config_entry_id, _cb)
+
+    if renamed:
+        _LOGGER.warning(
+            "Migrated %d entity_id(s) with the v11.0.0 doubled-prefix bug. "
+            "Update automations/scripts/Lovelace dashboards that reference: %s",
+            len(renamed),
+            "; ".join(f"{old} → {new}" for old, new in renamed),
+        )
+        examples = ", ".join(
+            f"`{old}` → `{new}`" for old, new in renamed[:5]
+        )
+        if len(renamed) > 5:
+            examples += ", …"
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "doubled_prefix_entity_ids_migrated",
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="doubled_prefix_entity_ids_migrated",
+            translation_placeholders={
+                "count": str(len(renamed)),
+                "examples": examples,
+            },
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, "doubled_prefix_entity_ids_migrated")
+
+    return len(renamed)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BoschCameraCoordinator(hass, entry)
 
     await coordinator.async_config_entry_first_refresh()
+
+    # v12.3.0 migration — rename entity_ids carrying the v11.0.0 doubled-prefix
+    # bug BEFORE forwarding platforms, so entities re-attach to the renamed
+    # registry entries instead of re-creating with the buggy id. No-op on
+    # clean / new installs and on installs that have already been migrated.
+    await _migrate_doubled_prefix_entity_ids(hass, entry.entry_id)
 
     # Start proactive background token refresh (5 min before JWT expiry)
     coordinator._schedule_token_refresh()

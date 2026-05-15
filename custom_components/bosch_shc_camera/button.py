@@ -74,7 +74,7 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):  # type: igno
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
-        self._attr_name            = f"Bosch {self._cam_title} Refresh Snapshot"
+        self._attr_name            = "Refresh Snapshot"
         self._attr_unique_id       = f"bosch_shc_refresh_{cam_id.lower()}"
         self._attr_icon            = "mdi:camera-refresh"
         self._attr_translation_key = "refresh_snapshot"
@@ -131,7 +131,7 @@ class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):  # type: ignore
         self._fw        = info.get("firmwareVersion", "")
         self._mac       = info.get("macAddress", "")
 
-        self._attr_name            = f"Bosch {self._cam_title} Siren"
+        self._attr_name            = "Siren"
         self._attr_unique_id       = f"bosch_shc_siren_{cam_id.lower()}"
         self._attr_icon            = "mdi:alarm-light"
 
