@@ -25,6 +25,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .const import DOMAIN
+from .snapshot_store import save_snapshot
 
 
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
@@ -563,18 +564,39 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                 else:
                     _LOGGER.info("Alert skipped for %s (%s) — notifications disabled", cam_name, event_type)
 
-                # Trigger snapshot refresh.
-                # WHY tracked: fire-and-forget tasks get GC-collected on
-                # HA shutdown mid-flight, leaving half-written temp files.
-                # Keeping a strong reference + cleanup on done lets
-                # async_unload_entry cancel+await them cleanly.
+                # Path A — live-snap refresh: fire immediately on every real event so
+                # the frontend gets a fresh camera frame within ~1-2 s of the event.
+                # Status-only types (connectivity events) are excluded — they carry no
+                # image data and the camera view hasn't changed.
+                # WHY tracked: fire-and-forget tasks get GC-collected on HA shutdown
+                # mid-flight, leaving half-written temp files. Strong reference +
+                # discard callback allows async_unload_entry to cancel+await cleanly.
+                _SNAP_EVENT_TYPES = frozenset({
+                    "MOVEMENT", "PERSON", "VEHICLE", "ANIMAL", "AUDIO_ALARM", "BABY_CRY",
+                })
                 cam_entity = coordinator._camera_entities.get(cam_id)
-                if cam_entity:
-                    task = coordinator.hass.async_create_task(
-                        cam_entity._async_trigger_image_refresh(delay=2)
-                    )
-                    coordinator._bg_tasks.add(task)
-                    task.add_done_callback(coordinator._bg_tasks.discard)
+                if cam_entity and event_type in _SNAP_EVENT_TYPES:
+                    try:
+                        # Per-model settle delay — Gen2 captures immediately (0 s),
+                        # Gen1 needs ~1.5 s so the snap reflects the post-trigger frame.
+                        from .models import get_model_config
+                        hw_cache = getattr(coordinator, "_hw_version", {})
+                        hw = hw_cache.get(cam_id, "") if hasattr(hw_cache, "get") else ""
+                        refresh_delay = get_model_config(hw).event_refresh_delay
+                        task = coordinator.hass.async_create_task(
+                            cam_entity._async_trigger_image_refresh(delay=refresh_delay)
+                        )
+                        coordinator._bg_tasks.add(task)
+                        task.add_done_callback(coordinator._bg_tasks.discard)
+                        _LOGGER.debug(
+                            "FCM Path A: live-snap refresh scheduled for %s (%s, delay=%.1fs)",
+                            cam_name, event_type, refresh_delay,
+                        )
+                    except Exception as _snap_err:
+                        _LOGGER.warning(
+                            "FCM Path A: failed to schedule live-snap refresh for %s: %s",
+                            cam_name, _snap_err,
+                        )
 
                 # Notify all entity listeners
                 coordinator.async_update_listeners()
@@ -828,6 +850,61 @@ async def async_send_alert(
                             _LOGGER.debug("Alert step 2 (screenshot) sent: %s", snap_path)
                             if not save_snapshots:
                                 files_to_cleanup.append(snap_path)
+
+                            # Path B — push the Bosch event image (with AI overlay / motion
+                            # box) into the camera entity cache so the image entity gets a
+                            # second update ~5-30 s after Path A's live snap.
+                            # Skip when privacy is ON (cache must not hold a stale image that
+                            # was captured before privacy was activated).
+                            # Skip when bytes are identical length to the current cache —
+                            # avoids a pointless disk write + notify on duplicate pushes.
+                            # Wrapped in its own try/except so any error here never affects
+                            # the alert pipeline (cleanup, clip download, etc.).
+                            try:
+                                _cam_id_for_b: str | None = None
+                                for _cid, _cdata in coordinator.data.items():
+                                    if _cdata.get("info", {}).get("title", "") == cam_name:
+                                        _cam_id_for_b = _cid
+                                        break
+                                if _cam_id_for_b:
+                                    _cam_entities = getattr(
+                                        coordinator, "_camera_entities", {}
+                                    )
+                                    _cam_b = _cam_entities.get(_cam_id_for_b)
+                                    _shc_cache = getattr(
+                                        coordinator, "_shc_state_cache", {}
+                                    )
+                                    _priv = _shc_cache.get(
+                                        _cam_id_for_b, {}
+                                    ).get("privacy_mode", False)
+                                    if _cam_b and not _priv:
+                                        _existing = _cam_b._cached_image
+                                        if _existing is None or len(_existing) != len(data):
+                                            _cam_b._cached_image = data
+                                            _cam_b._last_image_fetch = time.monotonic()
+                                            await save_snapshot(
+                                                coordinator.hass, _cam_id_for_b, data
+                                            )
+                                            _img_entities = getattr(
+                                                coordinator, "_image_entities", {}
+                                            )
+                                            _img_ent = _img_entities.get(_cam_id_for_b)
+                                            if _img_ent is not None:
+                                                await _img_ent.async_notify_refreshed()
+                                            _LOGGER.debug(
+                                                "FCM Path B: event image pushed to %s cache (%d B)",
+                                                cam_name, len(data),
+                                            )
+                                        else:
+                                            _LOGGER.debug(
+                                                "FCM Path B: skipping %s — bytes unchanged (%d B)",
+                                                cam_name, len(data),
+                                            )
+                            except Exception as _pb_err:
+                                _LOGGER.warning(
+                                    "FCM Path B: failed to update %s cache: %s",
+                                    cam_name, _pb_err,
+                                )
         except Exception as err:
             _LOGGER.warning("Alert step 2 failed: %s", err)
 

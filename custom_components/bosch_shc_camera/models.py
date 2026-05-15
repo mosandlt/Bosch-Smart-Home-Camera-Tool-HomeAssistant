@@ -62,6 +62,11 @@ class CameraModelConfig:
     # ── Snapshots ────────────────────────────────────────────────────────
     snapshot_warmup: int = 4    # Seconds to wait before LOCAL snap.jpg fetch
                                 # (encoder must be running for fresh frame)
+    event_refresh_delay: float = 1.5  # Seconds to wait before fetching a fresh snap
+                                      # in response to an FCM motion/person event.
+                                      # Gen2 cams capture immediately → set to 0;
+                                      # Gen1 needs ~1.5 s to settle the encoder so
+                                      # the snap reflects the post-trigger frame.
 
 
 # ── Model registry ───────────────────────────────────────────────────────
@@ -150,6 +155,7 @@ MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
     heartbeat_interval=3600,
     snapshot_warmup=5,
     max_stream_errors=10,  # outdoor: real WLAN flap + slower encoder
+    event_refresh_delay=0,  # Gen2 captures immediately, no settle delay needed
 )
 MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
 
@@ -169,6 +175,7 @@ MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
     max_session_duration=3600,
     heartbeat_interval=30,
     snapshot_warmup=3,
+    event_refresh_delay=0,  # Gen2 captures immediately, no settle delay needed
 )
 MODELS["CAMERA_INDOOR_GEN2"] = MODELS["HOME_Eyes_Indoor"]
 
