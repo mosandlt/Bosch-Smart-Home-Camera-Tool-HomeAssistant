@@ -247,6 +247,11 @@ async def async_setup_entry(
         # Disabled by default; user enables in options, then toggles per camera.
         if opts.get("enable_nvr", False):
             entities.append(BoschNvrRecordingSwitch(coordinator, cam_id, config_entry))
+        # External stream URL exposure — per-camera opt-in for Frigate / BlueIris users.
+        # The switch is always registered (default OFF, disabled in entity registry by
+        # default); user enables in HA UI per camera, then the two stream_url sensors
+        # populate. Avoids entity-spam on installs that don't need external recorders.
+        entities.append(BoschExternalStreamSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1900,3 +1905,66 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
         _LOGGER.info("NVR OFF for %s", self._cam_title)
         await self.coordinator.stop_recorder(self._cam_id)
         self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschExternalStreamSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
+    """Switch: ON = publish stream_url + stream_url_sub sensors for this camera.
+
+    Per-camera opt-in for users who want to paste the LOCAL TLS-proxy RTSP URL
+    into an external recorder (Frigate, BlueIris, …). Default OFF to avoid
+    entity-spam on installs that only use HA's native streaming.
+
+    When ON, the integration publishes two sensor entities for this camera:
+      - sensor.bosch_<name>_stream_url     — main quality (inst=1)
+      - sensor.bosch_<name>_stream_url_sub — sub-stream (inst=2), same Bosch
+        session, no extra cloud-API quota cost (RTSP is pull-based; quota is
+        only consumed when an external client actually connects).
+
+    Both URLs carry Digest credentials inline (the HA TLS proxy is a pure
+    TCP-TLS tunnel — FFmpeg / Frigate / BlueIris handle Digest auth
+    themselves). For credential-free URLs, a follow-up release will port the
+    ioBroker v0.5.3 RTSP-aware Digest-injection proxy.
+
+    State persists across HA restarts via RestoreEntity. No API call —
+    purely a client-side flag governing sensor population.
+    """
+
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:share-variant-outline"
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name            = f"Bosch {self._cam_title} External-Stream-URL freigeben"
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_external_stream"
+        self._attr_translation_key = "external_stream"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator._external_stream_enabled.get(self._cam_id, False))
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success  # type: ignore[no-any-return]
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self.coordinator._external_stream_enabled[self._cam_id] = True
+            _LOGGER.debug(
+                "external_stream: restored ON for %s from previous state",
+                self._cam_id[:8],
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator._external_stream_enabled[self._cam_id] = True
+        self.async_write_ha_state()
+        # Notify the two URL sensors so they recompute state immediately.
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator._external_stream_enabled[self._cam_id] = False
+        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()

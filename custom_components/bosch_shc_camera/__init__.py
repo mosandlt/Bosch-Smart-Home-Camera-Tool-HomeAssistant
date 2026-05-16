@@ -466,6 +466,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Pan number entity (inverts sign so "right" stays "right" on screen).
         # State is owned by BoschImageRotation180Switch (RestoreEntity).
         self._image_rotation_180: dict[str, bool] = {}
+        # External stream URL exposure flag — keyed by cam_id, default False.
+        # Owned by BoschExternalStreamSwitch (RestoreEntity). When True, the
+        # per-camera BoschStreamUrlSensor + BoschStreamUrlSubSensor expose the
+        # current LOCAL/REMOTE rtspsUrl (inst=1) and a derived inst=2 sub-stream
+        # URL so users can paste them into Frigate / BlueIris configs.
+        # Default OFF — opt-in per camera, avoids entity-spam.
+        self._external_stream_enabled: dict[str, bool] = {}
         # Ambient lighting config cache — keyed by cam_id, from GET /lighting/ambient (Gen2 only)
         self._ambient_lighting_cache: dict[str, dict[str, Any]] = {}
         # Lighting switch cache — keyed by cam_id, from GET /lighting/switch (Gen2 only)

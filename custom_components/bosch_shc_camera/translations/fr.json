@@ -308,6 +308,9 @@
       },
       "nvr_recording": {
         "name": "Enregistrement Mini-NVR"
+      },
+      "external_stream": {
+        "name": "Publier l'URL du flux externe"
       }
     },
     "number": {
@@ -568,6 +571,12 @@
           "recording": "Enregistrement",
           "error": "Erreur"
         }
+      },
+      "stream_url": {
+        "name": "URL du flux (principal)"
+      },
+      "stream_url_sub": {
+        "name": "URL du flux (sub)"
       }
     }
   },

@@ -308,6 +308,9 @@
       },
       "nvr_recording": {
         "name": "Mini-NVR opname"
+      },
+      "external_stream": {
+        "name": "Externe stream-URL publiceren"
       }
     },
     "number": {
@@ -568,6 +571,12 @@
           "recording": "Opname bezig",
           "error": "Fout"
         }
+      },
+      "stream_url": {
+        "name": "Stream-URL (hoofd)"
+      },
+      "stream_url_sub": {
+        "name": "Stream-URL (sub)"
       }
     }
   },

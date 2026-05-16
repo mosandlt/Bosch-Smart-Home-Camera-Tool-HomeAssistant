@@ -225,6 +225,9 @@
       },
       "nvr_recording": {
         "name": "Mini-NVR Recording"
+      },
+      "external_stream": {
+        "name": "Publish external stream URL"
       }
     },
     "sensor": {
@@ -233,6 +236,12 @@
       },
       "nvr_state": {
         "name": "Mini-NVR State"
+      },
+      "stream_url": {
+        "name": "Stream URL (main)"
+      },
+      "stream_url_sub": {
+        "name": "Stream URL (sub)"
       }
     }
   },

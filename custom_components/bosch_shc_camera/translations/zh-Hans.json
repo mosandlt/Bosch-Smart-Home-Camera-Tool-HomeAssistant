@@ -1,0 +1,724 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bosch Smart Home Camera — 登录（第 1 步，共 2 步）",
+        "description": "**登录步骤：**\n\n1. 复制下方字段中的 URL\n2. 在浏览器中打开\n3. 使用您的 **Bosch SingleKey ID** 登录\n4. 浏览器显示 **404 页面** — 这是正常现象\n5. 从地址栏复制**完整 URL**\n6. 点击**提交**继续",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "复制此 URL 并在浏览器中打开以完成登录。"
+        }
+      },
+      "auth": {
+        "title": "Bosch Smart Home Camera — 粘贴 URL（第 2 步，共 2 步）",
+        "description": "请将浏览器地址栏中的重定向 URL 粘贴至下方。\n\n**重要：** 授权码将在约 60 秒后过期。",
+        "data": {
+          "redirect_url": "Redirect URL"
+        },
+        "data_description": {
+          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）"
+        }
+      },
+      "reauth_confirm": {
+        "title": "重新认证 Bosch Smart Home Camera",
+        "description": "您的 Bosch Cloud 令牌已过期，无法自动续期。通常是因为刷新令牌在 Bosch 端被撤销所致。\n\n点击**提交**在浏览器中打开 Bosch SingleKey ID 登录页面。登录后将自动跳转回 Home Assistant，您现有的配置（实体、自动化、选项）将被保留。",
+        "submit": "提交"
+      },
+      "reconfigure": {
+        "title": "重新配置 Bosch Smart Home Camera",
+        "description": "重新执行 OAuth 登录以刷新凭据，无需删除集成。所有现有实体、自动化和选项均予以保留。",
+        "submit": "提交"
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "在 URL 中未找到授权码。",
+      "token_exchange_failed": "登录失败 — 授权码可能已过期。请重试。",
+      "cannot_connect": "无法连接至 Bosch 服务器。",
+      "timeout": "连接超时。"
+    },
+    "abort": {
+      "already_configured": "已配置。",
+      "reauth_successful": "重新认证成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bosch Camera — 设置",
+        "description": "**令牌：** {token_status}",
+        "sections": {
+          "polling": {
+            "name": "轮询间隔",
+            "description": "集成与 Bosch 云端通信的频率。",
+            "data": {
+              "scan_interval": "轮询间隔（秒）",
+              "interval_status": "状态检查间隔（秒）",
+              "interval_events": "事件检查间隔（秒）",
+              "snapshot_interval": "快照刷新间隔（秒）"
+            },
+            "data_description": {
+              "scan_interval": "集成从 Bosch 云端获取数据的频率。越低越快，但 API 调用越多。默认值：60",
+              "interval_status": "检查摄像头 ONLINE/OFFLINE 状态的频率。默认值：300（5 分钟）",
+              "interval_events": "检查新运动/音频事件的频率。启用 FCM Push 时仅作备用。默认值：300（5 分钟）",
+              "snapshot_interval": "主动刷新摄像头快照的频率。范围：300–86400。默认值：1800（30 分钟）"
+            }
+          },
+          "features": {
+            "name": "功能",
+            "description": "选择集成创建的实体类型。",
+            "data": {
+              "enable_snapshots": "摄像头快照",
+              "enable_sensors": "传感器（状态、WiFi、固件、事件）",
+              "enable_snapshot_button": "开关和按钮（流媒体、隐私、灯光）",
+              "enable_binary_sensors": "运动/音频报警传感器",
+              "audio_default_on": "音频默认开启",
+              "enable_intercom": "对讲机（双向音频）"
+            },
+            "data_description": {
+              "enable_snapshots": "在 HA 中将最新的运动触发 JPEG 显示为摄像头实体。",
+              "enable_sensors": "为摄像头状态、WiFi 信号、固件、今日事件、最新事件等创建传感器实体。",
+              "enable_snapshot_button": "创建开关和按钮实体：Live Stream、Audio、Privacy Mode、Camera Light、通知、刷新。",
+              "enable_binary_sensors": "创建二进制传感器，在运动或音频报警事件后保持开启 30 秒。适用于自动化。",
+              "audio_default_on": "开启时：音频开关默认启动（含声音的流媒体）。关闭时：音频默认静音。可在控制面板随时切换。",
+              "enable_intercom": "启用对讲机（双向音频）开关实体。默认禁用。允许向摄像头扬声器发送音频。"
+            }
+          },
+          "stream": {
+            "name": "实时直播",
+            "description": "实时视频的连接模式和播放器缓冲设置。",
+            "data": {
+              "stream_connection_type": "流媒体连接类型",
+              "live_buffer_mode": "播放器缓冲配置（HLS）",
+              "enable_go2rtc": "go2rtc WebRTC（低延迟约 2 秒）"
+            },
+            "data_description": {
+              "stream_connection_type": "实时直播的默认连接类型。\n• **auto**（推荐）：优先尝试本地 LAN，失败时自动切换至 Bosch 云端代理。\n• **local**：仅直连 LAN — 无需互联网。RTSP 更快，但快照较慢（约 6–10 秒）。会话每 50 秒自动续期。\n• **remote**：始终通过 Bosch 云端代理。快照更快（约 0.4–1.9 秒）。HA 不在同一 LAN 时的最佳默认选项。\n\"Stream Mode\" 选择实体可在运行时覆盖此设置，无需重启。",
+              "live_buffer_mode": "播放器在显示前预缓冲的视频秒数。缓冲越多 = 卡顿越少，但与实时的延迟越大。\n• **Latency**：小缓冲（约 4-6 秒延迟）。Wi-Fi 不稳定时可能卡顿。\n• **Balanced**（推荐）：中等缓冲（约 8-10 秒）。对典型 Wi-Fi 波动有较强鲁棒性。\n• **Stable**：大缓冲（约 12-15 秒）。即使在弱网络下也流畅，但延迟明显。\n仅影响卡片显示 — 对摄像头、录制或快照无影响。",
+              "enable_go2rtc": "自动将实时直播注册到 HA 内置 go2rtc 以启用 WebRTC 播放（约 2 秒延迟 vs. HLS 约 10 秒）。推荐。仅在使用自定义 go2rtc 配置时禁用。"
+            }
+          },
+          "fcm": {
+            "name": "推送通知",
+            "description": "通过 FCM 实时推送事件，并配置分步通知服务。",
+            "data": {
+              "enable_fcm_push": "FCM Push — 即时事件检测（约 2 秒）",
+              "fcm_push_mode": "FCM Push 模式（auto / android / ios / polling）",
+              "mark_events_read": "将 Bosch 云端事件标记为已读",
+              "alert_save_snapshots": "本地保存报警图片/视频",
+              "alert_delete_after_send": "发送后删除文件",
+              "alert_notify_service": "报警服务 — 默认备用（逗号分隔）",
+              "alert_notify_information": "第 1 步 — 文字通知",
+              "alert_notify_screenshot": "第 2 步 — 快照图片",
+              "alert_notify_video": "第 3 步 — 视频片段",
+              "alert_notify_system": "系统报警（令牌失效、NAS 清理）"
+            },
+            "data_description": {
+              "enable_fcm_push": "通过 Firebase Cloud Messaging 在约 2 秒内接收运动/音频事件，而非每 5 分钟轮询一次。FCM 故障时自动回退至轮询。推荐！",
+              "fcm_push_mode": "选择推送模式。Auto 先尝试 iOS，再尝试 Android，最后回退至轮询。Polling 仅使用标准 API 调用（无 FCM）。",
+              "mark_events_read": "关闭时（默认），新的运动/音频事件在 Bosch 应用中保持未读状态 — 即使 HA 已处理 — 以便应用继续将其标记为新事件。开启后，集成将在处理后把事件标记为已读（原有行为 — 适用于以 HA 为主要客户端且不希望应用显示过期\"新事件\"角标的情况）。",
+              "alert_save_snapshots": "将已下载的事件图片和视频保存在 www/bosch_alerts/（HA 配置目录内）。关闭时，文件在发送后数秒内被删除。",
+              "alert_delete_after_send": "通知服务收到后从 www/bosch_alerts/ 中删除通知文件。关闭时，文件保留以供参考。",
+              "alert_notify_service": "默认备用：当下方各类型字段为空时使用。逗号分隔。示例：notify.signal_messenger，notify.mobile_app_xxx。留空则禁用报警。",
+              "alert_notify_information": "第 1 步服务 — 即时文字通知。留空 = 使用默认备用。例如：notify.signal_messenger，notify.mobile_app_xxx。",
+              "alert_notify_screenshot": "第 2 步服务 — 快照图片。留空 = 跳过此步（无备用）。移动应用（mobile_app_xxx）内联接收图片；其他以文件附件形式发送。",
+              "alert_notify_video": "第 3 步服务 — 视频片段。留空 = 跳过此步（无备用）。",
+              "alert_notify_system": "系统报警服务（令牌过期、磁盘空间不足）。留空 = 使用上方默认备用。"
+            }
+          },
+          "events_storage": {
+            "name": "事件存储（下载 / SMB / FTP）",
+            "description": "将 Bosch 云端事件的 JPEG 和 MP4 片段保存至本地或 NAS 共享。",
+            "data": {
+              "enable_local_save": "本地保存事件",
+              "download_path": "本地存储文件夹",
+              "enable_smb_upload": "上传至 NAS（SMB 或 FTP）",
+              "upload_protocol": "上传协议（SMB 或 FTP）",
+              "smb_server": "服务器（IP 或主机名）",
+              "smb_share": "SMB 共享名",
+              "smb_username": "SMB 用户名",
+              "smb_password": "SMB 密码",
+              "smb_base_path": "共享上的基础文件夹",
+              "folder_pattern": "子文件夹模式",
+              "file_pattern": "文件名模式",
+              "smb_retention_days": "保留期限（天，0 = 永久保留）"
+            },
+            "data_description": {
+              "enable_local_save": "将每个新的运动/音频事件以 JPEG + MP4 形式保存至下方文件夹。**默认关闭** — 启用以激活本地保存。",
+              "download_path": "事件文件的存储位置。示例：/config/bosch_events。仅在\"本地保存事件\"开启时有效。",
+              "enable_smb_upload": "将事件快照和视频片段上传至 SMB/CIFS 或 FTP 网络共享（如 FRITZ!Box NAS、Synology、任何 Windows 共享）。SMB 需要 smbprotocol 包；FTP 使用 Python 内置 ftplib。",
+              "upload_protocol": "传输协议。**SMB**（默认）为典型 Windows/macOS 共享。**FTP** 在许多 NAS 设备（如 FRITZ!Box）上处理大量小文件时显著更快，并可绕过 macOS Sequoia 上已知的 SMB 重命名挂起问题。使用 FTP 时，共享名字段被忽略；基础路径相对于 FTP 根目录（例如 `FILES/Bosch-Kameras` 而非仅 `Bosch-Kameras`）。",
+              "smb_server": "IP 地址或主机名。示例：192.168.1.1（FRITZ!Box）、nas.local 或 fritz.box",
+              "smb_share": "SMB 共享名（仅 SMB）。示例：FRITZ.NAS",
+              "smb_username": "SMB 登录用户名",
+              "smb_password": "SMB 登录密码",
+              "smb_base_path": "共享上存储文件的基础文件夹。默认值：Bosch-Kameras",
+              "folder_pattern": "子文件夹模式。可用变量：`camera`、`year`、`month`、`day`、`type`（在模式中用花括号括起来）。默认使用 camera/year/month/day。",
+              "file_pattern": "文件名模式（不含扩展名）。可用变量：`camera`、`date`、`time`、`type`、`id`、`year`、`month`、`day`（在模式中用花括号括起来）。默认使用下划线连接 camera、date、time、type、id。",
+              "smb_retention_days": "自动删除 NAS 上超过此天数的文件。0 = 永久保留。默认值：180（6 个月）。每天运行一次。"
+            }
+          },
+          "nvr": {
+            "name": "Mini-NVR",
+            "description": "仅限 LAN 的持续录制。可选择导出至 SMB 或 FTP。",
+            "data": {
+              "enable_nvr": "Mini-NVR — 持续 LAN 录制（实验性）",
+              "nvr_storage_target": "NVR 存储目标",
+              "nvr_base_path": "NVR 存储文件夹",
+              "nvr_smb_subpath": "NAS / FTP 上的 NVR 子文件夹",
+              "nvr_retention_days": "NVR 保留期限（天）",
+              "nvr_quality": "NVR 录制质量",
+              "nvr_preroll_seconds": "预录缓冲（秒）",
+              "nvr_preroll_cache_dir": "预录缓存目录"
+            },
+            "data_description": {
+              "enable_nvr": "将每台摄像头的 LOCAL 流持续录制到磁盘，以 5 分钟 MP4 片段形式存储。仅限 LAN — 摄像头通过云端中继时录制暂停。每台摄像头添加一个录制开关（默认禁用；逐台摄像头单独启用）。需要 ffmpeg。",
+              "nvr_storage_target": "已完成 NVR 片段的存储位置。**本地**：保存在下方存储文件夹。**SMB / FTP**：ffmpeg 先本地写入（暂存），然后由监视器将每个片段上传至事件存储部分中配置的同一 NAS 的单独子文件夹。默认值：本地。",
+              "nvr_base_path": "NVR 片段的文件夹。每台摄像头一个子文件夹，再按每天一个子文件夹，内含命名为 HH-MM.mp4 的 5 分钟 MP4 片段。默认值：/config/bosch_nvr。保留超过 1 天建议使用 NAS 挂载 — 以 5 Mbps 计，单台摄像头每天写入约 54 GB。",
+              "nvr_smb_subpath": "SMB / FTP 基础路径下专用于 NVR 片段的子文件夹。默认值：NVR。使 NVR 目录树与云端事件上传保持分离。",
+              "nvr_retention_days": "删除超过此天数的 NVR 片段。范围：1-365。默认值：3。每天运行一次。",
+              "nvr_quality": "**Auto** 使用全质量流（inst=1，约 30 Mbps）。**Low** 使用低带宽流（inst=4，约 2 Mbps） — 以分辨率为代价节省约 90% 磁盘空间。仅限 LAN；云端中继不支持 inst=4。",
+              "nvr_preroll_seconds": "在 RAM（/dev/shm）中保留此秒数的滚动缓冲。检测到运动时，将创建包含此预录内容的运动片段。0 = 禁用。默认值：0。RAM 消耗：每台摄像头约 250 KB/s。",
+              "nvr_preroll_cache_dir": "预录片段缓存目录。必须是 tmpfs 挂载（RAM 磁盘） — Linux 上默认为 /dev/shm/bosch_nvr_cache。仅在 /dev/shm 不可用时更改。"
+            }
+          },
+          "auth": {
+            "name": "认证",
+            "description": "强制重新进行浏览器登录或迁移至 OSS OAuth 客户端。",
+            "data": {
+              "force_relogin": "重新认证（浏览器登录）",
+              "migrate_to_oss_client": "切换至 OSS OAuth 客户端"
+            },
+            "data_description": {
+              "force_relogin": "勾选此项以通过浏览器重新认证。仅在刷新令牌过期时需要（极少发生）。",
+              "migrate_to_oss_client": "从旧版 `residential_app` 客户端切换至 Bosch 为开源集成提供的专用 `oss_residential_app` 客户端。启用后将触发重新认证流程 — 您需要通过 Bosch SingleKey ID 登录一次，现有实体、自动化和选项将被保留。"
+            }
+          }
+        }
+      },
+      "relogin_show": {
+        "title": "重新登录 — 第 1 步，共 2 步",
+        "description": "复制下方 URL，在浏览器中打开，登录，然后点击提交。",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "复制并在浏览器中打开。"
+        }
+      },
+      "relogin_paste": {
+        "title": "重新登录 — 第 2 步，共 2 步",
+        "description": "粘贴重定向 URL。**授权码将在约 60 秒后过期！**",
+        "data": {
+          "redirect_url": "Redirect URL"
+        },
+        "data_description": {
+          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）"
+        }
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "未找到授权码。请粘贴完整 URL。",
+      "token_exchange_failed": "登录失败 — 授权码已过期。请重试。",
+      "cannot_connect": "无法连接至 Bosch 服务器。"
+    },
+    "abort": {
+      "migration_started": "迁移已启动 — 请在集成卡片上完成重新配置流程。"
+    }
+  },
+  "entity": {
+    "image": {
+      "last_snapshot": {
+        "name": "最新快照"
+      }
+    },
+    "switch": {
+      "live_stream": {
+        "name": "Live Stream"
+      },
+      "audio": {
+        "name": "Audio"
+      },
+      "camera_light": {
+        "name": "摄像头灯光"
+      },
+      "front_light": {
+        "name": "前置灯光"
+      },
+      "wallwasher": {
+        "name": "Wallwasher"
+      },
+      "privacy_mode": {
+        "name": "隐私模式"
+      },
+      "notifications": {
+        "name": "通知"
+      },
+      "motion_detection": {
+        "name": "移动检测"
+      },
+      "record_sound": {
+        "name": "录音"
+      },
+      "auto_follow": {
+        "name": "Auto Follow"
+      },
+      "intercom": {
+        "name": "对讲机"
+      },
+      "privacy_sound": {
+        "name": "隐私音效"
+      },
+      "timestamp_overlay": {
+        "name": "时间戳叠加"
+      },
+      "status_led": {
+        "name": "Status LED"
+      },
+      "motion_light": {
+        "name": "运动灯光"
+      },
+      "ambient_light": {
+        "name": "常亮灯光"
+      },
+      "soft_light_fading": {
+        "name": "柔光渐变"
+      },
+      "intrusion_detection": {
+        "name": "入侵检测"
+      },
+      "image_rotation_180": {
+        "name": "图像旋转 180°"
+      },
+      "alarm_system_arm": {
+        "name": "报警系统"
+      },
+      "alarm_mode": {
+        "name": "警报器"
+      },
+      "pre_alarm": {
+        "name": "Pre-Alarm"
+      },
+      "audio_alarm": {
+        "name": "声音检测"
+      },
+      "panic_alarm": {
+        "name": "触发警报器"
+      },
+      "nvr_recording": {
+        "name": "Mini-NVR 录制"
+      },
+      "external_stream": {
+        "name": "发布外部流 URL"
+      }
+    },
+    "number": {
+      "pan_position": {
+        "name": "水平旋转位置"
+      },
+      "audio_threshold": {
+        "name": "音频阈值"
+      },
+      "speaker_level": {
+        "name": "扬声器音量"
+      },
+      "front_light_intensity": {
+        "name": "前置灯光亮度"
+      },
+      "lens_elevation": {
+        "name": "镜头仰角"
+      },
+      "microphone_level": {
+        "name": "麦克风音量"
+      },
+      "white_balance": {
+        "name": "前置灯光色温"
+      },
+      "top_led_brightness": {
+        "name": "顶部 LED 亮度"
+      },
+      "bottom_led_brightness": {
+        "name": "底部 LED 亮度"
+      },
+      "motion_light_sensitivity": {
+        "name": "运动灯光灵敏度"
+      },
+      "darkness_threshold": {
+        "name": "暗度阈值"
+      },
+      "power_led_brightness": {
+        "name": "电源 LED 亮度"
+      },
+      "alarm_delay": {
+        "name": "警报器持续时间"
+      },
+      "alarm_activation_delay": {
+        "name": "报警激活延迟"
+      },
+      "pre_alarm_delay": {
+        "name": "Pre-Alarm 持续时间"
+      },
+      "audio_alarm_sensitivity": {
+        "name": "声音检测灵敏度"
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "刷新快照"
+      },
+      "acoustic_alarm": {
+        "name": "警报器"
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "视频质量",
+        "state": {
+          "auto": "Auto",
+          "high": "高（30 Mbps）",
+          "low": "低（1.9 Mbps）"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "移动检测灵敏度",
+        "state": {
+          "super_high": "极高",
+          "high": "高",
+          "medium_high": "中高",
+          "medium_low": "中低",
+          "low": "低",
+          "off": "关闭"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "FCM Push 模式",
+        "state": {
+          "auto": "Auto",
+          "android": "Android",
+          "ios": "iOS",
+          "polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "流媒体模式",
+        "state": {
+          "auto": "Auto（本地 → 云端）",
+          "local": "仅本地",
+          "remote": "仅云端"
+        }
+      },
+      "detection_mode": {
+        "name": "检测模式",
+        "state": {
+          "all_motions": "所有运动",
+          "only_humans": "仅人员",
+          "zones": "区域"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "运动"
+      },
+      "audio_alarm_binary": {
+        "name": "音频报警"
+      },
+      "person_detected": {
+        "name": "检测到人员"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "固件"
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "顶部 LED"
+      },
+      "bottom_led_light": {
+        "name": "底部 LED"
+      },
+      "front_light_entity": {
+        "name": "前置灯光"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "状态",
+        "state": {
+          "online": "在线",
+          "offline": "离线",
+          "unknown": "未知"
+        }
+      },
+      "last_event": {
+        "name": "最新事件"
+      },
+      "events_today": {
+        "name": "今日事件"
+      },
+      "wifi_signal": {
+        "name": "WiFi 信号"
+      },
+      "firmware_version": {
+        "name": "固件版本"
+      },
+      "ambient_light": {
+        "name": "环境光"
+      },
+      "led_dimmer": {
+        "name": "LED 调光器"
+      },
+      "clock_offset": {
+        "name": "时钟偏差"
+      },
+      "motion_sensitivity": {
+        "name": "移动检测灵敏度"
+      },
+      "audio_alarm": {
+        "name": "音频报警"
+      },
+      "last_event_type": {
+        "name": "最新事件类型",
+        "state": {
+          "movement": "运动",
+          "person": "人员",
+          "audio_alarm": "音频报警",
+          "trouble": "故障",
+          "trouble_disconnect": "故障（断线）",
+          "trouble_reconnect": "故障（重连）",
+          "none": "无"
+        }
+      },
+      "movement_events_today": {
+        "name": "今日运动事件"
+      },
+      "audio_events_today": {
+        "name": "今日音频事件"
+      },
+      "push_status": {
+        "name": "FCM Push 状态",
+        "state": {
+          "fcm_push": "FCM Push（即时）",
+          "polling": "Polling（备用）",
+          "disabled": "已禁用"
+        }
+      },
+      "unread_events": {
+        "name": "未读事件"
+      },
+      "commissioned": {
+        "name": "启用状态"
+      },
+      "schedule_rules": {
+        "name": "计划规则"
+      },
+      "alarm_catalog": {
+        "name": "报警目录"
+      },
+      "motion_zones": {
+        "name": "运动区域"
+      },
+      "tls_cert": {
+        "name": "TLS 证书"
+      },
+      "network_services": {
+        "name": "网络服务"
+      },
+      "iva_analytics": {
+        "name": "IVA 分析"
+      },
+      "privacy_masks": {
+        "name": "隐私遮罩"
+      },
+      "ambient_schedule": {
+        "name": "常亮灯光计划",
+        "state": {
+          "disabled": "已禁用",
+          "dusk_to_dawn": "黄昏至黎明",
+          "manual": "手动"
+        }
+      },
+      "alarm_state": {
+        "name": "报警状态",
+        "state": {
+          "active": "已布防",
+          "inactive": "已撤防",
+          "unknown": "未知",
+          "system_managed_armed": "已布防（系统）",
+          "system_managed_disarmed": "已撤防（系统）",
+          "armed_away": "外出布防",
+          "armed_stay": "居家布防",
+          "disarmed": "已撤防"
+        }
+      },
+      "stream_status": {
+        "name": "流媒体状态",
+        "state": {
+          "idle": "空闲",
+          "warming_up": "正在唤醒",
+          "connecting": "连接中",
+          "streaming": "直播中（LAN）",
+          "streaming_remote": "直播中（云端）"
+        }
+      },
+      "nvr_state": {
+        "name": "Mini-NVR 状态",
+        "state": {
+          "idle": "空闲",
+          "recording": "录制中",
+          "error": "错误"
+        }
+      },
+      "stream_url": {
+        "name": "流 URL（主）"
+      },
+      "stream_url_sub": {
+        "name": "流 URL（副）"
+      }
+    }
+  },
+  "services": {
+    "trigger_snapshot": {
+      "name": "强制刷新快照",
+      "description": "立即强制刷新所有 Bosch 摄像头的快照。"
+    },
+    "open_live_connection": {
+      "name": "打开实时连接",
+      "description": "打开实时流媒体代理连接（H.264 30fps + AAC Audio）。",
+      "fields": {
+        "camera_id": {
+          "name": "摄像头 ID",
+          "description": "摄像头的云端 UUID（在实体属性中查找）"
+        }
+      }
+    },
+    "migrate_flat_events": {
+      "name": "迁移扁平事件文件",
+      "description": "将事件文件从旧版扁平布局（camera/file.mp4）移动到日期层次结构（camera/year/month/day/file.mp4）。可安全多次运行 — 目标位置已存在的文件将被跳过。结果以持久通知形式显示。"
+    },
+    "delete_event": {
+      "name": "删除事件文件",
+      "description": "按精确路径删除一个或多个本地事件文件，或删除摄像头在指定日期的所有文件。",
+      "fields": {
+        "file_path": {
+          "name": "文件路径",
+          "description": "要删除的单个事件文件的绝对路径。"
+        },
+        "camera_name": {
+          "name": "摄像头名称",
+          "description": "删除此摄像头的所有事件（可与日期结合以限制范围）。"
+        },
+        "date": {
+          "name": "日期",
+          "description": "将删除限制在此日期（YYYY-MM-DD）。需要摄像头名称。"
+        }
+      }
+    },
+    "get_motion_zones": {
+      "name": "获取运动区域",
+      "description": "从摄像头读取当前运动检测区域。结果以持久通知形式写入。",
+      "fields": {
+        "camera_id": {
+          "name": "摄像头 ID",
+          "description": "摄像头的云端 UUID（在实体属性中查找）"
+        }
+      }
+    },
+    "set_motion_zones": {
+      "name": "设置运动区域",
+      "description": "将运动检测区域配置写入摄像头。",
+      "fields": {
+        "camera_id": {
+          "name": "摄像头 ID",
+          "description": "摄像头的云端 UUID"
+        },
+        "zones": {
+          "name": "区域",
+          "description": "由\"获取运动区域\"返回的区域对象列表。"
+        }
+      }
+    },
+    "rename_camera": {
+      "name": "重命名摄像头",
+      "description": "更改摄像头在 Bosch 云端的显示名称。",
+      "fields": {
+        "camera_id": {
+          "name": "摄像头 ID",
+          "description": "摄像头的云端 UUID"
+        },
+        "name": {
+          "name": "新名称",
+          "description": "摄像头的新显示名称"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "argument_required": {
+      "message": "{argument} 为必填项"
+    },
+    "argument_must_be_list": {
+      "message": "{argument} 必须是列表"
+    },
+    "missing_field": {
+      "message": "{kind} {index} 缺少字段 {field}"
+    },
+    "value_out_of_range": {
+      "message": "{kind} {index} {field}={value} 超出范围 0.0–1.0"
+    },
+    "index_out_of_range": {
+      "message": "索引 {index} 超出范围（共 {count} 项）"
+    },
+    "not_found": {
+      "message": "未找到 {kind} {id}"
+    },
+    "live_connection_failed": {
+      "message": "无法为摄像头 {cam_id_prefix} 建立实时连接 — 请查看日志获取 mitmproxy 捕获说明"
+    },
+    "http_error": {
+      "message": "{action} 失败：HTTP {status}"
+    },
+    "http_error_with_body": {
+      "message": "{action} 失败：HTTP {status} — {body}"
+    },
+    "privacy_blocked": {
+      "message": "{action}：隐私模式激活时功能不可用"
+    },
+    "unexpected_error": {
+      "message": "{action} 失败：{error}"
+    }
+  },
+  "issues": {
+    "token_expired": {
+      "title": "Bosch Camera — 令牌已过期",
+      "description": "访问令牌无法续期。\n\n{message}\n\n请在集成卡片上点击**重新配置**（设置 → 设备与服务 → Bosch Smart Home Camera）以重新登录。现有实体和自动化将被保留。"
+    },
+    "auth_server_outage": {
+      "title": "Bosch Camera — 认证服务器故障",
+      "description": "Bosch 认证服务器当前返回 HTTP {error}。这是 Bosch 端的问题，并非您的配置错误。\n\n集成将自动重试（指数退避，最长 10 分钟）。服务器恢复前实体不可用 — 无需任何操作。"
+    },
+    "doubled_prefix_entity_ids_migrated": {
+      "title": "Bosch Camera — 实体 ID 已重命名",
+      "description": "**{count}** 个 Bosch 摄像头实体 ID 带有重复前缀 `bosch_NAME_bosch_NAME_`（v11.0.0–v12.2.1 版本的 Bug），已更正为正确形式。\n\n示例：{examples}\n\n**您必须更新所有引用旧 ID 的自动化、脚本、场景和 Lovelace 控制面板。** Home Assistant 在实体 ID 更改时不会自动重写 YAML 文件或 Lovelace 卡片。历史记录和统计数据将自动迁移。\n\n完整映射请参阅 v12.3.0 版本说明。"
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_cloud": "Bosch 云端可达",
+      "fcm_push_active": "FCM Push 状态",
+      "cameras_loaded": "已加载摄像头",
+      "last_fcm_push_ago": "最近 FCM Push",
+      "platinum_quality": "Quality Scale"
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "bosch_shc_camera_motion": "检测到运动",
+      "bosch_shc_camera_audio_alarm": "检测到音频报警",
+      "bosch_shc_camera_person": "检测到人员"
+    }
+  }
+}

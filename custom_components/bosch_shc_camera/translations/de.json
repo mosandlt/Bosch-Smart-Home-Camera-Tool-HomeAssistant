@@ -308,6 +308,9 @@
       },
       "nvr_recording": {
         "name": "Mini-NVR Aufnahme"
+      },
+      "external_stream": {
+        "name": "Externe Stream-URL veröffentlichen"
       }
     },
     "number": {
@@ -568,6 +571,12 @@
           "recording": "Nimmt auf",
           "error": "Fehler"
         }
+      },
+      "stream_url": {
+        "name": "Stream-URL (Haupt)"
+      },
+      "stream_url_sub": {
+        "name": "Stream-URL (Sub)"
       }
     }
   },

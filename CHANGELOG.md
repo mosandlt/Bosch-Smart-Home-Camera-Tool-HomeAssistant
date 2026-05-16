@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.4.0 — 2026-05-16
+
+**External-stream URL exposure (Frigate / BlueIris); 5 new UI languages.**
+
+- **New per-camera switch + 2 sensors for external recorder integration.** When the new `switch.bosch_<name>_external_stream_url_freigeben` is enabled, the integration publishes two diagnostic sensors per camera: `sensor.bosch_<name>_stream_url_haupt` (main quality, `inst=1`) and `sensor.bosch_<name>_stream_url_sub` (sub-stream, `inst=2`). Paste either URL straight into a Frigate `cameras.<id>.ffmpeg.inputs[].path` field or BlueIris's camera setup. Both URLs route through the existing per-camera TLS proxy, share the same Bosch session, and consume no extra cloud-API quota — RTSP is pull-based, so the camera only sends bytes when an external client actually opens a session. Default OFF on every camera; the switch + sensors ship `_attr_entity_registry_enabled_default = False` so a fresh install adds 12 extra registry rows that stay hidden until a user opts in. State persists across HA restarts via `RestoreEntity`. The URLs carry Digest credentials inline (the HA TLS proxy is a pure TCP-TLS tunnel — FFmpeg / Frigate / BlueIris handle Digest auth themselves), which matches the ~99 % of Frigate tutorials. A follow-up release will port the ioBroker v0.5.3 RTSP-aware Digest-injection proxy if there's demand for credential-free URLs.
+- **5 new UI languages: Russian, Portuguese, Polish, Ukrainian, Simplified Chinese.** The integration now ships in **11 fully-translated locales** (EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans), matching the ioBroker adapter's coverage. Each of the 5 new files carries the full 329-string corpus already present in `en.json` / `de.json` — every config-flow page, options form, entity name, service description, repair-issue text, system-health label, and error message. Selection follows the user's Home Assistant frontend language — no reconfiguration. Technical terms (`Bosch`, `LAN`, `Wi-Fi`, `RTSP`, `FFmpeg`, `go2rtc`, `HACS`, `Lovelace`, `Frigate`, `BlueIris`, `Digest`, camera model names) stay in English in every locale per HA-community convention. The 14 new regression tests in `tests/test_external_stream_url.py` pin the substream feature's contracts (default-off, null when no session, inst= rewrite).
+- **No code-path or runtime behaviour changes** for users not opting into the new switch. FCM push, alert routing, snapshot/video capture, motion detection, stream handling, and the Bosch cloud API surface are untouched. No migration required.
+
 ## v12.3.1 — 2026-05-16
 
 **4 new UI languages; cleaner Signal alert captions.**

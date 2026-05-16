@@ -101,6 +101,13 @@ async def async_setup_entry(
     if opts.get("enable_nvr", False):
         for cam_id in coordinator.data:
             entities.append(BoschNvrStateSensor(coordinator, cam_id, config_entry))
+    # External stream URL sensors (main + sub). Per-camera, always registered
+    # so the BoschExternalStreamSwitch can toggle their value without dynamic
+    # entity (re-)registration. Disabled in entity registry by default;
+    # surfaced only when the user enables them for a specific camera.
+    for cam_id in coordinator.data:
+        entities.append(BoschStreamUrlSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschStreamUrlSubSensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1339,3 +1346,87 @@ class BoschNvrStateSensor(_BoschSensorBase):
             "preroll_segments":   len(preroll),
             "preroll_running":    bool(self.coordinator._nvr_preroll_processes.get(self._cam_id)),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+import re as _re_inst
+
+
+def _swap_inst(url: str, new_inst: int) -> str:
+    """Return ``url`` with its ``inst=N`` query parameter rewritten to ``new_inst``.
+
+    The Bosch RTSP URL always contains exactly one ``inst=N`` token in the
+    query string (e.g. ``?inst=1&enableaudio=1``). This helper is the only
+    place that knows that invariant — kept tiny so it's trivial to test.
+    """
+    return _re_inst.sub(r"inst=\d+", f"inst={new_inst}", url, count=1)
+
+
+class _BoschStreamUrlSensorBase(_BoschSensorBase):
+    """Shared base for the main + sub external-stream-URL sensors.
+
+    Subclasses set ``_inst`` (1 for main, 2 for sub) and a translation key.
+    Returns ``None`` when:
+      - the BoschExternalStreamSwitch is OFF for this camera (default), OR
+      - no live session is open yet (rtspsUrl empty).
+
+    The URL is read straight from ``coordinator._live_connections[cam_id]``
+    so it always reflects whatever quality/transport the integration picked
+    (LOCAL TLS proxy, REMOTE TLS proxy, or direct rtsps fallback).
+    """
+
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:link-variant"
+    _inst: int = 1
+
+    @property
+    def native_value(self) -> str | None:
+        if not self.coordinator._external_stream_enabled.get(self._cam_id, False):
+            return None
+        live = self.coordinator._live_connections.get(self._cam_id) or {}
+        url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
+        if not url:
+            return None
+        # The integration always picks one ``inst=N`` per session; for the
+        # sub-stream sensor we substitute it with 2. For the main sensor we
+        # leave it untouched (whatever the user picked in options is fine —
+        # typically inst=1 for max quality on LOCAL).
+        if self._inst == 2:
+            return _swap_inst(url, 2)
+        return url
+
+
+class BoschStreamUrlSensor(_BoschStreamUrlSensorBase):
+    """Main RTSP stream URL (whatever inst= the current session uses).
+
+    Default quality is inst=1 (LOCAL ~30 Mbps full-HD); selectable via the
+    integration's stream-connection options. Same URL the camera entity uses
+    internally — exposing it here lets users paste it into Frigate / BlueIris
+    without digging through HA's internals.
+    """
+
+    _inst = 1
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id       = f"bosch_shc_stream_url_{cam_id.lower()}"
+        self._attr_translation_key = "stream_url"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+
+class BoschStreamUrlSubSensor(_BoschStreamUrlSensorBase):
+    """Sub-stream RTSP URL (inst=2 — balanced quality, ~7.5 Mbps LOCAL).
+
+    Derived from the main URL by substituting ``inst=N`` → ``inst=2``. Same
+    Bosch session, same TLS proxy, no extra cloud-API quota cost — RTSP is
+    pull-based, so the camera only sends the sub-stream when an external
+    client actually connects.
+    """
+
+    _inst = 2
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id       = f"bosch_shc_stream_url_sub_{cam_id.lower()}"
+        self._attr_translation_key = "stream_url_sub"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
