@@ -73,14 +73,15 @@ class TestFcmNoiseFilterAdditional:
         r2 = _make_record("Unexpected exception during read")
         assert f.filter(r2) is False
 
-    def test_60s_window_lets_through_after_elapsed(self, monkeypatch):
-        """After 60 s the next matching record passes again — keeps a
-        heartbeat so users still see the WAN-down state in the log."""
+    def test_dedup_window_lets_through_after_elapsed(self, monkeypatch):
+        """After the dedup window (v12.4.1: 300 s) the next matching record
+        passes again — keeps a heartbeat so users still see the WAN-down
+        state in the log."""
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
         f = _FCMNoiseFilter()
         f.filter(_make_record("Unexpected exception during read"))
-        # Force the internal timestamp 70 s into the past
-        f._last_passed = time.monotonic() - 70.0
+        # Force the internal timestamp past the dedup window
+        f._last_passed = time.monotonic() - (_FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0)
         rec = _make_record("Unexpected exception during read")
         assert f.filter(rec) is True
 

@@ -92,13 +92,13 @@ class TestFCMNoiseFilter:
         rec2 = _make_record("Unexpected exception during read")
         assert f.filter(rec2) is False
 
-    def test_record_after_60s_passes(self):
-        """After the 60 s window, another message gets through."""
+    def test_record_after_dedup_window_passes(self):
+        """After the dedup window (v12.4.1: 300 s), another message gets through."""
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
         f = _FCMNoiseFilter()
         f.filter(_make_record("Unexpected exception during read"))
-        # Backdate the last_passed timestamp so the next record passes
-        f._last_passed = time.monotonic() - 70.0
+        # Backdate past the dedup window so the next record passes
+        f._last_passed = time.monotonic() - (_FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0)
         rec = _make_record("Unexpected exception during read")
         assert f.filter(rec) is True
 

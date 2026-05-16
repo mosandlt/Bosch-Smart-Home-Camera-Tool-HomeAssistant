@@ -47,6 +47,12 @@ _RESPAWN_DELAY_SECONDS = 5.0
 # Stop timeout — give ffmpeg time to flush the trailing moov atom on SIGTERM.
 _STOP_GRACE_SECONDS = 5.0
 
+# When the NVR switch is toggled on right after Live Stream ON, the TLS
+# proxy URL is still empty until the RTSP DESCRIBE handshake completes
+# (~3–10 s on Gen2). Poll for it before giving up.
+_PROXY_URL_WAIT_STEPS = 24
+_PROXY_URL_WAIT_INTERVAL = 0.5
+
 # ── Phase 4: pre-roll buffer tunables ────────────────────────────────────────
 _PREROLL_SEGMENT_SECONDS = 10      # short segments for fine-grained pre-roll
 _PREROLL_MAX_SEGMENTS = 5          # keep last 5 × 10 s = 50 s max in tmpfs
@@ -250,6 +256,12 @@ def prune_preroll_cache(cam_dir: str, max_segments: int) -> int:
     return deleted
 
 
+def _prune_and_count(cam_dir: str, max_segments: int) -> int:
+    """Prune then return remaining segment count. Runs inside executor job."""
+    prune_preroll_cache(cam_dir, max_segments)
+    return len(_list_preroll_segments(cam_dir))
+
+
 def _build_preroll_ffmpeg_args(rtsp_url: str, pattern: str) -> list[str]:
     """ffmpeg args for 10 s segments to tmpfs. No -segment_atclocktime, no -strftime_mkdir.
     No -reconnect* — those are HTTP-only and crash ffmpeg rc=8 on rtsp:// inputs."""
@@ -293,9 +305,10 @@ async def _watch_preroll_recorder(
         if proc is None or proc.returncode is not None:
             return
         try:
-            await coordinator.hass.async_add_executor_job(
-                prune_preroll_cache, cam_dir, max_segs,
+            remaining = await coordinator.hass.async_add_executor_job(
+                _prune_and_count, cam_dir, max_segs,
             )
+            coordinator._nvr_preroll_segment_counts[cam_id] = remaining
         except Exception:  # noqa: BLE001
             pass
 
@@ -348,9 +361,10 @@ async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: 
     max_segs = max(2, math.ceil(preroll_secs / _PREROLL_SEGMENT_SECONDS) + 1)
     # Prune on spawn so stale segments from a previous session don't inflate the buffer.
     try:
-        await coordinator.hass.async_add_executor_job(
-            prune_preroll_cache, cam_dir, max_segs,
+        remaining = await coordinator.hass.async_add_executor_job(
+            _prune_and_count, cam_dir, max_segs,
         )
+        coordinator._nvr_preroll_segment_counts[cam_id] = remaining
     except Exception:  # noqa: BLE001
         pass
 
@@ -374,6 +388,7 @@ async def stop_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: s
     if watcher is not None and not watcher.done():
         watcher.cancel()
 
+    coordinator._nvr_preroll_segment_counts.pop(cam_id, None)
     proc = coordinator._nvr_preroll_processes.pop(cam_id, None)
     if proc is None:
         return
@@ -435,7 +450,9 @@ def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[
 
 async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str, output_path: str) -> bool:
     """Concatenate available pre-roll segments into output_path. Returns True on success."""
-    paths = list_preroll_files(coordinator, cam_id)
+    paths = await coordinator.hass.async_add_executor_job(
+        list_preroll_files, coordinator, cam_id,
+    )
     if not paths:
         _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
         return False
@@ -539,13 +556,30 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
             cam_id[:8],
         )
         return
+    # Poll for the TLS-proxy URL: when the NVR switch is toggled on right
+    # after the Live Stream switch, the RTSP DESCRIBE handshake (~3–10 s on
+    # Gen2) may still be in flight and ``_live_connections[cam_id].rtspsUrl``
+    # is still empty. The coordinator tick would eventually retry, but the
+    # immediate UI toggle would record an unwarranted WARNING every tick
+    # until the URL lands. Wait up to 12 s in 500 ms steps before giving up.
     rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
     if not rtsp_url.startswith("rtsp://"):
-        _LOGGER.warning(
-            "NVR start skipped for %s — TLS-proxy URL not ready (got %r)",
-            cam_id[:8], rtsp_url[:30],
-        )
-        return
+        for _ in range(_PROXY_URL_WAIT_STEPS):
+            await asyncio.sleep(_PROXY_URL_WAIT_INTERVAL)
+            live = coordinator._live_connections.get(cam_id, {})
+            if live.get("_connection_type") != "LOCAL":
+                return  # stream torn down while we were waiting
+            rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
+            if rtsp_url.startswith("rtsp://"):
+                break
+        if not rtsp_url.startswith("rtsp://"):
+            _LOGGER.warning(
+                "NVR start skipped for %s — TLS-proxy URL not ready after %d s "
+                "(stream warm-up too slow); next coordinator tick will retry",
+                cam_id[:8],
+                int(_PROXY_URL_WAIT_STEPS * _PROXY_URL_WAIT_INTERVAL),
+            )
+            return
 
     opts = coordinator.options
 

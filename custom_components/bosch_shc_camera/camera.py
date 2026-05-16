@@ -33,7 +33,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -437,6 +438,43 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────
+    @callback
+    def close_webrtc_session(self, session_id: str) -> None:
+        """Close a WebRTC session — no-op for unknown / never-established sessions.
+
+        HA's go2rtc provider stores sessions in a dict keyed by session_id and
+        calls ``dict.pop(session_id)`` (without a default) in ``async_close_session``.
+        When privacy mode is ON, ``async_handle_async_webrtc_offer`` calls
+        ``_update_stream_source`` which raises HomeAssistantError (no stream source),
+        so the session is *never inserted* into ``go2rtc._sessions``.  However the
+        websocket handler already registered
+        ``partial(camera.close_webrtc_session, session_id)`` as a subscription
+        cleanup before the offer was even forwarded — so when the client
+        disconnects, ``async_handle_close`` calls this method for a session_id that
+        go2rtc never tracked, causing a KeyError that HA logs at ERROR level:
+
+            "Error unsubscribing from subscription: functools.partial(
+             <bound method Camera.close_webrtc_session …>, '<session_id>')"
+
+        Fix: delegate to the base class (which calls provider.async_close_session)
+        inside a try/except that silences KeyError.  All other exceptions (e.g.
+        RuntimeError from a closed event-loop) still propagate so real bugs
+        remain visible.
+
+        Regression test: tests/test_close_webrtc_session.py
+        """
+        try:
+            super().close_webrtc_session(session_id)
+        except KeyError:
+            # Session was never established (e.g. privacy mode was ON when the
+            # WebRTC offer arrived and go2rtc bailed before inserting it into
+            # its _sessions dict).  Silently discard — there is nothing to close.
+            _LOGGER.debug(
+                "%s: close_webrtc_session(%s) — session not found, already closed or "
+                "never established (privacy mode?); ignoring",
+                self._display_name, session_id,
+            )
+
     async def async_create_stream(self) -> Any:
         """Auto-open live connection when play_stream / Cast is requested.
 
@@ -444,8 +482,18 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         Without the override stream_source() returns None with no active session
         → async_create_stream() returns None → HA logs
         "does not support play stream service" (observed 2026-05-09 19:02 CEST).
+
+        When privacy mode is ON the live connection is intentionally blocked.
+        We raise HomeAssistantError so HA surfaces a meaningful message instead of
+        the generic "does not support play stream service".
         """
         if not self.coordinator._live_connections.get(self._cam_id):
+            # Privacy mode gate: do not even attempt a live connection
+            shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+            if shc.get("privacy_mode") is True:
+                raise HomeAssistantError(
+                    f"{self._display_name}: stream unavailable — privacy mode is ON"
+                )
             _LOGGER.debug("%s: play_stream — auto-opening live connection", self._display_name)
             result = await self.coordinator.try_live_connection(self._cam_id)
             if not result:

@@ -26,6 +26,7 @@ def _make_coord(
     nvr_processes: dict | None = None,
     user_intent: dict | None = None,
     error_state: dict | None = None,
+    preroll_counts: dict | None = None,
     title: str = "Terrasse",
 ):
     return SimpleNamespace(
@@ -35,6 +36,7 @@ def _make_coord(
         _nvr_processes=nvr_processes or {},
         _nvr_preroll_processes={},
         _nvr_preroll_tasks={},
+        _nvr_preroll_segment_counts=preroll_counts or {},
         _nvr_user_intent=user_intent or {},
         _nvr_error_state=error_state or {},
         options={"nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache", "nvr_preroll_seconds": 0},
@@ -167,6 +169,48 @@ class TestNvrStateSensorAttributes:
             CAM_ID, _make_entry(),
         )
         assert s.extra_state_attributes["last_segment_age_s"] == 99.0
+
+    def test_preroll_segments_read_from_cached_count_not_disk(self):
+        """Regression: extra_state_attributes must NOT call list_preroll_files
+        (which does os.listdir) — that's a blocking call in the event loop.
+        The count is populated by the preroll watcher into
+        ``_nvr_preroll_segment_counts`` and read from there.
+
+        User/forum source: HA detected blocking call to listdir at
+        recorder.py:221 during a v12.x test on 2026-05-16. Fix landed in
+        v12.3.2 — preroll watcher caches count, sensor reads cache.
+        """
+        import custom_components.bosch_shc_camera.recorder as recorder_mod
+        from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
+        called = {"n": 0}
+        orig = recorder_mod.list_preroll_files
+
+        def boom(*args, **kwargs):
+            called["n"] += 1
+            raise AssertionError(
+                "list_preroll_files must not be called from event loop — "
+                "use _nvr_preroll_segment_counts cache",
+            )
+
+        recorder_mod.list_preroll_files = boom
+        try:
+            s = BoschNvrStateSensor(
+                _make_coord(preroll_counts={CAM_ID: 5}),
+                CAM_ID, _make_entry(),
+            )
+            attrs = s.extra_state_attributes
+            assert attrs["preroll_segments"] == 5
+            assert called["n"] == 0
+        finally:
+            recorder_mod.list_preroll_files = orig
+
+    def test_preroll_segments_defaults_to_zero_when_not_populated(self):
+        """If the watcher never ran (NVR off), the count attr defaults to 0
+        — never raises AttributeError on an unseen cam_id."""
+        from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+        s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
+        assert s.extra_state_attributes["preroll_segments"] == 0
 
 
 # ── Entity metadata ──────────────────────────────────────────────────────────

@@ -1333,8 +1333,7 @@ class BoschNvrStateSensor(_BoschSensorBase):
         info = self.coordinator.data.get(self._cam_id, {}).get("info", {})
         cam_key = _safe_name(info.get("title", self._cam_id))
         last_age = (state.get("last_age_by_cam") or {}).get(cam_key)
-        from .recorder import list_preroll_files
-        preroll = list_preroll_files(self.coordinator, self._cam_id)
+        preroll_count = self.coordinator._nvr_preroll_segment_counts.get(self._cam_id, 0)
         return {
             "target":             state.get("target", "local"),
             "pending_uploads":    int(state.get("pending", 0)),
@@ -1343,7 +1342,7 @@ class BoschNvrStateSensor(_BoschSensorBase):
             "last_tick_ts":       state.get("last_tick_ts"),
             "user_intent":        bool(self.coordinator._nvr_user_intent.get(self._cam_id, False)),
             "error":              self.coordinator._nvr_error_state.get(self._cam_id, ""),
-            "preroll_segments":   len(preroll),
+            "preroll_segments":   preroll_count,
             "preroll_running":    bool(self.coordinator._nvr_preroll_processes.get(self._cam_id)),
         }
 

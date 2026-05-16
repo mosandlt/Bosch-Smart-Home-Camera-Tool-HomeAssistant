@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import ssl
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -63,9 +64,15 @@ class _FCMNoiseFilter(logging.Filter):
       1. Strip `exc_info` from the record so the formatter doesn't dump
          the recursive stack — the plain message is enough to know the
          FCM connection failed.
-      2. De-duplicate: at most one pass-through per 60 s window so the
-         log has a heartbeat marker without flooding.
+      2. De-duplicate: at most one pass-through per 300 s (5 min) window.
+         The library's reconnect cadence is ~63 s on a permanently-broken
+         SSL session (upstream `_reset()` retry loop). A 60 s window would
+         let every retry through; 300 s gives a heartbeat without flooding
+         and matches what the watchdog needs to flip to polling-fallback.
     """
+
+    _DEDUP_WINDOW_SECONDS = 300.0
+    _SHARED_ERROR_TIMESTAMPS: list[float] = []  # class-level so the watchdog can read
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,24 +90,248 @@ class _FCMNoiseFilter(logging.Filter):
         # recursion that doesn't help triage.
         record.exc_info = None
         record.exc_text = None
-        # Then de-dupe: 1 line per 60 s.
+        # Record timestamp so the coordinator's FCM watchdog can detect a
+        # persistent-failure loop (≥3 errors in 5 min) and self-heal by
+        # purging the stale persisted credentials in entry data. Keep only
+        # the last 10 timestamps so the list never grows unbounded on a
+        # cleanly-running install (the watchdog only ever needs the 3 most
+        # recent in the dedup window).
         now = time.monotonic()
-        if (now - self._last_passed) < 60.0:
+        self._SHARED_ERROR_TIMESTAMPS.append(now)
+        del self._SHARED_ERROR_TIMESTAMPS[:-10]
+        # Then de-dupe.
+        if (now - self._last_passed) < self._DEDUP_WINDOW_SECONDS:
             return False
         self._last_passed = now
         return True
 
 
-def _install_fcm_noise_filter() -> None:
-    """Install the noise filter on the firebase_messaging logger once.
+def get_recent_fcm_error_count(window_seconds: float = 300.0) -> int:
+    """How many ``Unexpected exception during read`` errors fired in the
+    last ``window_seconds`` according to the filter's shared timestamp list.
 
-    Idempotent: re-running attaches no duplicate filters.
+    Coordinator's FCM watchdog uses this to detect a persistent reconnect
+    loop and trigger ``async_self_heal_fcm_push`` — clearing stale creds and
+    forcing fresh ``checkin_or_register()``.
     """
-    fcm_logger = logging.getLogger("firebase_messaging.fcmpushclient")
-    for f in fcm_logger.filters:
+    if not _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS:
+        return 0
+    cutoff = time.monotonic() - window_seconds
+    return sum(1 for ts in _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS if ts >= cutoff)
+
+
+def reset_fcm_error_counter() -> None:
+    """Clear the shared timestamp list. Called by self-heal after the recovery
+    cycle so the next 5-min window starts fresh."""
+    _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+
+
+def _install_fcm_noise_filter() -> None:
+    """Install the noise filter on both relevant loggers once.
+
+    Two loggers can emit "Unexpected exception during read":
+      1. ``firebase_messaging.fcmpushclient`` — the vanilla library path (when
+         ``_QuietFcmPushClient`` is not used or the patch falls back).
+      2. ``custom_components.bosch_shc_camera.fcm`` (``_LOGGER``) — the
+         ``_QuietFcmPushClient._listen()`` override also logs via ``_LOGGER``
+         in its fallback ``else`` branch (for non-ConnectionReset OSErrors or
+         if the run_state guard does not fire).
+
+    A single shared ``_FCMNoiseFilter`` instance is installed on BOTH loggers so
+    ``_last_passed`` and ``_SHARED_ERROR_TIMESTAMPS`` are identical regardless of
+    which logger emits the record — the 300 s dedup window spans both sources.
+
+    Idempotent: re-running finds the existing instance and returns early.
+    """
+    # Find or create the shared filter instance.
+    lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+    for f in lib_logger.filters:
         if isinstance(f, _FCMNoiseFilter):
+            # Already installed on the library logger.  Make sure the bosch
+            # logger also carries it (handles reload after a partial install).
+            if f not in _LOGGER.filters:
+                _LOGGER.addFilter(f)
             return
-    fcm_logger.addFilter(_FCMNoiseFilter())
+
+    shared_filter = _FCMNoiseFilter()
+    lib_logger.addFilter(shared_filter)
+    _LOGGER.addFilter(shared_filter)
+
+
+class _QuietFcmPushClient:
+    """FcmPushClient subclass that fixes the upstream state-machine bug described in
+    github.com/sdb9696/firebase-messaging#33.
+
+    Root cause (b — state-machine bug):
+      In the library's ``_listen()`` while-loop, when an ``OSError``/``EOFError``
+      is caught the existing quiet-path check is:
+
+          if (isinstance(osex, (ConnectionResetError, TimeoutError, ...))
+              and self.run_state == FcmPushClientRunState.RESETTING):
+              <log quietly>
+          else:
+              _logger.exception("Unexpected exception during read\\n")  # ← noise
+
+      ``run_state`` is only set to ``RESETTING`` *inside* ``_reset()``, which is
+      called **after** the logging decision.  So the very first connectivity error
+      always takes the loud ``_logger.exception`` path, even though the connection
+      is about to be gracefully reset.  On a permanent WAN outage the library
+      re-enters this path every ~63 s producing one error (or many thousands of
+      lines without ``_FCMNoiseFilter``).
+
+    Fix: override ``_listen()`` and set ``self.run_state = RESETTING`` immediately
+    on catching the OS error, **before** the existing quiet-path check fires.  This
+    makes the check evaluate to True on the first error, routing to the verbose
+    (INFO-level) path instead of ``_logger.exception``.  The rest of the method body
+    — including the call to ``_reset()`` — is byte-identical to the library version
+    so no happy-path behaviour changes.
+
+    Import-time guard: the class body is only evaluated when ``firebase_messaging``
+    is importable (inside ``async_start_fcm_push``).  If the import fails we fall
+    back to the vanilla ``FcmPushClient`` transparently.
+    """
+
+    # _make() is called inside async_start_fcm_push after a successful import so
+    # the try/except there already handles ImportError.
+    @staticmethod
+    def _patch_class() -> type | None:
+        """Return a patched FcmPushClient subclass, or None if the library is too
+        new/old for safe subclassing (i.e. ``_listen`` signature changed)."""
+        try:
+            from firebase_messaging import FcmPushClient, FcmPushClientRunState
+        except ImportError:
+            return None
+
+        import inspect
+
+        # Safety guard: if the upstream _listen() signature ever changes (e.g.
+        # gains a parameter) we must not silently break it.  Fall back to vanilla
+        # if the signature is unexpected.
+        sig = inspect.signature(FcmPushClient._listen)  # type: ignore[attr-defined]
+        if list(sig.parameters) != ["self"]:
+            _LOGGER.debug(
+                "FCM subclass: upstream _listen() signature changed — "
+                "falling back to vanilla FcmPushClient (issue#33 noise may recur)"
+            )
+            return None
+
+        class _Patched(FcmPushClient):  # type: ignore[misc]
+            """FcmPushClient with the run_state-before-log fix for issue #33."""
+
+            async def _listen(self) -> None:  # type: ignore[override]
+                """Override _listen to set RESETTING state before the error-log decision.
+
+                Identical to upstream except for the single line that sets
+                ``self.run_state = FcmPushClientRunState.RESETTING`` at the top of
+                the ``except (OSError, EOFError)`` handler.  This makes the
+                existing quiet-path check pass on the very first connectivity error,
+                routing to INFO-level logging instead of ``_logger.exception``.
+                """
+                if not await self._connect_with_retry():
+                    return
+
+                try:
+                    await self._login()
+
+                    while self.do_listen:
+                        try:
+                            if self.run_state == FcmPushClientRunState.RESETTING:
+                                await asyncio.sleep(1)
+                            elif msg := await self._receive_msg():
+                                await self._handle_message(msg)
+
+                        except (OSError, EOFError) as osex:
+                            # FIX for issue #33: advance state to RESETTING here,
+                            # before the quiet-path check below — the library only
+                            # sets it inside _reset() which is called afterwards.
+                            # Without this line, the first OS error always takes the
+                            # _logger.exception() branch even though the connection
+                            # is about to be gracefully reset.
+                            if self.run_state not in (
+                                FcmPushClientRunState.RESETTING,
+                                FcmPushClientRunState.STOPPING,
+                                FcmPushClientRunState.STOPPED,
+                            ):
+                                self.run_state = FcmPushClientRunState.RESETTING
+
+                            if (
+                                isinstance(
+                                    osex,
+                                    (
+                                        ConnectionResetError,
+                                        TimeoutError,
+                                        asyncio.IncompleteReadError,
+                                        ssl.SSLError,
+                                    ),
+                                )
+                                and self.run_state == FcmPushClientRunState.RESETTING
+                            ):
+                                if (
+                                    isinstance(osex, ssl.SSLError)
+                                    and osex.reason
+                                    != "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+                                ):
+                                    self._log_warn_with_limit(
+                                        "Unexpected SSLError reason during reset of %s",
+                                        osex.reason,
+                                    )
+                                else:
+                                    self._log_verbose(
+                                        "Expected read error during reset: %s",
+                                        type(osex).__name__,
+                                    )
+                            else:
+                                _LOGGER.exception("Unexpected exception during read\n")
+                                # Import ErrorType lazily — it is a private enum in
+                                # the library module, not exported via __all__.
+                                # If the import fails (future refactor) we skip the
+                                # error counter; the self-heal watchdog still fires.
+                                try:
+                                    from firebase_messaging.fcmpushclient import (  # type: ignore[import]
+                                        ErrorType as _ErrorType,
+                                    )
+                                    if self._try_increment_error_count(
+                                        _ErrorType.CONNECTION
+                                    ):
+                                        await self._reset()
+                                except ImportError:
+                                    await self._reset()
+                except Exception as ex:
+                    import traceback as _tb
+
+                    _LOGGER.error(
+                        "Unknown error: %s, shutting down FcmPushClient.\n%s",
+                        ex,
+                        _tb.format_exc(),
+                    )
+                    self._terminate()
+                finally:
+                    await self._do_writer_close()
+
+        return _Patched
+
+    # Module-level cache so _patch_class() runs at most once per process.
+    _patched_class: type | None | bool = False  # False = not yet computed
+
+
+def _get_fcm_push_client_class() -> type | None:
+    """Return the patched FcmPushClient subclass (or vanilla if patch failed).
+
+    Cached after the first call.
+    """
+    if _QuietFcmPushClient._patched_class is False:
+        _QuietFcmPushClient._patched_class = _QuietFcmPushClient._patch_class()
+    result = _QuietFcmPushClient._patched_class
+    if result is None:
+        # Patch failed — fall back to vanilla
+        try:
+            from firebase_messaging import FcmPushClient
+
+            return FcmPushClient
+        except ImportError:
+            return None
+    return result
+
 
 # Firebase Cloud Messaging — push notifications from Bosch CBS
 FCM_SENDER_ID = "404630424405"
@@ -149,8 +380,16 @@ async def async_start_fcm_push(coordinator: Any) -> None:
         return
 
     try:
-        from firebase_messaging import FcmPushClient, FcmRegisterConfig
+        from firebase_messaging import FcmRegisterConfig
     except ImportError:
+        _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
+        return
+
+    # Use our patched subclass that fixes the upstream state-machine bug (issue #33):
+    # it sets run_state=RESETTING before the error-log decision so transient WAN
+    # errors are routed to INFO-level rather than _logger.exception().
+    FcmPushClient = _get_fcm_push_client_class()
+    if FcmPushClient is None:
         _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
         return
 
@@ -357,7 +596,19 @@ async def register_fcm_with_bosch(coordinator: Any, mode: str | None = None) -> 
 
 
 async def async_stop_fcm_push(coordinator: Any) -> None:
-    """Stop the FCM push listener."""
+    """Stop the FCM push listener.
+
+    firebase-messaging's ``client.stop()`` cancels its internal read/heartbeat
+    tasks via ``task.cancel()`` but returns before those tasks finish their
+    ``finally: await self._do_writer_close()`` cleanup. If we recreate the
+    FcmPushClient before the old SSL shutdown completes (e.g. user toggles
+    ``fcm_push_mode`` in the UI), the old read loop emits
+    ``ERROR [firebase_messaging.fcmpushclient] Unexpected exception during read``
+    once per ~63 s and never recovers — the state machine sees the SSL close
+    fire outside of ``RESETTING`` state. Awaiting the cancelled tasks here
+    drains the old SSL session before the new client starts. Library has no
+    documented stop-and-restart pattern (upstream issues #23, #33 open).
+    """
     with coordinator._fcm_lock:
         client = coordinator._fcm_client
         running = coordinator._fcm_running
@@ -368,12 +619,67 @@ async def async_stop_fcm_push(coordinator: Any) -> None:
             raise
         except Exception as err:
             _LOGGER.debug("FCM stop raised: %s", err)
+        pending = getattr(client, "tasks", None) or []
+        if pending:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.debug(
+                    "FCM stop: %d background task(s) did not drain in 10 s — "
+                    "proceeding (residual SSL close may log one final error)",
+                    len(pending),
+                )
+            except asyncio.CancelledError:
+                raise
         with coordinator._fcm_lock:
             coordinator._fcm_running = False
             coordinator._fcm_healthy = False
             coordinator._fcm_client = None
             coordinator._fcm_push_mode = "unknown"
         _LOGGER.info("FCM push listener stopped")
+
+
+async def async_self_heal_fcm_push(coordinator: Any) -> None:
+    """Recover from a persistent ``firebase_messaging`` reconnect-fail loop
+    by dropping the stale persisted FCM credentials and forcing a fresh
+    ``checkin_or_register()``.
+
+    Symptom: ``ERROR firebase_messaging.fcmpushclient: Unexpected exception
+    during read`` fires once per ~63 s on a running client whose SSL session
+    keeps failing. The library auto-reconnects internally but every new SSL
+    session re-fails for the same reason (typically because the persisted
+    FCM credentials are stale — Google's mtalk endpoint rejects the saved
+    Android-ID / security-token pair until a fresh checkin issues new ones).
+
+    Self-heal flow:
+      1. Stop the current client (drains pending tasks via async_stop_fcm_push).
+      2. Delete ``fcm_credentials`` and ``fcm_registered_token`` from
+         ``coordinator._entry.data`` so the next start does a clean checkin.
+      3. Restart the client; Bosch CBS gets the new device token on the
+         ``register_fcm_with_bosch`` path because ``fcm_registered_token`` is
+         now unset.
+
+    Called by the coordinator's FCM watchdog at most once per cool-down
+    period (handled in ``__init__.py``) — auto-fires when ≥ 3 errors land in
+    5 min. The user does NOT need to remove + re-add the integration.
+    """
+    _LOGGER.warning(
+        "FCM self-heal: ≥3 'Unexpected exception during read' errors in 5 min — "
+        "purging persisted creds and forcing fresh checkin_or_register()"
+    )
+    await async_stop_fcm_push(coordinator)
+    new_data = {**coordinator._entry.data}
+    new_data.pop("fcm_credentials", None)
+    new_data.pop("fcm_registered_token", None)
+    coordinator.hass.config_entries.async_update_entry(
+        coordinator._entry, data=new_data,
+    )
+    reset_fcm_error_counter()
+    if coordinator.options.get("enable_fcm_push", False):
+        await async_start_fcm_push(coordinator)
 
 
 async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:

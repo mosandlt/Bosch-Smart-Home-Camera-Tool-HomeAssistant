@@ -38,7 +38,7 @@ def _make_coord(opts=None, cam_title="Terrasse", cam_id="11111111"):
         _live_connections={cam_id: {"_connection_type": "LOCAL",
                                     "rtspsUrl": "rtsp://user:pass@127.0.0.1:9000/rtsp_tunnel?inst=1&enableaudio=1"}},
         _nvr_processes={},
-        _nvr_preroll_processes={},
+        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
         _nvr_preroll_last_crash={},
         _nvr_preroll_tasks={},
         hass=MagicMock(),
@@ -751,7 +751,12 @@ class TestWatchPrerollRecorder(unittest.TestCase):
         prune_calls = []
 
         async def fake_executor_job(fn, *args):
-            if fn is recorder.prune_preroll_cache:
+            # v12.4.1: watcher now calls _prune_and_count (prune + return
+            # remaining segment count for the diagnostic sensor) instead
+            # of the plain prune_preroll_cache. Accept either name so this
+            # test pins the "prune fired on tick" contract regardless of
+            # the helper rename.
+            if fn in (recorder.prune_preroll_cache, recorder._prune_and_count):
                 prune_calls.append(args)
             return None
 

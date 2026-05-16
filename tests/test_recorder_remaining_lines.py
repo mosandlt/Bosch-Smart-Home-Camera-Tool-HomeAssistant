@@ -55,7 +55,7 @@ def _make_coord(tmp_path=None, *, conn_type: str = "LOCAL"):
             }
         },
         _nvr_processes={},
-        _nvr_preroll_processes={},
+        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _nvr_user_intent={CAM_ID: True},
         _nvr_recent_crash={CAM_ID: float("-inf")},

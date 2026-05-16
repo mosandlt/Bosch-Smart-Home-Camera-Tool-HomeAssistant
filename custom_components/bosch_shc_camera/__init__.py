@@ -399,6 +399,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._fcm_running: bool = False
         self._fcm_last_push: float = float("-inf")  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
+        self._fcm_last_self_heal: float = float("-inf")  # monotonic ts of last creds-purge self-heal
         self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
         # Lock serializing cross-thread FCM state writes.
         # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
@@ -612,6 +613,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Keyed by cam_id, lifecycle mirrors _nvr_processes but independently controlled.
         self._nvr_preroll_processes: dict[str, asyncio.subprocess.Process] = {}
         self._nvr_preroll_last_crash: dict[str, float] = {}
+        self._nvr_preroll_segment_counts: dict[str, int] = {}
         # Drain watcher state — populated by recorder.sync_drain_tick. Used by
         # BoschNvrStateSensor to render `target` / `pending_uploads` /
         # `failed_uploads` / `last_segment_age_s` attributes without coupling
@@ -1386,7 +1388,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "FCM push watchdog: FcmPushClient.is_started()=False — "
                     "listener terminated, flagging unhealthy (polling tempo resumes)"
                 )
+            # Persistent reconnect-loop watchdog: when the library reports
+            # the client is "started" but its read loop keeps erroring out
+            # (typically stale persisted creds), is_started()==True so the
+            # check above never fires. Detect that pattern by counting the
+            # noise-filter's recorded error timestamps; ≥3 in 5 min => the
+            # SSL session is permanently broken and only a fresh checkin
+            # will recover. Cool-down 30 min so a single transient WAN blip
+            # doesn't keep tearing FCM down. See `fcm.async_self_heal_fcm_push`.
+            heal_needed = False
+            if (
+                opts.get("enable_fcm_push", False)
+                and self._fcm_running and self._fcm_healthy
+                and (now - getattr(self, "_fcm_last_self_heal", float("-inf"))) > 1800.0
+            ):
+                from .fcm import get_recent_fcm_error_count
+                if get_recent_fcm_error_count(300.0) >= 3:
+                    heal_needed = True
             _fcm_healthy = self._fcm_healthy
+        if heal_needed:
+            self._fcm_last_self_heal = now
+            from .fcm import async_self_heal_fcm_push
+            self.hass.async_create_task(async_self_heal_fcm_push(self))
         if _fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
         else:

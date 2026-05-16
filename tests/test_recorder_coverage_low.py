@@ -63,7 +63,7 @@ def _make_coord(tmp_path, *, cam_title: str = CAM_TITLE):
             "nvr_preroll_cache_dir": str(tmp_path),
             "nvr_preroll_seconds": 30,
         },
-        _nvr_preroll_processes={},
+        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _bg_tasks=set(),
         # SENTINEL_RULE: monotonic-based "last X" maps default to float('-inf')
