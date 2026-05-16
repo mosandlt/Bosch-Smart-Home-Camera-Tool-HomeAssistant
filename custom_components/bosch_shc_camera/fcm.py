@@ -19,12 +19,10 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.network import NoURLAvailableError, get_url
 
-from .const import DOMAIN
 from .snapshot_store import save_snapshot
 
 
@@ -633,41 +631,6 @@ def get_alert_services(coordinator: Any, type_key: str) -> list[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
-def build_browser_url(coordinator: Any, cam_name: str, date_iso: str) -> str | None:
-    """Deep-link into the HA Media Browser at the camera's day folder.
-
-    Uses the external HA URL when configured so the link works from outside the
-    LAN; falls back to internal. Backend kind: "S" when SMB upload enabled,
-    else "L" (local). Returns None if neither backend is enabled or the date
-    can't be parsed.
-
-    URL format derived from HA frontend ha-panel-media-browser.ts: two
-    encodeURIComponent'd path segments after /media-browser/browser/ are
-    sufficient — no need for the full breadcrumb chain.
-    Linking to a leaf file fails (browse_media rejects non-folder IDs), so we
-    always link to the day folder.
-    """
-    parts = date_iso.split("-")
-    if len(parts) != 3:
-        return None
-    year, month, day = parts
-    opts = coordinator.options
-    if opts.get("enable_smb_upload") and opts.get("smb_server"):
-        kind = "S"
-    elif opts.get("enable_local_save") and opts.get("download_path"):
-        kind = "L"
-    else:
-        return None
-    try:
-        base = get_url(coordinator.hass, prefer_external=True, allow_internal=True)
-    except NoURLAvailableError:
-        return None
-    entry_id = coordinator._entry.entry_id
-    seg1 = quote(f"app,media-source://{DOMAIN}", safe="")
-    seg2 = quote(f",media-source://{DOMAIN}/{entry_id}/{kind}/{cam_name}/{year}/{month}/{day}", safe="")
-    return f"{base}/media-browser/browser/{seg1}/{seg2}"
-
-
 def build_notify_data(
     svc: str, message: str, file_path: str | None = None, title: str | None = None,
 ) -> dict[str, Any]:
@@ -838,10 +801,7 @@ async def async_send_alert(
                         data = await resp.read()
                         if data:
                             await coordinator.hass.async_add_executor_job(_write_file, snap_path, data)
-                            link = build_browser_url(coordinator, cam_name, timestamp[:10])
                             caption = f"\U0001f4f8 {cam_name} Snapshot ({ts_short})"
-                            if link:
-                                caption = f"{caption}\n\U0001f4c2 {link}"
                             await _notify_type(
                                 "screenshot",
                                 caption,
@@ -993,10 +953,7 @@ async def async_send_alert(
                                     _write_file, clip_path, data
                                 )
                                 size_kb = len(data) // 1024
-                                vlink = build_browser_url(coordinator, cam_name, timestamp[:10])
                                 vcaption = f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)"
-                                if vlink:
-                                    vcaption = f"{vcaption}\n\U0001f4c2 {vlink}"
                                 await _notify_type(
                                     "video",
                                     vcaption,
