@@ -387,7 +387,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
     """Handle the initial setup flow — automatic OAuth2 PKCE browser login."""
 
     DOMAIN = DOMAIN
-    VERSION = 1
+    VERSION = 2
 
     @property
     def logger(self) -> logging.Logger:
@@ -602,7 +602,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             vol.Schema({
                 vol.Optional(
                     "stream_connection_type",
-                    default=str(opts.get("stream_connection_type", "auto")),
+                    default=str(opts.get("stream_connection_type", "local")),
                 ): SelectSelector(SelectSelectorConfig(
                     options=[
                         SelectOptionDict(value="auto", label="Auto (Lokal → Cloud Fallback)"),

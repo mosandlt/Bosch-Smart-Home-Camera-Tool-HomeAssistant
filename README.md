@@ -546,6 +546,20 @@ No automations needed — the integration sends alerts directly:
 2. **Snapshot image:** `📸 Kamera Snapshot` + JPEG — sent ~5s later
 3. **Video clip:** `🎬 Kamera Video (245 KB)` + MP4 — sent ~30-90s later (polls until Bosch uploads the clip)
 
+```mermaid
+flowchart TD
+    Cam[Camera<br/>motion / person / audio] -->|FCM push or polling| Int[Integration<br/>event handler]
+    Int --> Gate{notification<br/>switches}
+    Gate -->|master OFF or<br/>type-specific OFF| Skip[suppress alerts<br/>event still tracked]
+    Gate -->|enabled| S1
+    S1["Step 1: instant text<br/>📷 Bewegung HH:MM:SS"] -->|~5 s| S2
+    S2["Step 2: snapshot JPEG<br/>📸 inline image"] -->|poll until clip ready<br/>~30–90 s| S3
+    S3["Step 3: video clip MP4<br/>🎬 attachment"]
+    S1 -.->|alert_notify_information<br/>or alert_notify_service| Notify1["notify.signal_messenger<br/>notify.mobile_app_xxx<br/>..."]
+    S2 -.->|alert_notify_screenshot<br/>opt-in only| Notify2["notify.signal_messenger<br/>notify.mobile_app_xxx"]
+    S3 -.->|alert_notify_video<br/>opt-in only| Notify3[notify.signal_messenger]
+```
+
 Steps 2 and 3 also include a clickable Media Browser link to that day's event folder (`📂 https://…`). Uses the configured external HA URL when set so the link works from outside the LAN; points to the SMB backend when SMB upload is enabled, otherwise the local backend.
 
 **Per-step routing** (v6.5.0+): each step can go to different services, multiple recipients at once. Supports Signal, Telegram, iOS/Android Companion App, or any HA notify service.
@@ -693,6 +707,24 @@ Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; pat
 ### Mini-NVR — Local Continuous Recording (BETA)
 
 Continuously records the LOCAL stream to disk in 5-minute wall-aligned segments. No cloud involved. Recording stops automatically when the camera falls back to REMOTE (relay).
+
+```mermaid
+flowchart LR
+    Cam[Camera RTSP<br/>local TLS] --> Proxy["TLS proxy<br/>127.0.0.1:N"]
+    Proxy --> FFmain[FFmpeg main<br/>5 min segments]
+    FFmain -->|writes| Stage["Staging tree<br/>_staging/cam/day/HHMMSS.mp4"]
+    Proxy -.->|optional preroll| FFpre[FFmpeg preroll<br/>10 s segments]
+    FFpre -.->|tmpfs| Cache["/dev/shm/bosch_nvr_cache/<br/>cam/HHMMSS.mp4"]
+    Stage --> Drain[Drain watcher<br/>tick every 30 s]
+    Drain -->|target = local| Local["base/cam/day/<br/>finalized segments"]
+    Drain -->|target = smb / ftp| SMB[SMB or FTP share]
+    Cache -.->|FCM motion event| Concat[concat preroll + main<br/>→ motion clip]
+    Concat --> Local
+    Local --> MB[HA Media Browser]
+    SMB --> MB
+    Drain -.->|state| Sensor[sensor.bosch_x_mini_nvr_status<br/>idle / recording / error]
+```
+
 
 > **BETA:** The NVR switch becomes unavailable whenever the camera is on a REMOTE connection. A live stream must be active (via `switch.bosch_{name}_live_stream`) for the TLS proxy to start before recording can begin.
 
@@ -1608,8 +1640,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.4.1** — see the GitHub release page for full notes:
-[**v12.4.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.1)
+Latest: **v12.4.2** — see the GitHub release page for full notes:
+[**v12.4.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.2)
 
 | | |
 |---|---|
@@ -1624,7 +1656,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.1** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.2** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.0 · beta · npm |
 

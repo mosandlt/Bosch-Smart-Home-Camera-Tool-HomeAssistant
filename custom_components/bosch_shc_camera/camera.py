@@ -500,6 +500,24 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 _LOGGER.warning("%s: play_stream — live connection failed", self._display_name)
                 return None
             self.coordinator.async_update_listeners()
+        # Pre-warm race (observed 2026-05-17 05:16:14 UTC for bosch_innenbereich):
+        # coordinator sets _live_connections[cam_id] BEFORE the LOCAL pre-warm
+        # populates rtspsUrl. During that window stream_source() intentionally
+        # returns None — but super().async_create_stream() reads stream_source()
+        # and returns None too, which HA core surfaces as the misleading
+        # "does not support play stream service". Wait for warming to clear
+        # (rtspsUrl gets populated at the same point) so super() reads a valid URL.
+        if self._cam_id in self.coordinator._stream_warming:
+            cfg = self.coordinator.get_model_config(self._cam_id)
+            deadline = time.monotonic() + cfg.min_total_wait + 5
+            while self._cam_id in self.coordinator._stream_warming:
+                if time.monotonic() > deadline:
+                    _LOGGER.warning(
+                        "%s: play_stream — pre-warm did not complete within %ds",
+                        self._display_name, cfg.min_total_wait + 5,
+                    )
+                    return None
+                await asyncio.sleep(0.5)
         return await super().async_create_stream()
 
     async def stream_source(self) -> str | None:

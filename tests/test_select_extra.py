@@ -132,13 +132,14 @@ class TestStreamModeSelect:
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "remote"
 
-    def test_unknown_value_collapses_to_auto(self, stub_coord, stub_entry):
+    def test_unknown_value_collapses_to_local(self, stub_coord, stub_entry):
         """Garbage in the entry options must not poison the dropdown —
-        the select entity would refuse to render an out-of-list value."""
+        the select entity would refuse to render an out-of-list value.
+        Default collapse target is 'local' since v12.4.2 (LOCAL-first)."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
         stub_coord._stream_type_override = "made-up-mode"
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel.current_option == "auto"
+        assert sel.current_option == "local"
 
     @pytest.mark.asyncio
     async def test_select_option_writes_override(self, stub_coord, stub_entry):
@@ -304,3 +305,147 @@ class TestVideoQualitySelectExtra:
                 f"If the option list and the coordinator drift, the "
                 f"dropdown silently snaps to 'auto' for valid values."
             )
+
+
+# ── Gap 1: BoschStreamModeSelect — explicit "auto" pin ─────────────────
+
+
+class TestStreamModeSelectAutoPinned:
+    def test_auto_mode_explicit_pin(self, stub_coord, stub_entry):
+        """Pin: override=None + persisted='auto' → current_option == 'auto'.
+
+        The 'auto' key must survive a round-trip through the fallback chain:
+        no in-memory override → read entry option → return 'auto'.
+        Without this pin a refactor could default to 'local' for persisted
+        'auto', silently breaking existing installations that rely on
+        LOCAL-first-then-REMOTE behaviour.
+        """
+        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        stub_coord._stream_type_override = None
+        stub_entry.options["stream_connection_type"] = "auto"
+        sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
+        assert sel.current_option == "auto", (
+            "override=None + persisted='auto' must yield current_option='auto'. "
+            "Falling through to 'local' would silently disable cloud fallback "
+            "for all users who never touched the stream-mode dropdown."
+        )
+
+
+# ── Gap 2+3: BoschFcmPushModeSelect — android + polling explicit pins ───
+
+
+class TestFcmPushModeSelectExtraPins:
+    def test_android_mode_pinned(self, stub_coord, stub_entry):
+        """Pin: persisted 'android' → current_option == 'android'.
+
+        FCM push mode 'android' uses the direct Android FCM path.
+        If this value is ever misread as 'auto' (the default), users
+        with Android-only setups lose push notifications silently.
+        """
+        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        stub_entry.options["fcm_push_mode"] = "android"
+        sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
+        assert sel.current_option == "android", (
+            "Persisted 'android' must survive the current_option fallback chain. "
+            "Collapsing to 'auto' breaks Android-only push configurations."
+        )
+
+    def test_polling_mode_pinned(self, stub_coord, stub_entry):
+        """Pin: persisted 'polling' → current_option == 'polling'.
+
+        FCM push mode 'polling' is the fallback for environments where
+        FCM connectivity is blocked (corporate firewalls). Users who
+        explicitly chose this mode must not be silently reverted to 'auto'.
+        """
+        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        stub_entry.options["fcm_push_mode"] = "polling"
+        sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
+        assert sel.current_option == "polling", (
+            "Persisted 'polling' must survive the current_option fallback chain. "
+            "Collapsing to 'auto' silently breaks push for users behind "
+            "firewalls that block FCM long-lived connections."
+        )
+
+
+# ── Gap 4: BoschMotionSensitivitySelect — 5 missing API-to-key pins ─────
+
+
+class TestMotionSensitivitySelectAllLevels:
+    """Parametrized pin: each API value (UPPER-snake) maps correctly to
+    the entity option key (lower-snake) via current_option.
+
+    The 'high' level was already covered in TestMotionSensitivitySelect.
+    This class covers the 5 remaining levels that the audit found unpinned:
+    SUPER_HIGH, MEDIUM_HIGH, MEDIUM_LOW, LOW, OFF.
+
+    Each level failure mode is the same: the select UI shows the raw
+    API string as a label (untranslated) and the dropdown mismatches the
+    actual camera setting.
+    """
+
+    @pytest.mark.parametrize("api_value,expected_key", [
+        ("SUPER_HIGH",  "super_high"),
+        ("MEDIUM_HIGH", "medium_high"),
+        ("MEDIUM_LOW",  "medium_low"),
+        ("LOW",         "low"),
+        ("OFF",         "off"),
+    ])
+    def test_api_value_maps_to_option_key(
+        self, stub_coord, stub_entry, api_value: str, expected_key: str
+    ) -> None:
+        """Pin: Bosch API value '{api_value}' → current_option == '{expected_key}'.
+
+        Verifies that lower-casing the API wire value yields a key that
+        exists in MOTION_SENSITIVITY_OPTIONS, so the dropdown renders the
+        translated label instead of the raw UPPER-snake API string.
+        """
+        stub_coord.motion_settings = lambda cid: {
+            "motionAlarmConfiguration": api_value
+        }
+        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
+        assert sel.current_option == expected_key, (
+            f"API value '{api_value}' must map to option key '{expected_key}'. "
+            f"A mismatch means the dropdown shows the raw API string as a label "
+            f"and the write-path sends the wrong wire value to Bosch."
+        )
+
+
+# ── Gap 5: BoschDetectionModeSelect — all_motions + zones pins ──────────
+
+
+class TestDetectionModeSelectPins:
+    """Parametrized pin: API detection mode values map to entity option keys.
+
+    API (UPPER-snake): ALL_MOTIONS, ONLY_HUMANS, ZONES
+    Entity keys (lower-snake): all_motions, only_humans, zones
+
+    'only_humans' was covered by existing tests; 'all_motions' and 'zones'
+    were identified as unpinned by the test-audit.
+    """
+
+    @pytest.mark.parametrize("api_value,expected_key", [
+        ("ALL_MOTIONS", "all_motions"),
+        ("ZONES",       "zones"),
+    ])
+    def test_detection_mode_api_to_key(
+        self, stub_coord, stub_entry, api_value: str, expected_key: str
+    ) -> None:
+        """Pin: coordinator cache value '{api_value}' → current_option == '{expected_key}'.
+
+        BoschDetectionModeSelect reads coordinator._intrusion_config_cache[cam_id]
+        ['detectionMode'] and lower-cases it. If the lower-cased value is in
+        DETECTION_MODE_OPTIONS it is returned; otherwise None.
+        A failure here means the detection-mode dropdown shows 'unknown' despite
+        a valid API value being cached, confusing users who check their settings.
+        """
+        stub_coord._intrusion_config_cache = {
+            CAM_ID: {"detectionMode": api_value}
+        }
+        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        sel = BoschDetectionModeSelect(stub_coord, CAM_ID, stub_entry)
+        assert sel.current_option == expected_key, (
+            f"API value '{api_value}' must map to option key '{expected_key}'. "
+            f"The lower-casing + DETECTION_MODE_OPTIONS membership check must "
+            f"cover all three API variants, not just 'only_humans'."
+        )

@@ -353,8 +353,8 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         """Return the current stream mode key."""
         mode = self.coordinator._stream_type_override
         if mode is None:
-            mode = get_options(self._entry).get("stream_connection_type", "auto")
-        return mode if mode in STREAM_MODE_OPTIONS else "auto"
+            mode = get_options(self._entry).get("stream_connection_type", "local")
+        return mode if mode in STREAM_MODE_OPTIONS else "local"
 
     async def async_select_option(self, option: str) -> None:
         """Handle stream mode selection — update in-memory preference immediately."""

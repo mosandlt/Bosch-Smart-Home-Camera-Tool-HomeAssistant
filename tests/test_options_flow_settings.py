@@ -198,7 +198,10 @@ class TestStreamSection:
         assert data["enable_go2rtc"] is False
 
     def test_stream_connection_type_default(self):
-        assert DEFAULT_OPTIONS["stream_connection_type"] == "auto"
+        # v12.4.2 flipped the default to "local" (LOCAL-first); existing
+        # installs that relied on the old "auto" default are migrated via
+        # async_migrate_entry → see test_local_first_default.py.
+        assert DEFAULT_OPTIONS["stream_connection_type"] == "local"
 
     def test_live_buffer_mode_default(self):
         assert DEFAULT_OPTIONS["live_buffer_mode"] == "balanced"

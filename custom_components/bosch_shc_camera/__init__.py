@@ -1543,7 +1543,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # prevents ping-pong if LAN flaps in/out.
                     if self._stream_fell_back.get(cam_id):
                         opts = get_options(self._entry)
-                        if opts.get("stream_connection_type", "auto") == "auto":
+                        if opts.get("stream_connection_type", "local") == "auto":
                             err_count_was = self._stream_error_count.get(cam_id, 0)
                             _LOGGER.info(
                                 "AUTO mode: %s LAN reachable again — clearing "
@@ -2394,7 +2394,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         try:
             hq, inst = self.get_quality_params(cam_id)
             opts = get_options(self._entry)
-            conn_type_pref = self._stream_type_override or opts.get("stream_connection_type", "auto")
+            conn_type_pref = self._stream_type_override or opts.get("stream_connection_type", "local")
             if conn_type_pref == "local":
                 candidates = ["LOCAL"]
             elif conn_type_pref == "auto":
@@ -4436,6 +4436,29 @@ async def _migrate_doubled_prefix_entity_ids(
         ir.async_delete_issue(hass, DOMAIN, "doubled_prefix_entity_ids_migrated")
 
     return len(renamed)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entries to the current schema version.
+
+    v1 → v2 (2026-05-17, v12.4.3): DEFAULT_OPTIONS['stream_connection_type']
+    flipped from 'auto' to 'local'. Entries that never explicitly set the
+    option silently relied on the auto default; without this migration they
+    would switch to local-only on first start after upgrade and lose their
+    REMOTE-fallback safety net. Persist 'auto' explicitly so existing
+    installs keep their current behaviour. New installs (created after the
+    bump) get 'local' via DEFAULT_OPTIONS.
+    """
+    if entry.version < 2:
+        new_options = dict(entry.options)
+        if "stream_connection_type" not in new_options:
+            new_options["stream_connection_type"] = "auto"
+            _LOGGER.info(
+                "Migration v1→v2: preserved stream_connection_type=auto for entry %s",
+                entry.entry_id,
+            )
+        hass.config_entries.async_update_entry(entry, options=new_options, version=2)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
