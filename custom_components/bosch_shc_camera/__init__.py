@@ -1388,23 +1388,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "FCM push watchdog: FcmPushClient.is_started()=False — "
                     "listener terminated, flagging unhealthy (polling tempo resumes)"
                 )
-            # Persistent reconnect-loop watchdog: when the library reports
-            # the client is "started" but its read loop keeps erroring out
-            # (typically stale persisted creds), is_started()==True so the
-            # check above never fires. Detect that pattern by counting the
-            # noise-filter's recorded error timestamps; ≥3 in 5 min => the
-            # SSL session is permanently broken and only a fresh checkin
-            # will recover. Cool-down 30 min so a single transient WAN blip
-            # doesn't keep tearing FCM down. See `fcm.async_self_heal_fcm_push`.
+            # Self-heal: two triggers share one cool-down (30 min) so a single
+            # transient WAN blip doesn't keep tearing FCM down.
+            #   (a) silent death just detected (is_started()=False above) — without
+            #       this trigger the coordinator stays stuck in
+            #       fcm_running=True/healthy=False until the user restarts HA,
+            #       because the legacy error-storm path below requires
+            #       _fcm_healthy=True and never runs after fcm_dead flips it off.
+            #   (b) persistent reconnect-loop while the library still reports
+            #       "started" (typically stale persisted creds) — detected via the
+            #       noise filter's recorded error timestamps; ≥3 in 5 min => SSL
+            #       session permanently broken, only a fresh checkin recovers.
             heal_needed = False
+            cool_down_ok = (now - getattr(self, "_fcm_last_self_heal", float("-inf"))) > 1800.0
             if (
                 opts.get("enable_fcm_push", False)
-                and self._fcm_running and self._fcm_healthy
-                and (now - getattr(self, "_fcm_last_self_heal", float("-inf"))) > 1800.0
+                and self._fcm_running
+                and cool_down_ok
             ):
-                from .fcm import get_recent_fcm_error_count
-                if get_recent_fcm_error_count(300.0) >= 3:
+                if fcm_dead:
                     heal_needed = True
+                elif self._fcm_healthy:
+                    from .fcm import get_recent_fcm_error_count
+                    if get_recent_fcm_error_count(300.0) >= 3:
+                        heal_needed = True
             _fcm_healthy = self._fcm_healthy
         if heal_needed:
             self._fcm_last_self_heal = now

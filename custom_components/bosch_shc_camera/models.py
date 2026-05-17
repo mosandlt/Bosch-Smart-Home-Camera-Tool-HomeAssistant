@@ -160,8 +160,14 @@ MODELS["HOME_Eyes_Outdoor"] = CameraModelConfig(
 MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
 
 # ── Gen2: Eyes Innenkamera II ────────────────────────────────────────────
-# API hardwareVersion: "HOME_Eyes_Indoor" (expected, not yet confirmed)
-# App product type: "CAMERA_INDOOR_GEN2" (expected)
+# API hardwareVersion: "HOME_Eyes_Indoor" (confirmed live on cam 22222222, FW 9.40.25)
+# App product type: "CAMERA_INDOOR_GEN2"
+# FW 9.40.25 on Indoor exhibits the same destructive PUT /connection behaviour
+# as Outdoor: every heartbeat rotates Digest credentials, which invalidates the
+# live RTSP session and forces FFmpeg to TEARDOWN + reconnect — visible as
+# flicker + green YUV-garbage block while the new keyframe arrives. FFmpeg's
+# native GET_PARAMETER every ~15s already keeps the RTSP session alive without
+# rotation, so disabling the destructive heartbeat is safe.
 MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
     display_name="Eyes Innenkamera II",
     generation=2,
@@ -171,11 +177,11 @@ MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
     post_warm_buffer=2,
     describe_timeout=5,
     min_total_wait=25,
-    renewal_interval=3500,
+    renewal_interval=3600,
     max_session_duration=3600,
-    heartbeat_interval=30,
+    heartbeat_interval=3600,
     snapshot_warmup=3,
-    event_refresh_delay=0,  # Gen2 captures immediately, no settle delay needed
+    event_refresh_delay=0,
 )
 MODELS["CAMERA_INDOOR_GEN2"] = MODELS["HOME_Eyes_Indoor"]
 

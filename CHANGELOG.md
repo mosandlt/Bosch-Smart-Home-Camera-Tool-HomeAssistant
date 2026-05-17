@@ -5,6 +5,11 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.4.3 — 2026-05-17
+
+- **Indoor II live stream stability**: disabled the destructive 30 s `PUT /connection` heartbeat for `HOME_Eyes_Indoor` (FW 9.40.25). The indoor variant now mirrors the outdoor profile (`heartbeat_interval=3600`, `renewal_interval=3600`). Symptom before the fix: every ~30 s the camera rotated the ephemeral Digest credentials, FFmpeg lost the live RTSP session and reconnected, the picture flickered with green YUV-garbage blocks until the next keyframe arrived. FFmpeg's native `GET_PARAMETER` every ~15 s already keeps the RTSP session alive without rotating credentials, so disabling the destructive heartbeat is safe.
+- **FCM push self-heal on silent death**: when the `firebase-messaging` listener silently terminates (`FcmPushClient.is_started()` returns `False`) the coordinator watchdog now triggers `async_self_heal_fcm_push` instead of just flagging the listener unhealthy. Previously the watchdog set `_fcm_healthy=False` but never recovered — the legacy error-storm self-heal branch required `_fcm_healthy=True` so it never fired after the flag flipped, leaving the integration stuck in `fcm_running=True / fcm_healthy=False` and the Bosch FCM Push Status sensor stuck on `polling` until the user restarted Home Assistant. Both watchdog triggers now share the same 30-min cool-down so a transient WAN blip cannot keep tearing FCM down.
+
 ## v12.4.2 — 2026-05-17
 
 **Race fix during LOCAL pre-warm + LOCAL-first default for new installs.** The 12.x series ships an essentially complete LOCAL stack — privacy, light, RGB, panic, motion/audio events with FCM, Mini-NVR, SMB/NAS upload, dual-stream URL — so the integration now defaults new installs to pure-LAN streaming. The cloud is consulted only for OAuth login and FCM subscription; the rest stays on the local network unless the user opts back into `auto` (LOCAL with cloud fallback) or `remote`. Existing installs keep their previous behaviour via a soft migration.

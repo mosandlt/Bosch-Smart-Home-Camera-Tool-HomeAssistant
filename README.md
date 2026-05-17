@@ -76,8 +76,8 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
 | **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP |
-| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ❌ | ❌ |
-| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
+| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ✅ *(v10.6.0)* `live --webrtc` | ❌ |
+| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ✅ `info` shows both · `live --sub` *(v10.5.0)* | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
 | **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option |
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP |
 | **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP |
@@ -89,8 +89,8 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* |
 | **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP |
 | **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* |
-| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ❌ | ❌ |
-| **SMB / NAS clip upload** | ✅ | ❌ | ❌ |
+| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ |
+| **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ |
 | **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ |
 | **Camera sharing (friends)** | ❌ | ✅ command | ❌ |
 | **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ❌ |
@@ -99,7 +99,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` |
 | **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* |
 | **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs |
-| **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN only (CLI output) | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN |
+| **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v10.3.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN |
 
 **Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
 
@@ -1640,8 +1640,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.4.2** — see the GitHub release page for full notes:
-[**v12.4.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.2)
+Latest: **v12.4.3** — see the GitHub release page for full notes:
+[**v12.4.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.3)
 
 | | |
 |---|---|
@@ -1656,13 +1656,14 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.2** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.3** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.0 · Mini-NVR + SMB upload (BETA) · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.0 · beta · npm |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.0.0 · Claude Code / Claude Desktop integration |
 
 HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time per the [Cross-Platform Sync Strategy](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#cross-platform-sync) (linked internally, see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
 
-Also: [Bosch Smart Home Camera — Python Frontend (concept)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — planned NiceGUI web dashboard — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.0-alpha Phase-1 skeleton (dashboard + camera detail + settings) — community interest welcome
 
 ---
 

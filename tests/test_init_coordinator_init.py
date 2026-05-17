@@ -406,13 +406,20 @@ async def test_get_model_config_returns_gen2_outdoor(hass: HomeAssistant) -> Non
 
 
 async def test_get_model_config_returns_gen2_indoor(hass: HomeAssistant) -> None:
-    """HOME_Eyes_Indoor → Gen2 indoor profile (heartbeat=30, snapshot_warmup=3)."""
+    """HOME_Eyes_Indoor → Gen2 indoor profile (heartbeat=3600, snapshot_warmup=3).
+
+    Indoor FW 9.40.25 exhibits the same destructive PUT /connection behaviour
+    as Outdoor — every heartbeat rotates Digest creds and tears the live RTSP
+    session. heartbeat_interval=3600 disables the destructive ping; FFmpeg's
+    own GET_PARAMETER every ~15s keeps the session alive.
+    """
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
     coord._hw_version["cam-indoor-gen2"] = "HOME_Eyes_Indoor"
     cfg = coord.get_model_config("cam-indoor-gen2")
     assert cfg.generation == 2
-    assert cfg.heartbeat_interval == 30
+    assert cfg.heartbeat_interval == 3600
+    assert cfg.renewal_interval == 3600
     assert cfg.snapshot_warmup == 3
     assert cfg.display_name == "Eyes Innenkamera II"
 

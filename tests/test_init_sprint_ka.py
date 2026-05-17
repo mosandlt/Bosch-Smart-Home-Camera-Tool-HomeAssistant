@@ -458,6 +458,87 @@ class TestFcmWatchdog:
             "_fcm_healthy must not change when is_started() raises an exception"
         )
 
+    @pytest.mark.asyncio
+    async def test_fcm_dead_triggers_self_heal(self):
+        """is_started()=False must ALSO trigger async_self_heal_fcm_push.
+
+        Regression for the recovery gap: before this fix the coordinator only
+        flagged _fcm_healthy=False on silent death and then sat in
+        fcm_running=True/healthy=False forever, because the error-storm
+        self-heal branch required _fcm_healthy=True and never ran after the
+        flag was already flipped. The user had to restart HA manually.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        fcm_client = MagicMock()
+        fcm_client.is_started = MagicMock(return_value=False)
+
+        coord = _make_coord(
+            _fcm_running=True,
+            _fcm_healthy=True,
+            _fcm_client=fcm_client,
+            options={"enable_fcm_push": True},
+        )
+        coord._first_tick_done = True
+
+        session = _make_session({
+            "v11/video_inputs": _make_resp(200, []),
+            "feature_flags": _make_resp(200, {}),
+            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+        })
+
+        with patch(_PATCH_SESSION, return_value=session), \
+             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+            mock_heal.return_value = None  # coroutine target — async_create_task in stub closes it
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_healthy is False, "silent death still flips healthy=False"
+        assert mock_heal.called, (
+            "fcm_dead must trigger async_self_heal_fcm_push so the listener "
+            "recovers without a HA restart"
+        )
+        assert coord._fcm_last_self_heal == pytest.approx(time.monotonic(), abs=2.0), (
+            "_fcm_last_self_heal must be updated to start the 30-min cool-down"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fcm_dead_self_heal_cool_down(self):
+        """A second silent death within 30 min must NOT trigger a second heal.
+
+        Cool-down is 1800 s. Set _fcm_last_self_heal to "5 min ago" → the second
+        is_started()=False detection should not schedule another self-heal task.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        fcm_client = MagicMock()
+        fcm_client.is_started = MagicMock(return_value=False)
+
+        coord = _make_coord(
+            _fcm_running=True,
+            _fcm_healthy=True,
+            _fcm_client=fcm_client,
+            options={"enable_fcm_push": True},
+        )
+        coord._first_tick_done = True
+        coord._fcm_last_self_heal = time.monotonic() - 300.0  # 5 min ago — still in cool-down
+
+        session = _make_session({
+            "v11/video_inputs": _make_resp(200, []),
+            "feature_flags": _make_resp(200, {}),
+            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+        })
+
+        with patch(_PATCH_SESSION, return_value=session), \
+             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+            mock_heal.return_value = None
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_healthy is False, "healthy still flipped — flag update is independent of cool-down"
+        assert not mock_heal.called, (
+            "cool-down must suppress a second self-heal within 30 min "
+            "to avoid tearing FCM down on every coordinator tick"
+        )
+
 
 # ── 4. Camera list 200 success ────────────────────────────────────────────────
 
