@@ -543,6 +543,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
+        # Auto-rebuild backoff: monotonic ts of last _on_tls_proxy_died rebuild.
+        # Prevents a rebuild storm when the new proxy also immediately dies
+        # because the camera is still flapping (WiFi jitter, brief Bosch FW glitch).
+        self._tls_proxy_rebuild_last: dict[str, float] = {}
         # Stream error tracking — consecutive FFmpeg failures per camera.
         # After max_stream_errors, auto-fallback from LOCAL → REMOTE.
         # `_stream_error_at` records monotonic ts of the last record_stream_error
@@ -3651,10 +3655,95 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._tls_ssl_ctx is None:
             self._tls_ssl_ctx = await self.hass.async_add_executor_job(self._create_ssl_ctx)
         ssl_ctx: ssl.SSLContext = self._tls_ssl_ctx
+
+        # Hop from the proxy daemon thread back to the HA event loop and
+        # schedule the rebuild coroutine. The circuit breaker fires on
+        # transient WiFi jitter; without this signal the stream stays dead
+        # until the next heartbeat (up to 3600s for Indoor Gen2).
+        def _died_callback() -> None:
+            try:
+                self.hass.loop.call_soon_threadsafe(
+                    lambda: self.hass.async_create_task(
+                        self._on_tls_proxy_died(cam_id)
+                    )
+                )
+            except RuntimeError:
+                pass  # event loop closed (HA shutting down)
+
         return start_tls_proxy(
             ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports,
             is_renewal=is_renewal,
+            on_proxy_died=_died_callback,
         )
+
+    async def _on_tls_proxy_died(self, cam_id: str) -> None:
+        """Auto-rebuild the LOCAL session after the TLS proxy circuit breaker fires.
+
+        Triggered by start_tls_proxy's on_proxy_died callback when the proxy
+        closes its server socket after 5 consecutive connect failures (WiFi
+        jitter, brief camera reboot, Bosch FW glitch).
+
+        Backoff: skip if another rebuild ran within _TLS_PROXY_REBUILD_MIN_INTERVAL
+        seconds — prevents a storm when the new proxy also dies immediately
+        because the camera is still flapping.
+        """
+        _TLS_PROXY_REBUILD_MIN_INTERVAL = 30.0
+        _PRE_WAIT = 5.0  # give the camera a moment to actually recover
+
+        now = time.monotonic()
+        last = self._tls_proxy_rebuild_last.get(cam_id, float('-inf'))
+        if (now - last) < _TLS_PROXY_REBUILD_MIN_INTERVAL:
+            _LOGGER.debug(
+                "TLS proxy rebuild for %s skipped — last rebuild %.0fs ago (< %.0fs)",
+                cam_id[:8], now - last, _TLS_PROXY_REBUILD_MIN_INTERVAL,
+            )
+            return
+        self._tls_proxy_rebuild_last[cam_id] = now
+
+        await asyncio.sleep(_PRE_WAIT)
+
+        # Re-check state AFTER the wait — user may have toggled off,
+        # or another flow may have already rebuilt.
+        live = self._live_connections.get(cam_id)
+        if not live:
+            _LOGGER.debug(
+                "TLS proxy rebuild for %s skipped — stream no longer active",
+                cam_id[:8],
+            )
+            return
+        if live.get("_connection_type") != "LOCAL":
+            _LOGGER.debug(
+                "TLS proxy rebuild for %s skipped — active connection is %s, "
+                "not LOCAL (another recovery flow owns it)",
+                cam_id[:8], live.get("_connection_type"),
+            )
+            return
+
+        _LOGGER.warning(
+            "TLS proxy for %s died (circuit breaker) — rebuilding LOCAL session",
+            cam_id[:8],
+        )
+        # Clear stale state so try_live_connection's lock doesn't early-return
+        # and so a fresh PUT /connection runs end-to-end.
+        self._live_connections.pop(cam_id, None)
+        await self._stop_tls_proxy(cam_id)
+        try:
+            result = await self.try_live_connection(cam_id)
+            if result:
+                _LOGGER.info(
+                    "TLS proxy rebuild for %s succeeded (%s)",
+                    cam_id[:8], result.get("_connection_type", "?"),
+                )
+            else:
+                _LOGGER.warning(
+                    "TLS proxy rebuild for %s returned no result — next "
+                    "heartbeat/renewal will retry", cam_id[:8],
+                )
+        except Exception as exc:
+            _LOGGER.warning(
+                "TLS proxy rebuild for %s failed: %s — next heartbeat/renewal will retry",
+                cam_id[:8], exc,
+            )
 
     @staticmethod
     def _create_ssl_ctx() -> ssl.SSLContext:

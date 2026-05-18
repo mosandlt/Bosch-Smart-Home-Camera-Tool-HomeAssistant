@@ -22,6 +22,7 @@ import socket
 import time
 import ssl
 import threading
+from typing import Callable
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def start_tls_proxy(
     cam_port: int,
     port_cache: dict[str, int],
     is_renewal: bool = False,
+    on_proxy_died: Callable[[], None] | None = None,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
 
@@ -125,6 +127,18 @@ def start_tls_proxy(
                         srv.close()
                     except Exception:
                         pass
+                    # Signal the coordinator so it can rebuild the session
+                    # once the camera is reachable again — without this,
+                    # the proxy port stays dead until the next heartbeat
+                    # (up to renewal_interval seconds — 3600s for Indoor Gen2).
+                    if on_proxy_died is not None:
+                        try:
+                            on_proxy_died()
+                        except Exception as cb_exc:
+                            _LOGGER.debug(
+                                "TLS proxy %s: on_proxy_died callback raised — %s",
+                                cam_id[:8], cb_exc,
+                            )
                     break
                 continue
 
