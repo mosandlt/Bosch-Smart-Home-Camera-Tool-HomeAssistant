@@ -335,7 +335,6 @@ def _get_fcm_push_client_class() -> type | None:
 
 # Firebase Cloud Messaging — push notifications from Bosch CBS
 FCM_SENDER_ID = "404630424405"
-FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
 
 
 # ── Firebase config ──────────────────────────────────────────────────────────
@@ -400,36 +399,29 @@ async def async_start_fcm_push(coordinator: Any) -> None:
     except ImportError:  # pragma: no cover — 0.4+ ships this symbol
         FcmPushClientConfig = None
 
-    # Determine push mode
+    # Determine push mode — only "auto" (use OSS FCM key) or "polling" (skip FCM).
+    # Legacy values "ios"/"android" from older versions coerce to "auto".
     push_mode = coordinator.options.get("fcm_push_mode", "auto")
+    if push_mode not in ("auto", "polling"):
+        push_mode = "auto"
 
-    # Build FCM config based on mode
-    async def _build_fcm_cfg(mode: str) -> dict[str, str]:
-        """Return FCM config dict for the given mode (android or ios)."""
-        if mode == "ios":
-            import base64
-            return {
-                "project_id": "bosch-smart-cameras",
-                "app_id": FCM_IOS_APP_ID,
-                "api_key": base64.b64decode("QUl6YVN5QmxyN1o0ZmpaM0lmcnhsN1VRZFE4eGZRd3g5WFJBYnBJ").decode(),
-            }
-        else:
-            # Android mode — use stored config or fetch from Firebase
-            cfg = coordinator._entry.data.get("fcm_config") or {}
-            if not cfg:
-                cfg = await fetch_firebase_config(coordinator.hass)
-                if cfg:
-                    coordinator.hass.config_entries.async_update_entry(
-                        coordinator._entry,
-                        data={**coordinator._entry.data, "fcm_config": cfg},
-                    )
-            return cfg
+    async def _build_fcm_cfg() -> dict[str, str]:
+        """Return the OSS-sanctioned Firebase config (single source, no per-mode split)."""
+        cfg = coordinator._entry.data.get("fcm_config") or {}
+        if not cfg:
+            cfg = await fetch_firebase_config(coordinator.hass)
+            if cfg:
+                coordinator.hass.config_entries.async_update_entry(
+                    coordinator._entry,
+                    data={**coordinator._entry.data, "fcm_config": cfg},
+                )
+        return cfg
 
-    async def _try_fcm_with_mode(mode: str) -> bool:
-        """Attempt FCM registration and start with the given mode. Returns True on success."""
-        fcm_cfg = await _build_fcm_cfg(mode)
+    async def _try_fcm() -> bool:
+        """Attempt FCM registration with the OSS key. Returns True on success."""
+        fcm_cfg = await _build_fcm_cfg()
         if not fcm_cfg.get("api_key"):
-            _LOGGER.warning("FCM: could not obtain Firebase config for mode '%s'", mode)
+            _LOGGER.warning("FCM: could not obtain Firebase config")
             return False
 
         fcm_config = FcmRegisterConfig(
@@ -482,16 +474,15 @@ async def async_start_fcm_push(coordinator: Any) -> None:
 
         try:
             coordinator._fcm_token = await coordinator._fcm_client.checkin_or_register()
-            _LOGGER.debug("FCM registered (mode=%s) — token: %s...", mode, coordinator._fcm_token[:8])
+            _LOGGER.debug("FCM registered — token: %s...", coordinator._fcm_token[:8])
         except Exception as err:
-            _LOGGER.warning("FCM registration failed (mode=%s): %s", mode, err)
+            _LOGGER.warning("FCM registration failed: %s", err)
             coordinator._fcm_client = None
             return False
 
-        # Register FCM token with Bosch CBS API — pass mode explicitly so
-        # register_fcm_with_bosch uses the correct deviceType. coordinator._fcm_push_mode
-        # is still "unknown" at this point (set to `mode` only after client.start()).
-        await register_fcm_with_bosch(coordinator, mode)
+        # Register FCM token with Bosch CBS API. coordinator._fcm_push_mode is
+        # still "unknown" at this point (set to "auto" only after client.start()).
+        await register_fcm_with_bosch(coordinator)
 
         # Start listening for pushes
         try:
@@ -499,11 +490,11 @@ async def async_start_fcm_push(coordinator: Any) -> None:
             with coordinator._fcm_lock:
                 coordinator._fcm_running = True
                 coordinator._fcm_healthy = True
-                coordinator._fcm_push_mode = mode
-            _LOGGER.info("FCM push listener started (mode=%s) — near-instant event detection active", mode)
+                coordinator._fcm_push_mode = "auto"
+            _LOGGER.info("FCM push listener started — near-instant event detection active")
             return True
         except Exception as err:
-            _LOGGER.warning("FCM push listener failed to start (mode=%s): %s", mode, err)
+            _LOGGER.warning("FCM push listener failed to start: %s", err)
             with coordinator._fcm_lock:
                 coordinator._fcm_client = None
             return False
@@ -515,28 +506,20 @@ async def async_start_fcm_push(coordinator: Any) -> None:
     if push_mode == "polling":
         _LOGGER.info("FCM push mode set to 'polling' — using standard API polling only")
         return
-    elif push_mode == "auto":
-        # Try iOS first, fall back to Android, then polling
-        if not await _try_fcm_with_mode("ios"):
-            _LOGGER.info("FCM auto mode: iOS failed, trying Android fallback")
-            if not await _try_fcm_with_mode("android"):
-                _LOGGER.warning("FCM auto mode: both iOS and Android failed — falling back to standard polling")
-    elif push_mode in ("android", "ios"):
-        await _try_fcm_with_mode(push_mode)
-    else:
-        _LOGGER.warning("FCM: unknown push mode '%s' — defaulting to ios", push_mode)
-        await _try_fcm_with_mode("ios")
+
+    # "auto" — try FCM with the OSS-sanctioned key; on failure the integration
+    # automatically falls back to standard polling (no extra code path needed —
+    # async_get_events_polling runs unconditionally on the coordinator tick).
+    if not await _try_fcm():
+        _LOGGER.warning("FCM registration failed — falling back to standard polling")
 
 
-async def register_fcm_with_bosch(coordinator: Any, mode: str | None = None) -> bool:
+async def register_fcm_with_bosch(coordinator: Any) -> bool:
     """Register our FCM token with Bosch CBS so it sends us push notifications.
 
-    Endpoint: POST /v11/devices {"deviceType": "ANDROID"|"IOS", "deviceToken": token}
-    Response: HTTP 204 on success.
-    deviceType must match the FCM platform used for registration.
-
-    `mode` should be passed explicitly by the caller because coordinator._fcm_push_mode
-    is still "unknown" at call time (it is set only after client.start() succeeds).
+    Endpoint: POST /v11/devices {"deviceType": "ANDROID", "deviceToken": token}
+    Response: HTTP 204 on success. deviceType is always ANDROID — the OSS
+    Firebase app registered with Bosch lives under the Android app_id.
     """
     if not coordinator._fcm_token or not coordinator.token:
         return False
@@ -550,17 +533,12 @@ async def register_fcm_with_bosch(coordinator: Any, mode: str | None = None) -> 
         _LOGGER.debug("FCM: token unchanged — skipping re-registration with Bosch CBS")
         return True
 
-    # Use the caller-supplied mode if provided; fall back to the coordinator field
-    # only for direct calls after the mode is committed (e.g. token refresh).
-    effective_mode = mode if mode is not None else coordinator._fcm_push_mode
-    device_type = "IOS" if effective_mode == "ios" else "ANDROID"
-
     session = async_get_clientsession(coordinator.hass, verify_ssl=False)
     headers = {
         "Authorization": f"Bearer {coordinator.token}",
         "Content-Type":  "application/json",
     }
-    payload = {"deviceType": device_type, "deviceToken": coordinator._fcm_token}
+    payload = {"deviceType": "ANDROID", "deviceToken": coordinator._fcm_token}
 
     try:
         async with asyncio.timeout(10):

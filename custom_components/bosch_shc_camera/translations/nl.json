@@ -104,7 +104,7 @@
             "description": "Realtime gebeurtenislevering via FCM en gefaseerde meldingsdiensten.",
             "data": {
               "enable_fcm_push": "FCM Push — directe gebeurtenisdetectie (~2 s)",
-              "fcm_push_mode": "FCM Push-modus (auto / android / ios / polling)",
+              "fcm_push_mode": "FCM Push-modus (auto / polling)",
               "mark_events_read": "Bosch Cloud-gebeurtenissen als gelezen markeren",
               "alert_save_snapshots": "Waarschuwingsafbeeldingen/-video's lokaal opslaan",
               "alert_delete_after_send": "Bestanden verwijderen na verzenden",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "Ontvang bewegings-/audiogebeurtenissen in ~2 seconden via Firebase Cloud Messaging in plaats van elke 5 minuten te pollen. Automatische fallback naar polling als FCM uitvalt. Aanbevolen!",
-              "fcm_push_mode": "Kies de push-modus. Auto probeert eerst iOS, dan Android, dan polling. Polling gebruikt alleen standaard API-aanroepen (geen FCM).",
+              "fcm_push_mode": "Auto = FCM push met automatische fallback naar polling bij registratiefout. Polling = FCM overgeslagen, alleen standaard API-aanroepen.",
               "mark_events_read": "UIT (standaard): nieuwe bewegings-/audiogebeurtenissen blijven als ongelezen gemarkeerd in de Bosch-app — ook nadat HA ze heeft verwerkt — zodat de app ze als nieuw blijft markeren. AAN inschakelen zodat de integratie gebeurtenissen na verwerking als gelezen markeert in de Bosch Cloud (het eerdere gedrag, handig wanneer HA uw primaire client is en u geen verouderde 'nieuw'-badges in de app wilt zien).",
               "alert_save_snapshots": "Gedownloade gebeurtenisafbeeldingen en -video's bewaren in www/bosch_alerts/ (in de HA-configuratiemap). UIT: bestanden worden binnen seconden na verzending verwijderd.",
               "alert_delete_after_send": "Meldingsbestanden uit www/bosch_alerts/ verwijderen nadat de meldingsdienst ze heeft ontvangen. UIT: bestanden blijven bewaard als referentie.",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "FCM Push-modus",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

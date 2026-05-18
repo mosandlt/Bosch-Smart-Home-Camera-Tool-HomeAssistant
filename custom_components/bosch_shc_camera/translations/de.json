@@ -104,7 +104,7 @@
             "description": "Echtzeit-Events via FCM und stufenweise Notify-Dienste.",
             "data": {
               "enable_fcm_push": "FCM Push — Echtzeit-Erkennung (~2 Sek.)",
-              "fcm_push_mode": "FCM Push-Modus (auto / android / ios / polling)",
+              "fcm_push_mode": "FCM Push-Modus (auto / polling)",
               "mark_events_read": "Ereignisse in der Bosch-Cloud als gelesen markieren",
               "alert_save_snapshots": "Alert-Bilder/Videos lokal speichern",
               "alert_delete_after_send": "Dateien nach Senden löschen",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
-              "fcm_push_mode": "Push-Modus wählen. Auto versucht zuerst iOS, dann Android, dann Polling. Polling nutzt nur Standard-API-Aufrufe (kein FCM).",
+              "fcm_push_mode": "Auto = FCM Push mit automatischem Fallback auf Polling bei Fehler. Polling = überspringt FCM und nutzt nur Standard-API-Aufrufe.",
               "mark_events_read": "Wenn AUS (Standard), bleiben neue Bewegungs-/Audio-Ereignisse in der Bosch-App weiterhin als 'ungelesen' markiert — auch nachdem HA sie verarbeitet hat — sodass die App sie weiter als neu hervorhebt. AN schalten, damit die Integration Ereignisse nach der Verarbeitung in der Bosch-Cloud als gelesen markiert (das frühere Verhalten — sinnvoll wenn HA dein Hauptclient ist und die App keine veralteten 'neu'-Badges anzeigen soll).",
               "alert_save_snapshots": "Event-Bilder und Videos in www/bosch_alerts/ (im HA-config-Verzeichnis) behalten. Wenn AUS, werden Dateien innerhalb von Sekunden nach dem Senden gelöscht.",
               "alert_delete_after_send": "Benachrichtigungs-Dateien aus www/bosch_alerts/ nach dem Senden löschen. AUS = Dateien bleiben zur Referenz erhalten.",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "FCM Push-Modus",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

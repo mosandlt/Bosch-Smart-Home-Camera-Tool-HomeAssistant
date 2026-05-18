@@ -106,8 +106,9 @@ class TestOptionConstants:
 
     def test_fcm_push_mode_options_pinned(self):
         from custom_components.bosch_shc_camera.select import FCM_PUSH_MODE_OPTIONS
+        # v12.4.5: simplified to 2 options — OSS Android key handles both platforms.
         # Order matters for the dropdown in the UI.
-        assert FCM_PUSH_MODE_OPTIONS == ["auto", "android", "ios", "polling"]
+        assert FCM_PUSH_MODE_OPTIONS == ["auto", "polling"]
 
 
 # ── BoschStreamModeSelect: in-memory override beats persisted option ────
@@ -182,10 +183,13 @@ class TestFcmPushModeSelect:
         assert sel.available is True
 
     def test_current_option_reads_entry_options(self, stub_coord, stub_entry):
+        # v12.4.5: valid options are now "auto" and "polling" only.
+        # Pin "polling" — the non-default valid option — to verify persisted
+        # entry options are read correctly through the fallback chain.
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
-        stub_entry.options["fcm_push_mode"] = "ios"
+        stub_entry.options["fcm_push_mode"] = "polling"
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel.current_option == "ios"
+        assert sel.current_option == "polling"
 
     def test_current_option_default_auto(self, stub_coord, stub_entry):
         """Missing option key → 'auto'. Stable default ensures fresh
@@ -331,25 +335,12 @@ class TestStreamModeSelectAutoPinned:
         )
 
 
-# ── Gap 2+3: BoschFcmPushModeSelect — android + polling explicit pins ───
+# ── Gap 2+3: BoschFcmPushModeSelect — polling explicit pin ─────────────
+# test_android_mode_pinned removed in v12.4.5: "android" is no longer a
+# valid FCM push mode option. The OSS key handles both platforms as "auto".
 
 
 class TestFcmPushModeSelectExtraPins:
-    def test_android_mode_pinned(self, stub_coord, stub_entry):
-        """Pin: persisted 'android' → current_option == 'android'.
-
-        FCM push mode 'android' uses the direct Android FCM path.
-        If this value is ever misread as 'auto' (the default), users
-        with Android-only setups lose push notifications silently.
-        """
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
-        stub_entry.options["fcm_push_mode"] = "android"
-        sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel.current_option == "android", (
-            "Persisted 'android' must survive the current_option fallback chain. "
-            "Collapsing to 'auto' breaks Android-only push configurations."
-        )
-
     def test_polling_mode_pinned(self, stub_coord, stub_entry):
         """Pin: persisted 'polling' → current_option == 'polling'.
 

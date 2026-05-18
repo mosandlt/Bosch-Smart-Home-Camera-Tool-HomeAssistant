@@ -104,7 +104,7 @@
             "description": "Dostarczanie zdarzeń w czasie rzeczywistym przez FCM i etapowe usługi powiadomień.",
             "data": {
               "enable_fcm_push": "FCM Push — natychmiastowe wykrywanie zdarzeń (~2 s)",
-              "fcm_push_mode": "Tryb FCM Push (auto / android / ios / polling)",
+              "fcm_push_mode": "Tryb FCM Push (auto / polling)",
               "mark_events_read": "Oznaczaj zdarzenia w chmurze Bosch jako przeczytane",
               "alert_save_snapshots": "Zapisuj obrazy/filmy alertów lokalnie",
               "alert_delete_after_send": "Usuń pliki po wysłaniu",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "Otrzymuj zdarzenia ruchu/dźwięku w ~2 sekundy przez Firebase Cloud Messaging zamiast odpytywania co 5 minut. Automatyczny fallback do odpytywania przy awarii FCM. Zalecane!",
-              "fcm_push_mode": "Wybierz tryb push. Auto najpierw próbuje iOS, potem Android, potem przechodzi do odpytywania. Polling używa tylko standardowych wywołań API (bez FCM).",
+              "fcm_push_mode": "Auto = FCM push z automatycznym fallback do odpytywania przy błędzie rejestracji. Polling = pomija FCM, używa tylko standardowych wywołań API.",
               "mark_events_read": "Gdy WYŁĄCZONE (domyślnie), nowe zdarzenia ruchu/dźwięku pozostają oznaczone jako nieprzeczytane w aplikacji Bosch — nawet po przetworzeniu przez HA — aby aplikacja nadal je wyróżniała jako nowe. Włącz, aby integracja oznaczała zdarzenia jako przeczytane w chmurze Bosch po przetworzeniu (poprzednie zachowanie — przydatne gdy HA jest głównym klientem i nie chcesz, aby aplikacja pokazywała nieaktualne znaczniki 'nowe zdarzenie').",
               "alert_save_snapshots": "Przechowuj pobrane obrazy i filmy zdarzeń w www/bosch_alerts/ (wewnątrz katalogu konfiguracji HA). Gdy WYŁĄCZONE, pliki są usuwane w ciągu sekund po wysłaniu.",
               "alert_delete_after_send": "Usuń pliki powiadomień z www/bosch_alerts/ po ich odebraniu przez usługę powiadomień. Gdy WYŁĄCZONE, pliki są zachowywane dla celów referencyjnych.",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "Tryb FCM Push",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

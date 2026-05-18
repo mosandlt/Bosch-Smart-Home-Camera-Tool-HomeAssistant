@@ -342,28 +342,8 @@ class TestRegisterFcmWithBosch:
             ok = await register_fcm_with_bosch(coord)
         assert ok is False
 
-    @pytest.mark.asyncio
-    async def test_device_type_picks_ios(self):
-        """`_fcm_push_mode == 'ios'` → deviceType=IOS in the body."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
-        captured = {}
-
-        @asynccontextmanager
-        async def _post(*args, **kw):
-            captured["json"] = kw.get("json", {})
-            r = MagicMock()
-            r.status = 204
-            yield r
-
-        session = MagicMock()
-        session.post = _post
-        coord = _stub_coord(_fcm_push_mode="ios")
-        with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
-        ):
-            await register_fcm_with_bosch(coord)
-        assert captured["json"]["deviceType"] == "IOS"
+    # test_device_type_picks_ios removed in v12.4.5: deviceType is now always
+    # ANDROID — the OSS-sanctioned key handles both platforms transparently.
 
     @pytest.mark.asyncio
     async def test_device_type_picks_android_for_other(self):

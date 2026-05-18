@@ -6,14 +6,17 @@ covers camera.py executor-based Digest snap functions by making
 async_add_executor_job actually call the closure.
 
 New coverage:
-  fcm.py 168-185  — _build_fcm_cfg ios + android (has-config / no-config) paths
-  fcm.py 189-268  — _try_fcm_with_mode body: no-api-key guard, checkin, start
-  fcm.py 277-287  — async_start_fcm_push dispatch: auto/ios/android/unknown modes
+  fcm.py — _build_fcm_cfg (OSS key path), _try_fcm body: no-api-key guard, checkin, start
+  fcm.py — async_start_fcm_push dispatch: auto/polling/legacy-coercion
   fcm.py 556-557  — mark_events_read exception swallow in push handler
   fcm.py 699-701  — async_send_alert step-1 exception → return
   fcm.py 790-791  — direct clip.mp4 available log
   camera.py 606-618 — _fetch_local_snap executor closure (success + RequestException)
   camera.py 826-838 — _fetch_outage_snap executor closure (success + RequestException)
+
+Note (v12.4.5): iOS/Android-specific dispatch paths removed from production code.
+  TestBuildFcmCfgIos deleted — there is no longer an iOS-specific FCM config.
+  TestDispatchModes updated — auto tries FCM once (OSS key); legacy modes coerce to auto.
 """
 from __future__ import annotations
 
@@ -72,53 +75,8 @@ def _fcm_coord(push_mode="ios", entry_data=None, **overrides):
     return base
 
 
-class TestBuildFcmCfgIos:
-    """fcm.py 168-174: _build_fcm_cfg returns ios config with hardcoded key."""
-
-    @pytest.mark.asyncio
-    async def test_ios_mode_returns_config_with_api_key(self):
-        """push_mode=ios → _build_fcm_cfg must return dict with api_key."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
-
-        mock_fcm, mock_client = _mock_fcm_module()
-        coord = _fcm_coord("ios")
-
-        api_key_used = []
-
-        original_FcmRegisterConfig = mock_fcm.FcmRegisterConfig
-        def capture_config(project_id, app_id, api_key, messaging_sender_id):
-            api_key_used.append(api_key)
-            return original_FcmRegisterConfig()
-
-        mock_fcm.FcmRegisterConfig = capture_config
-
-        with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
-            with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
-                    await async_start_fcm_push(coord)
-
-        # ios path uses a hardcoded base64-decoded api_key — must be non-empty
-        assert len(api_key_used) > 0, "_build_fcm_cfg ios must pass api_key to FcmRegisterConfig"
-        assert api_key_used[0], "ios api_key must be non-empty string"
-        assert coord._fcm_running is True, "FCM must be marked running on successful ios start"
-        assert coord._fcm_push_mode == "ios", "_fcm_push_mode must be 'ios' after success"
-
-    @pytest.mark.asyncio
-    async def test_ios_mode_token_stored(self):
-        """push_mode=ios → coordinator._fcm_token must be set after checkin."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
-
-        mock_fcm, _ = _mock_fcm_module(checkin_token="tok-xyz-123")
-        coord = _fcm_coord("ios")
-
-        with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
-            with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
-                    await async_start_fcm_push(coord)
-
-        assert coord._fcm_token == "tok-xyz-123", (
-            "_fcm_token must be set to the checkin_or_register return value"
-        )
+# TestBuildFcmCfgIos removed in v12.4.5: iOS-specific FCM config path no longer exists.
+# The OSS Android Firebase config is used for all platforms. See test_fcm_mode_pin.py.
 
 
 class TestBuildFcmCfgAndroid:
@@ -238,21 +196,16 @@ class TestTryFcmWithModeGuards:
 
 
 class TestDispatchModes:
-    """fcm.py 277-287: push_mode branch coverage — auto/android/unknown."""
+    """fcm.py: push_mode branch coverage — auto/polling/legacy-coercion (v12.4.5+)."""
 
     @pytest.mark.asyncio
-    async def test_auto_mode_tries_ios_first(self):
-        """auto mode → tries ios; if ios succeeds, android not tried."""
+    async def test_auto_mode_calls_fcm_once(self):
+        """auto mode → calls _try_fcm exactly once with OSS key."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         mock_fcm, mock_client = _mock_fcm_module()
         coord = _fcm_coord("auto")
 
-        tried_modes = []
-        original_FcmRegisterConfig = mock_fcm.FcmRegisterConfig
-        original_FcmPushClient = mock_fcm.FcmPushClient
-
-        # Track which mode was used by capturing what api_key was passed
         call_count = []
         def track_client(**kwargs):
             call_count.append(1)
@@ -264,56 +217,16 @@ class TestDispatchModes:
                 with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
                     await async_start_fcm_push(coord)
 
-        # ios succeeded on first try → only one client created
-        assert len(call_count) == 1, (
-            "auto mode: if ios succeeds, android must not be tried (only 1 client created)"
-        )
-        assert coord._fcm_running is True, "auto mode ios success must set _fcm_running=True"
+        assert len(call_count) == 1, "auto mode: exactly one FCM client created"
+        assert coord._fcm_running is True, "auto mode success must set _fcm_running=True"
+
+    # test_auto_mode_falls_back_to_android removed in v12.4.5: there is no
+    # Android fallback — auto tries FCM once with the OSS key and falls back
+    # to standard polling on failure (no second client attempt).
 
     @pytest.mark.asyncio
-    async def test_auto_mode_falls_back_to_android(self):
-        """auto mode → ios fails → tries android."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
-
-        mock_fcm_ios, ios_client = _mock_fcm_module(checkin_raises=True)
-        mock_fcm_android, android_client = _mock_fcm_module()
-
-        coord = _fcm_coord("auto")
-
-        client_calls = []
-        client_factory_calls = []
-
-        def mock_client_factory(**kwargs):
-            client_calls.append(len(client_calls))
-            if len(client_calls) == 1:
-                # First call (ios): return failing client
-                ios_client.checkin_or_register = AsyncMock(side_effect=RuntimeError("ios fail"))
-                return ios_client
-            else:
-                # Second call (android): return success client
-                android_client.checkin_or_register = AsyncMock(return_value="android-tok")
-                android_client.start = AsyncMock(return_value=None)
-                return android_client
-
-        mock_module = MagicMock()
-        mock_module.FcmPushClient = mock_client_factory
-        mock_module.FcmRegisterConfig = MagicMock()
-        mock_module.FcmPushClientConfig = None  # test the no-config path too
-
-        with patch.dict(sys.modules, {"firebase_messaging": mock_module}):
-            with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.fetch_firebase_config",
-                           new=AsyncMock(return_value={"project_id": "p", "app_id": "a", "api_key": "k"})):
-                    with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
-                        await async_start_fcm_push(coord)
-
-        assert len(client_calls) == 2, (
-            "auto mode: ios fail → must try android (2 client instances created)"
-        )
-
-    @pytest.mark.asyncio
-    async def test_auto_mode_both_fail_no_crash(self):
-        """auto mode → ios fails + android fails → function returns without crash."""
+    async def test_auto_mode_fcm_fail_no_crash(self):
+        """auto mode → FCM registration fails → function returns without crash."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         mock_module = MagicMock()
@@ -332,11 +245,11 @@ class TestDispatchModes:
                     # Must not raise
                     await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running, "both ios+android fail → must not set _fcm_running"
+        assert not coord._fcm_running, "FCM fail → must not set _fcm_running"
 
     @pytest.mark.asyncio
-    async def test_unknown_mode_falls_back_to_ios(self):
-        """push_mode='weirdvalue' → else branch → _try_fcm_with_mode('ios') called."""
+    async def test_unknown_mode_coerces_to_auto(self):
+        """push_mode='weirdvalue' → coerced to 'auto' → _fcm_push_mode='auto' on success."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         mock_fcm, mock_client = _mock_fcm_module()
@@ -347,14 +260,13 @@ class TestDispatchModes:
                 with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
                     await async_start_fcm_push(coord)
 
-        # ios path would set _fcm_push_mode to "ios"
-        assert coord._fcm_push_mode == "ios", (
-            "unknown push_mode must fall back to ios (else branch at line 285)"
+        assert coord._fcm_push_mode == "auto", (
+            "unknown push_mode must coerce to auto → _fcm_push_mode='auto'"
         )
 
     @pytest.mark.asyncio
-    async def test_android_mode_direct(self):
-        """push_mode='android' → _try_fcm_with_mode('android') called directly."""
+    async def test_android_legacy_coerces_to_auto(self):
+        """push_mode='android' (legacy) → coerced to 'auto' → _fcm_push_mode='auto' on success."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         mock_fcm, mock_client = _mock_fcm_module()
@@ -368,8 +280,8 @@ class TestDispatchModes:
                 with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
                     await async_start_fcm_push(coord)
 
-        assert coord._fcm_push_mode == "android", (
-            "push_mode='android' must set _fcm_push_mode='android' on success"
+        assert coord._fcm_push_mode == "auto", (
+            "legacy 'android' mode must coerce to auto → _fcm_push_mode='auto'"
         )
 
 

@@ -141,118 +141,12 @@ class TestNvrCleanupSentinel:
         )
 
 
-# ── Bug 3: FCM device_type race ─────────────────────────────────────────────
-
-
-class TestFcmDeviceTypeRace:
-    """register_fcm_with_bosch was called before coordinator._fcm_push_mode
-    was set to `mode` — always evaluated to 'unknown' → always ANDROID."""
-
-    def test_register_accepts_mode_parameter(self):
-        """register_fcm_with_bosch must accept an explicit `mode` parameter."""
-        import inspect
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
-        sig = inspect.signature(register_fcm_with_bosch)
-        assert "mode" in sig.parameters, (
-            "register_fcm_with_bosch must have a `mode` parameter so callers "
-            "can pass the mode before coordinator._fcm_push_mode is committed"
-        )
-
-    def test_mode_none_falls_back_to_coordinator_field(self):
-        """When mode=None (default), effective_mode falls back to coordinator field."""
-        import inspect
-        from custom_components.bosch_shc_camera import fcm as _fcm
-        src = inspect.getsource(_fcm.register_fcm_with_bosch)
-        assert "effective_mode" in src or "mode if mode" in src, (
-            "register_fcm_with_bosch must use passed mode preferentially, "
-            "falling back to coordinator._fcm_push_mode only when mode is None"
-        )
-
-    @pytest.mark.asyncio
-    async def test_ios_mode_registers_as_ios(self):
-        """Calling register_fcm_with_bosch(coord, 'ios') must POST deviceType=IOS."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
-
-        posted_body = {}
-
-        def _post_cm(*args, **kwargs):
-            posted_body.update(kwargs.get("json", {}))
-            resp = MagicMock()
-            resp.status = 204
-            cm = MagicMock()
-            cm.__aenter__ = AsyncMock(return_value=resp)
-            cm.__aexit__ = AsyncMock(return_value=None)
-            return cm
-
-        session = MagicMock()
-        session.post = _post_cm
-
-        coord = SimpleNamespace(
-            _fcm_token="token123",
-            token="bearer-tok",
-            _fcm_push_mode="unknown",  # simulates state BEFORE commit
-            _entry=SimpleNamespace(data={}),
-            hass=MagicMock(),
-        )
-
-        with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
-        ):
-            await register_fcm_with_bosch(coord, "ios")
-
-        assert posted_body.get("deviceType") == "IOS", (
-            "register_fcm_with_bosch(coord, 'ios') must POST deviceType=IOS "
-            "even when coordinator._fcm_push_mode is still 'unknown'"
-        )
-
-    @pytest.mark.asyncio
-    async def test_android_mode_registers_as_android(self):
-        """register_fcm_with_bosch(coord, 'android') must POST deviceType=ANDROID."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
-
-        posted_body = {}
-
-        def _post_cm(*args, **kwargs):
-            posted_body.update(kwargs.get("json", {}))
-            resp = MagicMock()
-            resp.status = 204
-            cm = MagicMock()
-            cm.__aenter__ = AsyncMock(return_value=resp)
-            cm.__aexit__ = AsyncMock(return_value=None)
-            return cm
-
-        session = MagicMock()
-        session.post = _post_cm
-
-        coord = SimpleNamespace(
-            _fcm_token="token123",
-            token="bearer-tok",
-            _fcm_push_mode="unknown",
-            _entry=SimpleNamespace(data={}),
-            hass=MagicMock(),
-        )
-
-        with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
-        ):
-            await register_fcm_with_bosch(coord, "android")
-
-        assert posted_body.get("deviceType") == "ANDROID", (
-            "register_fcm_with_bosch(coord, 'android') must POST deviceType=ANDROID"
-        )
-
-    def test_caller_passes_mode_explicitly(self):
-        """_try_fcm_with_mode must pass mode to register_fcm_with_bosch."""
-        import inspect
-        from custom_components.bosch_shc_camera import fcm as _fcm
-        src = inspect.getsource(_fcm)
-        # The call site must pass mode, not rely on coordinator field
-        assert "register_fcm_with_bosch(coordinator, mode)" in src, (
-            "_try_fcm_with_mode must call register_fcm_with_bosch(coordinator, mode) "
-            "so the deviceType matches the FCM platform being registered"
-        )
+# ── Bug 3: FCM device_type race — OBSOLETE (class deleted) ──────────────────
+# The TestFcmDeviceTypeRace class was removed in v12.4.5 because the
+# `mode` parameter in register_fcm_with_bosch no longer exists — deviceType
+# is now hardcoded to ANDROID (the OSS key handles both platforms). The bug
+# it guarded against (race between mode-commit and device_type) is moot.
+# New pin tests live in tests/test_fcm_mode_pin.py.
 
 
 # ── Bug 4: local_rtsp_url uninitialized ─────────────────────────────────────

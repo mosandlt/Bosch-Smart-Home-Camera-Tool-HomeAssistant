@@ -104,7 +104,7 @@
             "description": "Ricezione eventi in tempo reale tramite FCM e servizi notify per fase.",
             "data": {
               "enable_fcm_push": "FCM Push — rilevamento immediato (~2 s)",
-              "fcm_push_mode": "Modalità FCM Push (auto / android / ios / polling)",
+              "fcm_push_mode": "Modalità FCM Push (auto / polling)",
               "mark_events_read": "Segna gli eventi Bosch Cloud come letti",
               "alert_save_snapshots": "Salva immagini/video degli alert localmente",
               "alert_delete_after_send": "Elimina i file dopo l'invio",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "Ricevi eventi di movimento/audio in ~2 secondi tramite Firebase Cloud Messaging invece di effettuare polling ogni 5 minuti. Fallback automatico al polling se FCM non è disponibile. Consigliato!",
-              "fcm_push_mode": "Scegliere la modalità push. Auto tenta prima iOS, poi Android, poi passa al polling. Polling utilizza solo chiamate API standard (senza FCM).",
+              "fcm_push_mode": "Auto = FCM push con fallback automatico al polling in caso di errore di registrazione. Polling = ignora FCM e utilizza solo chiamate API standard.",
               "mark_events_read": "Disattivo (predefinito): i nuovi eventi di movimento/audio restano contrassegnati come non letti nell'app Bosch — anche dopo l'elaborazione da parte di HA — in modo che l'app continui a evidenziarli come nuovi. Attivare per fare in modo che l'integrazione segni gli eventi come letti nel Bosch Cloud dopo l'elaborazione (comportamento precedente, utile quando HA è il client principale e non si desidera che l'app mostri badge 'nuovo evento' obsoleti).",
               "alert_save_snapshots": "Mantieni le immagini e i video degli eventi scaricati in www/bosch_alerts/ (nella directory di configurazione HA). Disattivo: i file vengono eliminati entro pochi secondi dall'invio.",
               "alert_delete_after_send": "Elimina i file di notifica da www/bosch_alerts/ dopo che il servizio notify li ha ricevuti. Disattivo: i file vengono conservati come riferimento.",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "Modalità FCM Push",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

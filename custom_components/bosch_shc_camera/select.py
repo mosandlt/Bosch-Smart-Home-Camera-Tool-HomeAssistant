@@ -40,7 +40,7 @@ SENSITIVITY_TO_API = {k: k.upper() for k in MOTION_SENSITIVITY_OPTIONS}
 DETECTION_MODE_OPTIONS = ["all_motions", "only_humans", "zones"]
 DETECTION_TO_API = {k: k.upper() for k in DETECTION_MODE_OPTIONS}
 
-FCM_PUSH_MODE_OPTIONS = ["auto", "android", "ios", "polling"]
+FCM_PUSH_MODE_OPTIONS = ["auto", "polling"]
 
 
 async def async_setup_entry(
@@ -236,7 +236,8 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
 class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
     """Select entity to choose the FCM push notification mode.
 
-    Options: Auto (ios→android→polling fallback), Android, iOS, Polling.
+    Options: Auto (FCM push, auto-fallback to polling on registration failure),
+    Polling (skip FCM entirely, poll the API instead).
     When changed: restarts FCM with the new mode.
     One per integration (not per camera).
     """

@@ -85,7 +85,7 @@ async def test_migration_v1_to_v2_preserves_legacy_auto():
 
     result = await async_migrate_entry(hass, entry)
     assert result is True
-    assert captured["version"] == 2
+    assert captured["version"] == 3
     assert captured["options"]["stream_connection_type"] == "auto"
     # And the rest of options is preserved
     assert captured["options"]["enable_snapshots"] is True
@@ -117,14 +117,16 @@ async def test_migration_v1_to_v2_preserves_explicit_choice():
 
 
 @pytest.mark.asyncio
-async def test_migration_already_v2_is_noop():
-    """A v2 entry should not be touched by migration."""
+async def test_migration_v2_to_v3_is_noop_for_clean_entry():
+    """A v2 entry with no legacy fcm_push_mode is bumped to v3 without changing options."""
     from custom_components.bosch_shc_camera import async_migrate_entry
 
     captured: dict = {}
 
     def _update_entry(entry, **kwargs):
         captured.update(kwargs)
+        entry.version = kwargs.get("version", entry.version)
+        entry.options = kwargs.get("options", entry.options)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry)
@@ -137,11 +139,37 @@ async def test_migration_already_v2_is_noop():
 
     result = await async_migrate_entry(hass, entry)
     assert result is True
-    assert captured == {}  # no update call
+    # v2→v3 migration bumps version; options unchanged (no legacy fcm_push_mode)
+    assert captured.get("version") == 3
+    assert captured.get("options") == {}
 
 
 @pytest.mark.asyncio
-async def test_config_flow_version_is_2():
-    """ConfigFlow.VERSION must be 2 so HA invokes async_migrate_entry on v1 entries."""
+async def test_migration_already_v3_is_noop():
+    """A v3 entry (current version) should not be touched by migration."""
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    captured: dict = {}
+
+    def _update_entry(entry, **kwargs):
+        captured.update(kwargs)
+
+    hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_update_entry=_update_entry)
+    )
+    entry = SimpleNamespace(
+        entry_id="current-version",
+        version=3,
+        options={},
+    )
+
+    result = await async_migrate_entry(hass, entry)
+    assert result is True
+    assert captured == {}  # no update call for already-current entry
+
+
+@pytest.mark.asyncio
+async def test_config_flow_version_is_3():
+    """ConfigFlow.VERSION must be 3 so HA invokes async_migrate_entry on v1/v2 entries."""
     from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
-    assert BoschCameraConfigFlow.VERSION == 2
+    assert BoschCameraConfigFlow.VERSION == 3

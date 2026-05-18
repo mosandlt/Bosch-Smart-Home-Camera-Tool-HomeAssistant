@@ -387,7 +387,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
     """Handle the initial setup flow — automatic OAuth2 PKCE browser login."""
 
     DOMAIN = DOMAIN
-    VERSION = 2
+    VERSION = 3
 
     @property
     def logger(self) -> logging.Logger:
@@ -638,8 +638,12 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 ): bool,
                 vol.Optional(
                     "fcm_push_mode",
-                    default=str(opts.get("fcm_push_mode", "auto")),
-                ): vol.In(["auto", "android", "ios", "polling"]),
+                    default=(
+                        opts.get("fcm_push_mode", "auto")
+                        if opts.get("fcm_push_mode") in ("auto", "polling")
+                        else "auto"
+                    ),
+                ): vol.In(["auto", "polling"]),
                 vol.Optional(
                     "mark_events_read",
                     default=bool(opts.get("mark_events_read", False)),

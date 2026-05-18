@@ -104,7 +104,7 @@
             "description": "Entrega de eventos em tempo real via FCM e serviços de notificação por etapas.",
             "data": {
               "enable_fcm_push": "FCM Push — detecção instantânea de eventos (~2 s)",
-              "fcm_push_mode": "Modo FCM Push (auto / android / ios / polling)",
+              "fcm_push_mode": "Modo FCM Push (auto / polling)",
               "mark_events_read": "Marcar eventos cloud Bosch como lidos",
               "alert_save_snapshots": "Guardar imagens/vídeos de alertas localmente",
               "alert_delete_after_send": "Eliminar ficheiros após envio",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "Receber eventos de movimento/áudio em ~2 segundos via Firebase Cloud Messaging em vez de verificar a cada 5 minutos. Fallback automático para polling se o FCM falhar. Recomendado!",
-              "fcm_push_mode": "Escolha o modo push. Auto tenta iOS primeiro, depois Android, depois muda para polling. Polling usa apenas chamadas API padrão (sem FCM).",
+              "fcm_push_mode": "Auto = FCM push com fallback automático para polling em caso de falha de registo. Polling = ignora FCM e usa apenas chamadas API padrão.",
               "mark_events_read": "Se DESLIGADO (predefinição), novos eventos de movimento/áudio permanecem sinalizados como não lidos na app Bosch — mesmo após o HA os processar — para que a app continue a destacá-los como novos. Ligue para que a integração marque os eventos como lidos na cloud Bosch após o processamento (o comportamento anterior, útil quando trata o HA como o cliente principal e não quer que a app mostre distintivos 'novo evento' desactualizados).",
               "alert_save_snapshots": "Manter imagens e vídeos de eventos transferidos em www/bosch_alerts/ (dentro do directório de configuração do HA). Se DESLIGADO, os ficheiros são eliminados segundos após o envio.",
               "alert_delete_after_send": "Eliminar ficheiros de notificação de www/bosch_alerts/ após o serviço de notificação os receber. Se DESLIGADO, os ficheiros são mantidos para referência.",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "Modo FCM Push",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

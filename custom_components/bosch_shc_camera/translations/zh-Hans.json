@@ -104,7 +104,7 @@
             "description": "通过 FCM 实时推送事件，并配置分步通知服务。",
             "data": {
               "enable_fcm_push": "FCM Push — 即时事件检测（约 2 秒）",
-              "fcm_push_mode": "FCM Push 模式（auto / android / ios / polling）",
+              "fcm_push_mode": "FCM Push 模式（auto / polling）",
               "mark_events_read": "将 Bosch 云端事件标记为已读",
               "alert_save_snapshots": "本地保存报警图片/视频",
               "alert_delete_after_send": "发送后删除文件",
@@ -116,7 +116,7 @@
             },
             "data_description": {
               "enable_fcm_push": "通过 Firebase Cloud Messaging 在约 2 秒内接收运动/音频事件，而非每 5 分钟轮询一次。FCM 故障时自动回退至轮询。推荐！",
-              "fcm_push_mode": "选择推送模式。Auto 先尝试 iOS，再尝试 Android，最后回退至轮询。Polling 仅使用标准 API 调用（无 FCM）。",
+              "fcm_push_mode": "Auto = FCM 推送，注册失败时自动回退至轮询。Polling = 跳过 FCM，仅使用标准 API 调用。",
               "mark_events_read": "关闭时（默认），新的运动/音频事件在 Bosch 应用中保持未读状态 — 即使 HA 已处理 — 以便应用继续将其标记为新事件。开启后，集成将在处理后把事件标记为已读（原有行为 — 适用于以 HA 为主要客户端且不希望应用显示过期\"新事件\"角标的情况）。",
               "alert_save_snapshots": "将已下载的事件图片和视频保存在 www/bosch_alerts/（HA 配置目录内）。关闭时，文件在发送后数秒内被删除。",
               "alert_delete_after_send": "通知服务收到后从 www/bosch_alerts/ 中删除通知文件。关闭时，文件保留以供参考。",
@@ -394,9 +394,7 @@
       "fcm_push_mode": {
         "name": "FCM Push 模式",
         "state": {
-          "auto": "Auto",
-          "android": "Android",
-          "ios": "iOS",
+          "auto": "FCM Push",
           "polling": "Polling"
         }
       },

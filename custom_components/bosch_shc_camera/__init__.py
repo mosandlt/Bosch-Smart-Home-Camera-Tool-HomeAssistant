@@ -400,7 +400,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._fcm_last_push: float = float("-inf")  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
         self._fcm_last_self_heal: float = float("-inf")  # monotonic ts of last creds-purge self-heal
-        self._fcm_push_mode: str = "unknown"  # active FCM mode: "android", "ios", "auto", or "unknown"
+        self._fcm_push_mode: str = "unknown"  # "auto" once FCM listener is up, else "unknown"
         # Lock serializing cross-thread FCM state writes.
         # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
         self._fcm_lock: threading.Lock = threading.Lock()
@@ -4544,6 +4544,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     REMOTE-fallback safety net. Persist 'auto' explicitly so existing
     installs keep their current behaviour. New installs (created after the
     bump) get 'local' via DEFAULT_OPTIONS.
+
+    v2 → v3 (2026-05-18, v12.4.5): fcm_push_mode is now binary — 'auto' (use
+    OSS FCM key with automatic polling fallback) or 'polling' (skip FCM
+    entirely). Legacy 'ios' / 'android' values from earlier versions get
+    coerced to 'auto'; the OSS-sanctioned Android Firebase app handles both
+    platforms transparently.
     """
     if entry.version < 2:
         new_options = dict(entry.options)
@@ -4554,6 +4560,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry.entry_id,
             )
         hass.config_entries.async_update_entry(entry, options=new_options, version=2)
+    if entry.version < 3:
+        new_options = dict(entry.options)
+        if new_options.get("fcm_push_mode") in ("ios", "android"):
+            new_options["fcm_push_mode"] = "auto"
+            _LOGGER.info(
+                "Migration v2→v3: rewrote legacy fcm_push_mode to 'auto' for entry %s",
+                entry.entry_id,
+            )
+        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
     return True
 
 
