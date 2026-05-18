@@ -38,7 +38,7 @@ def _make_coord() -> SimpleNamespace:
                 "title": "Innenbereich",
                 "hardwareVersion": "HOME_Eyes_Indoor",
                 "firmwareVersion": "9.40.25",
-                "macAddress": "aa:bb:cc:30:68:29",
+                "macAddress": "aa:bb:cc:dd:ee:02",
             },
         }},
         _intrusion_config_cache={CAM_ID: dict(cfg)},

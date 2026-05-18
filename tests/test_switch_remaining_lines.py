@@ -34,7 +34,7 @@ def _make_coord(**overrides):
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                     "featureSupport": {"light": True, "panLimit": 0, "sound": False},
                 },
                 "status": "ONLINE",
@@ -105,7 +105,7 @@ def test_device_info_with_mac():
     assert info is not None
     assert (switch_mod.DOMAIN, CAM_ID) in info["identifiers"]
     assert info["manufacturer"] == "Bosch"
-    assert info["connections"] == {("mac", "aa:bb:cc:33:14:ae")}
+    assert info["connections"] == {("mac", "aa:bb:cc:dd:ee:01")}
 
 
 def test_device_info_without_mac():

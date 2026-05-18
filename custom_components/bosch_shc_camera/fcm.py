@@ -524,14 +524,28 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     if not coordinator._fcm_token or not coordinator.token:
         return False
 
-    # Skip re-registration when the same FCM device token was already successfully
-    # registered in a previous run. Bosch returns HTTP 500 on duplicate registration
-    # (server-side "sh:internal.error") — stable tokens across HA restarts make this
-    # the common path. Invalidated automatically when the FCM token rotates (new
-    # checkin_or_register() returns a different value → mismatch → POST fires again).
-    if coordinator._entry.data.get("fcm_registered_token") == coordinator._fcm_token:
-        _LOGGER.debug("FCM: token unchanged — skipping re-registration with Bosch CBS")
+    # Skip re-registration only when BOTH conditions hold:
+    #   1. The same FCM device token was already registered in a previous run.
+    #   2. The registration used deviceType=ANDROID (marker written since Fix C++).
+    # If either is false the POST fires to heal any drift.
+    #
+    # Drift scenario (live bug 2026-05-18): migration v2→v3 without Fix C left
+    # fcm_registered_token intact but wrote no fcm_registered_device_type marker.
+    # Old skip-logic fired on token==token, leaving Bosch CBS with deviceType=IOS
+    # while the HA client used the Android Firebase context. All FCM pushes were
+    # routed to the wrong sub-app for hours (latency 3:43 min → polling fallback).
+    # Fix: require the ANDROID marker before allowing the skip.
+    stored_token: str | None = coordinator._entry.data.get("fcm_registered_token")
+    stored_device_type: str | None = coordinator._entry.data.get("fcm_registered_device_type")
+    if stored_token == coordinator._fcm_token and stored_device_type == "ANDROID":
+        _LOGGER.debug("FCM: token unchanged + deviceType=ANDROID verified — skipping re-registration")
         return True
+    if stored_token == coordinator._fcm_token and stored_device_type != "ANDROID":
+        _LOGGER.info(
+            "FCM CBS heal: token unchanged but deviceType marker is %r (not ANDROID) — "
+            "forcing re-registration as deviceType=ANDROID",
+            stored_device_type,
+        )
 
     session = async_get_clientsession(coordinator.hass, verify_ssl=False)
     headers = {
@@ -548,18 +562,26 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
                 if resp.status in (200, 201, 204):
                     coordinator.hass.config_entries.async_update_entry(
                         coordinator._entry,
-                        data={**coordinator._entry.data, "fcm_registered_token": coordinator._fcm_token},
+                        data={
+                            **coordinator._entry.data,
+                            "fcm_registered_token": coordinator._fcm_token,
+                            "fcm_registered_device_type": "ANDROID",
+                        },
                     )
-                    _LOGGER.info("FCM token registered with Bosch CBS (HTTP %d)", resp.status)
+                    _LOGGER.info("FCM token registered with Bosch CBS as deviceType=ANDROID (HTTP %d)", resp.status)
                     return True
                 resp_body = await resp.text()
                 if resp.status == 500 and "sh:internal.error" in resp_body:
                     # Bosch returns 500 "sh:internal.error" when the same device
                     # token is already registered — FCM push still works. Treat as
-                    # success and save the token so subsequent restarts skip the POST.
+                    # success and save both markers so subsequent restarts skip the POST.
                     coordinator.hass.config_entries.async_update_entry(
                         coordinator._entry,
-                        data={**coordinator._entry.data, "fcm_registered_token": coordinator._fcm_token},
+                        data={
+                            **coordinator._entry.data,
+                            "fcm_registered_token": coordinator._fcm_token,
+                            "fcm_registered_device_type": "ANDROID",
+                        },
                     )
                     _LOGGER.debug(
                         "FCM: token already registered with Bosch (HTTP 500 sh:internal.error) — skipping on next restart"

@@ -143,16 +143,16 @@ class TestGetAlertServices:
         from custom_components.bosch_shc_camera.fcm import get_alert_services
         coord = SimpleNamespace(options={
             "alert_notify_system": "",
-            "alert_notify_service": "notify.thomas",
+            "alert_notify_service": "notify.test_user",
         })
-        assert get_alert_services(coord, "system") == ["notify.thomas"]
+        assert get_alert_services(coord, "system") == ["notify.test_user"]
 
     def test_screenshot_does_not_fall_back(self):
         """Empty `alert_notify_screenshot` must NOT fall back — empty means skip step."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
         coord = SimpleNamespace(options={
             "alert_notify_screenshot": "",
-            "alert_notify_service": "notify.thomas",
+            "alert_notify_service": "notify.test_user",
         })
         assert get_alert_services(coord, "screenshot") == []
 
@@ -161,7 +161,7 @@ class TestGetAlertServices:
         from custom_components.bosch_shc_camera.fcm import get_alert_services
         coord = SimpleNamespace(options={
             "alert_notify_video": "",
-            "alert_notify_service": "notify.thomas",
+            "alert_notify_service": "notify.test_user",
         })
         assert get_alert_services(coord, "video") == []
 
@@ -198,7 +198,7 @@ class TestBuildNotifyData:
         """HA Companion App reads images from /local/bosch_alerts/ (auth-free)."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
         data = build_notify_data(
-            "notify.mobile_app_iphoneXX",
+            "notify.mobile_app_test_phone",
             "msg",
             file_path="/config/www/bosch_alerts/snap_123.jpg",
         )

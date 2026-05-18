@@ -253,7 +253,7 @@ class TestAsyncCleanupAlertException:
         coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("notify broken"))
 
         # Must not raise — the except branch is logged at DEBUG
-        await _async_cleanup_alert(coord, "msg", "notify.thomas")
+        await _async_cleanup_alert(coord, "msg", "notify.test_user")
 
         coord.hass.services.async_call.assert_awaited_once()
 

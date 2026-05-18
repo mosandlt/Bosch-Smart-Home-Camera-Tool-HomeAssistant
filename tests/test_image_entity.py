@@ -49,7 +49,7 @@ def _make_coordinator(cam_id: str = CAM_ID) -> Any:
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                 },
                 "events": [],
                 "live": {},

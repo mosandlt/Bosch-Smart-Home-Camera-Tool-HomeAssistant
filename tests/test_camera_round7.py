@@ -86,7 +86,7 @@ def _make_camera(coord=None, **overrides):
     cam._model_name = "Eyes Outdoor II"
     cam._hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
-    cam._mac = "aa:bb:cc:33:14:ae"
+    cam._mac = "aa:bb:cc:dd:ee:01"
     cam.async_write_ha_state = MagicMock()
     cam.hass = SimpleNamespace(
         async_create_task=MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1]),

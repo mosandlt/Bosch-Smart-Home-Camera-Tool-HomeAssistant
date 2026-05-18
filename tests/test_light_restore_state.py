@@ -34,7 +34,7 @@ def _stub_coord(**overrides):
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                 },
             },
         },
@@ -64,7 +64,7 @@ def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
     light._model = "HOME_Eyes_Outdoor"
     light._model_name = "Eyes Outdoor"
     light._fw = "9.40.25"
-    light._mac = "aa:bb:cc:33:14:ae"
+    light._mac = "aa:bb:cc:dd:ee:01"
     light._brightness = 0
     light._last_brightness = 100
     light._color_hex = None

@@ -4550,6 +4550,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entirely). Legacy 'ios' / 'android' values from earlier versions get
     coerced to 'auto'; the OSS-sanctioned Android Firebase app handles both
     platforms transparently.
+
+    Additionally, when the mode is FCM-bound ('ios', 'android', or the legacy
+    'auto' which used an iOS-first chain), fcm_credentials and
+    fcm_registered_token are cleared from entry.data so that
+    register_fcm_with_bosch detects a missing token and forces re-registration
+    with deviceType=ANDROID against Bosch CBS. Without this clearance,
+    register_fcm_with_bosch sees "token unchanged" and skips re-registration,
+    leaving Bosch CBS with deviceType=IOS while the HA client registers
+    platform=ANDROID at Firebase — silently breaking push routing for every
+    upgrader on a legacy FCM mode.
     """
     if entry.version < 2:
         new_options = dict(entry.options)
@@ -4562,13 +4572,26 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, options=new_options, version=2)
     if entry.version < 3:
         new_options = dict(entry.options)
-        if new_options.get("fcm_push_mode") in ("ios", "android"):
+        new_data = dict(entry.data)
+        fcm_mode = new_options.get("fcm_push_mode")
+        if fcm_mode in ("ios", "android"):
             new_options["fcm_push_mode"] = "auto"
+        if fcm_mode in ("ios", "android", "auto"):
+            # Clear stale FCM registration so register_fcm_with_bosch forces
+            # re-registration with deviceType=ANDROID on next startup.
+            # 'auto' in v2 used an iOS-first Bosch registration path; that token
+            # is equally stale after switching to the OSS Android Firebase key.
+            new_data.pop("fcm_credentials", None)
+            new_data.pop("fcm_registered_token", None)
             _LOGGER.info(
-                "Migration v2→v3: rewrote legacy fcm_push_mode to 'auto' for entry %s",
+                "Migration v2→v3: rewrote fcm_push_mode to 'auto' + cleared FCM "
+                "creds + token for re-registration with deviceType=ANDROID for "
+                "entry %s",
                 entry.entry_id,
             )
-        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, data=new_data, version=3
+        )
     return True
 
 

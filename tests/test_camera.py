@@ -29,7 +29,7 @@ def stub_coord():
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                 },
                 "events": [],
                 "live": {},
@@ -196,7 +196,7 @@ class TestMetadata:
         info = cam.device_info
         assert info["manufacturer"] == "Bosch"
         assert info["sw_version"] == "9.40.25"
-        assert ("mac", "aa:bb:cc:33:14:ae") in info["connections"]
+        assert ("mac", "aa:bb:cc:dd:ee:01") in info["connections"]
 
     def test_device_info_no_mac_empty_connections(self, stub_coord, stub_entry):
         """No mac in info dict → connections is empty set, not None."""

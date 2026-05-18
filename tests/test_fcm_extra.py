@@ -254,18 +254,18 @@ class TestGetAlertServicesExtras:
         from custom_components.bosch_shc_camera.fcm import get_alert_services
         coord = SimpleNamespace(options={
             "alert_notify_information": "",
-            "alert_notify_service": "notify.thomas",
+            "alert_notify_service": "notify.test_user",
         })
-        assert get_alert_services(coord, "information") == ["notify.thomas"]
+        assert get_alert_services(coord, "information") == ["notify.test_user"]
 
     def test_system_falls_back_to_default(self):
         """`system` (TROUBLE_CONNECT/DISCONNECT) also falls back."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
         coord = SimpleNamespace(options={
             "alert_notify_system": "",
-            "alert_notify_service": "notify.thomas",
+            "alert_notify_service": "notify.test_user",
         })
-        assert get_alert_services(coord, "system") == ["notify.thomas"]
+        assert get_alert_services(coord, "system") == ["notify.test_user"]
 
     def test_explicit_value_takes_precedence_over_default(self):
         """Explicit per-type service must NOT be overwritten by the

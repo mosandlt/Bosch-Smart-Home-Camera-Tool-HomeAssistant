@@ -81,6 +81,7 @@ async def test_migration_v1_to_v2_preserves_legacy_auto():
         entry_id="existing-install",
         version=1,
         options={"enable_snapshots": True},  # no stream_connection_type
+        data={},
     )
 
     result = await async_migrate_entry(hass, entry)
@@ -108,6 +109,7 @@ async def test_migration_v1_to_v2_preserves_explicit_choice():
         entry_id="explicit-local",
         version=1,
         options={"stream_connection_type": "remote"},
+        data={},
     )
 
     result = await async_migrate_entry(hass, entry)
@@ -135,6 +137,7 @@ async def test_migration_v2_to_v3_is_noop_for_clean_entry():
         entry_id="new-install",
         version=2,
         options={},
+        data={},
     )
 
     result = await async_migrate_entry(hass, entry)
@@ -161,6 +164,7 @@ async def test_migration_already_v3_is_noop():
         entry_id="current-version",
         version=3,
         options={},
+        data={},
     )
 
     result = await async_migrate_entry(hass, entry)

@@ -46,20 +46,56 @@ def _make_coord(**overrides: object) -> SimpleNamespace:
 
 
 def _make_migrate_harness(version: int, options: dict) -> tuple:
-    """Return (hass, entry, captured) for async_migrate_entry tests."""
+    """Return (hass, entry, captured) for async_migrate_entry tests.
+
+    entry.data defaults to {} so that the v2→v3 migration (which always reads
+    entry.data) does not AttributeError on entries that have no FCM data.
+    """
     captured: dict = {}
 
     def _update_entry(entry: SimpleNamespace, **kwargs: object) -> None:
         captured.update(kwargs)
         if "options" in kwargs:
             entry.options = kwargs["options"]
+        if "data" in kwargs:
+            entry.data = kwargs["data"]  # type: ignore[assignment]
         if "version" in kwargs:
             entry.version = kwargs["version"]
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry)
     )
-    entry = SimpleNamespace(entry_id="test-entry", version=version, options=options)
+    entry = SimpleNamespace(
+        entry_id="test-entry", version=version, options=options, data={}
+    )
+    return hass, entry, captured
+
+
+def _make_migrate_harness_with_data(
+    version: int, options: dict, data: dict
+) -> tuple:
+    """Return (hass, entry, captured) for async_migrate_entry tests that touch entry.data.
+
+    Unlike _make_migrate_harness, the entry carries a data dict and the captured
+    dict also records the 'data' kwarg passed to async_update_entry.
+    """
+    captured: dict = {}
+
+    def _update_entry(entry: SimpleNamespace, **kwargs: object) -> None:
+        captured.update(kwargs)
+        if "options" in kwargs:
+            entry.options = kwargs["options"]  # type: ignore[assignment]
+        if "data" in kwargs:
+            entry.data = kwargs["data"]  # type: ignore[assignment]
+        if "version" in kwargs:
+            entry.version = kwargs["version"]  # type: ignore[assignment]
+
+    hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_update_entry=_update_entry)
+    )
+    entry = SimpleNamespace(
+        entry_id="test-entry", version=version, options=options, data=data
+    )
     return hass, entry, captured
 
 
@@ -301,3 +337,188 @@ async def test_migration_v3_entry_is_noop() -> None:
     result = await async_migrate_entry(hass, entry)
     assert result is True
     assert captured == {}, "v3 entry must produce zero async_update_entry calls"
+
+
+# ── FCM-cred clearance tests (regression: v2→v3 push-routing break) ───────────
+#
+# Bug (v12.4.5): async_migrate_entry v2→v3 coerced fcm_push_mode ios/android→auto
+# but left fcm_credentials + fcm_registered_token intact in entry.data.
+# register_fcm_with_bosch saw "token unchanged" and skipped re-registration, so
+# Bosch CBS kept deviceType=IOS while the HA client registered platform=ANDROID
+# at Firebase. Push routing broke for every upgrader on legacy ios/android/auto mode.
+# Fix: pop fcm_credentials + fcm_registered_token from data whenever fcm_push_mode
+# is FCM-bound (ios/android/auto) so re-registration is forced on next startup.
+
+
+_FCM_DATA_WITH_CREDS: dict = {
+    "fcm_credentials": {"token": "old-token-abc", "device_id": "dev-123"},
+    "fcm_registered_token": "old-fcm-reg-token",
+    "fcm_config": {"api_key": "key", "project_id": "proj"},
+    "bearer_token": "bearer-xyz",
+    "refresh_token": "refresh-xyz",
+}
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_ios_clears_fcm_creds() -> None:
+    """(a) fcm_push_mode='ios' + creds present → after v2→v3: mode='auto',
+    fcm_credentials + fcm_registered_token absent from data, other data preserved,
+    version=3.
+
+    Regression: without the fix, register_fcm_with_bosch saw token unchanged and
+    skipped re-registration, leaving Bosch CBS with deviceType=IOS while the
+    HA client registered platform=ANDROID. Push routing was silently broken.
+    """
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=2,
+        options={"fcm_push_mode": "ios", "enable_fcm_push": True},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured["options"]["fcm_push_mode"] == "auto"
+    assert captured["version"] == 3
+    assert "fcm_credentials" not in captured["data"], (
+        "fcm_credentials must be cleared from data so register_fcm_with_bosch "
+        "forces re-registration with deviceType=ANDROID on next startup."
+    )
+    assert "fcm_registered_token" not in captured["data"], (
+        "fcm_registered_token must be cleared to trigger Bosch CBS re-registration."
+    )
+    # Non-FCM data must survive migration unchanged
+    assert captured["data"]["fcm_config"] == _FCM_DATA_WITH_CREDS["fcm_config"]
+    assert captured["data"]["bearer_token"] == _FCM_DATA_WITH_CREDS["bearer_token"]
+    assert captured["data"]["refresh_token"] == _FCM_DATA_WITH_CREDS["refresh_token"]
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_android_clears_fcm_creds() -> None:
+    """(b) fcm_push_mode='android' → same clearance outcome as (a).
+
+    'android' in v2 used the same iOS-first Bosch registration path; after
+    migration to the OSS Android key, the old token is stale.
+    """
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=2,
+        options={"fcm_push_mode": "android", "enable_fcm_push": True},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured["options"]["fcm_push_mode"] == "auto"
+    assert captured["version"] == 3
+    assert "fcm_credentials" not in captured["data"]
+    assert "fcm_registered_token" not in captured["data"]
+    assert captured["data"]["fcm_config"] == _FCM_DATA_WITH_CREDS["fcm_config"]
+    assert captured["data"]["bearer_token"] == _FCM_DATA_WITH_CREDS["bearer_token"]
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_old_auto_clears_fcm_creds() -> None:
+    """(c) fcm_push_mode='auto' in v2 → creds must also be cleared.
+
+    In v2, 'auto' was an iOS-first chain (not the OSS Android key). Any token
+    registered under the old 'auto' is equally stale and must be cleared to
+    force re-registration with platform=ANDROID.
+    """
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=2,
+        options={"fcm_push_mode": "auto", "enable_fcm_push": True},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured["options"]["fcm_push_mode"] == "auto"
+    assert captured["version"] == 3
+    assert "fcm_credentials" not in captured["data"], (
+        "Old 'auto' (iOS-first) tokens are stale after migration to OSS Android key; "
+        "fcm_credentials must be cleared."
+    )
+    assert "fcm_registered_token" not in captured["data"]
+
+
+@pytest.mark.asyncio
+async def test_migration_v3_polling_preserves_fcm_creds() -> None:
+    """(d) fcm_push_mode='polling' → fcm_credentials + fcm_registered_token preserved.
+
+    'polling' users never use FCM; their data dict may contain leftover creds
+    from a prior FCM phase but we must not alter them — we must not corrupt data
+    that was stored by a different mechanism, and we must not trigger any re-reg.
+    """
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=2,
+        options={"fcm_push_mode": "polling"},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured["options"]["fcm_push_mode"] == "polling"
+    assert captured["version"] == 3
+    assert captured["data"]["fcm_credentials"] == _FCM_DATA_WITH_CREDS["fcm_credentials"], (
+        "polling mode: fcm_credentials must NOT be cleared — user opted out of FCM "
+        "and we must not silently alter their stored data."
+    )
+    assert captured["data"]["fcm_registered_token"] == _FCM_DATA_WITH_CREDS["fcm_registered_token"]
+
+
+@pytest.mark.asyncio
+async def test_migration_already_v3_data_untouched() -> None:
+    """(e) entry already at version=3 → no-op, data fields not touched."""
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=3,
+        options={"fcm_push_mode": "auto"},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured == {}, (
+        "v3 entry must produce zero async_update_entry calls — no options, "
+        "no data, no version changes."
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_v1_to_v3_ios_clears_fcm_creds() -> None:
+    """(f) entry at version=1 → v1→v2 runs (stream_connection_type preserved)
+    THEN v2→v3 clears FCM creds as in test (a).
+
+    v1 entries never had an explicit stream_connection_type, so v1→v2 must
+    inject 'auto'. The combined v1→v3 path must also clear FCM creds.
+    """
+    from custom_components.bosch_shc_camera import async_migrate_entry
+
+    hass, entry, captured = _make_migrate_harness_with_data(
+        version=1,
+        options={"fcm_push_mode": "ios", "enable_fcm_push": True},
+        data=dict(_FCM_DATA_WITH_CREDS),
+    )
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    assert captured["version"] == 3
+    assert captured["options"]["stream_connection_type"] == "auto", (
+        "v1→v2 must inject stream_connection_type='auto' for legacy entries."
+    )
+    assert captured["options"]["fcm_push_mode"] == "auto", (
+        "v2→v3 must coerce 'ios' to 'auto'."
+    )
+    assert "fcm_credentials" not in captured["data"], (
+        "Combined v1→v3 path must clear fcm_credentials."
+    )
+    assert "fcm_registered_token" not in captured["data"]
+    assert captured["data"]["bearer_token"] == _FCM_DATA_WITH_CREDS["bearer_token"]

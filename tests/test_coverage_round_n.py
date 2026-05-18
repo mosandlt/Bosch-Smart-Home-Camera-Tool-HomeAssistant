@@ -325,7 +325,7 @@ def _make_camera_for_snap(**overrides):
     cam._model_name = "Eyes Outdoor II"
     cam._hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
-    cam._mac = "aa:bb:cc:33:14:ae"
+    cam._mac = "aa:bb:cc:dd:ee:01"
     # _token is a read-only property backed by _entry.data["bearer_token"]
     cam.async_write_ha_state = MagicMock()
     cam.hass = MagicMock()

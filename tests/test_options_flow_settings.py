@@ -221,7 +221,7 @@ class TestFcmSection:
                 "mark_events_read": True,
                 "alert_save_snapshots": True,
                 "alert_delete_after_send": False,
-                "alert_notify_service": "notify.thomas",
+                "alert_notify_service": "notify.test_user",
                 "alert_notify_information": "notify.info",
                 "alert_notify_screenshot": "notify.screenshot",
                 "alert_notify_video": "notify.video",
@@ -233,7 +233,7 @@ class TestFcmSection:
         assert data["mark_events_read"] is True
         assert data["alert_save_snapshots"] is True
         assert data["alert_delete_after_send"] is False
-        assert data["alert_notify_service"] == "notify.thomas"
+        assert data["alert_notify_service"] == "notify.test_user"
         assert data["alert_notify_video"] == "notify.video"
 
     @pytest.mark.asyncio
@@ -462,7 +462,7 @@ class TestFullRoundTrip:
             "stream": {"stream_connection_type": "local", "live_buffer_mode": "latency", "enable_go2rtc": True},
             "fcm": {"enable_fcm_push": True, "fcm_push_mode": "ios", "mark_events_read": False,
                     "alert_save_snapshots": False, "alert_delete_after_send": True,
-                    "alert_notify_service": "notify.thomas", "alert_notify_information": "",
+                    "alert_notify_service": "notify.test_user", "alert_notify_information": "",
                     "alert_notify_screenshot": "", "alert_notify_video": "notify.video",
                     "alert_notify_system": ""},
             "events_storage": {"enable_local_save": True, "download_path": "/config/bosch_events",

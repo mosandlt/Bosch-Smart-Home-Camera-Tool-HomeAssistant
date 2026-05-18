@@ -288,7 +288,7 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                 },
                 "events": [],
                 "live": {},

@@ -47,7 +47,7 @@ def _make_coord_with_caches() -> SimpleNamespace:
                 "title": "Innenbereich",
                 "hardwareVersion": "HOME_Eyes_Indoor",
                 "firmwareVersion": "9.40.25",
-                "macAddress": "aa:bb:cc:30:68:29",
+                "macAddress": "aa:bb:cc:dd:ee:02",
                 "featureSupport": {"sound": True},
             },
             "audioAlarm": dict(settings),

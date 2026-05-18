@@ -20,7 +20,7 @@ def stub_coord():
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                 },
                 "status": "ONLINE",
             }
@@ -59,7 +59,7 @@ def test_refresh_button_device_info(stub_coord, stub_entry):
     assert info["manufacturer"] == "Bosch"
     assert info["sw_version"] == "9.40.25"
     assert "Außenkamera" in info["model"]
-    assert info["connections"] == {("mac", "aa:bb:cc:33:14:ae")}
+    assert info["connections"] == {("mac", "aa:bb:cc:dd:ee:01")}
 
 
 # ── BoschAcousticAlarmButton ────────────────────────────────────────────

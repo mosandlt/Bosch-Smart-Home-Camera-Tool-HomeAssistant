@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.7";
+const CARD_VERSION = "2.12.9";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -654,10 +654,10 @@ class BoschCameraCard extends HTMLElement {
           text-transform: uppercase; padding: 2px 6px; border-radius: 12px;
           white-space: nowrap;
         }
-        .push-badge.fcm  { background: rgba(48,209,88,.15); color: #30d158; }
+        .push-badge.push  { background: rgba(48,209,88,.15); color: #30d158; }
         .push-badge.poll { background: rgba(99,99,102,.2); color: #8e8e93; }
         .push-badge .pdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-        .push-badge.fcm .pdot  { background: #30d158; }
+        .push-badge.push .pdot  { background: #30d158; }
         .push-badge.poll .pdot { background: #636366; }
 
         /* Connection type badge (LAN / Cloud) */
@@ -2830,8 +2830,8 @@ class BoschCameraCard extends HTMLElement {
     const pushLabel  = this.shadowRoot.getElementById("push-label");
     if (pushBadge && pushLabel) {
       const isFcm  = pushState?.state === "fcm_push";
-      pushBadge.className = "push-badge " + (isFcm ? "fcm" : "poll");
-      pushLabel.textContent = isFcm ? "fcm" : "poll";
+      pushBadge.className = "push-badge " + (isFcm ? "push" : "poll");
+      pushLabel.textContent = isFcm ? "push" : "poll";
     }
 
     // Status dot

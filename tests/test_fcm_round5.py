@@ -370,10 +370,16 @@ class TestRegisterFcmWithBosch:
 
     @pytest.mark.asyncio
     async def test_same_token_in_entry_skips_post(self):
-        """When fcm_registered_token matches the current FCM token, skip the POST.
+        """When fcm_registered_token matches AND fcm_registered_device_type==ANDROID, skip POST.
+
+        The skip-check now requires BOTH conditions (Fix C++ deviceType-drift heal):
+        token match alone is insufficient — a missing/wrong deviceType marker means
+        Bosch CBS may have the stale deviceType=IOS registration and must be healed.
 
         Regression: every HA restart triggered a redundant POST → Bosch returned
         HTTP 500 ("sh:internal.error") because the token was already registered.
+        The updated guard preserves this fast-path for the steady-state case where
+        both the token and the ANDROID marker are present.
         """
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
         post_called = []
@@ -388,7 +394,10 @@ class TestRegisterFcmWithBosch:
         session = MagicMock()
         session.post = _post
         coord = _stub_coord(
-            _entry=SimpleNamespace(data={"fcm_registered_token": "fcm-token-xyz"}),
+            _entry=SimpleNamespace(data={
+                "fcm_registered_token": "fcm-token-xyz",
+                "fcm_registered_device_type": "ANDROID",  # both conditions must hold
+            }),
         )
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
@@ -396,7 +405,7 @@ class TestRegisterFcmWithBosch:
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True, "already-registered token must return True"
-        assert not post_called, "POST must be skipped when token is unchanged"
+        assert not post_called, "POST must be skipped when token is unchanged AND deviceType=ANDROID"
 
     @pytest.mark.asyncio
     async def test_new_token_triggers_post(self):

@@ -45,7 +45,7 @@ def _stub_coord(**overrides):
                     "title": "Terrasse",
                     "hardwareVersion": "HOME_Eyes_Outdoor",
                     "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:33:14:ae",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
                     "featureSupport": {"light": True, "panLimit": 90},
                 },
             },
@@ -73,7 +73,7 @@ def _stub_coord(**overrides):
     return SimpleNamespace(**base)
 
 
-def _make_entity(klass, coord=None, *, led_key=None, field=None, mac="aa:bb:cc:33:14:ae"):
+def _make_entity(klass, coord=None, *, led_key=None, field=None, mac="aa:bb:cc:dd:ee:01"):
     """Bypass __init__ for number entities."""
     coord = coord or _stub_coord()
     e = klass.__new__(klass)
