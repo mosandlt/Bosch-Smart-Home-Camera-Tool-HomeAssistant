@@ -171,7 +171,23 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.last_update_success)
+        """Cloud-primary with LAN-reachability fallback (Gen2 only).
+
+        When the Bosch cloud is unreachable but the camera is pingable on
+        the LAN, the coordinator's set-light path will fall through to a
+        direct RCP write — so the entity must remain controllable. Without
+        this fallback, every Bosch cloud 5xx leaves the light entities grey
+        even though they are toggleable on the same LAN via the Bosch app.
+        """
+        if self.coordinator.last_update_success:
+            return True
+        is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
+        if is_lan_reachable is None:
+            return False
+        from .shc import _is_gen2
+        if not _is_gen2(self.coordinator, self._cam_id):
+            return False
+        return bool(is_lan_reachable(self._cam_id))
 
     def _load_state_from_cache(self) -> None:
         """Sync state from coordinator lighting/switch cache.

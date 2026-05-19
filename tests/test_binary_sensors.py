@@ -352,13 +352,18 @@ class TestSetupEntry:
         types_ = {type(e) for e in captured}
         assert BoschMotionBinarySensor in types_
         assert BoschPersonDetectedBinarySensor in types_
-        assert len(captured) == 2
+        # +1 BoschLanReachableBinarySensor (v12.4.10: always-on diagnostic for
+        # LAN-fallback paths). Pinning by class set keeps this stable across
+        # future additions of unrelated entities.
+        from custom_components.bosch_shc_camera.binary_sensor import BoschLanReachableBinarySensor
+        assert BoschLanReachableBinarySensor in types_
+        assert len(captured) == 3
 
     @pytest.mark.asyncio
     async def test_creates_audio_sensor_when_sound_supported(self):
-        """Camera with sound feature → 3 entities (Motion + Person + AudioAlarm)."""
+        """Camera with sound feature → 4 entities (Motion + Person + LanReachable + AudioAlarm)."""
         from custom_components.bosch_shc_camera.binary_sensor import (
-            async_setup_entry, BoschAudioAlarmBinarySensor,
+            async_setup_entry, BoschAudioAlarmBinarySensor, BoschLanReachableBinarySensor,
         )
         coord = SimpleNamespace(
             data={
@@ -375,8 +380,10 @@ class TestSetupEntry:
         captured: list = []
         await async_setup_entry(hass=None, config_entry=entry,
                                 async_add_entities=lambda e, update_before_add=False: captured.extend(e))
-        assert BoschAudioAlarmBinarySensor in {type(e) for e in captured}
-        assert len(captured) == 3
+        types_ = {type(e) for e in captured}
+        assert BoschAudioAlarmBinarySensor in types_
+        assert BoschLanReachableBinarySensor in types_
+        assert len(captured) == 4
 
     @pytest.mark.asyncio
     async def test_empty_coordinator_yields_no_entities(self):

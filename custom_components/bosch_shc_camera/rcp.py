@@ -225,21 +225,26 @@ async def rcp_local_write(
     command: str,
     payload_hex: str,
     type_: str = "P_OCTET",
+    num: int = 0,
 ) -> bool:
     """Write an RCP value directly via the camera's LAN HTTP endpoint.
 
     Returns True on success. `payload_hex` may start with "0x" or not.
+    Some commands require `num=1` (e.g. T_WORD-typed writes like 0x0c22 LED
+    dimmer); the default 0 keeps backward compatibility with existing callers.
     Best-effort: any error returns False (caller should handle gracefully).
     """
     base = f"http://{cam_ip}/rcp.xml"
     if not payload_hex.lower().startswith("0x"):
         payload_hex = "0x" + payload_hex
-    params = {
+    params: dict[str, str] = {
         "command":   command,
         "direction": "WRITE",
         "type":      type_,
         "payload":   payload_hex,
     }
+    if num:
+        params["num"] = str(num)
     session = async_get_clientsession(hass, verify_ssl=False)
     try:
         async with asyncio.timeout(5):
@@ -290,6 +295,23 @@ async def rcp_local_write_privacy(
     # remaining bytes zero so we don't stamp over other mask fields.
     payload = "00010000" if enabled else "00000000"
     return await rcp_local_write(hass, cam_ip, "0x0d00", payload, "P_OCTET")
+
+
+async def rcp_local_write_front_light(
+    hass: "HomeAssistant", cam_ip: str, brightness: int,
+) -> bool:
+    """Write the front-light brightness via direct LOCAL RCP (Gen2, no auth).
+
+    Brightness is 0-100. 0 turns the light off; values 1-100 set the dimmer.
+    Maps to RCP 0x0c22 (`T_WORD`, num=1) — same command read by
+    BoschLedDimmerSensor. Best-effort: not every Gen2 firmware accepts
+    unauthenticated writes, a False return means the caller should fall back
+    to SHC.
+    """
+    # Clamp to legal range and encode as a 4-hex-digit big-endian word (T_WORD).
+    val = max(0, min(100, int(brightness)))
+    payload = f"{val:04x}"
+    return await rcp_local_write(hass, cam_ip, "0x0c22", payload, "T_WORD", num=1)
 
 
 # ── Read operations ──────────────────────────────────────────────────────────

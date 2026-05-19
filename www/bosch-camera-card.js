@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.13";
+const CARD_VERSION = "2.13.0";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -2398,10 +2398,11 @@ class BoschCameraOverviewCard extends HTMLElement {
     return this._hass;
   }
   _renderShell() {
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        .bco-empty.bco-empty-outage {\n          padding: 24px 16px;\n          color: var(--primary-text-color);\n        }\n        .bco-empty-title {\n          font-size: 15px;\n          font-weight: 500;\n          margin-bottom: 6px;\n        }\n        .bco-empty-sub {\n          font-size: 13px;\n          color: var(--secondary-text-color);\n          margin-top: 4px;\n        }\n        .bco-empty-link {\n          display: inline-block;\n          margin-top: 10px;\n          color: var(--primary-color);\n          text-decoration: none;\n          font-size: 13px;\n        }\n        .bco-empty-link:hover { text-decoration: underline; }\n        .bco-banner {\n          display: flex;\n          flex-direction: column;\n          gap: 4px;\n          padding: 10px 12px;\n          margin-bottom: 8px;\n          border-radius: 8px;\n          background: var(--warning-color, #ffc107);\n          color: #000;\n          font-size: 13px;\n          line-height: 1.35;\n        }\n        .bco-banner.bco-banner-info {\n          background: var(--info-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-banner-title { font-weight: 600; }\n        .bco-banner a {\n          color: inherit;\n          text-decoration: underline;\n          font-size: 12px;\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div id="bco-banner-slot"></div>\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        .bco-empty.bco-empty-outage {\n          padding: 24px 16px;\n          color: var(--primary-text-color);\n        }\n        .bco-empty-title {\n          font-size: 15px;\n          font-weight: 500;\n          margin-bottom: 6px;\n        }\n        .bco-empty-sub {\n          font-size: 13px;\n          color: var(--secondary-text-color);\n          margin-top: 4px;\n        }\n        .bco-empty-link {\n          display: inline-block;\n          margin-top: 10px;\n          color: var(--primary-color);\n          text-decoration: none;\n          font-size: 13px;\n        }\n        .bco-empty-link:hover { text-decoration: underline; }\n        .bco-banner {\n          display: flex;\n          flex-direction: column;\n          gap: 4px;\n          padding: 10px 12px;\n          margin-bottom: 8px;\n          border-radius: 8px;\n          background: var(--warning-color, #ffc107);\n          color: #000;\n          font-size: 13px;\n          line-height: 1.35;\n        }\n        .bco-banner.bco-banner-info {\n          background: var(--info-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-banner-title { font-weight: 600; }\n        .bco-banner a {\n          color: inherit;\n          text-decoration: underline;\n          font-size: 12px;\n        }\n        .bco-lan-tiles {\n          display: grid;\n          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n          gap: 8px;\n          margin-bottom: 10px;\n        }\n        .bco-lan-tile {\n          display: flex;\n          flex-direction: column;\n          gap: 6px;\n          padding: 10px 12px;\n          border-radius: 8px;\n          background: var(--card-background-color, #1c1c1c);\n          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          font-size: 13px;\n        }\n        .bco-lan-tile-header {\n          display: flex;\n          align-items: center;\n          gap: 8px;\n          font-weight: 600;\n        }\n        .bco-lan-dot {\n          width: 10px;\n          height: 10px;\n          border-radius: 50%;\n          background: var(--state-inactive-color, #888);\n          flex-shrink: 0;\n        }\n        .bco-lan-dot.bco-lan-on { background: var(--success-color, #4caf50); }\n        .bco-lan-dot.bco-lan-off { background: var(--error-color, #f44336); }\n        .bco-lan-controls {\n          display: flex;\n          gap: 6px;\n          flex-wrap: wrap;\n        }\n        .bco-lan-btn {\n          flex: 1 1 auto;\n          padding: 6px 10px;\n          border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          background: var(--secondary-background-color, #2c2c2c);\n          color: var(--primary-text-color, #fff);\n          font-size: 12px;\n          cursor: pointer;\n          white-space: nowrap;\n        }\n        .bco-lan-btn:hover:not(:disabled) {\n          background: var(--primary-color);\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-lan-btn:disabled {\n          opacity: 0.4;\n          cursor: not-allowed;\n        }\n        .bco-lan-btn.bco-lan-btn-on {\n          background: var(--state-active-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div id="bco-banner-slot"></div>\n        <div id="bco-lan-tiles-slot"></div>\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
     this._grid = this.shadowRoot.getElementById("bco-grid");
     this._countEl = this.shadowRoot.getElementById("bco-count");
     this._bannerSlot = this.shadowRoot.getElementById("bco-banner-slot");
+    this._lanTilesSlot = this.shadowRoot.getElementById("bco-lan-tiles-slot");
     this._rendered = true;
   }
   _escape(s) {
@@ -2412,6 +2413,103 @@ class BoschCameraOverviewCard extends HTMLElement {
       '"': "&quot;",
       "'": "&#39;"
     }[c]));
+  }
+  _renderLanTiles() {
+    if (!this._lanTilesSlot) return;
+    const states = this._hass?.states || {};
+    const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable");
+    if (unavailableBosch.length === 0) {
+      if (this._lanTilesSlot.firstChild) this._lanTilesSlot.innerHTML = "";
+      this._lanTilesSlot.dataset.sig = "";
+      return;
+    }
+    const tiles = [];
+    for (const camEid of unavailableBosch) {
+      const slug = camEid.replace(/^camera\.bosch_/, "");
+      const camFriendly = states[camEid]?.attributes?.friendly_name || `Bosch ${slug}`;
+      const findByFriendlyPrefix = (domain, suffix) => {
+        const direct = states[`${domain}.bosch_${slug}${suffix.entityId}`];
+        if (direct) return direct;
+        const target = `${camFriendly} ${suffix.friendly}`.toLowerCase();
+        return Object.values(states).find(s => {
+          if (!s.entity_id.startsWith(`${domain}.`)) return false;
+          const fn = (s.attributes?.friendly_name || "").toLowerCase();
+          return fn === target || fn.startsWith(target);
+        });
+      };
+      const lan = findByFriendlyPrefix("binary_sensor", {
+        entityId: "_lan_reachable",
+        friendly: "LAN"
+      });
+      const privacy = findByFriendlyPrefix("switch", {
+        entityId: "_privacy_mode",
+        friendly: "Privacy Mode"
+      });
+      const light = findByFriendlyPrefix("light", {
+        entityId: "_front_light",
+        friendly: "Front Light"
+      });
+      tiles.push({
+        camEid: camEid,
+        slug: slug,
+        friendly: camFriendly,
+        lan: lan,
+        privacy: privacy,
+        light: light
+      });
+    }
+    const sig = tiles.map(t => `${t.slug}|${t.lan?.state}|${t.privacy?.state}|${t.privacy?.attributes?.icon}|${t.light?.state}`).join("#");
+    if (this._lanTilesSlot.dataset.sig === sig) return;
+    this._lanTilesSlot.dataset.sig = sig;
+    this._lanTilesSlot.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "bco-lan-tiles";
+    for (const t of tiles) {
+      const tile = document.createElement("div");
+      tile.className = "bco-lan-tile";
+      const header = document.createElement("div");
+      header.className = "bco-lan-tile-header";
+      const dot = document.createElement("span");
+      dot.className = "bco-lan-dot";
+      const lanState = t.lan?.state;
+      if (lanState === "on") dot.classList.add("bco-lan-on"); else if (lanState === "off") dot.classList.add("bco-lan-off");
+      header.appendChild(dot);
+      const nameEl = document.createElement("span");
+      nameEl.textContent = t.friendly.replace(/^Bosch\s+/, "");
+      header.appendChild(nameEl);
+      tile.appendChild(header);
+      const status = document.createElement("div");
+      status.style.cssText = "font-size:11px;color:var(--secondary-text-color);";
+      status.textContent = lanState === "on" ? "LAN erreichbar" : lanState === "off" ? "LAN nicht erreichbar" : "LAN-Status unbekannt";
+      tile.appendChild(status);
+      const controls = document.createElement("div");
+      controls.className = "bco-lan-controls";
+      const addBtn = (label, entity, domain) => {
+        const btn = document.createElement("button");
+        btn.className = "bco-lan-btn";
+        btn.type = "button";
+        const reachable = lanState === "on";
+        const entOk = entity && entity.state !== "unavailable" && entity.state !== "unknown";
+        const isOn = entity && entity.state === "on";
+        if (isOn) btn.classList.add("bco-lan-btn-on");
+        btn.disabled = !entOk || !reachable;
+        btn.title = !reachable ? "Kamera lokal nicht erreichbar" : !entOk ? "Status unbekannt — Cloud-Daten fehlen" : `${label} ${isOn ? "AUS" : "AN"} schalten`;
+        btn.textContent = `${label}${isOn ? " AN" : ""}`;
+        if (entity) {
+          btn.addEventListener("click", () => {
+            this._hass.callService(domain, "toggle", {
+              entity_id: entity.entity_id
+            });
+          });
+        }
+        controls.appendChild(btn);
+      };
+      addBtn("Privacy", t.privacy, "switch");
+      if (t.light) addBtn("Licht", t.light, "light");
+      tile.appendChild(controls);
+      grid.appendChild(tile);
+    }
+    this._lanTilesSlot.appendChild(grid);
   }
   _renderMaintenanceBanner() {
     if (!this._bannerSlot) return;
@@ -2531,6 +2629,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     if (!this._rendered) this._renderShell();
     this._renderMaintenanceBanner();
+    this._renderLanTiles();
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
     const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");

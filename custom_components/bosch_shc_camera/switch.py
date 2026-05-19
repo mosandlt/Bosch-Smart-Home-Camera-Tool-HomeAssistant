@@ -633,16 +633,36 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        """Cloud-only: available without camera being ONLINE.
+        """Available whenever a write would actually go through.
 
-        Privacy state comes from the cloud API response — the camera does not
-        need to be locally reachable for this to work. Overrides the base class
-        is_camera_online() guard intentionally.
+        Three viable paths:
+          1. Cloud healthy and we have a known privacy state → primary path.
+          2. Cloud unhealthy BUT camera is LAN-reachable AND Gen2 → the
+             coordinator's `async_cloud_set_privacy_mode` already falls back
+             to `rcp_local_write_privacy` which talks directly to the camera
+             on port 443 without any Bosch infrastructure.
+          3. We are inside the post-write grace window — the camera has not
+             completed its cred-rotation reboot yet but a fresh write would
+             still queue and succeed once the session re-opens.
+
+        Without (2) the switch goes grey for the duration of every Bosch
+        cloud 5xx burst, even though the user can still toggle privacy via
+        the official app on the same LAN.
         """
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode") is not None
-        )
+        cache = self.coordinator._shc_state_cache.get(self._cam_id, {})
+        has_cached_state = cache.get("privacy_mode") is not None
+        if self.coordinator.last_update_success and has_cached_state:
+            return True
+        if not has_cached_state:
+            return False
+        # Cloud unhealthy — fall back to LAN reachability for Gen2 cams.
+        is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
+        if is_lan_reachable is None:
+            return False
+        from .shc import _is_gen2
+        if not _is_gen2(self.coordinator, self._cam_id):
+            return False
+        return bool(is_lan_reachable(self._cam_id))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

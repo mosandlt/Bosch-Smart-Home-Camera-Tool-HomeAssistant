@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.13";
+const CARD_VERSION = "2.13.0";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -4298,6 +4298,65 @@ class BoschCameraOverviewCard extends HTMLElement {
           text-decoration: underline;
           font-size: 12px;
         }
+        .bco-lan-tiles {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .bco-lan-tile {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          background: var(--card-background-color, #1c1c1c);
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          font-size: 13px;
+        }
+        .bco-lan-tile-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 600;
+        }
+        .bco-lan-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--state-inactive-color, #888);
+          flex-shrink: 0;
+        }
+        .bco-lan-dot.bco-lan-on { background: var(--success-color, #4caf50); }
+        .bco-lan-dot.bco-lan-off { background: var(--error-color, #f44336); }
+        .bco-lan-controls {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .bco-lan-btn {
+          flex: 1 1 auto;
+          padding: 6px 10px;
+          border-radius: 6px;
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          background: var(--secondary-background-color, #2c2c2c);
+          color: var(--primary-text-color, #fff);
+          font-size: 12px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .bco-lan-btn:hover:not(:disabled) {
+          background: var(--primary-color);
+          color: var(--text-primary-color, #fff);
+        }
+        .bco-lan-btn:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        .bco-lan-btn.bco-lan-btn-on {
+          background: var(--state-active-color, var(--primary-color));
+          color: var(--text-primary-color, #fff);
+        }
         bosch-camera-card { display: block; }
         @media (max-width: 480px) {
           .bco-grid { gap: 8px; }
@@ -4310,12 +4369,14 @@ class BoschCameraOverviewCard extends HTMLElement {
             <span class="bco-count" id="bco-count"></span>
           </div>` : ""}
         <div id="bco-banner-slot"></div>
+        <div id="bco-lan-tiles-slot"></div>
         <div class="bco-grid" id="bco-grid"></div>
       </div>
     `;
     this._grid = this.shadowRoot.getElementById("bco-grid");
     this._countEl = this.shadowRoot.getElementById("bco-count");
     this._bannerSlot = this.shadowRoot.getElementById("bco-banner-slot");
+    this._lanTilesSlot = this.shadowRoot.getElementById("bco-lan-tiles-slot");
     this._rendered = true;
   }
 
@@ -4323,6 +4384,107 @@ class BoschCameraOverviewCard extends HTMLElement {
     return String(s).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+  }
+
+  _renderLanTiles() {
+    // Per-camera "what still works locally" panel — shown when one or more
+    // Bosch cameras are unavailable (typical during a cloud 5xx outage) AND
+    // at least one of them is reachable on LAN (or has an unknown LAN state
+    // we still want to surface). Tiles disappear automatically once the
+    // cloud is back and cards render normally.
+    if (!this._lanTilesSlot) return;
+    const states = this._hass?.states || {};
+    const unavailableBosch = Object.keys(states).filter(
+      (eid) => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable",
+    );
+    if (unavailableBosch.length === 0) {
+      if (this._lanTilesSlot.firstChild) this._lanTilesSlot.innerHTML = "";
+      this._lanTilesSlot.dataset.sig = "";
+      return;
+    }
+    // Build a fallback friendly-name → entity index for the case where
+    // entity_id slugs do not match the camera entity_id (cloud-degraded
+    // first-setup registers LAN sensors with the cam UUID instead of the
+    // friendly slug, see v12.4.10 setup_entry fallback). Match by
+    // friendly_name prefix so a renamed camera still finds its sensors.
+    const tiles = [];
+    for (const camEid of unavailableBosch) {
+      const slug = camEid.replace(/^camera\.bosch_/, "");
+      const camFriendly = (states[camEid]?.attributes?.friendly_name) || `Bosch ${slug}`;
+      const findByFriendlyPrefix = (domain, suffix) => {
+        // Try entity_id slug match first (cheapest, works on healthy setup).
+        const direct = states[`${domain}.bosch_${slug}${suffix.entityId}`];
+        if (direct) return direct;
+        // Fall back to friendly-name prefix match.
+        const target = `${camFriendly} ${suffix.friendly}`.toLowerCase();
+        return Object.values(states).find((s) => {
+          if (!s.entity_id.startsWith(`${domain}.`)) return false;
+          const fn = (s.attributes?.friendly_name || "").toLowerCase();
+          return fn === target || fn.startsWith(target);
+        });
+      };
+      const lan = findByFriendlyPrefix("binary_sensor", { entityId: "_lan_reachable", friendly: "LAN" });
+      const privacy = findByFriendlyPrefix("switch", { entityId: "_privacy_mode", friendly: "Privacy Mode" });
+      const light = findByFriendlyPrefix("light", { entityId: "_front_light", friendly: "Front Light" });
+      tiles.push({ camEid, slug, friendly: camFriendly, lan, privacy, light });
+    }
+    const sig = tiles.map((t) =>
+      `${t.slug}|${t.lan?.state}|${t.privacy?.state}|${t.privacy?.attributes?.icon}|${t.light?.state}`,
+    ).join("#");
+    if (this._lanTilesSlot.dataset.sig === sig) return;
+    this._lanTilesSlot.dataset.sig = sig;
+    this._lanTilesSlot.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "bco-lan-tiles";
+    for (const t of tiles) {
+      const tile = document.createElement("div");
+      tile.className = "bco-lan-tile";
+      const header = document.createElement("div");
+      header.className = "bco-lan-tile-header";
+      const dot = document.createElement("span");
+      dot.className = "bco-lan-dot";
+      const lanState = t.lan?.state;
+      if (lanState === "on") dot.classList.add("bco-lan-on");
+      else if (lanState === "off") dot.classList.add("bco-lan-off");
+      header.appendChild(dot);
+      const nameEl = document.createElement("span");
+      nameEl.textContent = t.friendly.replace(/^Bosch\s+/, "");
+      header.appendChild(nameEl);
+      tile.appendChild(header);
+      const status = document.createElement("div");
+      status.style.cssText = "font-size:11px;color:var(--secondary-text-color);";
+      status.textContent = lanState === "on" ? "LAN erreichbar"
+        : lanState === "off" ? "LAN nicht erreichbar"
+        : "LAN-Status unbekannt";
+      tile.appendChild(status);
+      const controls = document.createElement("div");
+      controls.className = "bco-lan-controls";
+      const addBtn = (label, entity, domain) => {
+        const btn = document.createElement("button");
+        btn.className = "bco-lan-btn";
+        btn.type = "button";
+        const reachable = lanState === "on";
+        const entOk = entity && entity.state !== "unavailable" && entity.state !== "unknown";
+        const isOn = entity && entity.state === "on";
+        if (isOn) btn.classList.add("bco-lan-btn-on");
+        btn.disabled = !entOk || !reachable;
+        btn.title = !reachable ? "Kamera lokal nicht erreichbar"
+                  : !entOk ? "Status unbekannt — Cloud-Daten fehlen"
+                  : `${label} ${isOn ? "AUS" : "AN"} schalten`;
+        btn.textContent = `${label}${isOn ? " AN" : ""}`;
+        if (entity) {
+          btn.addEventListener("click", () => {
+            this._hass.callService(domain, "toggle", { entity_id: entity.entity_id });
+          });
+        }
+        controls.appendChild(btn);
+      };
+      addBtn("Privacy", t.privacy, "switch");
+      if (t.light) addBtn("Licht", t.light, "light");
+      tile.appendChild(controls);
+      grid.appendChild(tile);
+    }
+    this._lanTilesSlot.appendChild(grid);
   }
 
   _renderMaintenanceBanner() {
@@ -4464,6 +4626,11 @@ class BoschCameraOverviewCard extends HTMLElement {
     // it stays visible whether the user runs online_offline_view=true (offline
     // tiles shown) or =false (filtered down to an empty grid).
     this._renderMaintenanceBanner();
+    // Local-fallback tiles — shown when one or more Bosch cameras are
+    // unavailable AND we have a LAN reachability signal. Lets the user
+    // toggle privacy / light directly via the LAN even though the cloud is
+    // down. Self-clears once cards render normally again.
+    this._renderLanTiles();
 
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);

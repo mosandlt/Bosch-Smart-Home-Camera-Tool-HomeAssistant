@@ -461,7 +461,14 @@ async def async_cloud_set_privacy_mode(
                     "cloud_set_privacy_mode: cloud failed, Gen2 LOCAL RCP succeeded for %s",
                     cam_id,
                 )
-                coordinator._privacy_set_at[cam_id] = time.monotonic()
+                _now = time.monotonic()
+                coordinator._privacy_set_at[cam_id] = _now
+                # Local RCP writes briefly tear down the camera's cloud TLS
+                # session as Digest creds rotate. Record the timestamp so
+                # `is_lan_reachable()` masks transient ping failures in the
+                # ~30 s window after the write.
+                if hasattr(coordinator, "_local_write_at"):
+                    coordinator._local_write_at[cam_id] = _now
                 coordinator._shc_state_cache.setdefault(cam_id, {})[
                     "privacy_mode"
                 ] = enabled
@@ -731,6 +738,47 @@ async def async_cloud_set_light_component(
         )
         coordinator.hass.async_create_task(coordinator.async_request_refresh())
         return True
+
+    # -- Gen2 LOCAL RCP fallback for front-light (cloud outage) ---------------
+    # Mirror of the privacy fallback. Only supports "front" + "intensity" —
+    # the wallwasher RGB write is too complex for the unauthenticated RCP
+    # path (needs per-LED colour + whiteBalance, blocked by service auth).
+    if gen2 and component in ("front", "intensity"):
+        creds = coordinator._local_creds_cache.get(cam_id)
+        cam_host = creds.get("host") if creds else coordinator._rcp_lan_ip_cache.get(cam_id)
+        if cam_host:
+            from .rcp import rcp_local_write_front_light
+            if component == "front":
+                # Boolean toggle: 0 = off, 100 = on (full brightness on restore)
+                brightness = 100 if value else 0
+            else:
+                # intensity: int 0-100 or float 0.0-1.0
+                brightness = int(value * 100) if isinstance(value, float) and value <= 1.0 else int(value)
+            local_ok = await rcp_local_write_front_light(coordinator.hass, cam_host, brightness)
+            if local_ok:
+                _LOGGER.info(
+                    "cloud_set_light_component: cloud failed, Gen2 LOCAL RCP succeeded for %s %s=%s",
+                    cam_id[:8], component, value,
+                )
+                _now = time.monotonic()
+                cache_entry = coordinator._shc_state_cache.setdefault(cam_id, {})
+                if component == "front":
+                    cache_entry["front_light"] = value
+                else:
+                    cache_entry["front_light_intensity"] = value
+                cache_entry["camera_light"] = (
+                    cache_entry.get("front_light") or cache_entry.get("wallwasher")
+                )
+                coordinator._light_set_at[cam_id] = _now
+                if hasattr(coordinator, "_local_write_at"):
+                    coordinator._local_write_at[cam_id] = _now
+                coordinator.async_update_listeners()
+                return True
+            _LOGGER.debug(
+                "cloud_set_light_component: Gen2 LOCAL RCP fallback failed for %s %s — "
+                "camera may not accept unauthenticated writes",
+                cam_id[:8], component,
+            )
     return False
 
 

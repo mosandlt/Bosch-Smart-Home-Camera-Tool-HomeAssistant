@@ -28,6 +28,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -59,6 +60,7 @@ async def async_setup_entry(
         has_sound = cam_info.get("featureSupport", {}).get("sound", False)
         entities.append(BoschMotionBinarySensor(coordinator, cam_id, config_entry))
         entities.append(BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry))
+        entities.append(BoschLanReachableBinarySensor(coordinator, cam_id, config_entry))
         if has_sound:
             entities.append(BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
@@ -247,3 +249,66 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
             "timestamp": event.get("timestamp", ""),
             "image_url": event.get("imageUrl", ""),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
+    """Reports whether the camera answers a TCP connect on port 443.
+
+    Always available — useful precisely when the Bosch cloud is unreachable.
+    Honors the post-write grace period so a transient blip right after a
+    privacy/light toggle does not flip the state to off (the camera briefly
+    tears down its HTTPS endpoint while Digest creds rotate).
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "lan_reachable"
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lan_reachable"
+        # Use HA's auto-naming via translation_key + device_info — no `name`
+        # override here, otherwise the device-name prefix gets duplicated
+        # into the slug, producing entity_ids like
+        # `binary_sensor.bosch_<title>_bosch_<title>_lan_reachable`.
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def is_on(self) -> bool | None:
+        is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
+        if is_lan_reachable is None:
+            return None
+        result = is_lan_reachable(self._cam_id)
+        return None if result is None else bool(result)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        import time as _time
+        entry = self.coordinator._lan_tcp_reachable.get(self._cam_id)
+        attrs: dict[str, Any] = {"camera_id": self._cam_id}
+        if entry is not None:
+            _reachable, ts = entry
+            attrs["last_check_seconds_ago"] = round(_time.monotonic() - ts)
+        last_write = (
+            self.coordinator._local_write_at.get(self._cam_id, float("-inf"))
+            if hasattr(self.coordinator, "_local_write_at")
+            else float("-inf")
+        )
+        if last_write != float("-inf"):
+            grace_left = (
+                self.coordinator._LOCAL_WRITE_GRACE_S
+                - (_time.monotonic() - last_write)
+            )
+            if grace_left > 0:
+                attrs["write_grace_seconds_left"] = round(grace_left)
+        return attrs

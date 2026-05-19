@@ -77,7 +77,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -580,6 +580,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
         # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
         self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
+        # Monotonic timestamp of the last successful local-RCP write per cam.
+        # The camera briefly tears down its cloud session when Digest creds
+        # rotate after an RCP write; we use this to suppress LAN-offline
+        # false positives during that ~30 s window. Default `float('-inf')`
+        # per SENTINEL_RULE so "never written" never satisfies the grace check.
+        self._local_write_at: dict[str, float] = {}
+        # During a cloud outage we kick a periodic ping of every known cam IP
+        # so the card / switches have a recent reachability signal even though
+        # the cloud-driven status loop is blocked. Tracks last outage-ping
+        # tick to throttle to once per ~30 s.
+        self._last_outage_ping_at: float = float("-inf")
         # Active LOCAL-promotion cooldown: monotonic ts of last attempt to lift
         # an active REMOTE-fallback stream onto LOCAL via Stream.update_source.
         # Prevents ping-pong if LAN is flapping in/out of reachability.
@@ -1315,6 +1326,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             )
 
     # ── Local health check ────────────────────────────────────────────────────
+    # Grace period after a local RCP write during which LAN-ping failures are
+    # treated as still-reachable: the camera rotates Digest creds + tears down
+    # its cloud TLS session after each write, and the LAN HTTPS endpoint is
+    # briefly unresponsive (~5–15 s observed). 30 s leaves margin without
+    # masking a real network outage.
+    _LOCAL_WRITE_GRACE_S: float = 30.0
+
+    def _in_local_write_grace(self, cam_id: str, now: float | None = None) -> bool:
+        """True if this cam was written to via local RCP within _LOCAL_WRITE_GRACE_S."""
+        moment = now if now is not None else time.monotonic()
+        last = self._local_write_at.get(cam_id, float("-inf"))
+        return (moment - last) < self._LOCAL_WRITE_GRACE_S
+
+    def is_lan_reachable(self, cam_id: str) -> bool | None:
+        """Most recent LAN-TCP reachability for `cam_id`, or None if unknown.
+
+        Honors `_local_write_at` grace period — during the post-write window
+        we report the last *positive* reachability (or True if none recorded)
+        so the UI does not flip to offline for a few seconds after every
+        privacy/light toggle.
+        """
+        entry = self._lan_tcp_reachable.get(cam_id)
+        if entry is None:
+            return True if self._in_local_write_grace(cam_id) else None
+        reachable, _ts = entry
+        if not reachable and self._in_local_write_grace(cam_id):
+            return True
+        return reachable
+
     async def _async_local_tcp_ping(self, cam_id: str, timeout: float = 1.5) -> bool:
         """Quick TCP connect to camera port 443 on LAN — returns True if reachable.
 
@@ -1337,6 +1377,44 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             result = False
         self._lan_tcp_reachable[cam_id] = (result, time.monotonic())
         return result
+
+    async def _async_outage_ping_all(self) -> None:
+        """Ping every known camera concurrently during a cloud outage.
+
+        Called from the UpdateFailed paths in `_async_update_data`. Throttled
+        to once per 30 s so a flapping cloud does not hammer the LAN. Result
+        feeds `_lan_tcp_reachable`, which the switch/light entity
+        `available` checks and the card LAN-tile renderer consult.
+        """
+        now = time.monotonic()
+        if (now - self._last_outage_ping_at) < 30.0:
+            return
+        self._last_outage_ping_at = now
+        cam_ids: list[str] = []
+        if self.data:
+            cam_ids.extend(self.data.keys())
+        # Also include cams known only via LAN IP cache (rare — coordinator
+        # data not yet populated after a fresh start mid-outage).
+        for cid in self._rcp_lan_ip_cache:
+            if cid not in cam_ids:
+                cam_ids.append(cid)
+        if not cam_ids:
+            return
+        results = await asyncio.gather(
+            *(self._async_local_tcp_ping(cid) for cid in cam_ids),
+            return_exceptions=True,
+        )
+        _ok = sum(1 for r in results if r is True)
+        _LOGGER.info(
+            "Outage LAN-ping: %d/%d cam(s) reachable (%s)",
+            _ok, len(cam_ids),
+            ", ".join(f"{cid[:8]}={'on' if r is True else 'off' if r is False else 'err'}"
+                      for cid, r in zip(cam_ids, results)),
+        )
+        # Notify dependent entities (binary_sensor.*_lan_reachable, privacy/light
+        # switch `available` checks) so the new ping result reflects in the UI
+        # without waiting for the next coordinator tick.
+        self.async_update_listeners()
 
     def _get_cam_lan_ip(self, cam_id: str) -> str | None:
         """Return the best known LAN IP for a camera, or None if not yet discovered."""
@@ -1481,6 +1559,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         _maint = getattr(self, "_async_refresh_maintenance", None)
                         if _maint is not None:
                             self.hass.async_create_task(_maint(reactive=True))
+                        # And kick a LAN-ping sweep so the switch/light entities
+                        # have a fresh reachability signal even though the
+                        # cloud-driven status loop won't run this tick.
+                        _outage_ping = getattr(self, "_async_outage_ping_all", None)
+                        if _outage_ping is not None:
+                            self.hass.async_create_task(_outage_ping())
                         raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
                     else:
                         cam_list = await resp.json()
@@ -2286,6 +2370,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     new_status = _compute(_cam_id, _cam_data)
                     self.hass.async_create_task(_announce(_cam_id, new_status))
 
+            # Persist LAN IPs (cam_id → IP) so the next cloud-degraded
+            # startup can ping cameras without first needing a cloud call.
+            # Throttle: only write if the mapping actually changed.
+            _store = getattr(self, "_lan_ips_store", None)
+            if _store is not None and self._rcp_lan_ip_cache:
+                _snapshot = {k: v for k, v in self._rcp_lan_ip_cache.items() if v}
+                _prev = getattr(self, "_lan_ips_snapshot", None)
+                if _snapshot and _snapshot != _prev:
+                    self._lan_ips_snapshot = _snapshot
+                    self.hass.async_create_task(_store.async_save(_snapshot))
+
             # Periodic background refresh of the Bosch community maintenance
             # feed — once per hour on a healthy coordinator tick. Reactive
             # refresh on 503 is handled inside the cloud-call branch.
@@ -2304,6 +2399,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             _maint = getattr(self, "_async_refresh_maintenance", None)
             if _maint is not None:
                 self.hass.async_create_task(_maint(reactive=True))
+            _outage_ping = getattr(self, "_async_outage_ping_all", None)
+            if _outage_ping is not None:
+                self.hass.async_create_task(_outage_ping())
             raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Network error: {err}")
@@ -4873,13 +4971,134 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BoschCameraCoordinator(hass, entry)
 
-    await coordinator.async_config_entry_first_refresh()
+    # Load the persistent LAN-IP map (cam_id → IP) so the LAN-ping helpers
+    # have something to work with on a cloud-degraded startup. Written below
+    # on every successful coordinator refresh.
+    from homeassistant.helpers.storage import Store
+    _lan_ips_store: Store = Store(hass, version=1, key=f"{DOMAIN}_lan_ips")
+    coordinator._lan_ips_store = _lan_ips_store  # type: ignore[attr-defined]
+    _persisted_ips = await _lan_ips_store.async_load() or {}
+    if isinstance(_persisted_ips, dict):
+        for _cid, _ip in _persisted_ips.items():
+            if isinstance(_cid, str) and isinstance(_ip, str):
+                coordinator._rcp_lan_ip_cache[_cid.upper()] = _ip
+        if _persisted_ips:
+            _LOGGER.info(
+                "Loaded %d persisted LAN IP(s) for cloud-degraded LAN ping",
+                len(_persisted_ips),
+            )
+
+    # First refresh — tolerate a cloud-side 5xx so the integration can still
+    # set up entities for known cameras (loaded from the entity registry)
+    # and the LAN-fallback paths can take over. Before v12.4.10 the bare
+    # `async_config_entry_first_refresh()` raised `ConfigEntryNotReady` on
+    # any cloud failure, which left the user with no usable entities for as
+    # long as Bosch was down — even though privacy / light / LAN-ping all
+    # work without the cloud. Now: try once, if it fails, fall back to
+    # registry-derived cam_ids; the coordinator keeps retrying in the
+    # background.
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady as exc:
+        _LOGGER.warning(
+            "Bosch cloud unreachable on startup (%s) — bringing up integration "
+            "with LAN-only entities; cloud-driven data will arrive on next refresh",
+            exc,
+        )
+        # Re-hydrate coordinator.data from the entity registry so platforms
+        # still see the previously-known cameras and create their entities.
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.helpers import device_registry as dr
+        ereg = er.async_get(hass)
+        dreg = dr.async_get(hass)
+        cam_ids: set[str] = set()
+        for ent in er.async_entries_for_config_entry(ereg, entry.entry_id):
+            # Unique IDs in this integration consistently embed the UUID-style
+            # cam_id; the first match yields the canonical set.
+            for part in ent.unique_id.split("_"):
+                if len(part) == 36 and part.count("-") == 4:
+                    cam_ids.add(part.upper())
+                    break
+        # Look up the human-readable name for each rehydrated cam. Order:
+        #   1. device.name_by_user (manual rename — always wins)
+        #   2. device.name if it is NOT a "Bosch <UUID>" placeholder leaked
+        #      from a previous cloud-degraded startup (we repair those now)
+        #   3. derive from the camera entity_id slug
+        #   4. fall back to the cam_id itself
+        def _looks_like_uuid_name(n: str) -> bool:
+            return len(n) >= 36 and n.upper().count("-") >= 4
+        cam_titles: dict[str, str] = {}
+        for cid in cam_ids:
+            device = dreg.async_get_device(identifiers={(DOMAIN, cid)})
+            title: str | None = None
+            if device and device.name_by_user:
+                t = device.name_by_user
+                title = t[6:] if t.startswith("Bosch ") else t
+            elif device and device.name and not _looks_like_uuid_name(device.name):
+                t = device.name
+                title = t[6:] if t.startswith("Bosch ") else t
+            else:
+                cam_eid = ereg.async_get_entity_id("camera", DOMAIN, f"bosch_shc_cam_{cid.lower()}")
+                if cam_eid and cam_eid.startswith("camera.bosch_"):
+                    slug = cam_eid[len("camera.bosch_"):]
+                    title = slug.replace("_", " ").title()
+            if title:
+                cam_titles[cid] = title
+                # Repair the device name in the registry if it was a
+                # broken "Bosch <UUID>" placeholder from a prior degraded
+                # startup. Sticky-name damage compounds across restarts
+                # otherwise.
+                if device and device.name and _looks_like_uuid_name(device.name):
+                    dreg.async_update_device(device.id, name=f"Bosch {title}")
+                    _LOGGER.info(
+                        "Repaired device name for %s: 'Bosch %s' "
+                        "(was a UUID placeholder)", cid[:8], title,
+                    )
+        if cam_ids:
+            coordinator.data = {
+                cid: {
+                    "info": {"title": cam_titles.get(cid, cid)},
+                    "status": "UNKNOWN",
+                    "events": [],
+                }
+                for cid in cam_ids
+            }
+            coordinator.last_update_success = False
+            _LOGGER.info(
+                "Bosch cloud-degraded startup: rehydrated %d camera(s) from entity registry: %s",
+                len(cam_ids), ", ".join(sorted(c[:8] for c in cam_ids)),
+            )
+            # Kick an immediate LAN ping so the LAN-reachable sensors and
+            # switch fallbacks have a useful state right away.
+            hass.async_create_task(coordinator._async_outage_ping_all())
+        else:
+            # Truly first-time install with no registry → preserve the original
+            # behaviour and bail out so HA shows the standard setup-failed UI.
+            raise
 
     # v12.3.0 migration — rename entity_ids carrying the v11.0.0 doubled-prefix
     # bug BEFORE forwarding platforms, so entities re-attach to the renamed
     # registry entries instead of re-creating with the buggy id. No-op on
     # clean / new installs and on installs that have already been migrated.
     await _migrate_doubled_prefix_entity_ids(hass, entry.entry_id)
+
+    # v12.4.10 migration — the first BoschLanReachableBinarySensor build
+    # overrode `name()` which doubled the device-name prefix into the
+    # entity_id (`binary_sensor.bosch_<X>_bosch_<X>_lan_reachable`). Delete
+    # any such stale entries so platform setup re-creates them with the
+    # canonical `binary_sensor.bosch_<X>_lan_reachable` slug derived from
+    # the translation key. No-op on clean installs.
+    from homeassistant.helpers import entity_registry as er
+    _ereg = er.async_get(hass)
+    _stale_lan_ids = [
+        e.entity_id for e in er.async_entries_for_config_entry(_ereg, entry.entry_id)
+        if e.entity_id.endswith("_lan_reachable")
+        and e.entity_id.count("_bosch_") >= 1
+        and e.entity_id.startswith("binary_sensor.bosch_")
+    ]
+    for _stale_id in _stale_lan_ids:
+        _LOGGER.info("v12.4.10 migration: removing stale entity_id %s", _stale_id)
+        _ereg.async_remove(_stale_id)
 
     # Start proactive background token refresh (5 min before JWT expiry)
     coordinator._schedule_token_refresh()

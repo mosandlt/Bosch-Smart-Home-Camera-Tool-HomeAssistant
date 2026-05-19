@@ -424,6 +424,9 @@
       },
       "person_detected": {
         "name": "Person Detected"
+      },
+      "lan_reachable": {
+        "name": "LAN Reachable"
       }
     },
     "update": {
