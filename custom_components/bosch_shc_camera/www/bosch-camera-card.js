@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.12";
+const CARD_VERSION = "2.12.13";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -2534,7 +2534,8 @@ class BoschCameraOverviewCard extends HTMLElement {
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
     const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
-    const needsReorder = sig !== this._lastSig;
+    const gridEmpty = this._grid && this._grid.children.length === 0;
+    const needsReorder = sig !== this._lastSig || gridEmpty;
     this._lastSig = sig;
     const keep = new Set(cams.map(c => c.entity_id));
     for (const [eid, el] of [ ...this._cards.entries() ]) {

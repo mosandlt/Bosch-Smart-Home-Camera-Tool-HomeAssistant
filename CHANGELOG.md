@@ -5,6 +5,10 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.4.9 — 2026-05-19
+
+- **Card empty-state regression fix**: when all Bosch cameras transitioned from rendered to `unavailable` (typical during a Bosch cloud 5xx outage), the overview-card grid was correctly pruned of stale tiles but the empty-state banner was *not* re-appended — the user saw a blank panel for the rest of the session. Root cause: `_update()` only re-rendered when the discovery signature changed; two consecutive ticks with `cams.length === 0` produced the same signature `""`, so the empty-state path never ran. Fix in `src/bosch-camera-card.js:_update()`: also re-render when the grid is currently empty (`needsReorder = sig !== this._lastSig || gridEmpty`). Card v2.12.13.
+
 ## v12.4.8 — 2026-05-19
 
 - **Maintenance lifecycle notifications** (scheduled → active → past): when the RSS-derived `BoschCloudMaintenanceSensor` enters `scheduled`, `active`, or `past` state for a window, the coordinator fires a notification via the existing alert pipeline (`alert_notify_system` falls back to `alert_notify_service`). Three notifications per window: announcement when first seen as scheduled, "läuft" when the window opens, "beendet" when it closes. Deduped by `(RSS link, state)` so a coordinator tick during the same phase stays silent. The `past` notification only fires if we previously announced `active` for the same link — prevents spam from stale historical windows discovered after restart. Recent / unknown / idle states stay silent. Notification body carries title + Europe/Berlin time window + community link.

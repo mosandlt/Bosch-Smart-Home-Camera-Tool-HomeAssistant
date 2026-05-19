@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.12";
+const CARD_VERSION = "2.12.13";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -4469,7 +4469,13 @@ class BoschCameraOverviewCard extends HTMLElement {
     if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);
 
     const sig = cams.map((c) => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
-    const needsReorder = sig !== this._lastSig;
+    // Re-render also when the grid is empty (no cards, no empty-state) — this
+    // covers the post-outage edge case where the prune loop emptied the grid
+    // on a previous tick but the empty-state was never appended because the
+    // sig hadn't changed. Without this, the user sees a blank panel forever
+    // until they reload the page.
+    const gridEmpty = this._grid && this._grid.children.length === 0;
+    const needsReorder = sig !== this._lastSig || gridEmpty;
     this._lastSig = sig;
 
     // prune stale inner cards

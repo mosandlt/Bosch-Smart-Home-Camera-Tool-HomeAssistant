@@ -207,8 +207,11 @@ class TestPrefers:
         defaults.update(kw)
         return MaintenanceWindow(**defaults)
 
-    def test_active_beats_scheduled(self):
-        now = datetime(2026, 5, 19, 7, 0, tzinfo=timezone.utc)
+    def test_active_beats_scheduled(self, freezer):
+        # Freeze wall clock so _prefers's internal state() call (which uses
+        # utcnow as default) lands inside the active window. Without freezing,
+        # the test only passes between 05:00 and 09:00 UTC.
+        freezer.move_to("2026-05-19T07:00:00+00:00")
         active = self._mw(
             scheduled_start=datetime(2026, 5, 19, 5, 0, tzinfo=timezone.utc),
             scheduled_end=datetime(2026, 5, 19, 9, 0, tzinfo=timezone.utc),
@@ -217,11 +220,8 @@ class TestPrefers:
             scheduled_start=datetime(2026, 5, 20, 5, 0, tzinfo=timezone.utc),
             scheduled_end=datetime(2026, 5, 20, 9, 0, tzinfo=timezone.utc),
         )
-        # state() at the default 'now' (utc-now). Replace assertion by directly
-        # checking against fixed instant via state(now=...) — wrap manually.
-        assert active.state(now) == "active"
-        assert scheduled.state(now) == "scheduled"
-        # _prefers uses default 'now' but we trust active < scheduled in rank.
+        assert active.state() == "active"
+        assert scheduled.state() == "scheduled"
         assert _prefers(active, scheduled)
 
     def test_camera_relevant_breaks_tie(self):
