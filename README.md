@@ -71,7 +71,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) |
 |---|---|---|---|
-| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.6+ beta |
+| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.7+ beta |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |

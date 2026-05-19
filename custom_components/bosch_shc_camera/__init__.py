@@ -28,7 +28,10 @@ import ssl
 import threading
 import time
 from datetime import timedelta
-from typing import Any, Coroutine
+from typing import Any, Coroutine, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .maintenance import MaintenanceWindow
 from urllib.parse import urlparse
 
 import aiohttp
@@ -608,6 +611,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._maintenance_last_fetch: float = float("-inf")
         self._MAINTENANCE_INTERVAL_S: float = 3600.0
         self._MAINTENANCE_REACTIVE_COOLDOWN_S: float = 300.0
+        # (link, state) of the last user-facing notification we sent for a
+        # maintenance window. Dedupes so the same window announces at most
+        # three times (scheduled / active / past). In-memory only — a HA
+        # restart inside a maintenance window may re-announce, accepted as a
+        # v1 trade-off vs. persistence overhead.
+        self._maintenance_notified_key: tuple[str, str] | None = None
+        # Per-camera last observed availability ("online" / "offline" /
+        # "unknown"). First observation is silent so a HA restart while a
+        # camera is offline does not re-announce. Transitions involving
+        # "unknown" are also silent — those are coordinator transient flaps,
+        # not real availability changes.
+        self._last_camera_status: dict[str, str] = {}
         # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
         # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
         # _nvr_user_intent: persisted switch state (True = user wants to record).
@@ -2256,6 +2271,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if not is_first_tick and data:
                 self._cleanup_stale_devices(set(data.keys()))
 
+            # Per-camera availability transition notifier — fires when a cam
+            # flips between online and offline. First tick is silent (records
+            # baseline). Skipped on the fast first tick because the cache is
+            # still being populated and could carry a stale "online" from a
+            # restore_state load. Defensive getattr handles stub coordinators
+            # in unit tests that bypass __init__ (~80 fixtures across the
+            # test suite).
+            _announce = getattr(self, "_async_maybe_announce_camera_status", None)
+            _compute = getattr(self, "_compute_status_for", None)
+            if not is_first_tick and data and _announce is not None and _compute is not None:
+                for _cam_id in data:
+                    _cam_data = data[_cam_id]
+                    new_status = _compute(_cam_id, _cam_data)
+                    self.hass.async_create_task(_announce(_cam_id, new_status))
+
             # Periodic background refresh of the Bosch community maintenance
             # feed — once per hour on a healthy coordinator tick. Reactive
             # refresh on 503 is handled inside the cloud-call branch.
@@ -2306,6 +2336,163 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 result.title[:60], result.state(),
                 result.scheduled_start, result.scheduled_end,
             )
+            await self._async_maybe_announce_maintenance(result)
+
+    async def _async_maybe_announce_maintenance(self, mw: "MaintenanceWindow") -> None:
+        """Fire a user notification for a maintenance-window state transition.
+
+        Triggers on state in {scheduled, active, past}, deduped by (link,
+        state) so each window announces at most three times: scheduled when
+        first seen, active when the window opens, past when it closes. The
+        `past` announcement only fires if we previously announced `active`
+        for the same link — otherwise an old past window discovered mid-feed
+        would spam users with stale "wartung beendet" messages.
+
+        Recent/unknown/idle states stay silent (no actionable info). Service
+        routing: get_alert_services(coordinator, "system") — falls back to
+        `alert_notify_service`, matching the existing TROUBLE event plumbing.
+
+        Failure is non-fatal — a notify service can be misconfigured by the
+        user, but maintenance discovery itself must keep working.
+        """
+        if not mw.camera_relevant:
+            return
+        state = mw.state()
+        if state not in ("scheduled", "active", "past"):
+            return
+        # `past` only announces when we already announced `active` for this
+        # same window (same link). Suppresses stale past-window discovery.
+        if state == "past":
+            prior = self._maintenance_notified_key
+            if prior is None or prior[0] != mw.link or prior[1] != "active":
+                self._maintenance_notified_key = (mw.link, state)
+                return
+        notify_key = (mw.link, state)
+        if self._maintenance_notified_key == notify_key:
+            return
+        from .fcm import get_alert_services, build_notify_data
+        services = get_alert_services(self, "system")
+        if not services:
+            _LOGGER.debug("Maintenance announce skipped: no notify service configured")
+            self._maintenance_notified_key = notify_key
+            return
+        from zoneinfo import ZoneInfo
+        when = ""
+        if mw.scheduled_start and mw.scheduled_end:
+            tz = ZoneInfo("Europe/Berlin")
+            start = mw.scheduled_start.astimezone(tz)
+            end = mw.scheduled_end.astimezone(tz)
+            when = f"{start.strftime('%a %d.%m. %H:%M')}–{end.strftime('%H:%M')}"
+        verb_map = {"scheduled": "geplant", "active": "läuft", "past": "beendet"}
+        verb = verb_map[state]
+        title = f"Bosch Cloud-Wartung {verb}"
+        body_lines = [mw.title or "Wartungsmeldung"]
+        if when:
+            body_lines.append(when)
+        if state == "active":
+            body_lines.append("Live-Bild und Snapshots ggf. eingeschränkt.")
+        elif state == "past":
+            body_lines.append("Cloud-Dienste sollten wieder normal funktionieren.")
+        if mw.link:
+            body_lines.append(mw.link)
+        message = "\n".join(body_lines)
+        for svc in services:
+            try:
+                data = build_notify_data(svc, message, title=title)
+                await self.hass.services.async_call("notify", svc, data, blocking=False)
+                _LOGGER.info(
+                    "Maintenance announce sent via notify.%s (state=%s, window=%s)",
+                    svc, state, when or "(no window)",
+                )
+            except Exception as exc:  # noqa: BLE001 — any notify failure is non-fatal
+                _LOGGER.warning(
+                    "Maintenance announce via notify.%s failed: %s", svc, exc,
+                )
+        self._maintenance_notified_key = notify_key
+
+    async def _async_maybe_announce_camera_status(
+        self, cam_id: str, new_status: str,
+    ) -> None:
+        """Fire a notification when a camera flips between online and offline.
+
+        The first observation per camera is silent — we record the baseline
+        without notifying so a HA restart while a camera is offline does not
+        re-announce the existing state. Only `online → offline` and
+        `offline → online` transitions notify; `unknown` is treated as a
+        non-event (camera info is just temporarily missing, not a real
+        availability change).
+
+        Routing matches the maintenance path: `alert_notify_system` falls
+        back to `alert_notify_service`. Notify failures are swallowed.
+        """
+        last = self._last_camera_status.get(cam_id)
+        if last is None:
+            # First tick after startup — record baseline silently.
+            self._last_camera_status[cam_id] = new_status
+            return
+        if new_status == last:
+            return
+        # Skip transitions involving "unknown" — coordinator hickups can flap
+        # status to UNKNOWN for one tick during cloud transients; do not
+        # convert that into spam.
+        if new_status == "unknown" or last == "unknown":
+            self._last_camera_status[cam_id] = new_status
+            return
+        self._last_camera_status[cam_id] = new_status
+        from .fcm import get_alert_services, build_notify_data
+        services = get_alert_services(self, "system")
+        cam_info = self.data.get(cam_id, {}).get("info", {})
+        cam_name = cam_info.get("title") or cam_id[:8]
+        if not services:
+            _LOGGER.debug(
+                "Camera status announce skipped for %s (%s→%s): no notify service configured",
+                cam_name, last, new_status,
+            )
+            return
+        if new_status == "offline":
+            title = f"Bosch Kamera {cam_name} offline"
+            message = (
+                f"Bosch Kamera {cam_name} ist offline. "
+                "Live-Bild und Snapshots sind bis zur Wiederverbindung nicht verfügbar."
+            )
+        else:
+            title = f"Bosch Kamera {cam_name} wieder online"
+            message = f"Bosch Kamera {cam_name} ist wieder erreichbar."
+        for svc in services:
+            try:
+                data = build_notify_data(svc, message, title=title)
+                await self.hass.services.async_call("notify", svc, data, blocking=False)
+                _LOGGER.info(
+                    "Camera status announce sent via notify.%s for %s (%s→%s)",
+                    svc, cam_name, last, new_status,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Camera status announce via notify.%s for %s failed: %s",
+                    svc, cam_name, exc,
+                )
+
+    def _compute_status_for(
+        self, cam_id: str, cam_data: dict[str, Any] | None = None,
+    ) -> str:
+        """Re-uses the BoschCameraStatusSensor logic so the announce path and
+        the sensor never drift apart.
+
+        Mirror of `sensor.BoschCameraStatusSensor.native_value`: cloud ONLINE
+        + latest event TROUBLE_DISCONNECT → offline; otherwise the cloud
+        status verbatim. The `cam_data` argument lets the update-loop pass
+        the fresh data dict before `self.data` has been swapped by the
+        parent class (`_async_update_data` returns after the per-cam
+        transition check fires).
+        """
+        if cam_data is None:
+            cam_data = self.data.get(cam_id, {}) if self.data else {}
+        raw = str(cam_data.get("status", "UNKNOWN")).lower()
+        if raw == "online":
+            events = cam_data.get("events", [])
+            if events and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT":
+                return "offline"
+        return raw
 
     def _cleanup_stale_devices(self, current_cam_ids: set[str]) -> None:
         """Remove devices for cameras no longer in the Bosch cloud account.
