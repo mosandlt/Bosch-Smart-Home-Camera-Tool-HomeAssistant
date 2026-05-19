@@ -504,6 +504,17 @@
           "disabled": "Deaktiviert"
         }
       },
+      "cloud_maintenance": {
+        "name": "Bosch Cloud Wartung",
+        "state": {
+          "active": "Wartung läuft",
+          "scheduled": "Wartung geplant",
+          "past": "Letzte Wartung",
+          "recent": "Aktuelle Meldung",
+          "unknown": "Keine Zeitfenster-Info",
+          "idle": "Keine Wartungsinfo"
+        }
+      },
       "unread_events": {
         "name": "Ungelesene Ereignisse"
       },

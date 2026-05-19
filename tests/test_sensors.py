@@ -106,6 +106,51 @@ class TestStatusSensor:
         assert attrs["firmware_update_status"] == "downloading"
         assert attrs["firmware_up_to_date"] is False
 
+    def test_offline_when_latest_event_is_trouble_disconnect(self, stub_coord, stub_entry):
+        """Bosch cloud reports ONLINE forever after a disconnect; override via events.
+
+        Regression: outdoor Gen1 camera showed as online in UI for 22 days
+        while physically unreachable on LAN. Last event from cloud was
+        TROUBLE_DISCONNECT but the status sensor still said online because
+        Bosch cloud never updates the `status` field after a disconnect.
+        """
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        stub_coord.data[CAM_ID]["events"] = [
+            {"eventType": "TROUBLE_DISCONNECT", "timestamp": "2026-04-27T11:03:00+02:00"},
+        ]
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "offline"
+
+    def test_online_when_reconnect_is_newer_than_disconnect(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        stub_coord.data[CAM_ID]["events"] = [
+            {"eventType": "TROUBLE_RECONNECT", "timestamp": "2026-05-19T08:00:00+02:00"},
+            {"eventType": "TROUBLE_DISCONNECT", "timestamp": "2026-04-27T11:03:00+02:00"},
+        ]
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "online"
+
+    def test_online_when_movement_is_newer_than_disconnect(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        stub_coord.data[CAM_ID]["events"] = [
+            {"eventType": "MOVEMENT", "timestamp": "2026-05-19T08:00:00+02:00"},
+            {"eventType": "TROUBLE_DISCONNECT", "timestamp": "2026-04-27T11:03:00+02:00"},
+        ]
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "online"
+
+    def test_cloud_offline_not_changed_by_reconnect_event(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "OFFLINE"
+        stub_coord.data[CAM_ID]["events"] = [
+            {"eventType": "TROUBLE_RECONNECT", "timestamp": "2026-05-19T08:00:00+02:00"},
+        ]
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "offline"
+
 
 # ── BoschCameraEventsTodaySensor ─────────────────────────────────────────
 

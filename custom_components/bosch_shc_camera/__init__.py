@@ -598,6 +598,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # no-op, leaving the entity badge stuck on "warming" after stream start.
         self._stream_warming: set[str] = set()
         self._stream_warming_started: dict[str, float] = {}
+        # Bosch community RSS-derived maintenance announcement. Periodic refresh
+        # every _MAINTENANCE_INTERVAL_S; reactive refresh on cloud 5xx (rate-
+        # limited by _MAINTENANCE_REACTIVE_COOLDOWN_S). Cleared explicitly only
+        # when the fetcher returns a fresh window — transient community-site
+        # outages leave the previous value in place so the sensor stays stable.
+        from .maintenance import MaintenanceWindow  # local import: avoid module-load order issues
+        self._maintenance_cache: MaintenanceWindow | None = None
+        self._maintenance_last_fetch: float = float("-inf")
+        self._MAINTENANCE_INTERVAL_S: float = 3600.0
+        self._MAINTENANCE_REACTIVE_COOLDOWN_S: float = 300.0
         # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
         # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
         # _nvr_user_intent: persisted switch state (True = user wants to record).
@@ -1448,6 +1458,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         token = await self._ensure_valid_token()
                         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
                     elif resp.status != 200:
+                        # Cloud 5xx often coincides with announced maintenance —
+                        # kick off a background fetch of the community RSS so
+                        # the UI can show a specific reason instead of generic
+                        # "unavailable". Rate-limited inside the helper.
+                        # getattr handles stub coordinators in tests.
+                        _maint = getattr(self, "_async_refresh_maintenance", None)
+                        if _maint is not None:
+                            self.hass.async_create_task(_maint(reactive=True))
                         raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
                     else:
                         cam_list = await resp.json()
@@ -2238,14 +2256,56 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if not is_first_tick and data:
                 self._cleanup_stale_devices(set(data.keys()))
 
+            # Periodic background refresh of the Bosch community maintenance
+            # feed — once per hour on a healthy coordinator tick. Reactive
+            # refresh on 503 is handled inside the cloud-call branch.
+            # getattr defaults handle stub coordinators in tests that bypass __init__.
+            _maint_last = getattr(self, "_maintenance_last_fetch", float("-inf"))
+            _maint_interval = getattr(self, "_MAINTENANCE_INTERVAL_S", 3600.0)
+            _maint_refresh = getattr(self, "_async_refresh_maintenance", None)
+            if _maint_refresh is not None and (now - _maint_last) >= _maint_interval:
+                self.hass.async_create_task(_maint_refresh(reactive=False))
+
             return data
 
         except UpdateFailed:
             raise
         except asyncio.TimeoutError:
+            _maint = getattr(self, "_async_refresh_maintenance", None)
+            if _maint is not None:
+                self.hass.async_create_task(_maint(reactive=True))
             raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Network error: {err}")
+
+    async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
+        """Fetch the Bosch community maintenance announcement in the background.
+
+        Reactive calls (triggered by cloud 5xx/timeout) are rate-limited so a
+        flapping cloud does not hammer the community site. Periodic calls run
+        once per _MAINTENANCE_INTERVAL_S regardless of cloud health.
+
+        Failure is silent — the previous cache value is retained so the sensor
+        does not flap on a transient community-site outage.
+        """
+        from .maintenance import async_fetch_maintenance
+        now = time.monotonic()
+        if reactive and (now - self._maintenance_last_fetch) < self._MAINTENANCE_REACTIVE_COOLDOWN_S:
+            return
+        self._maintenance_last_fetch = now
+        try:
+            session = async_get_clientsession(self.hass)
+            result = await async_fetch_maintenance(session)
+        except Exception as exc:
+            _LOGGER.debug("Maintenance fetch raised: %s", exc)
+            return
+        if result is not None:
+            self._maintenance_cache = result
+            _LOGGER.debug(
+                "Maintenance: %s state=%s window=%s..%s",
+                result.title[:60], result.state(),
+                result.scheduled_start, result.scheduled_end,
+            )
 
     def _cleanup_stale_devices(self, current_cam_ids: set[str]) -> None:
         """Remove devices for cameras no longer in the Bosch cloud account.
@@ -2334,9 +2394,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._stream_warming.discard(cam_id)
             self._stream_warming_started.pop(cam_id, None)
             return False
-        # Scenario 3: warming for >300 s — hard timeout
+        # Scenario 3: warming for >180 s — hard timeout. Pre-warm worst case is
+        # ~150 s (CAMERA_EYES outdoor: 8 retries × 13 s + 35 s min_total_wait +
+        # buffer). 180 s leaves a small safety margin without holding the
+        # privacy toggle hostage for 5 minutes on a stuck warm-up.
         started = self._stream_warming_started.get(cam_id, 0)
-        if started and (_time.monotonic() - started) > 300:
+        if started and (_time.monotonic() - started) > 180:
             _LOGGER.warning(
                 "Clearing stuck stream-warming flag for %s (warming for %.0fs)",
                 cam_id[:8], _time.monotonic() - started,
@@ -2741,10 +2804,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     cam_id[:8],
                                 )
                                 self._stream_warming.discard(cam_id)
+                                self._stream_warming_started.pop(cam_id, None)
                                 self._live_connections.pop(cam_id, None)
                                 await self._stop_tls_proxy(cam_id)
                                 self._stream_fell_back[cam_id] = True
                                 continue  # try next candidate (REMOTE)
+                            if not prewarm_ok:
+                                # LOCAL-only mode: no REMOTE candidate to fall back to.
+                                # Pre-warm failed (camera rejected TLS handshakes or
+                                # RTSP DESCRIBE), so the URL we are about to expose
+                                # won't actually stream. Clear the warm-up flag now
+                                # rather than holding it through the min_total_wait
+                                # sleep — otherwise the user gets locked out of the
+                                # privacy toggle for ~25s on Indoor / ~100s on
+                                # Outdoor while the encoder warm-up they paid for
+                                # has already definitively failed. Regression
+                                # 2026-05-19 (Innenbereich): TLS proxy reset 3×,
+                                # warm-up held the privacy switch hostage.
+                                _LOGGER.warning(
+                                    "LOCAL pre-warm failed for %s without REMOTE fallback — "
+                                    "clearing warm-up flag so privacy toggle stays responsive",
+                                    cam_id[:8],
+                                )
+                                self._stream_warming.discard(cam_id)
+                                self._stream_warming_started.pop(cam_id, None)
                             # Ensure minimum total time from PUT /connection.
                             # Renewals use 2/3 of this (camera encoder already warm).
                             min_wait = (cfg.min_total_wait * 2 // 3) if is_renewal else cfg.min_total_wait
@@ -3724,8 +3807,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             cam_id[:8],
         )
         # Clear stale state so try_live_connection's lock doesn't early-return
-        # and so a fresh PUT /connection runs end-to-end.
+        # and so a fresh PUT /connection runs end-to-end. The warm-up flag is
+        # cleared here too: the camera was demonstrably unreachable for ~30 s,
+        # so any pre-warm in flight has zero chance of succeeding and the
+        # privacy toggle deserves to be reactive again.
         self._live_connections.pop(cam_id, None)
+        self._stream_warming.discard(cam_id)
+        self._stream_warming_started.pop(cam_id, None)
         await self._stop_tls_proxy(cam_id)
         try:
             result = await self.try_live_connection(cam_id)

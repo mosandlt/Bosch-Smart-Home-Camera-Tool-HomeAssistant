@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.12.9";
+const CARD_VERSION = "2.12.12";
 
 const BOSCH_BUFFER_PROFILES = {
   latency: {
@@ -2398,9 +2398,10 @@ class BoschCameraOverviewCard extends HTMLElement {
     return this._hass;
   }
   _renderShell() {
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        .bco-empty.bco-empty-outage {\n          padding: 24px 16px;\n          color: var(--primary-text-color);\n        }\n        .bco-empty-title {\n          font-size: 15px;\n          font-weight: 500;\n          margin-bottom: 6px;\n        }\n        .bco-empty-sub {\n          font-size: 13px;\n          color: var(--secondary-text-color);\n          margin-top: 4px;\n        }\n        .bco-empty-link {\n          display: inline-block;\n          margin-top: 10px;\n          color: var(--primary-color);\n          text-decoration: none;\n          font-size: 13px;\n        }\n        .bco-empty-link:hover { text-decoration: underline; }\n        .bco-banner {\n          display: flex;\n          flex-direction: column;\n          gap: 4px;\n          padding: 10px 12px;\n          margin-bottom: 8px;\n          border-radius: 8px;\n          background: var(--warning-color, #ffc107);\n          color: #000;\n          font-size: 13px;\n          line-height: 1.35;\n        }\n        .bco-banner.bco-banner-info {\n          background: var(--info-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-banner-title { font-weight: 600; }\n        .bco-banner a {\n          color: inherit;\n          text-decoration: underline;\n          font-size: 12px;\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div id="bco-banner-slot"></div>\n        <div class="bco-grid" id="bco-grid"></div>\n      </div>\n    `;
     this._grid = this.shadowRoot.getElementById("bco-grid");
     this._countEl = this.shadowRoot.getElementById("bco-count");
+    this._bannerSlot = this.shadowRoot.getElementById("bco-banner-slot");
     this._rendered = true;
   }
   _escape(s) {
@@ -2411,6 +2412,72 @@ class BoschCameraOverviewCard extends HTMLElement {
       '"': "&quot;",
       "'": "&#39;"
     }[c]));
+  }
+  _renderMaintenanceBanner() {
+    if (!this._bannerSlot) return;
+    const states = this._hass?.states || {};
+    const maint = Object.values(states).find(s => {
+      const src = s?.attributes?.source;
+      return typeof src === "string" && /^(rss|html):/.test(src);
+    });
+    const mState = maint?.state || "";
+    const mAttr = maint?.attributes || {};
+    const show = (mState === "active" || mState === "scheduled") && mAttr.camera_relevant;
+    if (!show) {
+      if (this._bannerSlot.firstChild) this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "";
+      return;
+    }
+    const isActive = mState === "active";
+    const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+    const sig = `${mState}|${mAttr.title}|${win}`;
+    if (this._bannerSlot.dataset.sig === sig) return;
+    this._bannerSlot.dataset.sig = sig;
+    this._bannerSlot.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = isActive ? "bco-banner" : "bco-banner bco-banner-info";
+    const t = document.createElement("div");
+    t.className = "bco-banner-title";
+    t.textContent = isActive ? "Bosch-Cloud-Wartung läuft" : "Bosch-Cloud-Wartung geplant";
+    const sub = document.createElement("div");
+    sub.textContent = win ? `${mAttr.title || "Wartungsmeldung"} · ${win}` : mAttr.title || "Wartungsmeldung";
+    banner.appendChild(t);
+    banner.appendChild(sub);
+    if (isActive) {
+      const note = document.createElement("div");
+      note.textContent = "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.";
+      banner.appendChild(note);
+    }
+    if (mAttr.link) {
+      const a = document.createElement("a");
+      a.href = mAttr.link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Details in der Bosch Community";
+      banner.appendChild(a);
+    }
+    this._bannerSlot.appendChild(banner);
+  }
+  _formatWindow(startIso, endIso) {
+    if (!startIso || !endIso) return "";
+    try {
+      const s = new Date(startIso);
+      const e = new Date(endIso);
+      if (isNaN(s) || isNaN(e)) return "";
+      const date = s.toLocaleDateString("de-DE", {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      });
+      const fmt = d => d.toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      return `${date} ${fmt(s)}–${fmt(e)}`;
+    } catch (_) {
+      return "";
+    }
   }
   _discover() {
     if (!this._hass) return [];
@@ -2463,6 +2530,7 @@ class BoschCameraOverviewCard extends HTMLElement {
   _update() {
     if (!this._hass || !this._config) return;
     if (!this._rendered) this._renderShell();
+    this._renderMaintenanceBanner();
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
     const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
@@ -2479,8 +2547,49 @@ class BoschCameraOverviewCard extends HTMLElement {
       this._grid.innerHTML = "";
       if (cams.length === 0) {
         const empty = document.createElement("div");
-        empty.className = "bco-empty";
-        empty.textContent = "Keine Bosch-Kameras gefunden.";
+        const states = this._hass?.states || {};
+        const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable");
+        if (unavailableBosch.length > 0) {
+          empty.className = "bco-empty bco-empty-outage";
+          const maint = Object.values(states).find(s => {
+            const src = s?.attributes?.source;
+            return typeof src === "string" && /^(rss|html):/.test(src);
+          });
+          const mState = maint?.state || "";
+          const mAttr = maint?.attributes || {};
+          const titleEl = document.createElement("div");
+          titleEl.className = "bco-empty-title";
+          const sub = document.createElement("div");
+          sub.className = "bco-empty-sub";
+          const link = document.createElement("a");
+          link.className = "bco-empty-link";
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          const sub2 = document.createElement("div");
+          sub2.className = "bco-empty-sub";
+          if ((mState === "active" || mState === "scheduled" || mState === "recent") && mAttr.camera_relevant) {
+            const verb = mState === "active" ? "läuft" : mState === "scheduled" ? "geplant" : "angekündigt";
+            titleEl.textContent = `Bosch-Cloud-Wartung ${verb}`;
+            const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+            sub.textContent = win ? `${mAttr.title || "Wartungsmeldung"} · ${win}` : mAttr.title || "Wartungsmeldung";
+            link.href = mAttr.link || "https://www.bosch-smarthome.com/service";
+            link.textContent = "Details in der Bosch Community";
+            sub2.textContent = `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` + "kommen automatisch zurück, sobald die Cloud antwortet.";
+          } else {
+            titleEl.textContent = "Bosch-Cloud nicht erreichbar";
+            sub.textContent = `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` + "warten auf die Bosch-Server.";
+            link.href = "https://community.bosch-smarthome.com/t5/wartungsarbeiten/bg-p/Wartungsarbeiten";
+            link.textContent = "Status prüfen: Bosch Community";
+            sub2.textContent = "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.";
+          }
+          empty.appendChild(titleEl);
+          empty.appendChild(sub);
+          empty.appendChild(link);
+          empty.appendChild(sub2);
+        } else {
+          empty.className = "bco-empty";
+          empty.textContent = "Keine Bosch-Kameras gefunden.";
+        }
         this._grid.appendChild(empty);
       } else {
         for (const c of cams) {

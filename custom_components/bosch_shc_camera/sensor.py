@@ -95,6 +95,10 @@ async def async_setup_entry(
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
         entities.append(BoschFcmPushStatusSensor(coordinator, first_cam_id, config_entry))
+        # Bosch community-RSS-derived maintenance window (one per integration).
+        # Stays available even when the cloud is unreachable — that is the
+        # scenario it exists for.
+        entities.append(BoschCloudMaintenanceSensor(coordinator, first_cam_id, config_entry))
     # Mini-NVR diagnostic sensor — surfaces drain-watcher state per camera so
     # users can answer "is recording reaching the target?". Disabled by
     # default; enable via the entity registry. One per camera.
@@ -159,7 +163,12 @@ class BoschCameraStatusSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> str:
-        return str(self._cam_data.get("status", "UNKNOWN")).lower()
+        raw = str(self._cam_data.get("status", "UNKNOWN")).lower()
+        if raw == "online":
+            events = self._cam_data.get("events", [])
+            if events and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT":
+                return "offline"
+        return raw
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -676,6 +685,55 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
         if self.coordinator._fcm_last_push != float("-inf"):
             age = _time.monotonic() - self.coordinator._fcm_last_push
             attrs["last_push_seconds_ago"] = round(age)
+        return attrs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschCloudMaintenanceSensor(_BoschSensorBase):
+    """Surfaces Bosch's announced maintenance / incident state for the cloud.
+
+    Data source: community.bosch-smarthome.com Wartungsarbeiten + Statusmeldungen
+    RSS feeds, fetched by the coordinator (see `maintenance.py`). One per
+    integration. Stays available even when the Bosch cloud itself is down —
+    that is the entire point: the user needs a stable place to see WHY their
+    cameras are unavailable.
+    """
+
+    _attr_icon = "mdi:cloud-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "cloud_maintenance"
+    _attr_options = ["active", "scheduled", "past", "recent", "unknown", "idle"]
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    @property
+    def name(self) -> str:
+        return "Bosch Cloud Wartung"
+
+    @property
+    def unique_id(self) -> str:
+        return "bosch_shc_camera_cloud_maintenance"
+
+    @property
+    def available(self) -> bool:
+        # Intentionally always True: the sensor must remain readable while the
+        # Bosch cloud is down, since that is precisely when users look at it.
+        return True
+
+    @property
+    def native_value(self) -> str:
+        window = self.coordinator._maintenance_cache
+        return window.state() if window else "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        import time as _time
+        window = self.coordinator._maintenance_cache
+        attrs: dict[str, Any] = {}
+        if window is not None:
+            attrs.update(window.as_dict())
+        last_fetch = self.coordinator._maintenance_last_fetch
+        if last_fetch != float("-inf"):
+            attrs["last_fetched_seconds_ago"] = round(_time.monotonic() - last_fetch)
         return attrs
 
 

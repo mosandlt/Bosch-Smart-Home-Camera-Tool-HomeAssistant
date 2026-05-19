@@ -504,6 +504,17 @@
           "disabled": "Disabled"
         }
       },
+      "cloud_maintenance": {
+        "name": "Bosch Cloud Maintenance",
+        "state": {
+          "active": "Maintenance in progress",
+          "scheduled": "Maintenance scheduled",
+          "past": "Most recent maintenance",
+          "recent": "Recent announcement",
+          "unknown": "No time window info",
+          "idle": "No maintenance info"
+        }
+      },
       "unread_events": {
         "name": "Unread Events"
       },

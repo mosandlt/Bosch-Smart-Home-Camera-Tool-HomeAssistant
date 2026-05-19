@@ -35,6 +35,11 @@ def _make_coord(*, live_conn: dict | None = None):
     coord = SimpleNamespace()
     coord._live_connections = {CAM_A: live_conn} if live_conn else {}
     coord._tls_proxy_rebuild_last = {}
+    # Warm-up state — _on_tls_proxy_died now clears these too so the privacy
+    # toggle stays responsive after the breaker fires (regression 2026-05-19,
+    # Innenbereich incident).
+    coord._stream_warming = set()
+    coord._stream_warming_started = {}
     coord._stop_tls_proxy = AsyncMock(return_value=None)
     coord.try_live_connection = AsyncMock(return_value={"_connection_type": "LOCAL"})
     coord._on_tls_proxy_died = BoschCameraCoordinator._on_tls_proxy_died.__get__(coord)

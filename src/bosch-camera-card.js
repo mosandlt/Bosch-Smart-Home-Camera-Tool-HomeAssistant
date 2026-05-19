@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.12.9";
+const CARD_VERSION = "2.12.12";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -4254,6 +4254,50 @@ class BoschCameraOverviewCard extends HTMLElement {
           color: var(--secondary-text-color);
           font-size: 14px;
         }
+        .bco-empty.bco-empty-outage {
+          padding: 24px 16px;
+          color: var(--primary-text-color);
+        }
+        .bco-empty-title {
+          font-size: 15px;
+          font-weight: 500;
+          margin-bottom: 6px;
+        }
+        .bco-empty-sub {
+          font-size: 13px;
+          color: var(--secondary-text-color);
+          margin-top: 4px;
+        }
+        .bco-empty-link {
+          display: inline-block;
+          margin-top: 10px;
+          color: var(--primary-color);
+          text-decoration: none;
+          font-size: 13px;
+        }
+        .bco-empty-link:hover { text-decoration: underline; }
+        .bco-banner {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 10px 12px;
+          margin-bottom: 8px;
+          border-radius: 8px;
+          background: var(--warning-color, #ffc107);
+          color: #000;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .bco-banner.bco-banner-info {
+          background: var(--info-color, var(--primary-color));
+          color: var(--text-primary-color, #fff);
+        }
+        .bco-banner-title { font-weight: 600; }
+        .bco-banner a {
+          color: inherit;
+          text-decoration: underline;
+          font-size: 12px;
+        }
         bosch-camera-card { display: block; }
         @media (max-width: 480px) {
           .bco-grid { gap: 8px; }
@@ -4265,11 +4309,13 @@ class BoschCameraOverviewCard extends HTMLElement {
             <span>${this._escape(this._config.title)}</span>
             <span class="bco-count" id="bco-count"></span>
           </div>` : ""}
+        <div id="bco-banner-slot"></div>
         <div class="bco-grid" id="bco-grid"></div>
       </div>
     `;
     this._grid = this.shadowRoot.getElementById("bco-grid");
     this._countEl = this.shadowRoot.getElementById("bco-count");
+    this._bannerSlot = this.shadowRoot.getElementById("bco-banner-slot");
     this._rendered = true;
   }
 
@@ -4277,6 +4323,72 @@ class BoschCameraOverviewCard extends HTMLElement {
     return String(s).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+  }
+
+  _renderMaintenanceBanner() {
+    if (!this._bannerSlot) return;
+    const states = this._hass?.states || {};
+    const maint = Object.values(states).find((s) => {
+      const src = s?.attributes?.source;
+      return typeof src === "string" && /^(rss|html):/.test(src);
+    });
+    const mState = maint?.state || "";
+    const mAttr  = maint?.attributes || {};
+    const show = (mState === "active" || mState === "scheduled") && mAttr.camera_relevant;
+    if (!show) {
+      if (this._bannerSlot.firstChild) this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "";
+      return;
+    }
+    const isActive = mState === "active";
+    const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+    // Avoid re-rendering identical banner each tick.
+    const sig = `${mState}|${mAttr.title}|${win}`;
+    if (this._bannerSlot.dataset.sig === sig) return;
+    this._bannerSlot.dataset.sig = sig;
+    this._bannerSlot.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = isActive ? "bco-banner" : "bco-banner bco-banner-info";
+    const t = document.createElement("div");
+    t.className = "bco-banner-title";
+    t.textContent = isActive ? "Bosch-Cloud-Wartung läuft" : "Bosch-Cloud-Wartung geplant";
+    const sub = document.createElement("div");
+    sub.textContent = win
+      ? `${mAttr.title || "Wartungsmeldung"} · ${win}`
+      : (mAttr.title || "Wartungsmeldung");
+    banner.appendChild(t);
+    banner.appendChild(sub);
+    if (isActive) {
+      const note = document.createElement("div");
+      note.textContent = "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.";
+      banner.appendChild(note);
+    }
+    if (mAttr.link) {
+      const a = document.createElement("a");
+      a.href = mAttr.link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Details in der Bosch Community";
+      banner.appendChild(a);
+    }
+    this._bannerSlot.appendChild(banner);
+  }
+
+  _formatWindow(startIso, endIso) {
+    // Render the maintenance window in Berlin local time for the empty-state
+    // banner. Returns "" if either bound is missing or unparseable so the
+    // caller can fall back to a title-only line.
+    if (!startIso || !endIso) return "";
+    try {
+      const s = new Date(startIso);
+      const e = new Date(endIso);
+      if (isNaN(s) || isNaN(e)) return "";
+      const date = s.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+      const fmt = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      return `${date} ${fmt(s)}–${fmt(e)}`;
+    } catch (_) {
+      return "";
+    }
   }
 
   _discover() {
@@ -4347,6 +4459,12 @@ class BoschCameraOverviewCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     if (!this._rendered) this._renderShell();
 
+    // Cloud-maintenance banner above the grid — sourced from
+    // BoschCloudMaintenanceSensor (RSS feed). Independent of grid rendering so
+    // it stays visible whether the user runs online_offline_view=true (offline
+    // tiles shown) or =false (filtered down to an empty grid).
+    this._renderMaintenanceBanner();
+
     let cams = this._discover();
     if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);
 
@@ -4368,8 +4486,69 @@ class BoschCameraOverviewCard extends HTMLElement {
       this._grid.innerHTML = "";
       if (cams.length === 0) {
         const empty = document.createElement("div");
-        empty.className = "bco-empty";
-        empty.textContent = "Keine Bosch-Kameras gefunden.";
+        // Distinguish "no Bosch entities at all" vs. "all Bosch cameras are
+        // unavailable" (cloud outage / maintenance — HA strips attributes from
+        // unavailable entities so the brand!='Bosch' filter drops them).
+        const states = this._hass?.states || {};
+        const unavailableBosch = Object.keys(states).filter(
+          (eid) => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable",
+        );
+        if (unavailableBosch.length > 0) {
+          empty.className = "bco-empty bco-empty-outage";
+          // Look up the integration's maintenance sensor — surfaces the Bosch
+          // community RSS announcement (title, link, scheduled_start/end).
+          // Identified by attribute `source` matching /^(rss|html):/ which our
+          // BoschCloudMaintenanceSensor sets exclusively.
+          const maint = Object.values(states).find((s) => {
+            const src = s?.attributes?.source;
+            return typeof src === "string" && /^(rss|html):/.test(src);
+          });
+          const mState = maint?.state || "";
+          const mAttr  = maint?.attributes || {};
+          const titleEl = document.createElement("div");
+          titleEl.className = "bco-empty-title";
+          const sub = document.createElement("div");
+          sub.className = "bco-empty-sub";
+          const link = document.createElement("a");
+          link.className = "bco-empty-link";
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          const sub2 = document.createElement("div");
+          sub2.className = "bco-empty-sub";
+
+          if ((mState === "active" || mState === "scheduled" || mState === "recent") && mAttr.camera_relevant) {
+            // Best case: Bosch announced exactly this window.
+            const verb = mState === "active" ? "läuft" : (mState === "scheduled" ? "geplant" : "angekündigt");
+            titleEl.textContent = `Bosch-Cloud-Wartung ${verb}`;
+            const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+            sub.textContent = win
+              ? `${mAttr.title || "Wartungsmeldung"} · ${win}`
+              : (mAttr.title || "Wartungsmeldung");
+            link.href = mAttr.link || "https://www.bosch-smarthome.com/service";
+            link.textContent = "Details in der Bosch Community";
+            sub2.textContent =
+              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` +
+              "kommen automatisch zurück, sobald die Cloud antwortet.";
+          } else {
+            // Fallback: cameras unavailable but no matching RSS announcement —
+            // either Bosch hasn't posted yet, RSS is unreachable, or this is
+            // an unannounced outage. Stay honest about the uncertainty.
+            titleEl.textContent = "Bosch-Cloud nicht erreichbar";
+            sub.textContent =
+              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` +
+              "warten auf die Bosch-Server.";
+            link.href = "https://community.bosch-smarthome.com/t5/wartungsarbeiten/bg-p/Wartungsarbeiten";
+            link.textContent = "Status prüfen: Bosch Community";
+            sub2.textContent = "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.";
+          }
+          empty.appendChild(titleEl);
+          empty.appendChild(sub);
+          empty.appendChild(link);
+          empty.appendChild(sub2);
+        } else {
+          empty.className = "bco-empty";
+          empty.textContent = "Keine Bosch-Kameras gefunden.";
+        }
         this._grid.appendChild(empty);
       } else {
         // Cameras are already sorted by tier (0=live → 1=privat → 2=offline).

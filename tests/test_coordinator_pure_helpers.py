@@ -540,17 +540,32 @@ class TestStreamWarming:
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
         assert CAM_A not in coord._stream_warming
 
-    def test_warming_300s_timeout_clears(self):
-        """Scenario 3: 5-min hard timeout — pre-warm absolute worst case
-        is ~120 s; >300 s means stuck."""
+    def test_warming_180s_timeout_clears(self):
+        """Scenario 3: 3-min hard timeout — pre-warm absolute worst case is
+        ~150 s (CAMERA_EYES outdoor 8×13s + 35s min_total_wait + buffer).
+        Anything past 180 s is stuck; clearing frees the privacy toggle.
+        Lowered from 300 s on 2026-05-19 after Innenbereich incident — TLS
+        proxy reset 3× and warm-up held the privacy switch hostage for
+        ~45 s."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic() - 400
+        coord._stream_warming_started[CAM_A] = time.monotonic() - 200
         # No URL (so scenario 2 doesn't fire), but live conn entry exists
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
         assert CAM_A not in coord._stream_warming
+
+    def test_warming_at_old_300s_boundary_now_clears(self):
+        """Regression guard for the 300→180 s timeout reduction: a warm-up
+        elapsed 250 s would have stayed flagged under the old 300 s rule but
+        must now auto-clear."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        coord = _make_coord()
+        coord._stream_warming.add(CAM_A)
+        coord._stream_warming_started[CAM_A] = time.monotonic() - 250
+        coord._live_connections[CAM_A] = {"rtspsUrl": ""}
+        assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
 
     def test_warming_under_timeout_stays_true(self):
         """Healthy mid-warm state: live conn pending, no URL, started recently."""
@@ -558,6 +573,16 @@ class TestStreamWarming:
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic() - 30  # 30 s ago
+        coord._live_connections[CAM_A] = {"rtspsUrl": ""}
+        assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is True
+
+    def test_warming_at_150s_under_new_timeout_stays_true(self):
+        """Pin the upper end of the healthy band: 150 s elapsed is still
+        within the worst-case outdoor pre-warm envelope and must NOT clear."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        coord = _make_coord()
+        coord._stream_warming.add(CAM_A)
+        coord._stream_warming_started[CAM_A] = time.monotonic() - 150
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is True
 

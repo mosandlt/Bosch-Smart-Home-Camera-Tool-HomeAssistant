@@ -464,6 +464,26 @@ Before v11.0.0 these failure paths logged a WARNING and silently returned — cl
 
 ## Features
 
+- **Cloud-maintenance banner:** detects Bosch's announced maintenance windows from the community RSS feed and surfaces them in the dashboard card + as a sensor.
+
+```mermaid
+sequenceDiagram
+    participant Card as Lovelace Card
+    participant HA as Home Assistant
+    participant Coord as Coordinator
+    participant RSS as Bosch Community RSS
+    participant MP as maintenance.py
+    participant Sensor as BoschCloudMaintenanceSensor
+
+    HA->>Coord: hourly tick (+ reactive on 5xx)
+    Coord->>RSS: fetch Wartungsarbeiten + Statusmeldungen
+    RSS-->>MP: raw feed entries (+ HTML fallback)
+    MP-->>MP: parse title / time window / link
+    MP-->>Sensor: state: active / scheduled / past / recent / unknown / idle
+    Sensor-->>Card: hass update
+    Card-->>Card: show banner (state in {active,scheduled} AND camera_relevant=true)
+```
+
 ### Entities
 
 | Feature | Entity type | Default |
@@ -1640,8 +1660,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.4.6** — see the GitHub release page for full notes:
-[**v12.4.6 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.6)
+Latest: **v12.4.7** — see the GitHub release page for full notes:
+[**v12.4.7 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.7)
 
 | | |
 |---|---|
@@ -1656,7 +1676,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.6** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.7** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.1 · Mini-NVR + SMB upload (BETA) · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.2 · beta · npm |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.0.0 · Claude Code / Claude Desktop integration |
