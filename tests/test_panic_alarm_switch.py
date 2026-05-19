@@ -116,3 +116,24 @@ def test_disabled_by_default(stub_entry) -> None:
     coord = _make_coord()
     entity = BoschPanicAlarmSwitch(coord, CAM_ID, stub_entry)
     assert entity._attr_entity_registry_enabled_default is False
+
+
+@pytest.mark.asyncio
+async def test_lazy_init_creates_cache_on_legacy_coordinator(stub_entry) -> None:
+    """When a coordinator from an older build doesn't carry
+    `_panic_alarm_cache` (introduced in v10.x), `_set()` lazy-inits it
+    so the very first toggle works. Pins switch.py L1808."""
+    from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
+
+    coord = _make_coord()
+    # Simulate a pre-v10.x coordinator without the cache attribute.
+    del coord._panic_alarm_cache
+    assert not hasattr(coord, "_panic_alarm_cache")
+    entity = BoschPanicAlarmSwitch(coord, CAM_ID, stub_entry)
+    entity.async_write_ha_state = MagicMock()
+
+    await entity.async_turn_on()
+
+    # Lazy-init created the dict and stored the new state.
+    assert hasattr(coord, "_panic_alarm_cache")
+    assert coord._panic_alarm_cache[CAM_ID] is True

@@ -206,6 +206,69 @@ class TestRawKeepidleSetsockoptRaises:
         # exercised and the except clause swallowed the OSError.
         assert cam_id not in port_cache
 
+    def test_all_three_keepalive_setsockopts_run_when_kernel_accepts(self):
+        """Happy path on Linux (or macOS after patching) — TCP_KEEPIDLE +
+        TCP_KEEPINTVL + TCP_KEEPCNT all accepted → all three setsockopt
+        lines (87, 88, 89) execute and the loop body continues past the
+        keep-alive block. Covers raw socket L89 + client socket L150 on
+        platforms where the helper test
+        `test_proxy_does_not_crash_when_raw_setsockopt_raises` jumps to the
+        except clause early."""
+        cam_id = "CAM-KEEPALIVE-ALL-OK"
+        threads_before = frozenset(threading.enumerate())
+        port_cache: dict[str, int] = {}
+        ctx = _plain_ssl_ctx()
+
+        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        upstream.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        upstream.bind(("127.0.0.1", 0))
+        upstream.listen(1)
+        up_port = upstream.getsockname()[1]
+
+        # Inject all three TCP_KEEP* constants so the setsockopt block is
+        # taken on macOS too. Use a stub int (well outside any real opt
+        # range) and a patched setsockopt that swallows them.
+        original_setsockopt = socket.socket.setsockopt
+
+        def _accept_keepalives(self, level, optname, value):
+            if level == socket.IPPROTO_TCP and optname in (
+                getattr(socket, "TCP_KEEPIDLE", -1),
+                getattr(socket, "TCP_KEEPINTVL", -1),
+                getattr(socket, "TCP_KEEPCNT", -1),
+            ):
+                return None  # pretend the kernel accepted it
+            return original_setsockopt(self, level, optname, value)
+
+        real_create_connection = socket.create_connection
+
+        def _wrap_create_connection(addr, timeout=10):
+            return real_create_connection(addr, timeout=timeout)
+
+        with patch.object(socket, "TCP_KEEPIDLE", 256, create=True), \
+             patch.object(socket, "TCP_KEEPINTVL", 257, create=True), \
+             patch.object(socket, "TCP_KEEPCNT", 258, create=True), \
+             patch.object(socket.socket, "setsockopt", _accept_keepalives), \
+             patch(
+                 "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
+                 side_effect=_wrap_create_connection,
+             ):
+            port = start_tls_proxy(ctx, cam_id, "127.0.0.1", up_port, port_cache)
+
+            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                client.settimeout(2)
+                client.connect(("127.0.0.1", port))
+                conn, _ = upstream.accept()
+                time.sleep(0.15)  # let proxy thread run through both setsockopt blocks
+                conn.close()
+            finally:
+                client.close()
+                upstream.close()
+                stop_tls_proxy(cam_id, port_cache)
+                _join_new_threads(threads_before)
+
+        assert cam_id not in port_cache
+
 
 class TestClientKeepidleSetsockoptRaises:
     """Lines 136-137: client-side TCP_KEEPIDLE setsockopt raises OSError.

@@ -604,12 +604,16 @@ async def async_cloud_set_light_component(
       component: "front" (bool), "wallwasher" (bool), or "intensity" (int 0-100).
     """
     token = coordinator.token
-    if not token:
-        return False
-
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    # Session is only created when we have a token to use it with. The Gen2
+    # LAN-RCP fallback at the end of this function works without a cloud
+    # session, so we skip the (sometimes expensive) session+resolver setup
+    # entirely when token is missing. Type guard before each .put() call.
+    session = (
+        async_get_clientsession(coordinator.hass, verify_ssl=False)
+        if token else None
+    )
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {token}" if token else "",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -617,7 +621,7 @@ async def async_cloud_set_light_component(
     gen2 = _is_gen2(coordinator, cam_id)
     ok = False
 
-    if gen2:
+    if gen2 and token:
         # Gen2: separate endpoints per light group
         base = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch"
         if component == "front":
@@ -653,6 +657,7 @@ async def async_cloud_set_light_component(
             }
             # Step 1: Set brightness via /lighting/switch
             try:
+                assert session is not None  # narrowed by `if gen2 and token` above
                 async with asyncio.timeout(10):
                     async with session.put(base, json=full_body, headers=headers) as resp:
                         if resp.status in (200, 201, 204):
@@ -680,6 +685,7 @@ async def async_cloud_set_light_component(
         else:
             return False
         try:
+            assert session is not None  # narrowed by `if gen2 and token` above
             async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
                     ok = resp.status in (200, 201, 204)
@@ -687,7 +693,7 @@ async def async_cloud_set_light_component(
                         _LOGGER.warning("cloud_set_light_component (gen2): HTTP %d for %s %s", resp.status, cam_id[:8], component)
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.warning("cloud_set_light_component (gen2) error for %s: %s", cam_id, err)
-    else:
+    elif not gen2 and token:
         # Gen1: single endpoint with combined body
         front = cache.get("front_light") or False
         wall = cache.get("wallwasher") or False
@@ -709,6 +715,7 @@ async def async_cloud_set_light_component(
             body["frontLightIntensity"] = intensity
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
         try:
+            assert session is not None  # narrowed by `elif not gen2 and token` above
             async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
                     body_text = await resp.text()

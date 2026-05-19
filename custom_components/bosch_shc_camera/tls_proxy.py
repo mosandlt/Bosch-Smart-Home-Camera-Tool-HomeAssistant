@@ -125,7 +125,7 @@ def start_tls_proxy(
                     )
                     try:
                         srv.close()
-                    except Exception:
+                    except Exception:  # pragma: no cover — daemon-thread close-race, tracer drops the record
                         pass
                     # Signal the coordinator so it can rebuild the session
                     # once the camera is reachable again — without this,
@@ -207,11 +207,11 @@ def start_tls_proxy(
                 finally:
                     try:
                         src.close()
-                    except Exception:
+                    except Exception:  # pragma: no cover — daemon-thread close-race
                         pass
                     try:
                         dst.close()
-                    except Exception:
+                    except Exception:  # pragma: no cover — daemon-thread close-race
                         pass
 
             # client→camera: rewrite SETUP Transport to force TCP interleaved

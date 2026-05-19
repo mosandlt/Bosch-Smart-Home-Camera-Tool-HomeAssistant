@@ -246,6 +246,37 @@ class TestLifecycleHooks:
             # Must not raise
             await BoschCamera.async_will_remove_from_hass(cam)
 
+    @pytest.mark.asyncio
+    async def test_added_to_hass_restores_persisted_snapshot(self):
+        """Cold-start: `load_snapshot` returns bytes → `_cached_image` is
+        seeded with the persisted JPEG and `_last_image_fetch` is back-dated
+        by one snapshot_interval so the next live refresh fires on schedule
+        (instead of immediately, which would race the coordinator's first
+        tick). Pins camera.py L156 + L161-165."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        coord = _make_coord()
+        cam = _make_camera(coord=coord)
+        # Sentinel persisted JPEG, distinguishable from the placeholder.
+        persisted_jpeg = b"\xff\xd8\xff\xe0RESTORED" + b"\x00" * 100
+        with patch(
+            "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_added_to_hass",
+            new=AsyncMock(),
+        ), patch(
+            "custom_components.bosch_shc_camera.camera.load_snapshot",
+            new=AsyncMock(return_value=persisted_jpeg),
+        ), patch(
+            "custom_components.bosch_shc_camera.camera.time.monotonic",
+            return_value=10_000.0,
+        ):
+            await BoschCamera.async_added_to_hass(cam)
+        # _cached_image holds the persisted bytes (L156).
+        assert cam._cached_image is persisted_jpeg
+        # _last_image_fetch is back-dated by one snapshot_interval (L161-164).
+        # Default snapshot_interval = 90 s in DEFAULT_OPTIONS.
+        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        expected = 10_000.0 - float(DEFAULT_OPTIONS["snapshot_interval"])
+        assert cam._last_image_fetch == expected
+
 
 # ── _handle_coordinator_update (153-171) ────────────────────────────────
 
@@ -452,6 +483,28 @@ class TestAsyncTriggerImageRefresh:
         await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         cam.async_camera_image.assert_awaited_once()
         assert cam._cached_image == b"\xff\xd8seed"
+
+    @pytest.mark.asyncio
+    async def test_persists_to_disk_and_notifies_image_entity(self):
+        """On a successful refresh with privacy off + an image entity
+        registered, save_snapshot runs AND
+        `img_entity.async_notify_refreshed()` is awaited so the frontend
+        gets the new signed-URL token. Pins camera.py L270-272."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        coord = _make_coord(_shc_state_cache={CAM_ID: {"privacy_mode": False}})
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8new")
+        image_entity = SimpleNamespace(
+            async_notify_refreshed=AsyncMock(return_value=None),
+        )
+        coord._image_entities = {CAM_ID: image_entity}
+        cam = _make_camera(coord=coord)
+        with patch(
+            "custom_components.bosch_shc_camera.camera.save_snapshot",
+            new=AsyncMock(return_value=None),
+        ) as save_mock:
+            await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        save_mock.assert_awaited_once()
+        image_entity.async_notify_refreshed.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_exception_swallowed(self):

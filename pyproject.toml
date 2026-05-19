@@ -1,3 +1,11 @@
+[tool.coverage.run]
+# tls_proxy runs its accept loop + pipe pumps inside daemon threads.
+# Default coverage tracer only sees the main thread, so the keepalive
+# setsockopt fall-through + socket-close exception arms get reported
+# as uncovered even when tests exercise them. `concurrency = ["thread"]`
+# wraps `threading.Thread.run` so coverage follows the thread bodies.
+concurrency = ["thread"]
+
 [tool.mypy]
 python_version = "3.12"
 files = ["custom_components/bosch_shc_camera"]

@@ -911,12 +911,26 @@ class TestQuietFcmPushClient:
                 if record.levelno >= logging.ERROR:
                     exception_records.append(record.getMessage())
 
+        # Earlier tests that install the `_FCMNoiseFilter` via
+        # `async_start_fcm_push` leave it on this logger and that filter
+        # silently drops the very "Unexpected exception during read" record
+        # we're asserting on. Snapshot + remove + restore so this counter-
+        # test always sees the raw library output.
+        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        prev_filters = list(fcm_logger.filters)
+        for _f in prev_filters:
+            if isinstance(_f, _FCMNoiseFilter):
+                fcm_logger.removeFilter(_f)
+
         handler = _Capture()
         fcm_logger.addHandler(handler)
         try:
             await FcmPushClient._listen(instance)  # type: ignore[arg-type]
         finally:
             fcm_logger.removeHandler(handler)
+            for _f in prev_filters:
+                if isinstance(_f, _FCMNoiseFilter):
+                    fcm_logger.addFilter(_f)
 
         assert any("Unexpected exception" in r for r in exception_records), (
             "Upstream FcmPushClient._listen() MUST log 'Unexpected exception during read' "

@@ -41,6 +41,7 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True):
     return SimpleNamespace(
         token="token-AAA" if with_token else "",
         hass=SimpleNamespace(
+            data={},  # v12.4.10+ async_get_clientsession pre-allocates session
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
@@ -66,6 +67,12 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True):
         _last_topdown_brightness={},
         _auth_outage_count=0,
         async_update_listeners=lambda: None,
+        # v12.4.10: Gen2 LAN-RCP light fallback reads these. Empty caches
+        # mean the fallback path also fails and the function returns False —
+        # which is the documented behaviour when no LAN IP is known.
+        _local_creds_cache={},
+        _rcp_lan_ip_cache={},
+        _local_write_at={},
         async_request_refresh=AsyncMock(),
     )
 

@@ -95,7 +95,7 @@ try:
     _INTEGRATION_VERSION: str = _json.loads(
         (_pathlib.Path(__file__).parent / "manifest.json").read_text()
     )["version"]
-except Exception:
+except Exception:  # pragma: no cover — manifest.json ships with the package; only fires on a corrupted install
     _INTEGRATION_VERSION = "unknown"
 
 
@@ -231,6 +231,82 @@ class _StreamWorkerErrorListener(logging.Handler):
             # Intentionally broad: this runs inside logging.emit and any
             # exception here would be routed back to logging's own error path.
             pass
+
+
+def _looks_like_uuid_name(n: str) -> bool:
+    """True if `n` looks like a `Bosch <UUID>` placeholder name.
+
+    Detects names a previous cloud-degraded startup leaked into the device
+    registry when `coordinator.data[cam_id].info.title` was empty and the
+    code fell back to using the cam_id (UUID-style) as the title.
+    """
+    return len(n) >= 36 and n.upper().count("-") >= 4
+
+
+def _rehydrate_cams_from_registry(
+    hass: HomeAssistant, entry_id: str,
+) -> tuple[set[str], dict[str, str]]:
+    """Discover known cam_ids + human-readable titles from the HA registries.
+
+    Used by `async_setup_entry` when the first cloud refresh raises
+    `ConfigEntryNotReady` — without this rehydration, no entities would
+    materialise on a cold start during a cloud outage, even though privacy
+    / light / LAN-ping all work without the cloud.
+
+    Returns `(cam_ids, cam_titles)`. `cam_titles` is keyed by cam_id.
+    Title-resolution order:
+      1. `device.name_by_user` — manual rename always wins.
+      2. `device.name` if it is NOT a `Bosch <UUID>` placeholder (which we
+         repair on the way out).
+      3. derived from the camera entity_id slug (`camera.bosch_terrasse` →
+         `Terrasse`).
+      4. fall back to the cam_id itself.
+
+    If a stale `Bosch <UUID>` placeholder is detected in the device
+    registry, the device name is repaired in place so newly-registered
+    entities pick up the correct slug.
+    """
+    from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers import device_registry as dr
+    ereg = er.async_get(hass)
+    dreg = dr.async_get(hass)
+    cam_ids: set[str] = set()
+    for ent in er.async_entries_for_config_entry(ereg, entry_id):
+        # Unique IDs in this integration consistently embed the UUID-style
+        # cam_id; the first match yields the canonical set.
+        for part in ent.unique_id.split("_"):
+            if len(part) == 36 and part.count("-") == 4:
+                cam_ids.add(part.upper())
+                break
+    cam_titles: dict[str, str] = {}
+    for cid in cam_ids:
+        device = dreg.async_get_device(identifiers={(DOMAIN, cid)})
+        title: str | None = None
+        if device and device.name_by_user:
+            t = device.name_by_user
+            title = t[6:] if t.startswith("Bosch ") else t
+        elif device and device.name and not _looks_like_uuid_name(device.name):
+            t = device.name
+            title = t[6:] if t.startswith("Bosch ") else t
+        else:
+            cam_eid = ereg.async_get_entity_id(
+                "camera", DOMAIN, f"bosch_shc_cam_{cid.lower()}",
+            )
+            if cam_eid and cam_eid.startswith("camera.bosch_"):
+                slug = cam_eid[len("camera.bosch_"):]
+                title = slug.replace("_", " ").title()
+        if title:
+            cam_titles[cid] = title
+            # Repair the device name in the registry if it was a broken
+            # `Bosch <UUID>` placeholder from a prior degraded startup.
+            # Sticky-name damage compounds across restarts otherwise.
+            if device and device.name and _looks_like_uuid_name(device.name):
+                dreg.async_update_device(device.id, name=f"Bosch {title}")
+                _LOGGER.info(
+                    "Repaired device name for %s: 'Bosch %s' "
+                    "(was a UUID placeholder)", cid[:8], title,
+                )
+    return cam_ids, cam_titles
 
 
 def _redact_creds(d: dict[str, Any]) -> dict[str, Any]:
@@ -634,6 +710,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # "unknown" are also silent — those are coordinator transient flaps,
         # not real availability changes.
         self._last_camera_status: dict[str, str] = {}
+        # Bosch cloud reachability tracker. Fires user notifications on the
+        # transitions (healthy → outage) and (outage → recovered). One-tick
+        # blips are suppressed by requiring _CLOUD_OUTAGE_NOTIFY_AFTER_S of
+        # continuous failure before announcing the outage. The recovery
+        # notification fires immediately when the next tick succeeds. While
+        # an RSS-announced maintenance window is `active` we stay silent —
+        # the maintenance lifecycle notifier already told the user.
+        self._cloud_outage_started_at: float | None = None
+        self._cloud_outage_notified: bool = False
+        self._CLOUD_OUTAGE_NOTIFY_AFTER_S: float = 60.0
         # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
         # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
         # _nvr_user_intent: persisted switch state (True = user wants to record).
@@ -2391,9 +2477,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if _maint_refresh is not None and (now - _maint_last) >= _maint_interval:
                 self.hass.async_create_task(_maint_refresh(reactive=False))
 
+            # Cloud-state transition notifier (v12.4.11). Schedule as a
+            # background task so the coordinator main loop is not delayed by
+            # a slow notify service. getattr handles stub coordinators in
+            # tests that bypass __init__.
+            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
+            if _cloud_alert is not None:
+                self.hass.async_create_task(_cloud_alert(True))
+
             return data
 
         except UpdateFailed:
+            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
+            if _cloud_alert is not None:
+                self.hass.async_create_task(_cloud_alert(False))
             raise
         except asyncio.TimeoutError:
             _maint = getattr(self, "_async_refresh_maintenance", None)
@@ -2402,8 +2499,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             _outage_ping = getattr(self, "_async_outage_ping_all", None)
             if _outage_ping is not None:
                 self.hass.async_create_task(_outage_ping())
+            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
+            if _cloud_alert is not None:
+                self.hass.async_create_task(_cloud_alert(False))
             raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
         except aiohttp.ClientError as err:
+            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
+            if _cloud_alert is not None:
+                self.hass.async_create_task(_cloud_alert(False))
             raise UpdateFailed(f"Network error: {err}")
 
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
@@ -2497,7 +2600,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         for svc in services:
             try:
                 data = build_notify_data(svc, message, title=title)
-                await self.hass.services.async_call("notify", svc, data, blocking=False)
+                # `alert_notify_service` option stores entries like `notify.thomas`
+                # OR bare service names `thomas`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "thomas", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
+                # produced `notify.notify.thomas` and silently failed.
+                _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
+                await self.hass.services.async_call(_domain, _service, data, blocking=False)
                 _LOGGER.info(
                     "Maintenance announce sent via notify.%s (state=%s, window=%s)",
                     svc, state, when or "(no window)",
@@ -2559,7 +2668,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         for svc in services:
             try:
                 data = build_notify_data(svc, message, title=title)
-                await self.hass.services.async_call("notify", svc, data, blocking=False)
+                # `alert_notify_service` option stores entries like `notify.thomas`
+                # OR bare service names `thomas`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "thomas", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
+                # produced `notify.notify.thomas` and silently failed.
+                _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
+                await self.hass.services.async_call(_domain, _service, data, blocking=False)
                 _LOGGER.info(
                     "Camera status announce sent via notify.%s for %s (%s→%s)",
                     svc, cam_name, last, new_status,
@@ -2568,6 +2683,104 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 _LOGGER.warning(
                     "Camera status announce via notify.%s for %s failed: %s",
                     svc, cam_name, exc,
+                )
+
+    async def _async_maybe_announce_cloud_state(self, success: bool) -> None:
+        """Fire a user notification on cloud-reachability transitions.
+
+        Outage path: when ``success=False`` for at least
+        ``_CLOUD_OUTAGE_NOTIFY_AFTER_S`` seconds in a row, fire a one-shot
+        "Bosch Cloud nicht erreichbar" notification. Recovery path: when the
+        next ``success=True`` arrives after an outage was announced, fire
+        "Bosch Cloud wieder erreichbar". One-tick failure blips never get
+        announced — they self-clear on the next success.
+
+        Suppressed while an RSS-announced maintenance window is `active`
+        because the maintenance lifecycle notifier (v12.4.8) already told
+        the user. We still record state transitions internally so we are
+        able to announce a recovery once the window closes if needed.
+
+        Routing: `alert_notify_system` → falls back to
+        `alert_notify_service`, same path as TROUBLE_DISCONNECT and the
+        maintenance announcements. Notify failures are swallowed.
+        """
+        now = time.monotonic()
+        # Active-maintenance check — if Bosch announced this exact outage as
+        # planned, stay silent.
+        in_maintenance = False
+        mw = self._maintenance_cache
+        if mw is not None and mw.camera_relevant and mw.state() == "active":
+            in_maintenance = True
+        if success:
+            if not self._cloud_outage_notified:
+                # Was either healthy already or in a sub-grace blip — just
+                # reset the tracker so the next outage starts a fresh window.
+                self._cloud_outage_started_at = None
+                return
+            # We previously announced an outage — announce recovery now.
+            self._cloud_outage_notified = False
+            self._cloud_outage_started_at = None
+            if in_maintenance:
+                _LOGGER.debug("Cloud recovered during active maintenance — staying silent")
+                return
+            await self._async_dispatch_cloud_alert(recovered=True)
+            return
+        # success=False
+        if self._cloud_outage_started_at is None:
+            self._cloud_outage_started_at = now
+            return
+        if self._cloud_outage_notified:
+            return
+        if (now - self._cloud_outage_started_at) < self._CLOUD_OUTAGE_NOTIFY_AFTER_S:
+            return
+        # Outage has persisted long enough → announce, but stay silent during
+        # known maintenance.
+        self._cloud_outage_notified = True
+        if in_maintenance:
+            _LOGGER.debug("Cloud outage suppressed: known active maintenance window")
+            return
+        await self._async_dispatch_cloud_alert(recovered=False)
+
+    async def _async_dispatch_cloud_alert(self, *, recovered: bool) -> None:
+        """Send the actual notification through the integration's alert pipeline."""
+        from .fcm import build_notify_data, get_alert_services
+        services = get_alert_services(self, "system")
+        if not services:
+            _LOGGER.debug(
+                "Cloud-state alert skipped (recovered=%s) — no notify service configured",
+                recovered,
+            )
+            return
+        if recovered:
+            title = "Bosch Cloud wieder erreichbar"
+            message = (
+                "Die Bosch-Cloud antwortet wieder. "
+                "Snapshots und Stream-Anfragen laufen normal."
+            )
+        else:
+            title = "Bosch Cloud nicht erreichbar"
+            message = (
+                "Die Bosch-Cloud antwortet nicht mehr (HTTP 5xx / Timeout). "
+                "Privacy- und Licht-Schalter gehen weiter über LAN, "
+                "Snapshots und Stream-Anfragen sind eingeschränkt."
+            )
+        for svc in services:
+            try:
+                data = build_notify_data(svc, message, title=title)
+                # `alert_notify_service` option stores entries like `notify.thomas`
+                # OR bare service names `thomas`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "thomas", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
+                # produced `notify.notify.thomas` and silently failed.
+                _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
+                await self.hass.services.async_call(_domain, _service, data, blocking=False)
+                _LOGGER.info(
+                    "Cloud-state alert sent via notify.%s (recovered=%s)",
+                    svc, recovered,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Cloud-state alert via notify.%s failed: %s", svc, exc,
                 )
 
     def _compute_status_for(
@@ -5005,55 +5218,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "with LAN-only entities; cloud-driven data will arrive on next refresh",
             exc,
         )
-        # Re-hydrate coordinator.data from the entity registry so platforms
-        # still see the previously-known cameras and create their entities.
-        from homeassistant.helpers import entity_registry as er
-        from homeassistant.helpers import device_registry as dr
-        ereg = er.async_get(hass)
-        dreg = dr.async_get(hass)
-        cam_ids: set[str] = set()
-        for ent in er.async_entries_for_config_entry(ereg, entry.entry_id):
-            # Unique IDs in this integration consistently embed the UUID-style
-            # cam_id; the first match yields the canonical set.
-            for part in ent.unique_id.split("_"):
-                if len(part) == 36 and part.count("-") == 4:
-                    cam_ids.add(part.upper())
-                    break
-        # Look up the human-readable name for each rehydrated cam. Order:
-        #   1. device.name_by_user (manual rename — always wins)
-        #   2. device.name if it is NOT a "Bosch <UUID>" placeholder leaked
-        #      from a previous cloud-degraded startup (we repair those now)
-        #   3. derive from the camera entity_id slug
-        #   4. fall back to the cam_id itself
-        def _looks_like_uuid_name(n: str) -> bool:
-            return len(n) >= 36 and n.upper().count("-") >= 4
-        cam_titles: dict[str, str] = {}
-        for cid in cam_ids:
-            device = dreg.async_get_device(identifiers={(DOMAIN, cid)})
-            title: str | None = None
-            if device and device.name_by_user:
-                t = device.name_by_user
-                title = t[6:] if t.startswith("Bosch ") else t
-            elif device and device.name and not _looks_like_uuid_name(device.name):
-                t = device.name
-                title = t[6:] if t.startswith("Bosch ") else t
-            else:
-                cam_eid = ereg.async_get_entity_id("camera", DOMAIN, f"bosch_shc_cam_{cid.lower()}")
-                if cam_eid and cam_eid.startswith("camera.bosch_"):
-                    slug = cam_eid[len("camera.bosch_"):]
-                    title = slug.replace("_", " ").title()
-            if title:
-                cam_titles[cid] = title
-                # Repair the device name in the registry if it was a
-                # broken "Bosch <UUID>" placeholder from a prior degraded
-                # startup. Sticky-name damage compounds across restarts
-                # otherwise.
-                if device and device.name and _looks_like_uuid_name(device.name):
-                    dreg.async_update_device(device.id, name=f"Bosch {title}")
-                    _LOGGER.info(
-                        "Repaired device name for %s: 'Bosch %s' "
-                        "(was a UUID placeholder)", cid[:8], title,
-                    )
+        cam_ids, cam_titles = _rehydrate_cams_from_registry(hass, entry.entry_id)
         if cam_ids:
             coordinator.data = {
                 cid: {

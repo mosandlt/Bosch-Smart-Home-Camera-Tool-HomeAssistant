@@ -161,6 +161,24 @@ class TestAsyncSetup:
 
         hass.bus.async_listen_once.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_started_listener_body_invokes_register(self):
+        """Capture the registered EVENT_HOMEASSISTANT_STARTED callback and
+        fire it — verifies the listener body actually schedules
+        `_register_lovelace_resources()`. Pins __init__.py L5040."""
+        from custom_components.bosch_shc_camera import async_setup
+
+        hass = self._make_lovelace_hass(is_running=False)
+
+        with patch(f"{MODULE}._register_services"):
+            await async_setup(hass, {})
+
+        # Capture the listener and invoke it; it should schedule a task.
+        call = hass.bus.async_listen_once.call_args
+        started_cb = call.args[1]
+        started_cb(MagicMock())
+        hass.async_create_task.assert_called_once()
+
 
 # ── _async_cancel_coordinator_tasks — exception branches ─────────────────────
 

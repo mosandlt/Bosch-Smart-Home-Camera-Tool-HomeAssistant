@@ -230,12 +230,14 @@ class TestAsyncStartFcmPushModeBranches:
             side_effect=Exception("checkin failed")
         )
 
+        # fcm.py imports FcmPushClient lazily inside the function; patch the
+        # class lookup helper to return a stub that produces our mock_client.
         with patch(f"{MODULE}._install_fcm_noise_filter"):
             with patch(f"{MODULE}.fetch_firebase_config",
-                       new_callable=lambda: (lambda: AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"}))):
-                with patch(f"{MODULE}.FcmPushClient", return_value=mock_client):
-                    with patch(f"{MODULE}.FcmRegisterConfig", MagicMock()):
-                        await async_start_fcm_push(coord)
+                       new=AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"})):
+                with patch(f"{MODULE}._get_fcm_push_client_class",
+                           return_value=MagicMock(return_value=mock_client)):
+                    await async_start_fcm_push(coord)
 
         assert not coord._fcm_running
 
@@ -258,12 +260,12 @@ class TestAsyncStartFcmPushModeBranches:
 
         with patch(f"{MODULE}._install_fcm_noise_filter"):
             with patch(f"{MODULE}.fetch_firebase_config",
-                       new_callable=lambda: (lambda: AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"}))):
-                with patch(f"{MODULE}.FcmPushClient", return_value=mock_client):
-                    with patch(f"{MODULE}.FcmRegisterConfig", MagicMock()):
-                        with patch(f"{MODULE}.register_fcm_with_bosch",
-                                   new_callable=lambda: (lambda: AsyncMock(return_value=True))):
-                            await async_start_fcm_push(coord)
+                       new=AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"})):
+                with patch(f"{MODULE}._get_fcm_push_client_class",
+                           return_value=MagicMock(return_value=mock_client)):
+                    with patch(f"{MODULE}.register_fcm_with_bosch",
+                               new=AsyncMock(return_value=True)):
+                        await async_start_fcm_push(coord)
 
         assert coord._fcm_client is None
 

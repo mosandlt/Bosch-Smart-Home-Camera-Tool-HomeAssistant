@@ -156,6 +156,30 @@ class TestMigrateDoubledPrefix:
         assert issue.is_fixable is False
         assert issue.translation_placeholders["count"] == "2"
 
+    async def test_examples_truncated_with_ellipsis_when_more_than_five(
+        self, hass, config_entry,
+    ):
+        """When >5 entries are renamed, the repair-issue `examples` field is
+        truncated to the first 5 followed by ', …'. Pins L5103."""
+        ent_reg = er.async_get(hass)
+        slugs = ["a", "b", "c", "d", "e", "f", "g"]
+        for slug in slugs:
+            ent_reg.async_get_or_create(
+                "button", DOMAIN, f"uid_{slug}",
+                suggested_object_id=f"bosch_{slug}_bosch_{slug}_refresh_snapshot",
+                config_entry=config_entry,
+            )
+        count = await _migrate_doubled_prefix_entity_ids(hass, config_entry.entry_id)
+        assert count == 7
+        issue = ir.async_get(hass).async_get_issue(
+            DOMAIN, "doubled_prefix_entity_ids_migrated",
+        )
+        assert issue is not None
+        examples = issue.translation_placeholders["examples"]
+        # Exactly five "old → new" pairs (one per slug) plus the truncation marker.
+        assert examples.count("→") == 5
+        assert examples.endswith(", …")
+
     async def test_no_issue_when_no_buggy_entries(self, hass, config_entry):
         ent_reg = er.async_get(hass)
         ent_reg.async_get_or_create(

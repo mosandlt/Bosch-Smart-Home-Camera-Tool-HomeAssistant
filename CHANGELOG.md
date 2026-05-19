@@ -5,6 +5,10 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.4.11 — 2026-05-19
+
+- **Cloud up/down transition alerts**: the coordinator now fires a user notification when the Bosch cloud transitions between healthy and unreachable. Outage path: requires ≥60 s of continuous failure before announcing, so a single transient blip never spams. Recovery path: fires immediately on the first successful tick after an announced outage. Suppressed while an RSS-announced maintenance window is `active` so users don't get duplicate alerts about a planned event. Routes via `alert_notify_system` → fallback `alert_notify_service`, same delivery path as TROUBLE_DISCONNECT and the maintenance lifecycle notifier. 11 new pin tests in `tests/test_cloud_state_alert.py` covering first-observation silence, sub-threshold blip suppression, threshold-cross fires-once, recovery, maintenance-window suppression, multi-service routing, and notify-failure containment.
+
 ## v12.4.10 — 2026-05-19
 
 - **Cloud-degraded startup**: the integration now bootstraps with LAN-only entities when the Bosch cloud returns 5xx on HA start. Before, a 5xx on the very first coordinator refresh raised `ConfigEntryNotReady` and the integration sat in a retry loop with no usable entities — even though privacy / light / LAN-ping all work without the cloud. Now: catch `ConfigEntryNotReady`, rehydrate `coordinator.data` from the entity registry (using previously known cam_ids), look up the human-readable title from the device registry (with a one-time repair pass that fixes "Bosch <UUID>" placeholder names from earlier broken startups), and kick an immediate outage-ping sweep. The next successful coordinator refresh seamlessly takes over.

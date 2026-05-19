@@ -464,7 +464,9 @@ Before v11.0.0 these failure paths logged a WARNING and silently returned — cl
 
 ## Features
 
-- **Cloud-maintenance banner:** detects Bosch's announced maintenance windows from the community RSS feed and surfaces them in the dashboard card + as a sensor.
+- **Cloud-maintenance banner + lifecycle alerts (v12.4.7/v12.4.8):** detects Bosch's announced maintenance windows from the community RSS feed; fires notifications on scheduled → active → past transitions; cameras send online/offline transition alerts.
+- **LAN-fallback during cloud outage (v12.4.10):** privacy and front-light switches stay available as long as the camera is Gen2 and reachable on the LAN. A persistent LAN-IP store and outage-ping sweep keep `binary_sensor.*_lan_reachable` current. The overview-card renders per-camera LAN-status tiles with clickable privacy/light controls while the cloud is down.
+- **Cloud up/down transition alerts (v12.4.11):** the coordinator announces cloud-health transitions via the alert pipeline. Requires ≥60 s of continuous failure before announcing; suppressed during RSS-announced maintenance windows.
 
 ```mermaid
 sequenceDiagram
@@ -482,6 +484,44 @@ sequenceDiagram
     MP-->>Sensor: state: active / scheduled / past / recent / unknown / idle
     Sensor-->>Card: hass update
     Card-->>Card: show banner (state in {active,scheduled} AND camera_relevant=true)
+```
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Switch as switch.privacy_mode<br/>switch.camera_light
+    participant Coord as Coordinator
+    participant Cloud as Bosch CBS API
+    participant RCP as Camera LAN RCP
+    participant Cam as Camera 192.168.x.y:443
+
+    User->>Switch: toggle
+    Switch->>Coord: async_turn_on/off
+    Coord->>Cloud: PUT /v11/.../privacy or lighting
+    Cloud-->>Coord: 5xx (cloud outage)
+    Coord->>Coord: lan_reachable? + Gen2?
+    Coord->>RCP: RCP write (0x0d00 privacy / 0x0c22 light)
+    RCP->>Cam: HTTPS Digest + RCP payload
+    Cam-->>RCP: 200 OK
+    RCP-->>Coord: success (local fallback)
+```
+
+```mermaid
+sequenceDiagram
+    participant Coord as Coordinator
+    participant Ping as outage-ping sweep
+    participant Cam as Cameras (LAN)
+    participant Alert as alert pipeline
+    participant Notify as notify.alert_notify_system
+
+    Coord->>Coord: tick — cloud GET fails
+    Coord->>Ping: fan-out TCP-connect :443 (all cams)
+    Ping-->>Coord: lan_reachable per camera
+    Coord->>Coord: consecutive_failures ≥ 60 s?
+    Coord->>Coord: maintenance window active? → suppress
+    Coord->>Alert: cloud_down event
+    Alert->>Notify: "Cloud nicht erreichbar — LAN aktiv"
+    Note over Coord,Notify: recovery: same path, cloud_up event
 ```
 
 ### Entities
@@ -1660,8 +1700,16 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.4.10** — see the GitHub release page for full notes:
-[**v12.4.10 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.10)
+Latest: **v12.4.11** — see the GitHub release page for full notes:
+[**v12.4.11 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.4.11)
+
+| Version | Highlights |
+|---|---|
+| **v12.4.11** | Cloud up/down transition alerts; suppressed during maintenance windows; 11 pin tests |
+| **v12.4.10** | LAN-fallback: persistent LAN-IP store, outage-ping sweep, `binary_sensor.*_lan_reachable`, privacy/light switches stay available on LAN, cloud-degraded startup, front-light Gen2 LOCAL RCP, card v2.13.0 |
+| **v12.4.9** | Card empty-state regression fix — blank panel after all cameras go unavailable; card v2.12.13 |
+| **v12.4.8** | Maintenance lifecycle notifications (scheduled/active/past); per-camera offline↔online transition alerts |
+| **v12.4.7** | Cloud-maintenance banner + `sensor.*_bosch_cloud_wartung`; status sensor offline fix; stream warm-up timeout 300 s → 180 s |
 
 | | |
 |---|---|
@@ -1676,10 +1724,10 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.10** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.1 · Mini-NVR + SMB upload (BETA) · capture / research / no-HA standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.2 · beta · npm |
-| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.0.0 · Claude Code / Claude Desktop integration |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.4.11** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.3 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · capture / research / no-HA standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.4 · beta · npm |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.0 · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
 
 HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time per the [Cross-Platform Sync Strategy](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#cross-platform-sync) (linked internally, see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
 

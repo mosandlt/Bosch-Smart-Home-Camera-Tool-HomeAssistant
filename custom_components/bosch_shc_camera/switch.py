@@ -640,22 +640,29 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
           2. Cloud unhealthy BUT camera is LAN-reachable AND Gen2 → the
              coordinator's `async_cloud_set_privacy_mode` already falls back
              to `rcp_local_write_privacy` which talks directly to the camera
-             on port 443 without any Bosch infrastructure.
+             on port 443 without any Bosch infrastructure. Works even on a
+             cold start when the in-memory cache is empty — `is_on` returns
+             `None` (HA renders "unknown"), but the user can still toggle.
           3. We are inside the post-write grace window — the camera has not
              completed its cred-rotation reboot yet but a fresh write would
              still queue and succeed once the session re-opens.
 
         Without (2) the switch goes grey for the duration of every Bosch
         cloud 5xx burst, even though the user can still toggle privacy via
-        the official app on the same LAN.
+        the official app on the same LAN. The pre-v12.4.10 "must have
+        cached state" gate caused that grey-out after every HA restart that
+        landed during a cloud outage — fixed below by letting LAN
+        reachability stand on its own merits.
         """
         cache = self.coordinator._shc_state_cache.get(self._cam_id, {})
         has_cached_state = cache.get("privacy_mode") is not None
         if self.coordinator.last_update_success and has_cached_state:
             return True
-        if not has_cached_state:
-            return False
         # Cloud unhealthy — fall back to LAN reachability for Gen2 cams.
+        # Intentionally does NOT require cached state: a cold start during
+        # cloud-503 leaves the cache empty, but the LAN RCP write path
+        # still succeeds. `is_on` will return None until the next live
+        # state is observed, HA renders that as "unknown", toggles work.
         is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
         if is_lan_reachable is None:
             return False
