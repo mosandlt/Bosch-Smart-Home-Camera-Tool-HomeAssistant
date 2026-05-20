@@ -89,4 +89,16 @@ DEFAULT_OPTIONS = {
     "nvr_preroll_seconds": 0,
     "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
     "enable_go2rtc": True,
+    "enable_webhook_delivery": False,
+    "webhook_url": "",
+    # PTZ controls (pan presets) — opt-in. CAMERA_360 indoor only; default off
+    # so non-PTZ users do not see a stray select entity in their dashboard.
+    "enable_ptz_controls": False,
 }
+
+# ── Webhook delivery ──────────────────────────────────────────────────────────
+CONF_ENABLE_WEBHOOK_DELIVERY = "enable_webhook_delivery"
+CONF_WEBHOOK_URL = "webhook_url"
+
+# ── PTZ controls (pan presets) ────────────────────────────────────────────────
+CONF_ENABLE_PTZ_CONTROLS = "enable_ptz_controls"

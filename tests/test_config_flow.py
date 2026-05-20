@@ -28,7 +28,9 @@ async def test_user_flow_aborts_when_already_configured(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] == "abort"
-    assert result["reason"] == "already_configured"
+    # manifest.json sets single_config_entry:true — HA FlowManager aborts
+    # at the handler level before our flow runs, using this reason string.
+    assert result["reason"] == "single_instance_allowed"
 
 
 async def test_reauth_confirm_shows_form(

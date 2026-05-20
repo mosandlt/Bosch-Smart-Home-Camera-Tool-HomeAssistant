@@ -185,6 +185,28 @@
               "nvr_preroll_cache_dir": "Verzeichnis für den Pre-Roll-Segment-Cache. Muss ein tmpfs-Mount (RAM-Disk) sein — Standard /dev/shm/bosch_nvr_cache unter Linux. Nur ändern falls /dev/shm nicht verfügbar ist."
             }
           },
+          "webhook": {
+            "name": "Webhook-Auslieferung",
+            "description": "Ereignis-Payloads per HTTP POST an einen externen Endpunkt senden (Bewegung / Audio / Person / Intrusion).",
+            "data": {
+              "enable_webhook_delivery": "Webhook-Auslieferung aktivieren (Standard: aus)",
+              "webhook_url": "Webhook-URL"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Bei aktivierter Option sendet jedes Bewegungs-, Audio-, Personen- und Intrusion-Ereignis einen JSON-POST an die URL unten. **Standardmäßig deaktiviert.**",
+              "webhook_url": "HTTP/HTTPS-Endpunkt, der den Event-JSON empfängt. Leer lassen = deaktiviert. Beispiel: https://example.com/hooks/bosch. Nur aktiv wenn 'Webhook-Auslieferung aktivieren' eingeschaltet ist."
+            }
+          },
+          "ptz": {
+            "name": "PTZ-Steuerung",
+            "description": "Pan-Preset-Steuerung für Kameras mit Pan-Funktion (nur Innenkamera 360).",
+            "data": {
+              "enable_ptz_controls": "PTZ-Steuerung aktivieren (Standard: aus)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Bei aktivierter Option zeigen Kameras mit Pan-Funktion eine Pan-Preset-Auswahl (Home / Links / Rechts / Hinten-Links / Hinten-Rechts). Nur die 360-Innenkamera unterstützt Pan. **Standardmäßig deaktiviert** — Nutzer ohne 360-Kamera sehen keine überflüssige Entität."
+            }
+          },
           "auth": {
             "name": "Authentifizierung",
             "description": "Frische Browser-Anmeldung erzwingen oder zum OSS-OAuth-Client migrieren.",
@@ -421,6 +443,16 @@
           "only_humans": "Nur Personen",
           "zones": "Zonen"
         }
+      },
+      "pan_preset": {
+        "name": "Schwenk-Voreinstellung",
+        "state": {
+          "home": "Mitte (0°)",
+          "left": "Links (−60°)",
+          "right": "Rechts (+60°)",
+          "back_left": "Hinten links (−120°)",
+          "back_right": "Hinten rechts (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -601,6 +633,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "Webhook-Ereignis senden",
+      "description": "Einen Webhook-POST für ein Kameraereignis manuell auslösen (für Tests).",
+      "fields": {
+        "entity_id": {
+          "name": "Kamera-Entität",
+          "description": "Kamera-Entitäts-ID für den Payload (optional)"
+        },
+        "event_type": {
+          "name": "Ereignistyp",
+          "description": "Ereignistyp für POST: MOVEMENT, AUDIO_ALARM, PERSON oder INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "Snapshot aktualisieren",
       "description": "Sofortige Snapshot-Aktualisierung aller Bosch-Kameras."

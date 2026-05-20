@@ -615,7 +615,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Contains privacy mask polygons with color: "#000000"
         self._gen2_private_areas_cache: dict[str, list[Any]] = {}
         # userToken cache — keyed by cam_id, from GET /credentials
-        # Preparation for Bosch's planned permanent local user (summer 2026)
         self._user_token_cache: dict[str, str] = {}
         # Separate timer for lighting/switch — polled every tick (60s) instead of slow tier (300s)
         # Bosch app polls this every ~40s; slow tier (300s) is too slow for responsive light state
@@ -2682,11 +2681,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         for svc in services:
             try:
                 data = build_notify_data(svc, message, title=title)
-                # `alert_notify_service` option stores entries like `notify.thomas`
-                # OR bare service names `thomas`. Mirror the FCM-side split so
-                # `hass.services.async_call("notify", "thomas", ...)` resolves
-                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
-                # produced `notify.notify.thomas` and silently failed.
+                # `alert_notify_service` option stores entries like `notify.<svc>`
+                # OR bare service names `<svc>`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "<svc>", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
+                # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
                 await self.hass.services.async_call(_domain, _service, data, blocking=False)
                 _LOGGER.info(
@@ -2777,11 +2776,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         for svc in services:
             try:
                 data = build_notify_data(svc, message, title=title)
-                # `alert_notify_service` option stores entries like `notify.thomas`
-                # OR bare service names `thomas`. Mirror the FCM-side split so
-                # `hass.services.async_call("notify", "thomas", ...)` resolves
-                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
-                # produced `notify.notify.thomas` and silently failed.
+                # `alert_notify_service` option stores entries like `notify.<svc>`
+                # OR bare service names `<svc>`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "<svc>", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
+                # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
                 await self.hass.services.async_call(_domain, _service, data, blocking=False)
                 _LOGGER.info(
@@ -2878,11 +2877,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         for svc in services:
             try:
                 data = build_notify_data(svc, message, title=title)
-                # `alert_notify_service` option stores entries like `notify.thomas`
-                # OR bare service names `thomas`. Mirror the FCM-side split so
-                # `hass.services.async_call("notify", "thomas", ...)` resolves
-                # correctly. Pre-fix: hardcoded "notify" + svc="notify.thomas"
-                # produced `notify.notify.thomas` and silently failed.
+                # `alert_notify_service` option stores entries like `notify.<svc>`
+                # OR bare service names `<svc>`. Mirror the FCM-side split so
+                # `hass.services.async_call("notify", "<svc>", ...)` resolves
+                # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
+                # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
                 await self.hass.services.async_call(_domain, _service, data, blocking=False)
                 _LOGGER.info(
@@ -5655,6 +5654,99 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             nvr_recorder._drain_staging_to_remote(coordinator),
             "bosch_nvr_drain_watcher",
         )
+
+    # ── Webhook delivery ─────────────────────────────────────────────────────
+    # Listen on all four HA event bus topics fired by the coordinator and
+    # re-deliver them via HTTP POST to the user-configured URL.
+    # Default OFF — both enable_webhook_delivery AND webhook_url must be set.
+    _WEBHOOK_EVENT_TYPES = (
+        "bosch_shc_camera_motion",
+        "bosch_shc_camera_audio_alarm",
+        "bosch_shc_camera_person",
+        "bosch_shc_camera_intrusion",
+    )
+
+    async def _async_deliver_webhook(event: Any) -> None:
+        """POST event payload to the configured webhook URL."""
+        from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        cur_opts = get_options(entry)
+        if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
+            return
+        url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
+        if not url:
+            _LOGGER.warning(
+                "Webhook delivery enabled but webhook_url is empty — skipping"
+            )
+            return
+        payload: dict[str, Any] = {
+            "event_type": event.event_type,
+            "camera":     event.data.get("camera_name", event.data.get("camera_id", "")),
+            "camera_id":  event.data.get("camera_id", ""),
+            "timestamp":  event.data.get("timestamp", ""),
+            "extra":      {k: v for k, v in event.data.items()
+                           if k not in ("camera_name", "camera_id", "timestamp")},
+        }
+        session = async_get_clientsession(hass)
+        try:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status >= 400:
+                    _LOGGER.warning(
+                        "Webhook POST returned HTTP %d for event %s",
+                        resp.status, event.event_type,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Webhook POST %s → HTTP %d", event.event_type, resp.status
+                    )
+        except aiohttp.ClientError as err:
+            _LOGGER.error(
+                "Webhook delivery failed for %s: %s", event.event_type, err
+            )
+
+    for _evt_type in _WEBHOOK_EVENT_TYPES:
+        entry.async_on_unload(
+            hass.bus.async_listen(_evt_type, _async_deliver_webhook)
+        )
+
+    # send_event_webhook service — test/manual trigger
+    async def handle_send_event_webhook(call: ServiceCall) -> None:
+        """Manually fire a webhook POST for testing."""
+        from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        cur_opts = get_options(entry)
+        if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
+            _LOGGER.warning("send_event_webhook: webhook delivery is disabled in options")
+            return
+        url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
+        if not url:
+            _LOGGER.warning("send_event_webhook: webhook_url is not configured")
+            return
+        event_type_val: str = call.data.get("event_type", "MOVEMENT")
+        entity_id_val: str = call.data.get("entity_id", "")
+        # Resolve camera name from entity_id if given
+        cam_name = entity_id_val
+        if entity_id_val:
+            state = hass.states.get(entity_id_val)
+            if state:
+                cam_name = state.attributes.get("friendly_name", entity_id_val)
+        import datetime as _dt
+        payload: dict[str, Any] = {
+            "event_type": event_type_val,
+            "camera":     cam_name,
+            "camera_id":  "",
+            "timestamp":  _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "extra":      {"source": "manual"},
+        }
+        session = async_get_clientsession(hass)
+        try:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                _LOGGER.info(
+                    "send_event_webhook: POST %s → HTTP %d", url, resp.status
+                )
+        except aiohttp.ClientError as err:
+            _LOGGER.error("send_event_webhook: POST failed: %s", err)
+
+    if not hass.services.has_service(DOMAIN, "send_event_webhook"):
+        hass.services.async_register(DOMAIN, "send_event_webhook", handle_send_event_webhook)
 
     return True
 

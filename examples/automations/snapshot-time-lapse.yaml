@@ -1,0 +1,209 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Snapshot Scheduler / Time-Lapse Collection
+# Snapshot-Planer / Zeitraffer-Aufnahme
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Four ready-to-use variants for scheduled snapshot capture. All save to
+#     /media/bosch-timelapse/<cam>/ which is accessible in the HA Media Browser.
+#     Assemble into a time-lapse with ffmpeg — see README for the one-liner.
+# DE: Vier Varianten für geplante Snapshot-Aufnahmen. Alle speichern nach
+#     /media/bosch-timelapse/<cam>/ (erreichbar im HA-Medienbrowser).
+#     Zum Zeitraffer zusammenstellen mit ffmpeg — One-Liner im README.
+#
+# EN: Prerequisites / DE: Voraussetzungen
+#     • The /media/ path must be writable (default in HA OS and Supervised).
+#       Bare Docker: map a volume to /media in your docker-compose.
+#     • binary_sensor.workday from the "Workday" integration (optional, used in
+#       Variant 1). Remove the condition block if you don't have it.
+#     • The folder /media/bosch-timelapse/<cam>/ is created automatically by
+#       camera.snapshot on the first write.
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Placeholders / DE: Platzhalter
+#     <cam>       → your camera slug, e.g. terrasse, eingang, indoor
+#     <cam_entity>→ camera entity, e.g. camera.bosch_terrasse
+#     <motion_sensor> → binary_sensor.bosch_<cam>_motion
+# ─────────────────────────────────────────────────────────────────────────────
+
+automation:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Variant 1 — Hourly snapshot, daytime only (06:00–22:00), workdays only
+  # Variante 1 — Stündlich tagsüber (06–22 Uhr), nur Werktage
+  # ───────────────────────────────────────────────────────────────────────────
+  # EN: Shoots every full hour between 06:00 and 22:00, but only on workdays
+  #     (Mon–Fri, no public holidays if Workday integration is configured).
+  #     Change the hour range via the time_pattern and template condition.
+  # DE: Jeden Vollstunde zwischen 06 und 22 Uhr, aber nur Werktage.
+  #     Stundenbereich per time_pattern und Template-Condition anpassen.
+  - alias: "Bosch time-lapse — hourly daytime"
+    description: >
+      EN: Every full hour 06–22, workdays: snapshot to /media/bosch-timelapse/<cam>/
+      DE: Jede Stunde 06–22 Uhr, Werktage: Snapshot nach /media/bosch-timelapse/<cam>/
+    trigger:
+      - platform: time_pattern
+        hours: "*"
+        minutes: "0"
+        seconds: "0"
+    condition:
+      # EN: Only between 06:00 and 22:00 / DE: Nur zwischen 06 und 22 Uhr
+      - condition: template
+        value_template: "{{ now().hour >= 6 and now().hour < 22 }}"
+      # EN: Only on workdays (requires "Workday" integration, sensor name may differ)
+      # DE: Nur Werktage (braucht "Arbeitstag"-Integration; Name ggf. anpassen)
+      - condition: state
+        entity_id: binary_sensor.workday_sensor
+        state: "on"
+    action:
+      - variables:
+          ts: "{{ now().strftime('%Y%m%d_%H%M') }}"
+          folder: "/media/bosch-timelapse/<cam>"
+          file: "{{ folder }}/{{ ts }}.jpg"
+      - service: camera.snapshot
+        target:
+          entity_id: <cam_entity>
+        data:
+          filename: "{{ file }}"
+    mode: single
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Variant 2 — Every 15 minutes, motion-triggered burst
+  # Variante 2 — Alle 15 Minuten, motion-ausgelöst
+  # ───────────────────────────────────────────────────────────────────────────
+  # EN: Takes a snapshot when motion is detected, then throttles to at most
+  #     one snapshot per 15 minutes (prevents burst flooding during long events).
+  #     Good for activity-based time-lapses (construction site, garden project).
+  # DE: Snapshot bei Bewegungserkennung, drosselt auf max. 1 Snapshot pro
+  #     15 Minuten (kein Burst-Flooding bei langen Events).
+  #     Gut für aktivitätsbasierte Zeitraffer (Baustelle, Gartenprojekt).
+  - alias: "Bosch time-lapse — motion triggered, 15 min throttle"
+    description: >
+      EN: On motion: snapshot to /media/bosch-timelapse/<cam>/, max 1 per 15 min.
+      DE: Bei Bewegung: Snapshot, max. 1 pro 15 Min.
+    trigger:
+      - platform: state
+        entity_id: <motion_sensor>
+        to: "on"
+    condition:
+      # EN: Throttle — skip if last snapshot was <15 min ago
+      # DE: Drosselung — überspringen wenn letzter Snapshot <15 Min zurück
+      - condition: template
+        value_template: >
+          {{ (now() - this.attributes.last_triggered).total_seconds() > 900
+             if this.attributes.last_triggered else true }}
+    action:
+      - variables:
+          ts: "{{ now().strftime('%Y%m%d_%H%M') }}"
+          file: "/media/bosch-timelapse/<cam>/{{ ts }}_motion.jpg"
+      - service: camera.snapshot
+        target:
+          entity_id: <cam_entity>
+        data:
+          filename: "{{ file }}"
+    mode: single
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Variant 3 — Daily reference shot at midnight
+  # Variante 3 — Täglicher Referenz-Snapshot um Mitternacht
+  # ───────────────────────────────────────────────────────────────────────────
+  # EN: One snapshot per day at 00:00. Useful as a long-term reference archive
+  #     (fence, garden, building work progress). Low storage footprint.
+  #     Change the time value to whatever makes sense (e.g. "07:00:00" for
+  #     an early-morning light reference).
+  # DE: Ein Snapshot pro Tag um 00:00. Gut als langfristiges Referenzarchiv
+  #     (Zaun, Garten, Baufortschritt). Wenig Speicherbedarf.
+  #     Zeit nach Bedarf ändern (z.B. "07:00:00" für Morgenlicht-Referenz).
+  - alias: "Bosch time-lapse — daily midnight reference"
+    description: >
+      EN: One snapshot per day at midnight → /media/bosch-timelapse/<cam>/daily/
+      DE: Ein Snapshot täglich um Mitternacht → /media/bosch-timelapse/<cam>/daily/
+    trigger:
+      - platform: time
+        at: "00:00:00"
+    action:
+      - variables:
+          date: "{{ now().strftime('%Y%m%d') }}"
+          file: "/media/bosch-timelapse/<cam>/daily/{{ date }}.jpg"
+      - service: camera.snapshot
+        target:
+          entity_id: <cam_entity>
+        data:
+          filename: "{{ file }}"
+    mode: single
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Variant 4 — Weekly summary: one shot per day, then assemble notification
+  # Variante 4 — Wochenzusammenfassung: täglich + wöchentlicher Push
+  # ───────────────────────────────────────────────────────────────────────────
+  # EN: Two parts:
+  #   4a) Daily 08:00 snapshot into a "weekly" folder (Monday resets the week).
+  #   4b) Sunday 20:00: notify with the count of snapshots taken this week.
+  #       Swap for a proper album push if your notification adapter supports it.
+  # DE: Zwei Teile:
+  #   4a) Täglich 08:00 Snapshot in einen "weekly"-Ordner (Montag = neuer Ordner).
+  #   4b) Sonntag 20:00: Benachrichtigung mit Anzahl Snapshots der Woche.
+  - alias: "Bosch time-lapse — weekly daily shot (4a)"
+    description: >
+      EN: Daily 08:00 snapshot; folder per ISO week → /media/bosch-timelapse/<cam>/week-<YYnn>/
+      DE: Täglich 08:00 Snapshot; Ordner pro Kalenderwoche.
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    action:
+      - variables:
+          week: "{{ now().strftime('week-%Y%W') }}"
+          day: "{{ now().strftime('%a') }}"
+          file: "/media/bosch-timelapse/<cam>/{{ week }}/{{ day }}_{{ now().strftime('%Y%m%d') }}.jpg"
+      - service: camera.snapshot
+        target:
+          entity_id: <cam_entity>
+        data:
+          filename: "{{ file }}"
+    mode: single
+
+  - alias: "Bosch time-lapse — weekly summary push (4b)"
+    description: >
+      EN: Every Sunday 20:00: push a summary notification with the week folder path.
+      DE: Jeden Sonntag 20:00 Uhr: Summary-Push mit Wochenordner-Pfad.
+    trigger:
+      - platform: time
+        at: "20:00:00"
+    condition:
+      # EN: Only on Sundays / DE: Nur sonntags
+      - condition: template
+        value_template: "{{ now().weekday() == 6 }}"
+    action:
+      - variables:
+          week: "{{ now().strftime('week-%Y%W') }}"
+      - service: notify.mobile_app_<your_phone>
+        data:
+          title: "Weekly time-lapse ready / Zeitraffer bereit"
+          message: >
+            EN: 7 snapshots captured this week ({{ week }}).
+            Open /media/bosch-timelapse/<cam>/{{ week }}/ in Media Browser.
+            Assemble with: ffmpeg -framerate 7 -pattern_type glob
+            -i '*.jpg' -c:v libx264 timelapse.mp4
+          data:
+            channel: "Camera summaries"
+            importance: low
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EN: Assembling the time-lapse — ffmpeg one-liner
+# DE: Zeitraffer zusammenbauen — ffmpeg-One-Liner
+# ─────────────────────────────────────────────────────────────────────────────
+# Run this on the machine that hosts /media (HA OS: SSH add-on → Advanced SSH):
+#
+#   ffmpeg -framerate 24 \
+#          -pattern_type glob \
+#          -i '/media/bosch-timelapse/<cam>/*.jpg' \
+#          -vf "scale=1920:-2,format=yuv420p" \
+#          -c:v libx264 -crf 22 -preset slow \
+#          /media/bosch-timelapse/<cam>_timelapse.mp4
+#
+# EN: Adjust -framerate (frames per second in the output video):
+#     • 24 fps with hourly shots → 1 day of footage = 0.67 s video
+#     • 24 fps with 15-min shots → 1 day of footage = 4 s video
+#     • 12 fps with daily shots  → 1 year of footage = 30 s video
+# DE: -framerate anpassen (Bilder pro Sekunde im Ausgabevideo):
+#     • 24 fps bei stündlichen Shots → 1 Tag = 0,67 s Video
+#     • 24 fps bei 15-Min-Shots → 1 Tag = 4 s Video
+#     • 12 fps bei täglichen Shots → 1 Jahr = 30 s Video

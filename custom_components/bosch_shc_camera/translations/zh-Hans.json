@@ -74,7 +74,8 @@
               "enable_snapshot_button": "开关和按钮（流媒体、隐私、灯光）",
               "enable_binary_sensors": "运动/音频报警传感器",
               "audio_default_on": "音频默认开启",
-              "enable_intercom": "对讲机（双向音频）"
+              "enable_intercom": "对讲机（双向音频）",
+              "motion_active_window": "运动传感器：激活窗口（秒）"
             },
             "data_description": {
               "enable_snapshots": "在 HA 中将最新的运动触发 JPEG 显示为摄像头实体。",
@@ -82,7 +83,8 @@
               "enable_snapshot_button": "创建开关和按钮实体：Live Stream、Audio、Privacy Mode、Camera Light、通知、刷新。",
               "enable_binary_sensors": "创建二进制传感器，在运动或音频报警事件后保持开启 30 秒。适用于自动化。",
               "audio_default_on": "开启时：音频开关默认启动（含声音的流媒体）。关闭时：音频默认静音。可在控制面板随时切换。",
-              "enable_intercom": "启用对讲机（双向音频）开关实体。默认禁用。允许向摄像头扬声器发送音频。"
+              "enable_intercom": "启用对讲机（双向音频）开关实体。默认禁用。允许向摄像头扬声器发送音频。",
+              "motion_active_window": "运动事件后运动二进制传感器保持开启的秒数。范围 10-300，默认 90。"
             }
           },
           "stream": {
@@ -181,6 +183,28 @@
               "nvr_quality": "**Auto** 使用全质量流（inst=1，约 30 Mbps）。**Low** 使用低带宽流（inst=4，约 2 Mbps） — 以分辨率为代价节省约 90% 磁盘空间。仅限 LAN；云端中继不支持 inst=4。",
               "nvr_preroll_seconds": "在 RAM（/dev/shm）中保留此秒数的滚动缓冲。检测到运动时，将创建包含此预录内容的运动片段。0 = 禁用。默认值：0。RAM 消耗：每台摄像头约 250 KB/s。",
               "nvr_preroll_cache_dir": "预录片段缓存目录。必须是 tmpfs 挂载（RAM 磁盘） — Linux 上默认为 /dev/shm/bosch_nvr_cache。仅在 /dev/shm 不可用时更改。"
+            }
+          },
+          "webhook": {
+            "name": "Webhook 推送",
+            "description": "在每次运动/音频/人员/入侵事件时，将事件载荷 POST 到外部 HTTP 端点。",
+            "data": {
+              "enable_webhook_delivery": "启用 webhook 推送（默认关闭）",
+              "webhook_url": "Webhook URL"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "开启时：每次运动、音频报警、人员检测和入侵事件都会向下方 URL 发送 JSON POST。**默认关闭。**",
+              "webhook_url": "接收事件 JSON 的 HTTP/HTTPS 端点。留空则禁用。示例：https://example.com/hooks/bosch。仅在启用 webhook 推送开启时有效。"
+            }
+          },
+          "ptz": {
+            "name": "PTZ 控制",
+            "description": "为支持水平旋转的摄像头显示预设位置控制（仅限室内 360）。",
+            "data": {
+              "enable_ptz_controls": "启用 PTZ 控制（默认关闭）"
+            },
+            "data_description": {
+              "enable_ptz_controls": "开启时：支持水平旋转的摄像头将获得预设位置选择实体（home / 向左 / 向右 / 左后 / 右后）。只有室内 360 摄像头支持旋转。**默认关闭**，不使用 360 摄像头的用户不会看到多余实体。"
             }
           },
           "auth": {
@@ -361,6 +385,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "声音检测灵敏度"
+      },
+      "intrusion_sensitivity": {
+        "name": "入侵检测灵敏度"
+      },
+      "intrusion_distance": {
+        "name": "入侵检测范围"
       }
     },
     "button": {
@@ -413,6 +443,16 @@
           "only_humans": "仅人员",
           "zones": "区域"
         }
+      },
+      "pan_preset": {
+        "name": "云台预设位",
+        "state": {
+          "home": "中央 (0°)",
+          "left": "左 (−60°)",
+          "right": "右 (+60°)",
+          "back_left": "左后 (−120°)",
+          "back_right": "右后 (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -424,6 +464,9 @@
       },
       "person_detected": {
         "name": "检测到人员"
+      },
+      "lan_reachable": {
+        "name": "LAN 可达"
       }
     },
     "update": {
@@ -579,6 +622,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "发送事件 Webhook",
+      "description": "手动触发摄像头事件的 webhook POST（用于测试）。",
+      "fields": {
+        "entity_id": {
+          "name": "摄像头实体",
+          "description": "要包含在载荷中的摄像头实体 ID（可选）"
+        },
+        "event_type": {
+          "name": "事件类型",
+          "description": "要 POST 的事件类型：MOVEMENT、AUDIO_ALARM、PERSON 或 INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "强制刷新快照",
       "description": "立即强制刷新所有 Bosch 摄像头的快照。"

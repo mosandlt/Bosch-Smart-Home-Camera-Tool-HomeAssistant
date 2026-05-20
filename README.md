@@ -57,6 +57,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
   - [`bosch-camera-overview-card` — multi-camera grid](#bosch-camera-overview-card--multi-camera-grid)
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
+- [Apple HomeKit / Apple Home Integration](#apple-homekit--apple-home-integration)
 - [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
 - [Roadmap](#roadmap) — parked features and what's under consideration
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
@@ -93,10 +94,15 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 | **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ | ❌ |
 | **Camera sharing (friends)** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — needs user-driven flow)* |
-| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ❌ | ✅ `bosch_camera_pan` |
+| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` |
+| **Named pan presets (home / left / right / back-left / back-right)** | ✅ opt-in select entity | ✅ `pan --preset` flag | ✅ `pan_preset` DP | ✅ `bosch_camera_pan preset=` |
 | **Two-way audio / intercom** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — timing-sensitive)* |
+| **Webhook delivery on events** | ✅ service + opt-in options | ✅ `watch --webhook URL` | ✅ via MQTT bridge | ❌ *(request-response model)* |
+| **MQTT event bridge (motion / audio / person)** | n/a *(HA event bus native)* | n/a *(single-run)* | ✅ admin-config | n/a |
+| **Apple HomeKit (via HA Core bridge)** | ✅ documented | n/a | n/a | n/a |
+| **Snapshot scheduler / time-lapse** | ✅ examples/ YAML | ✅ cron + ffmpeg examples | ✅ Blockly example | n/a |
 | **Custom Lovelace card** | ✅ 2 cards (single + grid) | n/a | n/a | n/a |
-| **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` | n/a |
+| **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` + VIS-2 widget (alpha) | n/a |
 | **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* | ❌ *(media LAN-only; status/events via cloud)* |
 | **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs | n/a (LLM-mediated; config via CLI / MCP client) |
 | **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v10.3.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN | n/a *(no UI — LLM is the front-end)* |
@@ -1099,6 +1105,7 @@ A growing collection of bilingual (EN + DE) automation snippets that cover commo
 | **Smart notifications** | snapshot + push with image · weather-aware (skip during storms) · doorbell-style auto-display on a wall tablet · sleep mode (quiet at night, but real intruder pattern still wakes you) · vacation deterrent with random light flashes · **escalating offline alert** (silent → info → critical based on outage duration) |
 | **Garage & vehicles** | combine the driveway camera with the garage-door cover entity to detect "vehicle arriving" / "vehicle leaving" — optional AI vehicle classification (own car / delivery / unknown) |
 | **AI vision** | classify motion via Gemini / GPT-4o / Claude / local Ollama → push only for person/vehicle/package, ignore pets · package-delivery detection · daily AI summary of camera events · TTS visitor greeting |
+| **Snapshot scheduler / time-lapse** | [`snapshot-time-lapse.yaml`](examples/automations/snapshot-time-lapse.yaml) — four ready-to-use variants: hourly daytime (workday-aware), motion-triggered 15-min throttle, daily midnight reference, weekly summary push. Snapshots land in `/media/bosch-timelapse/<cam>/`; assemble into mp4 with the included ffmpeg one-liner. |
 
 → **[Browse the full example library](examples/automations/README.md)** — index, generation matrix (Gen1 vs Gen2), placeholder reference, and combination patterns.
 
@@ -1652,6 +1659,90 @@ title: "Eyes Innenkamera II"
 
 Everything renders automatically when the integration detects a Gen2 Indoor II.
 
+---
+
+## Apple HomeKit / Apple Home Integration
+
+Bosch Smart Home cameras can be surfaced in Apple Home via HA's built-in **HomeKit Bridge** integration. No special code or extra add-on is needed from this integration — HomeKit Bridge re-exposes any HA camera entity to Apple Home over the local network.
+
+For a detailed setup guide, troubleshooting steps, and YAML configuration options see **[docs/homekit-bridge.md](docs/homekit-bridge.md)**.
+
+### Requirements
+
+- Home Assistant 2024.1 or later
+- HomeKit Bridge integration (built into HA Core — no separate install)
+- iOS 16+ / macOS 13+ / tvOS 16+ with Home app
+
+### Setup
+
+**Step 1 — Add the HomeKit Bridge integration**
+
+Go to **Settings → Devices & services → Add Integration**, search for **HomeKit Bridge**, and select it. When asked which domains to expose, tick **Cameras**.
+
+**Step 2 — Select camera entities**
+
+In the HomeKit Bridge entity filter, include the Bosch camera entities you want to expose:
+
+```
+camera.bosch_terrasse
+camera.bosch_innenbereich
+camera.bosch_kamera
+camera.bosch_eingang
+```
+
+Only entities with `camera` domain are needed here — motion sensors are included automatically if you also tick `binary_sensor`.
+
+**Step 3 — Pair with Apple Home**
+
+Open the **Home** app on iOS, tap **+** → **Add Accessory**, and scan the QR code that HA displays in the HomeKit Bridge integration card (or enter the eight-digit code manually).
+
+**Step 4 — Verify privacy mode mapping**
+
+Each camera's `switch.bosch_*_privacy_mode` entity maps automatically to Apple Home's **Camera Streaming** toggle. When privacy mode is ON in HA, the camera appears as streaming-disabled in Apple Home, and vice versa. No additional configuration is required.
+
+### Known Limitations
+
+| Feature | Status |
+|---|---|
+| Live video stream | ✅ HLS via HomeKit Secure Video (HSV) or standard HomeKit camera stream |
+| Motion sensor events | ✅ Forwarded as Apple Home motion-sensor events automatically |
+| Privacy mode toggle | ✅ Mapped via `switch.bosch_*_privacy_mode` |
+| Two-way audio | ❌ Not exposed — HA's HomeKit Bridge does not forward two-way audio for any camera |
+| Activity zones | ❌ Not exposed — requires polygon editor, currently parked |
+| Pan controls (360° Indoor) | ❌ Not forwarded via HomeKit Bridge |
+
+Two-way audio is a HA Core HomeKit Bridge constraint that applies to all cameras, not specific to Bosch Smart Home cameras.
+
+### Optional: YAML configuration
+
+If you prefer managing HomeKit Bridge in `configuration.yaml` instead of the UI:
+
+```yaml
+homekit:
+  name: HA Bridge
+  port: 21063
+  filter:
+    include_domains:
+      - camera
+      - binary_sensor
+    include_entity_globs:
+      - camera.bosch_*
+      - binary_sensor.bosch_*_motion
+  entity_config:
+    camera.bosch_terrasse:
+      name: "Terrasse"
+    camera.bosch_innenbereich:
+      name: "Innenbereich"
+    camera.bosch_kamera:
+      name: "360 Kamera"
+    camera.bosch_eingang:
+      name: "Eingang"
+```
+
+After adding this, restart HA and pair using the QR code or PIN shown in the HomeKit Bridge integration card.
+
+---
+
 ## Known Limitations
 
 ### Cloudflare Tunnel + live stream
@@ -1700,12 +1791,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.6.0** — see the GitHub release page for full notes:
+Latest: **v12.7.0** — see the GitHub release page for full notes:
 [**v12.6.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.6.0)
 
 | Version | Highlights |
 |---|---|
-| **v12.6.0** | Bosch-app-parity sprint: Mic/Speaker level sliders (Gen2), Intrusion-detection sensitivity + distance numbers, configurable motion-sensor active window (10-300s, default 90), WiFi-RSSI + Firmware diagnostic sensors. +141 regression tests, 4314 suite total. Same-day cross-port to Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3. |
+| **v12.7.0** | Bosch-app-parity sprint: Mic/Speaker level sliders (Gen2), Intrusion-detection sensitivity + distance numbers, configurable motion-sensor active window (10-300s, default 90), WiFi-RSSI + Firmware diagnostic sensors. +141 regression tests, 4314 suite total. Same-day cross-port to Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3. |
 | **v12.5.1** | Hotfix: revert the v12.5.0 Indoor II light entity — Eyes Indoor II has no controllable light hardware. Includes registry cleanup migration that removes the orphan `light.bosch_*_frontlicht` plus three stale Indoor II number orphans on next startup. |
 | **v12.5.0** | LAN-fallback hardening (HTTPS + Digest on RCP writes, hw_version + Digest creds persisted across HA restarts), new `bosch-notifications-card` for the Lovelace dashboard (active / scheduled / recent maintenance + cam status), maintenance + cloud-state notification dedup persisted across restarts (kills 20× duplicate alerts during a single outage), switch / light availability gate now allows hw-unknown + LAN-reachable. Card v2.14.0 with `https://`-scheme guard for sensor-attribute URLs. |
 | **v12.4.12** | Live-stream switch now tracks user intent, not raw session state — auto-opens (Cast / dashboard preload / `play_stream` / WebRTC watchdog refresh) no longer flip the visible switch; teardown clears `_live_connections` before NVR-stop so the switch correctly flips OFF even when Mini-NVR cleanup raises; webrtc-watchdog refresh now scoped to cameras with active sessions; health-watchdog race after user-OFF closed |
@@ -1726,7 +1817,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.6.0** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.7.0** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.4 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.7 · beta · npm |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.3 · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

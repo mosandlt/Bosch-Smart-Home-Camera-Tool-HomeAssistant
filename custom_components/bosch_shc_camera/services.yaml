@@ -313,6 +313,38 @@ remove_friend:
       selector:
         text:
 
+send_event_webhook:
+  name: Send Event Webhook
+  description: >
+    Manually trigger a webhook POST for a specific camera event. Useful for
+    testing webhook delivery without waiting for a real camera event.
+    The integration must have enable_webhook_delivery ON and webhook_url set.
+  fields:
+    entity_id:
+      name: Camera Entity
+      description: >
+        Entity ID of the camera (e.g. camera.bosch_terrasse).
+        Used to resolve the camera name for the payload.
+      required: false
+      example: "camera.bosch_terrasse"
+      selector:
+        entity:
+          domain: camera
+    event_type:
+      name: Event Type
+      description: >
+        Type of event to simulate: MOVEMENT, AUDIO_ALARM, PERSON, or INTRUSION.
+      required: true
+      default: "MOVEMENT"
+      example: "MOVEMENT"
+      selector:
+        select:
+          options:
+            - "MOVEMENT"
+            - "AUDIO_ALARM"
+            - "PERSON"
+            - "INTRUSION"
+
 migrate_flat_events:
   name: Migrate Flat Event Files
   description: >

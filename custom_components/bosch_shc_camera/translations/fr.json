@@ -74,7 +74,8 @@
               "enable_snapshot_button": "Interrupteurs & Boutons (Stream, Confidentialité, Lumière)",
               "enable_binary_sensors": "Capteurs d'alarme mouvement / audio",
               "audio_default_on": "Audio activé par défaut",
-              "enable_intercom": "Interphone (audio bidirectionnel)"
+              "enable_intercom": "Interphone (audio bidirectionnel)",
+              "motion_active_window": "Capteur de mouvement : fenêtre active (secondes)"
             },
             "data_description": {
               "enable_snapshots": "Affiche le dernier JPEG déclenché par mouvement comme entité caméra dans HA.",
@@ -82,7 +83,8 @@
               "enable_snapshot_button": "Crée des entités interrupteurs et boutons : Live Stream, Audio, Mode Confidentialité, Lumière caméra, Notifications, Actualiser.",
               "enable_binary_sensors": "Crée des capteurs binaires qui s'activent pendant 30 secondes après un événement mouvement ou alarme audio. Utile pour les automations.",
               "audio_default_on": "Activé : l'interrupteur audio démarre en marche (stream avec son). Désactivé : l'audio démarre en sourdine. Peut être basculé à tout moment depuis le tableau de bord.",
-              "enable_intercom": "Active l'entité interrupteur d'interphone (audio bidirectionnel). Désactivé par défaut. Permet d'envoyer de l'audio vers le haut-parleur de la caméra."
+              "enable_intercom": "Active l'entité interrupteur d'interphone (audio bidirectionnel). Désactivé par défaut. Permet d'envoyer de l'audio vers le haut-parleur de la caméra.",
+              "motion_active_window": "Durée (secondes) pendant laquelle le capteur binaire de mouvement reste ACTIVÉ après un événement. Plage 10-300, défaut 90."
             }
           },
           "stream": {
@@ -181,6 +183,28 @@
               "nvr_quality": "**Auto** utilise le stream pleine qualité (inst=1, ~30 Mbps). **Basse** utilise le stream faible débit (inst=4, ~2 Mbps) — économise ~90 % d'espace disque au détriment de la résolution. LAN uniquement ; le relais Cloud ne supporte pas inst=4.",
               "nvr_preroll_seconds": "Conserve un tampon glissant de ce nombre de secondes en RAM (/dev/shm). Lors d'une détection de mouvement, un clip est créé incluant ce pré-roll. 0 = désactivé. Défaut : 0. Coût RAM : ~250 Ko/s par caméra.",
               "nvr_preroll_cache_dir": "Répertoire du cache de segments pré-roll. Doit être un montage tmpfs (disque RAM) — /dev/shm/bosch_nvr_cache est le défaut sous Linux. Ne modifier que si /dev/shm n'est pas disponible."
+            }
+          },
+          "webhook": {
+            "name": "Livraison de Webhook",
+            "description": "Envoyer les charges utiles d'événements à un endpoint HTTP externe à chaque événement de mouvement / audio / personne / intrusion.",
+            "data": {
+              "enable_webhook_delivery": "Activer la livraison de webhook (par défaut désactivé)",
+              "webhook_url": "URL du Webhook"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Quand ACTIVÉ : chaque mouvement, alarme audio, détection de personne et événement d'intrusion envoie un POST JSON à l'URL ci-dessous. **Désactivé par défaut.**",
+              "webhook_url": "Endpoint HTTP/HTTPS qui reçoit le JSON de l'événement. Laisser vide pour désactiver. Exemple : https://example.com/hooks/bosch. Actif uniquement quand 'Activer la livraison de webhook' est activé."
+            }
+          },
+          "ptz": {
+            "name": "Contrôles PTZ",
+            "description": "Afficher les commandes de position préréglée pour les caméras prenant en charge la rotation (intérieur 360 uniquement).",
+            "data": {
+              "enable_ptz_controls": "Activer les contrôles PTZ (par défaut désactivé)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Quand ACTIVÉ : les caméras prenant en charge la rotation obtiennent une entité de sélection de position préréglée (accueil / gauche / droite / arrière-gauche / arrière-droit). Seule la caméra intérieure 360 prend en charge la rotation. **Désactivé par défaut** pour que les utilisateurs sans caméra 360 ne voient pas d'entité superflue."
             }
           },
           "auth": {
@@ -361,6 +385,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "Sensibilité détection sonore"
+      },
+      "intrusion_sensitivity": {
+        "name": "Sensibilité de Détection d'Intrusion"
+      },
+      "intrusion_distance": {
+        "name": "Portée de Détection d'Intrusion"
       }
     },
     "button": {
@@ -413,6 +443,16 @@
           "only_humans": "Personnes uniquement",
           "zones": "Zones"
         }
+      },
+      "pan_preset": {
+        "name": "Position préréglée",
+        "state": {
+          "home": "Centre (0°)",
+          "left": "Gauche (−60°)",
+          "right": "Droite (+60°)",
+          "back_left": "Arrière gauche (−120°)",
+          "back_right": "Arrière droite (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -424,6 +464,9 @@
       },
       "person_detected": {
         "name": "Personne détectée"
+      },
+      "lan_reachable": {
+        "name": "Réseau LAN accessible"
       }
     },
     "update": {
@@ -579,6 +622,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "Envoyer un Webhook d'Événement",
+      "description": "Déclencher manuellement un POST webhook pour un événement caméra (pour les tests).",
+      "fields": {
+        "entity_id": {
+          "name": "Entité Caméra",
+          "description": "ID d'entité caméra à inclure dans le payload (optionnel)"
+        },
+        "event_type": {
+          "name": "Type d'Événement",
+          "description": "Type d'événement à envoyer par POST : MOVEMENT, AUDIO_ALARM, PERSON ou INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "Déclencher l'actualisation du snapshot",
       "description": "Force une actualisation immédiate du snapshot pour toutes les caméras Bosch."

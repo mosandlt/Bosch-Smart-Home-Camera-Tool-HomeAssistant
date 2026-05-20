@@ -5,6 +5,20 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.7.0 — 2026-05-20
+
+Feature release shipped alongside Python CLI v10.7.5, ioBroker v0.7.9, MCP v1.3.4 and a new Node-RED skeleton (alpha). Adds opt-in entity controls, webhook event delivery, HomeKit Bridge documentation, snapshot scheduling examples, and reaches 100% line coverage.
+
+- **PTZ named presets (Gen1 360°).** New `select.bosch_<cam>_pan_preset` entity exposing five named pan positions: `home` (0°), `left` (-60°), `right` (+60°), `back_left` (-120°), `back_right` (+120°). Ceiling-mount sign-inversion handled automatically. Cross-module port — also available as `pan --preset` flag in the Python CLI, `pan_preset` DP in the ioBroker adapter, and `bosch_camera_pan preset=` argument in the MCP server.
+- **Opt-in PTZ controls.** New options-flow toggle `enable_ptz_controls` (default off) — the pan-preset select entity is only created when the toggle is on. Users without a 360° camera see no stray entity.
+- **Webhook event delivery.** New service `bosch_shc_camera.send_event_webhook` plus opt-in options-flow toggle (`enable_webhook_delivery` + `webhook_url`). When enabled, motion / audio / person / intrusion events POST a JSON payload to the configured URL. Default off. POST failures are logged but not propagated. Cross-module — Python CLI gets `watch --webhook URL` flag, ioBroker uses the MQTT bridge instead.
+- **Apple HomeKit / Apple Home documentation.** New `## Apple HomeKit Integration` section in the README plus full `docs/homekit-bridge.md` guide. Camera entities and privacy switches are exposed via HA Core's built-in HomeKit Bridge — no additional code required, just configuration.
+- **Snapshot scheduler / time-lapse examples.** New `examples/automations/snapshot-time-lapse.yaml` with four variants: hourly daytime, motion-triggered with throttle, daily midnight, weekly summary. Filenames templated with `{{ now().strftime('%Y%m%d_%H%M') }}`. Companion `ffmpeg` one-liner included for assembly.
+- **100% line coverage milestone.** +34 new tests close every previously-uncovered line in the production codebase. Test count: **4409 passed, 0 failures** (was 4374 / 1 failure). Coverage: 100% line / 11,776 statements / 0 missed. 1 stale assertion fix (single_instance_allowed since `single_config_entry: true` is set on the manifest).
+- **Cross-module Comparison Table sync.** All four sister-project READMEs (HA + Python CLI + ioBroker + MCP) now share a byte-identical 37-row Integration Comparison Table — verified by MD5 hash. New rows: Named pan presets, Webhook delivery, MQTT event bridge, Apple HomeKit, Snapshot scheduler.
+- **Translation completeness.** Audit + fill across all 11 languages (`de`, `en`, `es`, `fr`, `it`, `nl`, `pl`, `pt`, `ru`, `uk`, `zh-Hans`). Zero gaps remaining — added `services.send_event_webhook`, `webhook` + `ptz` option sections, plus a handful of previously-missed entity labels.
+- **Architecture diagrams.** Five new Mermaid diagrams in `docs/architecture-diagrams/`: PTZ preset path, MQTT event flow, cred-rotation retry, emergency LiveSession, stream-lifecycle-with-privacy. Source `.mmd` + rendered `.svg` for each.
+
 ## v12.6.0 — 2026-05-20
 
 Feature release porting four Bosch-app-parity gaps surfaced by a competitive audit against Reolink/Eufy/Ring integrations. All four ship the same day as cross-platform releases (Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3).

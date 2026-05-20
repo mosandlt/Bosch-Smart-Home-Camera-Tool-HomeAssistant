@@ -42,6 +42,17 @@ DETECTION_TO_API = {k: k.upper() for k in DETECTION_MODE_OPTIONS}
 
 FCM_PUSH_MODE_OPTIONS = ["auto", "polling"]
 
+# Pan preset options and their mapped angles (degrees from centre).
+# Available only for cameras with panLimit > 0 (CAMERA_360 indoor).
+PAN_PRESET_OPTIONS = ["home", "left", "right", "back_left", "back_right"]
+PAN_PRESET_ANGLES: dict[str, int] = {
+    "home":       0,
+    "left":     -60,
+    "right":     60,
+    "back_left":  -120,
+    "back_right":  120,
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -59,6 +70,12 @@ async def async_setup_entry(
         from .models import get_model_config
         if get_model_config(hw).generation >= 2:
             entities.append(BoschDetectionModeSelect(coordinator, cam_id, config_entry))
+        # PTZ preset select — only for cameras with panLimit > 0 (CAMERA_360 indoor)
+        # AND opt-in via options. Default off so non-PTZ users see no extra entity.
+        pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
+        ptz_enabled = config_entry.options.get("enable_ptz_controls", False)
+        if pan_limit and ptz_enabled:
+            entities.append(BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit))
     # Integration-level selects (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -443,4 +460,95 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
             _LOGGER.debug("Detection mode set to %s for %s", api_value, self._cam_id[:8])
         else:
             _LOGGER.warning("Failed to set detection mode for %s", self._cam_id[:8])
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
+    """Select entity with named PTZ presets for the Gen1 360° indoor camera.
+
+    Options: home (0°), left (-60°), right (+60°), back_left (-120°), back_right (+120°).
+    Each selection calls coordinator.async_cloud_set_pan with the mapped angle.
+    Only created when featureSupport.panLimit > 0 (CAMERA_360).
+
+    The "current option" is derived live from the coordinator._pan_cache value:
+    the closest mapped preset whose angle matches exactly, or None when the
+    camera is between presets (e.g. after a manual slider move).
+    """
+
+    _attr_icon = "mdi:pan-horizontal"
+    _attr_options = PAN_PRESET_OPTIONS
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+        pan_limit: int,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry = entry
+        self._pan_limit = pan_limit
+
+        cam_data = coordinator.data.get(cam_id, {})
+        cam_info = cam_data.get("info", {})
+        self._cam_title = cam_info.get("title", cam_id)
+
+        self._attr_name = "Pan Preset"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_pan_preset"
+        self._attr_translation_key = "pan_preset"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        cam_data = self.coordinator.data.get(self._cam_id, {})
+        cam_info = cam_data.get("info", {})
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the preset name that matches the current pan position exactly, or None."""
+        raw = self.coordinator._pan_cache.get(self._cam_id)
+        if raw is None:
+            return None
+        # Invert sign for ceiling-mounted cameras (mirrors BoschPanNumber logic)
+        pos = -int(raw) if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id) else int(raw)
+        for name, angle in PAN_PRESET_ANGLES.items():
+            if pos == angle:
+                return name
+        return None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._pan_cache.get(self._cam_id) is not None
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        """Move camera to the preset pan angle."""
+        if option not in PAN_PRESET_ANGLES:
+            _LOGGER.warning("Unknown pan preset: %s", option)
+            return
+        target_angle = PAN_PRESET_ANGLES[option]
+        # Invert sign for ceiling-mounted cameras
+        actual = (
+            -target_angle
+            if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
+            else target_angle
+        )
+        success = await self.coordinator.async_cloud_set_pan(self._cam_id, actual)
+        if success:
+            self.coordinator._pan_cache[self._cam_id] = actual
+            _LOGGER.debug("Pan preset %s → %d° for %s", option, actual, self._cam_id[:8])
+        else:
+            _LOGGER.warning("Failed to apply pan preset %s for %s", option, self._cam_id[:8])
         self.async_write_ha_state()

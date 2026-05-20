@@ -74,7 +74,8 @@
               "enable_snapshot_button": "Schakelaars & knoppen (Stream, Privacy, Licht)",
               "enable_binary_sensors": "Bewegings-/audioalarmsensoren",
               "audio_default_on": "Audio standaard ingeschakeld",
-              "enable_intercom": "Intercom (tweerichtingsaudio)"
+              "enable_intercom": "Intercom (tweerichtingsaudio)",
+              "motion_active_window": "Bewegingssensor: actief venster (seconden)"
             },
             "data_description": {
               "enable_snapshots": "Toont de laatste door beweging geactiveerde JPEG als camera-entiteit in HA.",
@@ -82,7 +83,8 @@
               "enable_snapshot_button": "Maakt schakelaar- en knopentiteiten aan: Live Stream, Audio, Privacymodus, Cameralamp, Meldingen, Vernieuwen.",
               "enable_binary_sensors": "Maakt binaire sensoren aan die 30 seconden AAN blijven na een bewegings- of audioalarmgebeurtenis. Handig voor automatiseringen.",
               "audio_default_on": "AAN: audioschakelaar start ingeschakeld (stream met geluid). UIT: audio start gedempt. Kan op elk moment worden omgeschakeld via het dashboard.",
-              "enable_intercom": "Schakelt de intercom-entiteit (tweerichtingsaudio) in. Standaard uitgeschakeld. Maakt het mogelijk audio naar de cameraluidspreker te sturen."
+              "enable_intercom": "Schakelt de intercom-entiteit (tweerichtingsaudio) in. Standaard uitgeschakeld. Maakt het mogelijk audio naar de cameraluidspreker te sturen.",
+              "motion_active_window": "Hoe lang (seconden) de binaire bewegingssensor AAN blijft na een gebeurtenis. Bereik 10-300, standaard 90."
             }
           },
           "stream": {
@@ -181,6 +183,28 @@
               "nvr_quality": "**Auto** gebruikt de volledige kwaliteitsstream (inst=1, ~30 Mbps). **Laag** gebruikt de lage-bandbreedtestream (inst=4, ~2 Mbps) — bespaart ~90% schijfruimte ten koste van resolutie. Alleen LAN; de Cloud-relay ondersteunt inst=4 niet.",
               "nvr_preroll_seconds": "Bewaart een rollende buffer van dit aantal seconden in RAM (/dev/shm). Bij bewegingsdetectie wordt een clip gemaakt die deze pre-roll bevat. 0 = uitgeschakeld. Standaard: 0. RAM-gebruik: ~250 KB/s per camera.",
               "nvr_preroll_cache_dir": "Map voor de pre-roll-segmentcache. Moet een tmpfs-mount (RAM-schijf) zijn — /dev/shm/bosch_nvr_cache is de standaard op Linux. Alleen wijzigen als /dev/shm niet beschikbaar is."
+            }
+          },
+          "webhook": {
+            "name": "Webhook Bezorging",
+            "description": "Gebeurtenis-payloads sturen naar een extern HTTP-endpoint bij elke bewegings- / audio- / persoons- / indringingsgebeurtenis.",
+            "data": {
+              "enable_webhook_delivery": "Webhook bezorging inschakelen (standaard uitgeschakeld)",
+              "webhook_url": "Webhook URL"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Wanneer INGESCHAKELD: elke bewegings-, audioalarm-, persoonsdetectie- en indringingsgebeurtenis stuurt een JSON POST naar de URL hieronder. **Standaard uitgeschakeld.**",
+              "webhook_url": "HTTP/HTTPS-endpoint dat de gebeurtenis-JSON ontvangt. Leeg laten om uit te schakelen. Voorbeeld: https://example.com/hooks/bosch. Alleen actief wanneer 'Webhook bezorging inschakelen' aan is."
+            }
+          },
+          "ptz": {
+            "name": "PTZ Besturingen",
+            "description": "Pan-voorinstelling besturingen tonen voor camera's met ondersteuning voor pannen (alleen indoor 360).",
+            "data": {
+              "enable_ptz_controls": "PTZ besturingen inschakelen (standaard uitgeschakeld)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Wanneer INGESCHAKELD: camera's met pan-ondersteuning krijgen een pan-voorinstelling selectie-entiteit (home / links / rechts / achter-links / achter-rechts). Alleen de indoor 360-camera ondersteunt pannen. **Standaard uitgeschakeld** zodat gebruikers zonder 360-camera geen overbodige entiteit zien."
             }
           },
           "auth": {
@@ -361,6 +385,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "Gevoeligheid geluidsdetectie"
+      },
+      "intrusion_sensitivity": {
+        "name": "Gevoeligheid Indringingsdetectie"
+      },
+      "intrusion_distance": {
+        "name": "Bereik Indringingsdetectie"
       }
     },
     "button": {
@@ -413,6 +443,16 @@
           "only_humans": "Alleen personen",
           "zones": "Zones"
         }
+      },
+      "pan_preset": {
+        "name": "Zwenkpositie",
+        "state": {
+          "home": "Midden (0°)",
+          "left": "Links (−60°)",
+          "right": "Rechts (+60°)",
+          "back_left": "Achter links (−120°)",
+          "back_right": "Achter rechts (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -424,6 +464,9 @@
       },
       "person_detected": {
         "name": "Persoon gedetecteerd"
+      },
+      "lan_reachable": {
+        "name": "LAN Bereikbaar"
       }
     },
     "update": {
@@ -579,6 +622,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "Stuur Evenement Webhook",
+      "description": "Handmatig een webhook POST activeren voor een cameragebeurtenenis (voor testen).",
+      "fields": {
+        "entity_id": {
+          "name": "Camera Entiteit",
+          "description": "Camera entiteits-ID om op te nemen in het payload (optioneel)"
+        },
+        "event_type": {
+          "name": "Gebeurtenistype",
+          "description": "Gebeurtenistype voor POST: MOVEMENT, AUDIO_ALARM, PERSON of INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "Snapshot vernieuwen activeren",
       "description": "Dwingt een directe snapshot-vernieuwing af voor alle Bosch-camera's."

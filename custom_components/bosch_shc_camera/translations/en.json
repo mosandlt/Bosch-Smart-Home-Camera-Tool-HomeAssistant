@@ -185,6 +185,28 @@
               "nvr_preroll_cache_dir": "Directory for the pre-roll segment cache. Must be a tmpfs mount (RAM disk) — /dev/shm/bosch_nvr_cache is the default on Linux. Change only if /dev/shm is not available."
             }
           },
+          "webhook": {
+            "name": "Webhook delivery",
+            "description": "POST event payloads to an external HTTP endpoint on every motion / audio / person / intrusion event.",
+            "data": {
+              "enable_webhook_delivery": "Enable webhook delivery (default off)",
+              "webhook_url": "Webhook URL"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "When ON: every motion, audio alarm, person detection, and intrusion event fires a JSON POST to the URL below. **Off by default.**",
+              "webhook_url": "HTTP/HTTPS endpoint that receives the event JSON. Leave empty to disable. Example: https://example.com/hooks/bosch. Only active when 'Enable webhook delivery' is on."
+            }
+          },
+          "ptz": {
+            "name": "PTZ controls",
+            "description": "Show pan-preset controls for cameras that support pan (indoor 360 only).",
+            "data": {
+              "enable_ptz_controls": "Enable PTZ controls (default off)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "When ON: cameras with pan support get a pan-preset select entity (home / left / right / back-left / back-right). Only the indoor 360 camera exposes pan. **Off by default** so users without a 360 camera see no stray entity."
+            }
+          },
           "auth": {
             "name": "Authentication",
             "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
@@ -421,6 +443,16 @@
           "only_humans": "Persons Only",
           "zones": "Zones"
         }
+      },
+      "pan_preset": {
+        "name": "Pan Preset",
+        "state": {
+          "home": "Home (Centre)",
+          "left": "Left (−60°)",
+          "right": "Right (+60°)",
+          "back_left": "Back Left (−120°)",
+          "back_right": "Back Right (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -601,6 +633,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "Send Event Webhook",
+      "description": "Manually trigger a webhook POST for a camera event (for testing).",
+      "fields": {
+        "entity_id": {
+          "name": "Camera Entity",
+          "description": "Camera entity ID to include in the payload (optional)"
+        },
+        "event_type": {
+          "name": "Event Type",
+          "description": "Event type to POST: MOVEMENT, AUDIO_ALARM, PERSON, or INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "Trigger Snapshot Refresh",
       "description": "Force an immediate snapshot refresh for all Bosch cameras."

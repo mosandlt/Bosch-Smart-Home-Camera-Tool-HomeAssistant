@@ -11,5 +11,6 @@
   "loggers": ["custom_components.bosch_shc_camera"],
   "quality_scale": "platinum",
   "requirements": ["firebase-messaging>=0.4.5,<1", "smbprotocol>=1.10.0,<2"],
-  "version": "12.6.0"
+  "single_config_entry": true,
+  "version": "12.7.0"
 }

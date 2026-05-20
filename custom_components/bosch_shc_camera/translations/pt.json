@@ -74,7 +74,8 @@
               "enable_snapshot_button": "Interruptores e botões (Stream, Privacidade, Luz)",
               "enable_binary_sensors": "Sensores de movimento / alarme sonoro",
               "audio_default_on": "Áudio activado por predefinição",
-              "enable_intercom": "Intercomunicador (áudio bidirecional)"
+              "enable_intercom": "Intercomunicador (áudio bidirecional)",
+              "motion_active_window": "Sensor de movimento: janela ativa (segundos)"
             },
             "data_description": {
               "enable_snapshots": "Mostrar o último JPEG activado por movimento como entidade de câmara no HA.",
@@ -82,7 +83,8 @@
               "enable_snapshot_button": "Criar entidades de interruptor e botão: Live Stream, Audio, Privacy Mode, Camera Light, Notificações, Actualizar.",
               "enable_binary_sensors": "Criar sensores binários que ficam LIGADOS durante 30 segundos após um evento de movimento ou alarme sonoro. Útil para automações.",
               "audio_default_on": "Se LIGADO: o interruptor de áudio inicia activado (stream com som). Se DESLIGADO: o áudio inicia sem som. Pode ser alternado a qualquer momento no painel.",
-              "enable_intercom": "Activar a entidade interruptor de intercomunicador (áudio bidirecional). Desactivado por predefinição. Permite enviar áudio para o altifalante da câmara."
+              "enable_intercom": "Activar a entidade interruptor de intercomunicador (áudio bidirecional). Desactivado por predefinição. Permite enviar áudio para o altifalante da câmara.",
+              "motion_active_window": "Por quantos segundos o sensor binário de movimento permanece ATIVADO após um evento. Intervalo 10-300, padrão 90."
             }
           },
           "stream": {
@@ -181,6 +183,28 @@
               "nvr_quality": "**Auto** usa o stream de qualidade total (inst=1, ~30 Mbps). **Low** usa o stream de baixa largura de banda (inst=4, ~2 Mbps) — poupa ~90% de espaço em disco à custa da resolução. Apenas LAN; o relay cloud não suporta inst=4.",
               "nvr_preroll_seconds": "Manter um buffer rotativo deste número de segundos em RAM (/dev/shm). Quando é detectado movimento, é criado um clip que inclui este pré-roll. 0 = desactivado. Predefinição: 0. Custo RAM: ~250 KB/s por câmara.",
               "nvr_preroll_cache_dir": "Directório para o cache de segmentos de pré-gravação. Deve ser um mount tmpfs (disco RAM) — /dev/shm/bosch_nvr_cache é o predefinido no Linux. Altere apenas se /dev/shm não estiver disponível."
+            }
+          },
+          "webhook": {
+            "name": "Entrega de Webhook",
+            "description": "Enviar payloads de eventos para um endpoint HTTP externo a cada evento de movimento / áudio / pessoa / intrusão.",
+            "data": {
+              "enable_webhook_delivery": "Ativar entrega de webhook (padrão desativado)",
+              "webhook_url": "URL do Webhook"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Quando ATIVADO: cada evento de movimento, alarme de áudio, detecção de pessoas e intrusão envia um POST JSON para a URL abaixo. **Desativado por padrão.**",
+              "webhook_url": "Endpoint HTTP/HTTPS que recebe o JSON do evento. Deixar vazio para desativar. Exemplo: https://example.com/hooks/bosch. Ativo apenas quando 'Ativar entrega de webhook' estiver ligado."
+            }
+          },
+          "ptz": {
+            "name": "Controles PTZ",
+            "description": "Mostrar controles de posição predefinida para câmeras com suporte a rotação (apenas interior 360).",
+            "data": {
+              "enable_ptz_controls": "Ativar controles PTZ (padrão desativado)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Quando ATIVADO: câmeras com suporte a rotação recebem uma entidade de seleção de posição predefinida (home / esquerda / direita / trás-esquerda / trás-direita). Apenas a câmera interior 360 suporta rotação. **Desativado por padrão** para que usuários sem câmera 360 não vejam entidade desnecessária."
             }
           },
           "auth": {
@@ -361,6 +385,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "Sensibilidade de Detecção de Som"
+      },
+      "intrusion_sensitivity": {
+        "name": "Sensibilidade de Detecção de Intrusão"
+      },
+      "intrusion_distance": {
+        "name": "Alcance de Detecção de Intrusão"
       }
     },
     "button": {
@@ -413,6 +443,16 @@
           "only_humans": "Apenas Pessoas",
           "zones": "Zonas"
         }
+      },
+      "pan_preset": {
+        "name": "Posição predefinida",
+        "state": {
+          "home": "Centro (0°)",
+          "left": "Esquerda (−60°)",
+          "right": "Direita (+60°)",
+          "back_left": "Esquerda traseira (−120°)",
+          "back_right": "Direita traseira (+120°)"
+        }
       }
     },
     "binary_sensor": {
@@ -424,6 +464,9 @@
       },
       "person_detected": {
         "name": "Pessoa Detectada"
+      },
+      "lan_reachable": {
+        "name": "LAN Acessível"
       }
     },
     "update": {
@@ -579,6 +622,20 @@
     }
   },
   "services": {
+    "send_event_webhook": {
+      "name": "Enviar Webhook de Evento",
+      "description": "Acionar manualmente um POST de webhook para um evento de câmera (para testes).",
+      "fields": {
+        "entity_id": {
+          "name": "Entidade de Câmera",
+          "description": "ID da entidade de câmera para incluir no payload (opcional)"
+        },
+        "event_type": {
+          "name": "Tipo de Evento",
+          "description": "Tipo de evento para POST: MOVEMENT, AUDIO_ALARM, PERSON ou INTRUSION"
+        }
+      }
+    },
     "trigger_snapshot": {
       "name": "Forçar Actualização de Snapshot",
       "description": "Forçar uma actualização imediata de snapshot para todas as câmaras Bosch."

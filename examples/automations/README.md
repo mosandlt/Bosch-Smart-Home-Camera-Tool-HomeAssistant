@@ -46,6 +46,12 @@ Every file contains both English (EN:) and German (DE:) explanations side by sid
 |---|---|
 | [`ai-vision-smart-alerts.yaml`](ai-vision-smart-alerts.yaml) | EN: Use a vision LLM (Gemini, GPT-4o, Claude, Ollama) to classify motion: "person", "vehicle", "package", "pet". Includes 4 sub-examples — smart push, package detection, daily summary, visitor greeting via TTS. <br> DE: Vision-LLM (Gemini, GPT-4o, Claude, Ollama) klassifiziert Motion: "Person", "Fahrzeug", "Paket", "Tier". Enthält 4 Unterbeispiele — Smart-Push, Paket-Erkennung, Tageszusammenfassung, Besucher-Begrüßung per TTS. |
 
+### Snapshot scheduler & time-lapse / Snapshot-Planer & Zeitraffer
+
+| File / Datei | Use case / Anwendungsfall | Camera gen / Kamera-Gen |
+|---|---|---|
+| [`snapshot-time-lapse.yaml`](snapshot-time-lapse.yaml) | EN: Four variants — hourly daytime (workday-aware), motion-triggered 15-min throttle, daily midnight reference, weekly summary push. Saves to `/media/bosch-timelapse/<cam>/`; includes ffmpeg one-liner to assemble into mp4. <br> DE: Vier Varianten — stündlich tagsüber (Werktag-aware), Bewegungsauslösung 15-Min-Drossel, täglicher Mitternachts-Snapshot, wöchentlicher Summary-Push. Speichert nach `/media/bosch-timelapse/<cam>/`; mit ffmpeg-One-Liner zum mp4-Zusammenbauen. | Both / beide |
+
 ## Camera-generation matrix / Kamera-Generations-Matrix
 
 | Switch / Schalter | Gen1 (Eyes v1, 360 v1) | Gen2 (Eyes II, Innen II) |

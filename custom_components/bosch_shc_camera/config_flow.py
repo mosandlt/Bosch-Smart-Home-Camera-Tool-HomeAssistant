@@ -83,6 +83,12 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "nvr_smb_subpath", "nvr_retention_days",
         "nvr_quality", "nvr_preroll_seconds", "nvr_preroll_cache_dir",
     ],
+    "webhook": [
+        "enable_webhook_delivery", "webhook_url",
+    ],
+    "ptz": [
+        "enable_ptz_controls",
+    ],
     "auth": [
         "force_relogin", "migrate_to_oss_client",
     ],
@@ -149,6 +155,8 @@ from .const import (
     DEFAULT_MOTION_ACTIVE_WINDOW,
     MOTION_ACTIVE_WINDOW_MIN,
     MOTION_ACTIVE_WINDOW_MAX,
+    CONF_ENABLE_WEBHOOK_DELIVERY,
+    CONF_WEBHOOK_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -517,7 +525,9 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                       "enable_intercom",
                       "enable_smb_upload",
                       "enable_nvr",
-                      "enable_go2rtc"]:
+                      "enable_go2rtc",
+                      "enable_webhook_delivery",
+                      "enable_ptz_controls"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -804,6 +814,30 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     "nvr_preroll_cache_dir",
                     description={"suggested_value": opts.get("nvr_preroll_cache_dir", "/dev/shm/bosch_nvr_cache")},
                 ): str,
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("webhook")] = section(
+            vol.Schema({
+                vol.Optional(
+                    "enable_webhook_delivery",
+                    default=bool(opts.get("enable_webhook_delivery", False)),
+                ): bool,
+                vol.Optional(
+                    "webhook_url",
+                    description={"suggested_value": opts.get("webhook_url", "")},
+                ): str,
+            }),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("ptz")] = section(
+            vol.Schema({
+                vol.Optional(
+                    "enable_ptz_controls",
+                    default=bool(opts.get("enable_ptz_controls", False)),
+                ): bool,
             }),
             {"collapsed": True},
         )
