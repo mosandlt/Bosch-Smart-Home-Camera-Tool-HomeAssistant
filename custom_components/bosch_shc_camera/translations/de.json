@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "Bei aktivierter Option sendet jedes Bewegungs-, Audio-, Personen- und Intrusion-Ereignis einen JSON-POST an die URL unten. **Standardmäßig deaktiviert.**",
-              "webhook_url": "HTTP/HTTPS-Endpunkt, der den Event-JSON empfängt. Leer lassen = deaktiviert. Beispiel: https://example.com/hooks/bosch. Nur aktiv wenn 'Webhook-Auslieferung aktivieren' eingeschaltet ist."
+              "webhook_url": "HTTP/HTTPS-Endpunkt, der den Event-JSON empfängt. Leer lassen = deaktiviert. Nur aktiv wenn 'Webhook-Auslieferung aktivieren' eingeschaltet ist."
             }
           },
           "ptz": {

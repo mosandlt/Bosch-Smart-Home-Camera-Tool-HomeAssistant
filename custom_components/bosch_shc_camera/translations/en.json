@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "When ON: every motion, audio alarm, person detection, and intrusion event fires a JSON POST to the URL below. **Off by default.**",
-              "webhook_url": "HTTP/HTTPS endpoint that receives the event JSON. Leave empty to disable. Example: https://example.com/hooks/bosch. Only active when 'Enable webhook delivery' is on."
+              "webhook_url": "HTTP/HTTPS endpoint that receives the event JSON. Leave empty to disable. Only active when 'Enable webhook delivery' is on."
             }
           },
           "ptz": {

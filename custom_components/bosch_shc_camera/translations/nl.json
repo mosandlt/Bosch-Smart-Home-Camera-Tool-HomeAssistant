@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "Wanneer INGESCHAKELD: elke bewegings-, audioalarm-, persoonsdetectie- en indringingsgebeurtenis stuurt een JSON POST naar de URL hieronder. **Standaard uitgeschakeld.**",
-              "webhook_url": "HTTP/HTTPS-endpoint dat de gebeurtenis-JSON ontvangt. Leeg laten om uit te schakelen. Voorbeeld: https://example.com/hooks/bosch. Alleen actief wanneer 'Webhook bezorging inschakelen' aan is."
+              "webhook_url": "HTTP/HTTPS-endpoint dat de gebeurtenis-JSON ontvangt. Leeg laten om uit te schakelen. Alleen actief wanneer 'Webhook bezorging inschakelen' aan is."
             }
           },
           "ptz": {

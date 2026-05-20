@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "Gdy WŁĄCZONE: każde zdarzenie ruchu, alarmu dźwiękowego, wykrycia osoby i wtargnięcia wysyła POST JSON na URL poniżej. **Domyślnie wyłączone.**",
-              "webhook_url": "Punkt końcowy HTTP/HTTPS odbierający JSON zdarzenia. Pozostaw puste, aby wyłączyć. Przykład: https://example.com/hooks/bosch. Aktywny tylko gdy 'Włącz dostarczanie webhooka' jest włączone."
+              "webhook_url": "Punkt końcowy HTTP/HTTPS odbierający JSON zdarzenia. Pozostaw puste, aby wyłączyć. Aktywny tylko gdy 'Włącz dostarczanie webhooka' jest włączone."
             }
           },
           "ptz": {

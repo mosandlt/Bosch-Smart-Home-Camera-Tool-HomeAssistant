@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "Quando ATTIVO: ogni evento di movimento, allarme audio, rilevamento persone e intrusione invia un POST JSON all'URL sottostante. **Disattivato per impostazione predefinita.**",
-              "webhook_url": "Endpoint HTTP/HTTPS che riceve il JSON dell'evento. Lasciare vuoto per disabilitare. Esempio: https://example.com/hooks/bosch. Attivo solo quando 'Abilita consegna webhook' è attivo."
+              "webhook_url": "Endpoint HTTP/HTTPS che riceve il JSON dell'evento. Lasciare vuoto per disabilitare. Attivo solo quando 'Abilita consegna webhook' è attivo."
             }
           },
           "ptz": {

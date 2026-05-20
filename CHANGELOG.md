@@ -5,6 +5,10 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.7.1 — 2026-05-20
+
+Hotfix: Hassfest CI rejected v12.7.0 because the new `webhook_url` field's data_description contained a literal example URL (`https://example.com/hooks/bosch`). HA Core's translation linter blocks URLs in description strings to keep them safe for end-user UIs. v12.7.1 strips the example URL from the description string across all 12 translation files (`strings.json` + 11 languages). No functional change.
+
 ## v12.7.0 — 2026-05-20
 
 Feature release shipped alongside Python CLI v10.7.5, ioBroker v0.7.9, MCP v1.3.4 and a new Node-RED skeleton (alpha). Adds opt-in entity controls, webhook event delivery, HomeKit Bridge documentation, snapshot scheduling examples, and reaches 100% line coverage.

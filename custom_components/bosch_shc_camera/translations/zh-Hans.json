@@ -194,7 +194,7 @@
             },
             "data_description": {
               "enable_webhook_delivery": "开启时：每次运动、音频报警、人员检测和入侵事件都会向下方 URL 发送 JSON POST。**默认关闭。**",
-              "webhook_url": "接收事件 JSON 的 HTTP/HTTPS 端点。留空则禁用。示例：https://example.com/hooks/bosch。仅在启用 webhook 推送开启时有效。"
+              "webhook_url": "接收事件 JSON 的 HTTP/HTTPS 端点。留空则禁用。示例：。仅在启用 webhook 推送开启时有效。"
             }
           },
           "ptz": {
