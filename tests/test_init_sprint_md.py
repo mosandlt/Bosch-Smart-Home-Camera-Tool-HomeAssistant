@@ -1155,6 +1155,10 @@ class TestSetupEntrySendEventWebhookService:
         coord_stub = _make_coord_stub([CAM_A])
         coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
 
+        # Fix 3: handler now iterates hass.config_entries.async_loaded_entries(DOMAIN)
+        # instead of capturing a stale closure over the setup-time entry.
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
         if session is None:
             session = self._make_service_session()
 

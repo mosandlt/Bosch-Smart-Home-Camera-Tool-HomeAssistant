@@ -29,7 +29,7 @@ import logging
 import ssl
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # XXE-safe drop-in for xml.etree.ElementTree
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)

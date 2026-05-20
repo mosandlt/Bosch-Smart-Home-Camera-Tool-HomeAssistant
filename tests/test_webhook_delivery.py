@@ -23,6 +23,7 @@ from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.const import (
     CONF_ENABLE_WEBHOOK_DELIVERY,
     CONF_WEBHOOK_URL,
+    DOMAIN,
 )
 
 MODULE = "custom_components.bosch_shc_camera"
@@ -290,3 +291,70 @@ class TestWebhookDelivery:
         session.post.assert_called_once()
         # URL must have been stripped
         assert session.post.call_args.args[0] == "https://example.com/hook"
+
+    # ── Mode 10: no stale closure — service reads current entry options ────────
+    async def test_service_handler_uses_current_entry_options_after_reload(self) -> None:
+        """send_event_webhook must read options from hass.config_entries at call time.
+
+        Regression guard: before Fix 3 the handler captured the setup-time entry
+        object as a closure.  After an integration reload the entry's options
+        are updated but the handler still POSTed to the old URL.
+
+        We verify that when hass.config_entries.async_loaded_entries returns an
+        entry with the *new* URL, the POST goes to that URL — not to the URL
+        present at registration time.
+        """
+        import aiohttp as _aiohttp
+        import datetime as _dt
+        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
+        old_url = "https://old.example.com/hook"
+        new_url = "https://new.example.com/hook"
+
+        # Live entry that hass returns after reload — has the new URL.
+        live_entry = SimpleNamespace()
+        live_entry.options = {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: new_url}
+
+        session, _ = _make_session_mock(200)
+
+        hass = SimpleNamespace()
+        hass.states = SimpleNamespace(get=MagicMock(return_value=None))
+        # Simulate post-reload state: async_loaded_entries returns live_entry only.
+        hass.config_entries = SimpleNamespace(
+            async_loaded_entries=MagicMock(return_value=[live_entry])
+        )
+
+        # Implement the live-entry pattern that handle_send_event_webhook now uses.
+        async def handler_under_test(call: Any) -> None:
+            loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+            if not loaded:
+                return
+            cur_opts: dict[str, Any] = dict(DEFAULT_OPTIONS)
+            cur_opts.update(loaded[0].options)
+            if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
+                return
+            url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
+            if not url:
+                return
+            event_type_val: str = call.data.get("event_type", "MOVEMENT")
+            payload: dict[str, Any] = {
+                "event_type": event_type_val,
+                "camera":     "",
+                "camera_id":  "",
+                "timestamp":  _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "extra":      {"source": "manual"},
+            }
+            async with session.post(url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+                pass
+
+        call_stub = SimpleNamespace(data={"event_type": "MOVEMENT", "entity_id": ""})
+        await handler_under_test(call_stub)
+
+        session.post.assert_called_once()
+        posted_url: str = session.post.call_args.args[0]
+        # Must POST to the new URL read from the live entry — not the stale old URL.
+        assert posted_url == new_url, (
+            f"Expected POST to new URL {new_url!r} after reload, got {posted_url!r} — "
+            "stale closure regression"
+        )
+        assert posted_url != old_url

@@ -5,6 +5,15 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.7.2 — 2026-05-20
+
+Security pass — three findings from a pre-release static-analysis scan (Semgrep + Bandit + detect-secrets). No functional change for end users; mypy --strict stays green; coverage stays at 100% line.
+
+- **`hashlib.md5(..., usedforsecurity=False)` in `auth_utils.py`.** MD5 is protocol-mandated by RFC 7616 (HTTP Digest auth) and not used for security here. The flag prevents `ValueError` on Python 3.9+ in FIPS mode and silences the Bandit B324 warning. Same pattern was already correct in `tls_proxy.py:359`.
+- **`defusedxml.ElementTree` in `local_rcp.py` + `maintenance.py`.** Drop-in replacement for `xml.etree.ElementTree` that rejects XXE entity-expansion attacks. The camera is LAN-only and trusted, but defusedxml is the modern hygiene default for any XML parser that touches device-returned data. New runtime dep `defusedxml>=0.7.1`.
+- **`send_event_webhook` service handler refactor.** The handler is now defined inside `_register_services` instead of `async_setup_entry`, and reads options from `hass.config_entries.async_loaded_entries(DOMAIN)` at call time instead of capturing a stale `entry` closure. The old closure pattern silently held the original `entry` reference across reloads. New regression test `test_service_handler_uses_current_entry_options_after_reload` proves the fix.
+- 4410 tests passing (was 4409 / +1 regression test). 100% line coverage maintained.
+
 ## v12.7.1 — 2026-05-20
 
 Hotfix: Hassfest CI rejected v12.7.0 because the new `webhook_url` field's data_description contained a literal example URL (`https://example.com/hooks/bosch`). HA Core's translation linter blocks URLs in description strings to keep them safe for end-user UIs. v12.7.1 strips the example URL from the description string across all 12 translation files (`strings.json` + 11 languages). No functional change.

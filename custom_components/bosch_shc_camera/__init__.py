@@ -5709,10 +5709,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # send_event_webhook service — test/manual trigger
+    # Uses live-entry iteration so the handler always reads the current options
+    # even after an integration reload — no stale closure over a setup-time entry.
     async def handle_send_event_webhook(call: ServiceCall) -> None:
         """Manually fire a webhook POST for testing."""
+        import datetime as _dt
         from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
-        cur_opts = get_options(entry)
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            _LOGGER.warning("send_event_webhook: no loaded entries for domain %s", DOMAIN)
+            return
+        cur_opts = get_options(loaded[0])
         if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
             _LOGGER.warning("send_event_webhook: webhook delivery is disabled in options")
             return
@@ -5728,7 +5735,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             state = hass.states.get(entity_id_val)
             if state:
                 cam_name = state.attributes.get("friendly_name", entity_id_val)
-        import datetime as _dt
         payload: dict[str, Any] = {
             "event_type": event_type_val,
             "camera":     cam_name,

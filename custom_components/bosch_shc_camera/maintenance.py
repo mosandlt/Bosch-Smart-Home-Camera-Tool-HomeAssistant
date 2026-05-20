@@ -30,7 +30,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Iterable
-from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET  # XXE-safe drop-in for xml.etree.ElementTree
+from xml.etree.ElementTree import Element as _ETElement  # type annotation only
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -184,7 +185,7 @@ def _parse_pub_date(raw: str) -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
-def _items_from_rss(root: ET.Element) -> Iterable[dict[str, str]]:
+def _items_from_rss(root: _ETElement) -> Iterable[dict[str, str]]:
     # RSS 2.0
     for item in root.findall(".//item"):
         yield {

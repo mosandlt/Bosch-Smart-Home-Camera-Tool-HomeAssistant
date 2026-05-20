@@ -4,5 +4,7 @@ PyTurboJPEG==2.2.0
 pytest-cov==7.1.0
 pytest-timeout==2.4.0
 pytest-github-actions-annotate-failures==0.4.0
+defusedxml>=0.7.1
+types-defusedxml
 firebase-messaging>=0.4.5,<1
 smbprotocol>=1.10.0,<2

@@ -18,7 +18,10 @@ import aiohttp
 # ---------------------------------------------------------------------------
 
 def _md5(data: str) -> str:
-    return hashlib.md5(data.encode()).hexdigest()
+    # usedforsecurity=False: MD5 is protocol-mandated by HTTP Digest (RFC 7616),
+    # not used as a cryptographic security primitive.  Required on FIPS systems
+    # (Python 3.9+) which otherwise reject MD5 outright.
+    return hashlib.md5(data.encode(), usedforsecurity=False).hexdigest()
 
 
 def _sha256(data: str) -> str:
