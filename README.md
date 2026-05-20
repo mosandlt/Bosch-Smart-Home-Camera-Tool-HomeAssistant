@@ -1700,12 +1700,13 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.5.0** — see the GitHub release page for full notes:
-[**v12.5.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.5.0)
+Latest: **v12.5.1** — see the GitHub release page for full notes:
+[**v12.5.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.5.1)
 
 | Version | Highlights |
 |---|---|
-| **v12.5.0** | LAN-fallback hardening (HTTPS + Digest on RCP writes, hw_version + Digest creds persisted across HA restarts), Indoor II front-spotlight surfaced as a real `light` entity, new `bosch-notifications-card` for the Lovelace dashboard (active / scheduled / recent maintenance + cam status), maintenance + cloud-state notification dedup persisted across restarts (kills 20× duplicate alerts during a single outage), switch / light availability gate now allows hw-unknown + LAN-reachable. Card v2.14.0 with `https://`-scheme guard for sensor-attribute URLs. |
+| **v12.5.1** | Hotfix: revert the v12.5.0 Indoor II light entity — Eyes Indoor II has no controllable light hardware. Includes registry cleanup migration that removes the orphan `light.bosch_*_frontlicht` plus three stale Indoor II number orphans on next startup. |
+| **v12.5.0** | LAN-fallback hardening (HTTPS + Digest on RCP writes, hw_version + Digest creds persisted across HA restarts), new `bosch-notifications-card` for the Lovelace dashboard (active / scheduled / recent maintenance + cam status), maintenance + cloud-state notification dedup persisted across restarts (kills 20× duplicate alerts during a single outage), switch / light availability gate now allows hw-unknown + LAN-reachable. Card v2.14.0 with `https://`-scheme guard for sensor-attribute URLs. |
 | **v12.4.12** | Live-stream switch now tracks user intent, not raw session state — auto-opens (Cast / dashboard preload / `play_stream` / WebRTC watchdog refresh) no longer flip the visible switch; teardown clears `_live_connections` before NVR-stop so the switch correctly flips OFF even when Mini-NVR cleanup raises; webrtc-watchdog refresh now scoped to cameras with active sessions; health-watchdog race after user-OFF closed |
 | **v12.4.11** | Cloud up/down transition alerts; suppressed during maintenance windows; 11 pin tests |
 | **v12.4.10** | LAN-fallback: persistent LAN-IP store, outage-ping sweep, `binary_sensor.*_lan_reachable`, privacy/light switches stay available on LAN, cloud-degraded startup, front-light Gen2 LOCAL RCP, card v2.13.0 |
@@ -1724,7 +1725,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.5.0** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.5.1** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.3 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.5 · beta · npm |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.1 · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

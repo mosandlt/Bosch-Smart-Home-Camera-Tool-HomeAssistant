@@ -100,14 +100,13 @@ class TestLightAsyncSetupEntry:
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert added == [], "No light entities when featureSupport.light=False"
 
-    def test_indoor_ii_gets_front_light_despite_feature_support_false(self):
-        """Gen2 Indoor II reports `featureSupport.light=false` from the cloud
-        but DOES have a controllable front spotlight via the same
-        `lighting/switch/topdown` endpoint. v12.5.0 surfaces this as a single
-        BoschFrontLight entity (color-temp white only, no RGB wallwasher).
-        Bug 2026-05-20: Innenbereich II had no light entity at all in the
-        dashboard despite the working number entities for brightness +
-        color temp.
+    def test_indoor_ii_gets_no_light_entities(self):
+        """Eyes Indoor II has NO controllable light hardware (only fixed IR
+        night-vision LEDs that the firmware manages on its own). v12.5.0
+        mistakenly created a `BoschFrontLight` for it based on a misread of
+        the available number entities. v12.5.1 reverts: Indoor II + cloud
+        `featureSupport.light=false` → zero light entities. Confirmed by the
+        user (cam owner) on 2026-05-20.
         """
         from custom_components.bosch_shc_camera.light import async_setup_entry
         coord = _stub_coord()
@@ -119,11 +118,13 @@ class TestLightAsyncSetupEntry:
         entry = SimpleNamespace(runtime_data=coord, options={})
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
-        assert entity_classes == ["BoschFrontLight"], (
-            f"Indoor II should get exactly [BoschFrontLight], got {entity_classes}"
+        assert entity_classes == [], (
+            f"REGRESSION (v12.5.0 bug): Indoor II got light entities even "
+            f"though the camera has no controllable light hardware. "
+            f"Got {entity_classes}, expected []."
         )
 
-    def test_indoor_ii_alias_also_gets_front_light(self):
+    def test_indoor_ii_alias_also_gets_no_light(self):
         """`CAMERA_INDOOR_GEN2` is the legacy alias for HOME_Eyes_Indoor —
         cover both hw strings."""
         from custom_components.bosch_shc_camera.light import async_setup_entry
@@ -135,29 +136,31 @@ class TestLightAsyncSetupEntry:
         import asyncio
         entry = SimpleNamespace(runtime_data=coord, options={})
         asyncio.run(async_setup_entry(None, entry, _fake_add))
-        assert [type(e).__name__ for e in added] == ["BoschFrontLight"]
+        assert [type(e).__name__ for e in added] == []
 
     def test_hw_version_fallback_from_persistent_cache(self):
         """When `cam_info.hardwareVersion` is empty (cold-start during cloud
         outage, rehydrated coordinator.data has just `info.title`), light
-        setup must read from the persistent `_hw_version` store instead.
-        Without this fallback, Indoor II would silently miss its light
-        entity until the cloud comes back."""
+        setup falls back to the persistent `_hw_version` store. Same fallback
+        used by the rest of the integration to determine model behaviour.
+        Outdoor II must still get its three light entities on cold start."""
         from custom_components.bosch_shc_camera.light import async_setup_entry
         coord = _stub_coord()
         # Simulate cold-start rehydrate: info has title only, no hardwareVersion
         coord.data[CAM_ID]["info"].pop("hardwareVersion", None)
-        coord.data[CAM_ID]["info"]["featureSupport"] = {"light": False}
-        # Persistent store knows it's Indoor II
-        coord._hw_version = {CAM_ID: "HOME_Eyes_Indoor"}
+        coord.data[CAM_ID]["info"]["featureSupport"] = {"light": True}
+        # Persistent store knows it's Outdoor II
+        coord._hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}
         added = []
         def _fake_add(entities, **kw): added.extend(entities)
         import asyncio
         entry = SimpleNamespace(runtime_data=coord, options={})
         asyncio.run(async_setup_entry(None, entry, _fake_add))
-        assert [type(e).__name__ for e in added] == ["BoschFrontLight"], (
+        assert set(type(e).__name__ for e in added) == {
+            "BoschTopLedLight", "BoschBottomLedLight", "BoschFrontLight",
+        }, (
             "REGRESSION: hw_version fallback from persistent store no longer "
-            "feeds the light entity setup. Indoor II loses its light entity "
+            "feeds the light entity setup. Outdoor II loses its light entities "
             "during cloud-degraded cold starts."
         )
 

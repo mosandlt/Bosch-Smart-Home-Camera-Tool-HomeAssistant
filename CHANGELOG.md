@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.5.1 — 2026-05-20
+
+Hotfix: revert the v12.5.0 Indoor II light entity. The Eyes Indoor II has no controllable light hardware (only fixed IR night-vision LEDs managed by the camera firmware itself). v12.5.0 mistakenly created a `BoschFrontLight` for it based on the presence of stale `number.*_helligkeit_*` / `*_farbtemperatur_*` entities that had been left in the registry from an older codepath. Those numbers had always been `unavailable` and were not a signal that the hardware existed. Confirmed by the user (cam owner).
+
+- `light.py`: removed the Indoor II + `featureSupport.light=false` → `BoschFrontLight` branch. Light entities are now ONLY created for Outdoor II (the only Gen2 model with a controllable visible light surface).
+- New `v12.5.1 migration` in `async_setup_entry`: removes the `light.bosch_*_frontlicht` orphan plus three stale Indoor II number orphans (`*_helligkeit_oberes_licht`, `*_helligkeit_unteres_licht`, `*_white_balance`) from the entity registry. Per-cam scoped — only entities matching a cam_id in `_hw_version` with `HOME_Eyes_Indoor` / `CAMERA_INDOOR_GEN2` are removed.
+- Tests in `tests/test_light_round6.py` updated: Indoor II now asserts zero light entities; hw_version-fallback test inverted to Outdoor II (which is the case that actually needs the fallback during cloud-degraded cold start).
+
 ## v12.5.0 — 2026-05-20
 
 LAN-fallback hardening for cloud outages, duplicate-notification dedup persistence, Indoor II light entity, and a new `bosch-notifications-card` for the Lovelace dashboard. Surfaced during the Bosch maintenance window 2026-05-20 (cloud returned HTTP 503 for 30+ minutes) — multiple silent failures came out at once. Surfaced during the Bosch maintenance window 2026-05-20 (cloud returned HTTP 503 for 30+ minutes): privacy + light switches on Innenbereich II / Terrasse showed `unavailable` for the whole outage even though both cameras were LAN-reachable, and the LAN-RCP fallback path itself was non-functional regardless.

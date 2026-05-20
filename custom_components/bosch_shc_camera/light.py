@@ -50,31 +50,24 @@ async def async_setup_entry(
         cam_info = coordinator.data[cam_id].get("info", {})
         # Prefer cam_info hardwareVersion (live cloud data); fall back to the
         # persistent `_hw_version` store so a cold-start during a cloud outage
-        # still creates the right entities. Bug 2026-05-20: light entities
-        # never materialised for Indoor II when HA was restarted while the
-        # cloud was 503. `getattr` keeps the test stubs that don't seed the
-        # `_hw_version` dict happy.
+        # still creates the right entities for Outdoor II. `getattr` keeps the
+        # test stubs that don't seed the `_hw_version` dict happy.
         _hw_cache = getattr(coordinator, "_hw_version", {}) or {}
         hw = cam_info.get("hardwareVersion") or _hw_cache.get(cam_id, "CAMERA")
         from .models import get_model_config
         if get_model_config(hw).generation >= 2:
             has_light = cam_info.get("featureSupport", {}).get("light", False)
-            is_indoor_ii = hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2")
+            # ONLY Outdoor II has controllable lights (RGB top + bottom + color-
+            # temp front spotlight). Indoor II has NO visible light hardware —
+            # only the IR night-vision LEDs which are not user-controllable.
+            # Bosch's API correctly reports `featureSupport.light=false` for it.
+            # v12.5.0 mistakenly created a `BoschFrontLight` for Indoor II based
+            # on the stale `number.*_helligkeit_*` entities that were left in
+            # the registry from an older codepath — those numbers also never
+            # worked. Reverted in v12.5.1; cleanup runs in async_setup_entry.
             if has_light:
-                # Outdoor II has the full RGB wallwasher (top + bottom) + front spotlight.
                 entities.append(BoschTopLedLight(coordinator, cam_id, config_entry))
                 entities.append(BoschBottomLedLight(coordinator, cam_id, config_entry))
-                entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
-            elif is_indoor_ii:
-                # Indoor II reports `featureSupport.light=false` from the cloud API,
-                # but the camera DOES have a controllable front spotlight (color-temp,
-                # same `lighting/switch/topdown` endpoint as Outdoor II — confirmed
-                # by the matching `number.*_farbtemperatur_frontlicht` entity that
-                # has worked since v8.x). Surface it as a top-level light entity so
-                # users have an on/off toggle in the dashboard, matching the Bosch
-                # app's UX. Bug 2026-05-20: Thomas reported no light entity visible
-                # for Innenbereich II. Skip Top/Bottom — Indoor II has no RGB
-                # wallwasher.
                 entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 

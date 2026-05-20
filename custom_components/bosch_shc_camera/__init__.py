@@ -5507,6 +5507,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("v12.4.10 migration: removing stale entity_id %s", _stale_id)
         _ereg.async_remove(_stale_id)
 
+    # v12.5.1 migration — Eyes Indoor II has no controllable light hardware
+    # (only IR night-vision LEDs which the camera firmware manages itself).
+    # v12.5.0 mistakenly created a `BoschFrontLight` entity for Indoor II
+    # plus three stale `number.*_helligkeit_*` / `*_farbtemperatur_*`
+    # entities had been left in the registry from an even older codepath.
+    # All four were always `unavailable`. Remove them so the dashboard
+    # doesn't show greyed-out entries that can never work. Per-cam scoped:
+    # only entities whose unique_id contains an Indoor II cam_id are removed.
+    _indoor_ii_cam_ids: set[str] = set()
+    for _cam_id, _hw in (coordinator._hw_version or {}).items():
+        if _hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+            _indoor_ii_cam_ids.add(_cam_id.lower())
+    _orphan_uid_suffixes = (
+        "_front_light_entity",      # BoschFrontLight (v12.5.0 mistake)
+        "_top_led_brightness",      # BoschTopLedBrightnessNumber (Outdoor-only)
+        "_bottom_led_brightness",   # BoschBottomLedBrightnessNumber (Outdoor-only)
+        "_white_balance",           # BoschWhiteBalanceNumber (Outdoor-only)
+    )
+    _stale_indoor_ids: list[str] = []
+    for _ent in er.async_entries_for_config_entry(_ereg, entry.entry_id):
+        if not any(_ent.unique_id.lower().endswith(s) for s in _orphan_uid_suffixes):
+            continue
+        if not any(_cid in _ent.unique_id.lower() for _cid in _indoor_ii_cam_ids):
+            continue
+        _stale_indoor_ids.append(_ent.entity_id)
+    for _stale_id in _stale_indoor_ids:
+        _LOGGER.info(
+            "v12.5.1 migration: removing Indoor II orphan entity %s (no light hardware)",
+            _stale_id,
+        )
+        _ereg.async_remove(_stale_id)
+
     # Start proactive background token refresh (5 min before JWT expiry)
     coordinator._schedule_token_refresh()
 
