@@ -447,15 +447,29 @@ async def async_cloud_set_privacy_mode(
 
     # -- Gen2 LOCAL RCP fallback (cloud outage) --------------------------------
     # When the Bosch cloud (auth server or API) is unreachable, Gen2 cameras
-    # still answer unauthenticated RCP commands on their LAN IP. Try this
-    # before SHC — LOCAL RCP works directly against the camera without any
-    # Bosch infrastructure involved.
-    if _is_gen2(coordinator, cam_id):
+    # still answer authenticated RCP commands on their LAN IP via HTTPS+Digest.
+    # Try this before SHC — LOCAL RCP works directly against the camera
+    # without any Bosch infrastructure involved.
+    #
+    # Gate: confirmed Gen2 OR unknown (cold-start cloud-outage). Gen1 known →
+    # skip (no rcp.xml endpoint). For unknown, the write either succeeds
+    # (Gen2) or fails cleanly (Gen1) — same shape as if we'd known.
+    _hw = coordinator._hw_version.get(cam_id)
+    _gen2_or_unknown = _is_gen2(coordinator, cam_id) or _hw in (None, "", "CAMERA")
+    if _gen2_or_unknown:
         creds = coordinator._local_creds_cache.get(cam_id)
         cam_host = creds.get("host") if creds else coordinator._rcp_lan_ip_cache.get(cam_id)
+        # Pass cycling LOCAL Digest creds — `rcp.xml` runs HTTPS-only and
+        # requires Digest auth on Gen2. Falls through to anonymous mode if
+        # no creds are cached (will fail with HTTP 401, surfaced as False).
+        local_user = creds.get("user") if creds else None
+        local_pass = creds.get("password") if creds else None
         if cam_host:
             from .rcp import rcp_local_write_privacy
-            ok = await rcp_local_write_privacy(coordinator.hass, cam_host, enabled)
+            ok = await rcp_local_write_privacy(
+                coordinator.hass, cam_host, enabled,
+                user=local_user, password=local_pass,
+            )
             if ok:
                 _LOGGER.info(
                     "cloud_set_privacy_mode: cloud failed, Gen2 LOCAL RCP succeeded for %s",
@@ -748,11 +762,16 @@ async def async_cloud_set_light_component(
 
     # -- Gen2 LOCAL RCP fallback for front-light (cloud outage) ---------------
     # Mirror of the privacy fallback. Only supports "front" + "intensity" —
-    # the wallwasher RGB write is too complex for the unauthenticated RCP
-    # path (needs per-LED colour + whiteBalance, blocked by service auth).
-    if gen2 and component in ("front", "intensity"):
+    # wallwasher RGB needs per-LED colour + whiteBalance which is blocked by
+    # the LAN RCP service-auth gate. Treat "Gen2 confirmed OR unknown" as
+    # eligible so cold-start during a cloud outage isn't artificially blocked
+    # (Bug 2026-05-20).
+    _hw_light = coordinator._hw_version.get(cam_id)
+    if (gen2 or _hw_light in (None, "", "CAMERA")) and component in ("front", "intensity"):
         creds = coordinator._local_creds_cache.get(cam_id)
         cam_host = creds.get("host") if creds else coordinator._rcp_lan_ip_cache.get(cam_id)
+        local_user = creds.get("user") if creds else None
+        local_pass = creds.get("password") if creds else None
         if cam_host:
             from .rcp import rcp_local_write_front_light
             if component == "front":
@@ -761,7 +780,10 @@ async def async_cloud_set_light_component(
             else:
                 # intensity: int 0-100 or float 0.0-1.0
                 brightness = int(value * 100) if isinstance(value, float) and value <= 1.0 else int(value)
-            local_ok = await rcp_local_write_front_light(coordinator.hass, cam_host, brightness)
+            local_ok = await rcp_local_write_front_light(
+                coordinator.hass, cam_host, brightness,
+                user=local_user, password=local_pass,
+            )
             if local_ok:
                 _LOGGER.info(
                     "cloud_set_light_component: cloud failed, Gen2 LOCAL RCP succeeded for %s %s=%s",

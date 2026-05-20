@@ -2513,6 +2513,40 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     self._lan_ips_snapshot = _snapshot
                     self.hass.async_create_task(_store.async_save(_snapshot))
 
+            # Persist hardware versions (cam_id → hw_version) for the same
+            # cloud-degraded-startup reason — without this, _is_gen2() defaults
+            # to Gen1 after a cold start during a cloud outage, which makes
+            # the LAN-fallback gate on the privacy / front-light switches
+            # report "unavailable" even though the LAN RCP path would work.
+            _hw_store = getattr(self, "_hw_version_store", None)
+            if _hw_store is not None and self._hw_version:
+                _hw_snapshot = {k: v for k, v in self._hw_version.items() if v}
+                _hw_prev = getattr(self, "_hw_version_snapshot", None)
+                if _hw_snapshot and _hw_snapshot != _hw_prev:
+                    self._hw_version_snapshot = _hw_snapshot
+                    self.hass.async_create_task(_hw_store.async_save(_hw_snapshot))
+
+            # Persist LOCAL Digest creds so LAN-fallback privacy / light
+            # writes survive HA restarts during a Bosch cloud outage. Without
+            # this, every cold restart while the cloud is 503 leaves the cred
+            # cache empty and the LAN RCP write returns <err> "no auth".
+            _creds_store = getattr(self, "_local_creds_store", None)
+            if _creds_store is not None and self._local_creds_cache:
+                _cred_snapshot = {
+                    k: {
+                        "user":     v["user"],
+                        "password": v["password"],
+                        "host":     v["host"],
+                        "port":     v.get("port", 443),
+                    }
+                    for k, v in self._local_creds_cache.items()
+                    if v.get("user") and v.get("password") and v.get("host")
+                }
+                _cred_prev = getattr(self, "_local_creds_snapshot", None)
+                if _cred_snapshot and _cred_snapshot != _cred_prev:
+                    self._local_creds_snapshot = _cred_snapshot
+                    self.hass.async_create_task(_creds_store.async_save(_cred_snapshot))
+
             # Periodic background refresh of the Bosch community maintenance
             # feed — once per hour on a healthy coordinator tick. Reactive
             # refresh on 503 is handled inside the cloud-call branch.
@@ -2613,6 +2647,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             prior = self._maintenance_notified_key
             if prior is None or prior[0] != mw.link or prior[1] != "active":
                 self._maintenance_notified_key = (mw.link, state)
+                getattr(self, '_persist_maint_notified_key', lambda: None)()
                 return
         notify_key = (mw.link, state)
         if self._maintenance_notified_key == notify_key:
@@ -2622,6 +2657,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if not services:
             _LOGGER.debug("Maintenance announce skipped: no notify service configured")
             self._maintenance_notified_key = notify_key
+            getattr(self, '_persist_maint_notified_key', lambda: None)()
             return
         from zoneinfo import ZoneInfo
         when = ""
@@ -2662,6 +2698,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "Maintenance announce via notify.%s failed: %s", svc, exc,
                 )
         self._maintenance_notified_key = notify_key
+        getattr(self, '_persist_maint_notified_key', lambda: None)()
+
+    def _persist_maint_notified_key(self) -> None:
+        """Write `_maintenance_notified_key` to disk so HA restarts mid-
+        window do not re-fire the active-state announcement on the next
+        coordinator tick. Bug 2026-05-20: ~20 duplicate alerts during a
+        single Bosch maintenance window because every restart wiped the
+        in-memory dedup key.
+        """
+        key = self._maintenance_notified_key
+        store = getattr(self, "_maint_notified_store", None)
+        if store is None or key is None:
+            return
+        self.hass.async_create_task(
+            store.async_save({"link": key[0], "state": key[1]})
+        )
+
+    def _persist_cloud_outage_flag(self) -> None:
+        """Mirror the maintenance-key persistence for the cloud-state
+        dedup flag, so a restart mid-outage doesn't re-fire "Cloud nicht
+        erreichbar"."""
+        store = getattr(self, "_cloud_alert_store", None)
+        if store is None:
+            return
+        self.hass.async_create_task(
+            store.async_save({"outage_notified": bool(self._cloud_outage_notified)})
+        )
 
     async def _async_maybe_announce_camera_status(
         self, cam_id: str, new_status: str,
@@ -2766,6 +2829,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # We previously announced an outage — announce recovery now.
             self._cloud_outage_notified = False
             self._cloud_outage_started_at = None
+            getattr(self, '_persist_cloud_outage_flag', lambda: None)()
             if in_maintenance:
                 _LOGGER.debug("Cloud recovered during active maintenance — staying silent")
                 return
@@ -2782,6 +2846,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Outage has persisted long enough → announce, but stay silent during
         # known maintenance.
         self._cloud_outage_notified = True
+        getattr(self, '_persist_cloud_outage_flag', lambda: None)()
         if in_maintenance:
             _LOGGER.debug("Cloud outage suppressed: known active maintenance window")
             return
@@ -5246,10 +5311,42 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BoschCameraCoordinator(hass, entry)
 
+    # Load the persistent maintenance-notification dedup key so a restart
+    # mid-window does not re-fire the "Wartung läuft" alert. Stored as
+    # `[link, state]`. Bug 2026-05-20: Thomas received the same active-
+    # maintenance announcement ~20 times because every HA restart wiped
+    # `_maintenance_notified_key` and the next coordinator tick re-fired
+    # the active-state notify.
+    from homeassistant.helpers.storage import Store
+    _maint_key_store: Store = Store(hass, version=1, key=f"{DOMAIN}_maint_notified")
+    coordinator._maint_notified_store = _maint_key_store  # type: ignore[attr-defined]
+    _persisted_maint_key = await _maint_key_store.async_load() or None
+    if isinstance(_persisted_maint_key, dict):
+        _link = _persisted_maint_key.get("link")
+        _state = _persisted_maint_key.get("state")
+        if isinstance(_link, str) and isinstance(_state, str):
+            coordinator._maintenance_notified_key = (_link, _state)
+            _LOGGER.info(
+                "Loaded persisted maintenance-notify dedup key: %s for %s",
+                _state, _link[:60],
+            )
+
+    # Same problem for cloud-state-alert: `_cloud_outage_notified` lived only
+    # in memory, so a restart during an outage could re-fire "Cloud nicht
+    # erreichbar". Persist a tiny boolean so restarts honour the dedup.
+    _cloud_alert_store: Store = Store(hass, version=1, key=f"{DOMAIN}_cloud_alert_state")
+    coordinator._cloud_alert_store = _cloud_alert_store  # type: ignore[attr-defined]
+    _persisted_cloud_alert = await _cloud_alert_store.async_load() or {}
+    if isinstance(_persisted_cloud_alert, dict):
+        if _persisted_cloud_alert.get("outage_notified") is True:
+            coordinator._cloud_outage_notified = True
+            _LOGGER.info(
+                "Loaded persisted cloud-outage-notified flag (was True at last save)",
+            )
+
     # Load the persistent LAN-IP map (cam_id → IP) so the LAN-ping helpers
     # have something to work with on a cloud-degraded startup. Written below
     # on every successful coordinator refresh.
-    from homeassistant.helpers.storage import Store
     _lan_ips_store: Store = Store(hass, version=1, key=f"{DOMAIN}_lan_ips")
     coordinator._lan_ips_store = _lan_ips_store  # type: ignore[attr-defined]
     _persisted_ips = await _lan_ips_store.async_load() or {}
@@ -5262,6 +5359,89 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Loaded %d persisted LAN IP(s) for cloud-degraded LAN ping",
                 len(_persisted_ips),
             )
+
+    # Load the persistent hardware-version map (cam_id → hw_version). Without
+    # this, a cold start during a Bosch cloud 5xx leaves `_hw_version` empty
+    # and `_is_gen2()` returns False for every camera — which in turn makes
+    # the privacy / front-light switches unavailable even though the LAN
+    # RCP path would work. v12.4.10 added the LAN-fallback availability gate
+    # but missed this persistence; 2026-05-20 maintenance window exposed the
+    # gap (cloud 503 for 30+ minutes, switches grey, no toggle).
+    _hw_version_store: Store = Store(hass, version=1, key=f"{DOMAIN}_hw_versions")
+    coordinator._hw_version_store = _hw_version_store  # type: ignore[attr-defined]
+    _persisted_hw = await _hw_version_store.async_load() or {}
+    if isinstance(_persisted_hw, dict):
+        for _cid, _hw in _persisted_hw.items():
+            if isinstance(_cid, str) and isinstance(_hw, str):
+                coordinator._hw_version[_cid.upper()] = _hw
+        if _persisted_hw:
+            _LOGGER.info(
+                "Loaded %d persisted hardware version(s) for cloud-degraded LAN fallback",
+                len(_persisted_hw),
+            )
+
+    # Load persisted LOCAL Digest creds (cam_id → {user, password, host, port}).
+    # Bosch cycles these creds on every PUT /connection LOCAL — typically valid
+    # for the lifetime of a session, occasionally beyond. Persisting lets the
+    # LAN-fallback privacy / light writes work across HA restarts during a
+    # multi-hour cloud outage; without this the in-memory cache is empty on
+    # cold start and every RCP write returns <err> from the camera.
+    # Security note: stored in HA's .storage (same protection level as the
+    # cloud bearer token). LAN-only effective scope (camera not internet-exposed).
+    _creds_store: Store = Store(hass, version=1, key=f"{DOMAIN}_local_creds")
+    coordinator._local_creds_store = _creds_store  # type: ignore[attr-defined]
+    _persisted_creds = await _creds_store.async_load() or {}
+    if isinstance(_persisted_creds, dict):
+        _loaded_creds = 0
+        for _cid, _payload in _persisted_creds.items():
+            if not (isinstance(_cid, str) and isinstance(_payload, dict)):
+                continue
+            if "user" in _payload and "password" in _payload and "host" in _payload:
+                coordinator._local_creds_cache[_cid.upper()] = {
+                    "user":     _payload["user"],
+                    "password": _payload["password"],
+                    "host":     _payload["host"],
+                    "port":     int(_payload.get("port", 443)),
+                    "ts":       time.monotonic(),
+                }
+                _loaded_creds += 1
+        if _loaded_creds:
+            _LOGGER.info(
+                "Loaded %d persisted LOCAL Digest cred(s) for LAN-fallback writes",
+                _loaded_creds,
+            )
+
+    # Belt-and-suspenders: if the persistent store was empty (first start of
+    # the integration since this feature shipped, or store cleared), back-fill
+    # from the device registry. Device `model` is set by camera.py:device_info
+    # to the human-readable display name from models.py. Reverse-map it back
+    # to the canonical hardwareVersion string so `_is_gen2()` works.
+    # Wrapped in try/except: HA test fixtures sometimes hand back a partially-
+    # initialised DeviceRegistry mock; rehydrate is best-effort.
+    try:
+        from homeassistant.helpers import device_registry as dr
+        from .models import MODELS
+        _dreg = dr.async_get(hass)
+        _display_to_hw: dict[str, str] = {}
+        for _hw_key, _cfg in MODELS.items():
+            # First key wins per display name — keeps canonical Gen2 mapping
+            # ("HOME_Eyes_Outdoor") instead of the "CAMERA_OUTDOOR_GEN2" alias.
+            _display_to_hw.setdefault(_cfg.display_name, _hw_key)
+        for _device in dr.async_entries_for_config_entry(_dreg, entry.entry_id):
+            for _domain, _cid in _device.identifiers:
+                if _domain != DOMAIN:
+                    continue
+                if _cid.upper() in coordinator._hw_version:
+                    continue  # already populated
+                _hw_from_model = _display_to_hw.get(_device.model or "")
+                if _hw_from_model:
+                    coordinator._hw_version[_cid.upper()] = _hw_from_model
+                    _LOGGER.info(
+                        "Recovered hardware version for %s from device registry: %s (%s)",
+                        _cid[:8], _hw_from_model, _device.model,
+                    )
+    except Exception as exc:  # noqa: BLE001 — best-effort rehydrate
+        _LOGGER.debug("Device-registry hw_version rehydrate skipped: %s", exc)
 
     # First refresh — tolerate a cloud-side 5xx so the integration can still
     # set up entities for known cameras (loaded from the entity registry)

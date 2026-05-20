@@ -168,7 +168,7 @@ class TestRcpLocalPrivacy:
 
         captured = {}
 
-        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET"):
+        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET", num=0, *, user=None, password=None):
             captured["payload"] = payload_hex
             captured["command"] = command
             return True
@@ -189,7 +189,7 @@ class TestRcpLocalPrivacy:
 
         captured = {}
 
-        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET"):
+        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET", num=0, *, user=None, password=None):
             captured["payload"] = payload_hex
             return True
 

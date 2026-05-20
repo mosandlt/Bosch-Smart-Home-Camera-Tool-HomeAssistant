@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.13.0";
+const CARD_VERSION = "2.14.0";
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -4525,7 +4525,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       note.textContent = "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.";
       banner.appendChild(note);
     }
-    if (mAttr.link) {
+    // Validate the URL scheme before assigning it to `href`. A compromised
+    // Bosch RSS feed or any sensor-state-write path could otherwise inject
+    // `javascript:` / `data:` URIs that execute in the dashboard context.
+    if (mAttr.link && /^https:\/\//i.test(mAttr.link)) {
       const a = document.createElement("a");
       a.href = mAttr.link;
       a.target = "_blank";
@@ -4697,7 +4700,11 @@ class BoschCameraOverviewCard extends HTMLElement {
             sub.textContent = win
               ? `${mAttr.title || "Wartungsmeldung"} · ${win}`
               : (mAttr.title || "Wartungsmeldung");
-            link.href = mAttr.link || "https://www.bosch-smarthome.com/service";
+            // Only accept https:// — fall back to Bosch's service page if
+            // the sensor's link attribute is missing or has a non-https scheme.
+            link.href = (mAttr.link && /^https:\/\//i.test(mAttr.link))
+              ? mAttr.link
+              : "https://www.bosch-smarthome.com/service";
             link.textContent = "Details in der Bosch Community";
             sub2.textContent =
               `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` +
@@ -5287,5 +5294,239 @@ window.customCards.push({
   type:        "bosch-nvr-multi-cam-card",
   name:        "Bosch NVR Multi-Cam",
   description: "Stacked NVR timeline view for multiple cameras with shared seek and drift correction.",
+  preview:     false,
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bosch Notifications Card
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregates Bosch-cloud-side events that the integration knows about into
+// a single dashboard pane:
+//
+//   • Active / scheduled / recently ended cloud maintenance (RSS-driven,
+//     sensor.bosch_<cam>_bosch_cloud_wartung)
+//   • Cloud reachability state (info.connection_status — derived from the
+//     cloud-state-alert pipeline)
+//   • Cameras currently offline + LAN-reachability mismatches (cloud says
+//     offline but the camera answers a LAN ping)
+//
+// Auto-discovers the relevant entities — pass no config to use the first
+// maintenance sensor + every camera in the integration. Or pin a specific
+// maintenance entity + camera list.
+//
+// Card YAML:
+//   type: custom:bosch-notifications-card
+//   # all options optional — sensible defaults
+//   title: Bosch Cloud
+//   maintenance_entity: sensor.bosch_terrasse_bosch_cloud_wartung
+//   camera_status_entities:
+//     - sensor.bosch_terrasse_status
+//     - sensor.bosch_innenbereich_status
+//   show_camera_grid: true   # default true
+//   show_when_clear: true    # default true — show "alles ruhig" when idle
+//
+// Bug 2026-05-20: surfaced from a user-reported Bosch maintenance window
+// with no in-dashboard signal — only the Signal notifier fired (and that
+// fired 20× before the dedup-persistence fix in this same release).
+// ─────────────────────────────────────────────────────────────────────────────
+class BoschNotificationsCard extends HTMLElement {
+  setConfig(config) {
+    this._config = {
+      title:                  config.title ?? "Bosch Cloud",
+      maintenance_entity:     config.maintenance_entity ?? null,
+      camera_status_entities: Array.isArray(config.camera_status_entities)
+        ? config.camera_status_entities
+        : null,
+      show_camera_grid:       config.show_camera_grid !== false,
+      show_when_clear:        config.show_when_clear !== false,
+    };
+    if (this.isConnected) this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  connectedCallback() {
+    if (this._hass) this._render();
+  }
+
+  _maintenanceEntity() {
+    if (this._config.maintenance_entity) {
+      return this._hass.states[this._config.maintenance_entity] || null;
+    }
+    // Auto-discover: first sensor whose entity_id ends in `_bosch_cloud_wartung`
+    for (const eid in this._hass.states) {
+      if (/^sensor\..*_bosch_cloud_wartung$/.test(eid)) {
+        return this._hass.states[eid];
+      }
+    }
+    return null;
+  }
+
+  _cameraStatusEntities() {
+    if (this._config.camera_status_entities) {
+      return this._config.camera_status_entities
+        .map(eid => this._hass.states[eid])
+        .filter(Boolean);
+    }
+    // Auto-discover: every sensor matching `sensor.bosch_*_status` whose
+    // friendly_name doesn't include "Mini" / "Stream" (those are different
+    // status sensors on the same cam).
+    const out = [];
+    for (const eid in this._hass.states) {
+      if (!/^sensor\.bosch_[a-z0-9_]+_status$/.test(eid)) continue;
+      if (eid.endsWith("_mini_nvr_status")) continue;
+      if (eid.endsWith("_stream_status")) continue;
+      if (eid.endsWith("_alarm_status")) continue;
+      out.push(this._hass.states[eid]);
+    }
+    return out;
+  }
+
+  _maintenanceBanner(maint) {
+    if (!maint) return "";
+    const state = maint.state;
+    const a = maint.attributes || {};
+    const fmtTime = ts => ts ? new Date(ts).toLocaleString("de-DE", {
+      weekday: "short", day: "2-digit", month: "2-digit",
+      hour: "2-digit", minute: "2-digit",
+    }) : "?";
+    // Only render the link when the URL has an https:// scheme — prevents
+    // a compromised RSS feed (or any sensor-state-write path) from injecting
+    // `javascript:` / `data:` URIs that execute in the dashboard context.
+    const safeLink = (a.link && /^https:\/\//i.test(a.link)) ? a.link : null;
+    const link = safeLink ? `<a href="${this._esc(safeLink)}" target="_blank" rel="noopener">Details bei Bosch →</a>` : "";
+
+    if (state === "active") {
+      return `
+        <div class="banner banner-active">
+          <div class="banner-icon">⚠️</div>
+          <div class="banner-body">
+            <div class="banner-title">Cloud-Wartung läuft</div>
+            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
+            <div class="banner-window">${fmtTime(a.scheduled_start)} – ${fmtTime(a.scheduled_end).split(", ").slice(-1)[0]}</div>
+            <div class="banner-note">Live-Bild und Snapshots ggf. eingeschränkt.</div>
+            ${link ? `<div class="banner-link">${link}</div>` : ""}
+          </div>
+        </div>`;
+    }
+    if (state === "scheduled") {
+      return `
+        <div class="banner banner-scheduled">
+          <div class="banner-icon">📅</div>
+          <div class="banner-body">
+            <div class="banner-title">Cloud-Wartung geplant</div>
+            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
+            <div class="banner-window">Beginn: ${fmtTime(a.scheduled_start)}<br>Ende: ${fmtTime(a.scheduled_end)}</div>
+            ${link ? `<div class="banner-link">${link}</div>` : ""}
+          </div>
+        </div>`;
+    }
+    if (state === "recent" || state === "past") {
+      return `
+        <div class="banner banner-past">
+          <div class="banner-icon">✅</div>
+          <div class="banner-body">
+            <div class="banner-title">Cloud-Wartung beendet</div>
+            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
+            <div class="banner-window">Beendet ${fmtTime(a.scheduled_end)}</div>
+            <div class="banner-note">Cloud-Dienste sollten wieder normal funktionieren.</div>
+          </div>
+        </div>`;
+    }
+    return "";
+  }
+
+  _cameraGrid(cams) {
+    if (!cams.length || !this._config.show_camera_grid) return "";
+    const rows = cams.map(c => {
+      const name = (c.attributes && c.attributes.friendly_name) || c.entity_id;
+      const cleanName = name.replace(/^Bosch\s+/, "").replace(/\s+Status$/, "");
+      const status = c.state || "unknown";
+      const cls = (status === "ONLINE" || status === "online") ? "ok"
+                : (status === "OFFLINE" || status === "offline") ? "warn"
+                : "muted";
+      return `
+        <div class="cam-row">
+          <span class="cam-dot ${cls}"></span>
+          <span class="cam-name">${this._esc(cleanName)}</span>
+          <span class="cam-state ${cls}">${this._esc(status)}</span>
+        </div>`;
+    }).join("");
+    return `<div class="cam-grid"><div class="cam-header">Kamera-Status</div>${rows}</div>`;
+  }
+
+  _clearMessage(maint, cams) {
+    if (!this._config.show_when_clear) return "";
+    const hasMaint = maint && ["active", "scheduled", "recent"].includes(maint.state);
+    if (hasMaint) return "";
+    const anyOffline = cams.some(c => /OFFLINE|offline/i.test(c.state));
+    if (anyOffline) return "";
+    return `<div class="clear">✓ Keine Bosch-Cloud-Wartung geplant. Alle Kameras erreichbar.</div>`;
+  }
+
+  _esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+
+    const maint = this._maintenanceEntity();
+    const cams = this._cameraStatusEntities();
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host{display:block;background:var(--card-background-color,#1c1c1c);border-radius:12px;
+          padding:16px;color:var(--primary-text-color,#fff);font-family:var(--paper-font-body1_-_font-family,Roboto)}
+        h2{margin:0 0 12px 0;font-size:16px;font-weight:500;color:var(--primary-text-color,#fff)}
+        .banner{display:flex;gap:12px;padding:12px;border-radius:8px;margin-bottom:12px;align-items:flex-start}
+        .banner-active{background:rgba(255,152,0,0.12);border-left:4px solid #ff9800}
+        .banner-scheduled{background:rgba(33,150,243,0.12);border-left:4px solid #2196f3}
+        .banner-past{background:rgba(76,175,80,0.12);border-left:4px solid #4caf50}
+        .banner-icon{font-size:24px;line-height:1}
+        .banner-body{flex:1;font-size:13px}
+        .banner-title{font-weight:600;margin-bottom:4px}
+        .banner-sub{color:var(--secondary-text-color,#aaa);margin-bottom:4px}
+        .banner-window{font-family:var(--paper-font-code1_-_font-family,monospace);font-size:12px;margin-bottom:4px}
+        .banner-note{color:var(--secondary-text-color,#aaa);font-size:12px;margin-bottom:4px}
+        .banner-link a{color:var(--primary-color,#03a9f4);text-decoration:none}
+        .banner-link a:hover{text-decoration:underline}
+        .cam-grid{margin-top:8px}
+        .cam-header{font-size:12px;color:var(--secondary-text-color,#aaa);
+          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:500}
+        .cam-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--divider-color,#333);font-size:13px}
+        .cam-row:last-child{border-bottom:none}
+        .cam-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+        .cam-dot.ok{background:#4caf50}
+        .cam-dot.warn{background:#ff9800}
+        .cam-dot.muted{background:#666}
+        .cam-name{flex:1}
+        .cam-state{font-size:11px;color:var(--secondary-text-color,#aaa);text-transform:uppercase;letter-spacing:0.5px}
+        .cam-state.ok{color:#4caf50}
+        .cam-state.warn{color:#ff9800}
+        .clear{padding:12px;text-align:center;color:var(--secondary-text-color,#aaa);font-size:13px}
+      </style>
+      <h2>${this._esc(this._config.title)}</h2>
+      ${this._maintenanceBanner(maint)}
+      ${this._cameraGrid(cams)}
+      ${this._clearMessage(maint, cams)}`;
+  }
+
+  getCardSize() {
+    return 3;
+  }
+}
+customElements.define("bosch-notifications-card", BoschNotificationsCard);
+window.customCards.push({
+  type:        "bosch-notifications-card",
+  name:        "Bosch Notifications",
+  description: "Bosch cloud maintenance + camera status banner. Aggregates active/scheduled/past maintenance windows from the RSS feed and shows online/offline state per camera.",
   preview:     false,
 });

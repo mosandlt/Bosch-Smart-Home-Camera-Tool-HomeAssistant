@@ -283,15 +283,22 @@ class TestRcpLocalWrite:
 
     @pytest.mark.asyncio
     async def test_0x_prefix_preserved(self):
-        """Payloads without '0x' prefix get it added."""
+        """Payloads without '0x' prefix get it added.
+
+        v12.4.13: params now embedded in URL query string instead of `params=` kwarg.
+        """
         from custom_components.bosch_shc_camera.rcp import rcp_local_write
         resp_cm = _mock_resp(200, body=b"ok")
         session = MagicMock()
         session.get.return_value = resp_cm
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             await rcp_local_write(MagicMock(), CAM_IP, "0x0c22", "deadbeef")
-        _, call_kwargs = session.get.call_args
-        assert call_kwargs["params"]["payload"].startswith("0x")
+        # First positional arg is the URL; payload="0xdeadbeef" lives in the query.
+        call_args, _ = session.get.call_args
+        url = call_args[0] if call_args else ""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(url).query)
+        assert qs.get("payload", [""])[0].startswith("0x")
 
     @pytest.mark.asyncio
     async def test_non200_returns_false(self):

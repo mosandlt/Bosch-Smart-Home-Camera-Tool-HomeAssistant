@@ -226,15 +226,26 @@ async def rcp_local_write(
     payload_hex: str,
     type_: str = "P_OCTET",
     num: int = 0,
+    *,
+    user: str | None = None,
+    password: str | None = None,
 ) -> bool:
-    """Write an RCP value directly via the camera's LAN HTTP endpoint.
+    """Write an RCP value directly via the camera's LAN endpoint.
+
+    Bosch SHC cameras only listen on HTTPS port 443 (no plain HTTP) and the
+    `rcp.xml` endpoint requires HTTP Digest auth. Pass the cycling
+    `cbs-XXXXXXXX` user + password from a recent LOCAL session
+    (`coordinator._local_creds_cache[cam_id]` or `_live_connections[cam_id]`)
+    so the request is authorised. Earlier versions issued plain HTTP on
+    port 80 and silently failed — confirmed against live Gen2 hardware
+    2026-05-20.
 
     Returns True on success. `payload_hex` may start with "0x" or not.
     Some commands require `num=1` (e.g. T_WORD-typed writes like 0x0c22 LED
     dimmer); the default 0 keeps backward compatibility with existing callers.
     Best-effort: any error returns False (caller should handle gracefully).
     """
-    base = f"http://{cam_ip}/rcp.xml"
+    base = f"https://{cam_ip}/rcp.xml"
     if not payload_hex.lower().startswith("0x"):
         payload_hex = "0x" + payload_hex
     params: dict[str, str] = {
@@ -245,13 +256,41 @@ async def rcp_local_write(
     }
     if num:
         params["num"] = str(num)
+    # aiohttp serialises params into the query string when added to a GET URL.
+    # async_digest_request takes the full URL so we build it explicitly.
+    from urllib.parse import urlencode
+    url = f"{base}?{urlencode(params)}"
     session = async_get_clientsession(hass, verify_ssl=False)
     try:
+        if user and password:
+            from .auth_utils import async_digest_request
+            async with await async_digest_request(
+                session, "GET", url, user, password,
+                timeout=5.0, ssl=False,
+            ) as resp:
+                status = resp.status
+                if status != 200:
+                    _LOGGER.debug(
+                        "rcp_local_write: %s@%s HTTPS %d (Digest)",
+                        command, cam_ip, status,
+                    )
+                    return False
+                raw = await resp.read()
+                if b"<err>" in raw.lower():
+                    _LOGGER.debug(
+                        "rcp_local_write: %s@%s RCP error in response",
+                        command, cam_ip,
+                    )
+                    return False
+                return True
+        # Fallback path — no auth supplied. Kept for back-compat with
+        # callers that haven't been wired through to the creds cache yet.
+        # Will fail on every modern Gen2 firmware with HTTP 401.
         async with asyncio.timeout(5):
-            async with session.get(base, params=params) as resp:
+            async with session.get(url, ssl=False) as resp:
                 if resp.status != 200:
                     _LOGGER.debug(
-                        "rcp_local_write: %s@%s HTTP %d",
+                        "rcp_local_write: %s@%s HTTPS %d (no auth)",
                         command, cam_ip, resp.status,
                     )
                     return False
@@ -263,7 +302,7 @@ async def rcp_local_write(
                     )
                     return False
                 return True
-    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+    except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as err:
         _LOGGER.debug("rcp_local_write: %s@%s %s", command, cam_ip, err)
     return False
 
@@ -283,35 +322,51 @@ async def rcp_local_read_privacy(
 
 
 async def rcp_local_write_privacy(
-    hass: "HomeAssistant", cam_ip: str, enabled: bool,
+    hass: "HomeAssistant",
+    cam_ip: str,
+    enabled: bool,
+    *,
+    user: str | None = None,
+    password: str | None = None,
 ) -> bool:
-    """Write privacy-mode state via direct LOCAL RCP (Gen2, no auth).
+    """Write privacy-mode state via direct LOCAL RCP (Gen2 over HTTPS+Digest).
 
-    Best-effort fallback used when the cloud API is unreachable. Not all
-    Gen2 models accept privacy writes over unauthenticated RCP — a False
-    return means the caller should surface this to the user.
+    Best-effort fallback used when the cloud API is unreachable. Pass the
+    cycling LOCAL Digest user + password from a recent LAN session so the
+    write authorises — Gen2 cameras require Digest auth on `rcp.xml` and
+    do not accept anonymous WRITEs.
     """
     # Privacy mask payload: 4 bytes, byte[1] carries the mode. Keep the
     # remaining bytes zero so we don't stamp over other mask fields.
     payload = "00010000" if enabled else "00000000"
-    return await rcp_local_write(hass, cam_ip, "0x0d00", payload, "P_OCTET")
+    return await rcp_local_write(
+        hass, cam_ip, "0x0d00", payload, "P_OCTET",
+        user=user, password=password,
+    )
 
 
 async def rcp_local_write_front_light(
-    hass: "HomeAssistant", cam_ip: str, brightness: int,
+    hass: "HomeAssistant",
+    cam_ip: str,
+    brightness: int,
+    *,
+    user: str | None = None,
+    password: str | None = None,
 ) -> bool:
-    """Write the front-light brightness via direct LOCAL RCP (Gen2, no auth).
+    """Write the front-light brightness via direct LOCAL RCP (Gen2 HTTPS+Digest).
 
     Brightness is 0-100. 0 turns the light off; values 1-100 set the dimmer.
     Maps to RCP 0x0c22 (`T_WORD`, num=1) — same command read by
-    BoschLedDimmerSensor. Best-effort: not every Gen2 firmware accepts
-    unauthenticated writes, a False return means the caller should fall back
-    to SHC.
+    BoschLedDimmerSensor. Pass the cycling LOCAL Digest user + password so
+    the write authorises.
     """
     # Clamp to legal range and encode as a 4-hex-digit big-endian word (T_WORD).
     val = max(0, min(100, int(brightness)))
     payload = f"{val:04x}"
-    return await rcp_local_write(hass, cam_ip, "0x0c22", payload, "T_WORD", num=1)
+    return await rcp_local_write(
+        hass, cam_ip, "0x0c22", payload, "T_WORD", num=1,
+        user=user, password=password,
+    )
 
 
 # ── Read operations ──────────────────────────────────────────────────────────

@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Bosch Notifications Card — Lovelace YAML (Option A, no custom card needed)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Drops into any dashboard. Shows:
+#   • Active Bosch cloud maintenance window with title, time window, link
+#   • Recent past maintenance (for ~24h after end)
+#   • Each camera's online / offline status
+#   • Each camera's LAN reachability (binary_sensor)
+#
+# The card collapses to a single warm-grey "Alles ruhig" line when no
+# maintenance is active or scheduled and all cameras are online. The
+# conditional rows expand as needed.
+#
+# Adapt the entity IDs at the top to match your install. The maintenance
+# sensor is the same value across all cameras — pick any cam's sensor.
+# (We expose it per-cam so dashboards that filter by area still see it.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+title: Bosch Notifications
+cards:
+  # ── 1. Active cloud maintenance ───────────────────────────────────────────
+  - type: conditional
+    conditions:
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state: active
+    card:
+      type: markdown
+      content: |
+        ## ⚠️ Bosch Cloud-Wartung läuft
+        **{{ state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'title') }}**
+
+        {{ as_timestamp(state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'scheduled_start')) | timestamp_custom('%a %d.%m. %H:%M') }} – {{ as_timestamp(state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'scheduled_end')) | timestamp_custom('%H:%M') }}
+
+        Live-Bild und Snapshots ggf. eingeschränkt.
+
+        [Mehr Info bei Bosch →]({{ state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'link') }})
+
+  # ── 2. Scheduled (future) maintenance ─────────────────────────────────────
+  - type: conditional
+    conditions:
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state: scheduled
+    card:
+      type: markdown
+      content: |
+        ## 📅 Bosch Cloud-Wartung geplant
+        **{{ state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'title') }}**
+
+        Beginn: {{ as_timestamp(state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'scheduled_start')) | timestamp_custom('%a %d.%m. %H:%M') }}
+        Ende: {{ as_timestamp(state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'scheduled_end')) | timestamp_custom('%a %d.%m. %H:%M') }}
+
+        [Details →]({{ state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'link') }})
+
+  # ── 3. Recently ended maintenance (auto-expires after ~24h) ──────────────
+  - type: conditional
+    conditions:
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state: recent
+    card:
+      type: markdown
+      content: |
+        ## ✅ Bosch Cloud-Wartung beendet
+        **{{ state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'title') }}**
+
+        Beendet um {{ as_timestamp(state_attr('sensor.bosch_terrasse_bosch_cloud_wartung', 'scheduled_end')) | timestamp_custom('%H:%M') }}.
+        Cloud-Dienste sollten wieder normal funktionieren.
+
+  # ── 4. Camera status overview (always visible) ───────────────────────────
+  - type: entities
+    title: Kamera-Status
+    show_header_toggle: false
+    entities:
+      - entity: sensor.bosch_terrasse_status
+        name: Terrasse
+        secondary_info: last-changed
+      - entity: binary_sensor.bosch_11111111_1111_1111_1111_111111111111_lan_reachable
+        name: Terrasse LAN
+      - entity: sensor.bosch_innenbereich_status
+        name: Innenbereich
+        secondary_info: last-changed
+      - entity: binary_sensor.bosch_22222222_2222_2222_2222_222222222222_lan_reachable
+        name: Innenbereich LAN
+      - entity: sensor.bosch_kamera_status
+        name: 360° Kamera
+        secondary_info: last-changed
+      - entity: sensor.bosch_garten_status
+        name: Eingang
+        secondary_info: last-changed
+
+  # ── 5. "All clear" fallback when no maintenance ──────────────────────────
+  - type: conditional
+    conditions:
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state_not: active
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state_not: scheduled
+      - entity: sensor.bosch_terrasse_bosch_cloud_wartung
+        state_not: recent
+    card:
+      type: markdown
+      content: |
+        ✓ Keine Bosch-Cloud-Wartung geplant. Cloud-Dienste laufen normal.

@@ -707,10 +707,27 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
         if is_lan_reachable is None:
             return False
-        from .shc import _is_gen2
-        if not _is_gen2(self.coordinator, self._cam_id):
+        if not bool(is_lan_reachable(self._cam_id)):
             return False
-        return bool(is_lan_reachable(self._cam_id))
+        # Gate the LAN fallback to cams that actually have a working LAN
+        # RCP write surface. Gen2 known: yes. Gen1 known: no (no local
+        # rcp.xml endpoint). Hardware-version unknown (cold start during
+        # cloud outage, _hw_version cache empty + device-registry stale):
+        # let the user try — the write either succeeds (Gen2) or fails
+        # cleanly (Gen1, no LAN endpoint), and not gating means the user
+        # can recover privacy/light on a Gen2 cam during a multi-hour
+        # cloud outage without waiting for hw_version to backfill.
+        # Bug 2026-05-20 (Bosch maintenance window, hw_version never
+        # populated on Indoor II → switch grey, user stuck).
+        from .shc import _is_gen2
+        if _is_gen2(self.coordinator, self._cam_id):
+            return True
+        hw = self.coordinator._hw_version.get(self._cam_id)
+        if hw in (None, "", "CAMERA"):
+            # Hardware version not yet known — allow the toggle, the LAN
+            # write will short-circuit for Gen1 (no rcp.xml endpoint).
+            return True
+        return False
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

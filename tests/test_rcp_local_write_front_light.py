@@ -33,13 +33,22 @@ class _FakeResp:
 
 
 class _FakeSession:
-    """Captures the `params=` kwarg so the test can assert num=1 was sent."""
+    """Captures the URL query so the test can assert num=1 was sent.
+
+    v12.4.13: `rcp_local_write` now embeds params directly into the URL
+    (HTTPS path) instead of passing them via `params=`. The fake parses
+    the query string back into `last_params` so assertions keep working.
+    """
     def __init__(self, resp: _FakeResp):
         self._resp = resp
         self.last_params: dict | None = None
+        self.last_url: str | None = None
 
-    def get(self, _url, *, params=None):
-        self.last_params = params
+    def get(self, url, **_kwargs):
+        from urllib.parse import urlparse, parse_qs
+        self.last_url = url
+        parsed = urlparse(url)
+        self.last_params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         return self._resp
 
 

@@ -48,13 +48,33 @@ async def async_setup_entry(
     entities = []
     for cam_id in coordinator.data:
         cam_info = coordinator.data[cam_id].get("info", {})
-        hw = cam_info.get("hardwareVersion", "CAMERA")
+        # Prefer cam_info hardwareVersion (live cloud data); fall back to the
+        # persistent `_hw_version` store so a cold-start during a cloud outage
+        # still creates the right entities. Bug 2026-05-20: light entities
+        # never materialised for Indoor II when HA was restarted while the
+        # cloud was 503. `getattr` keeps the test stubs that don't seed the
+        # `_hw_version` dict happy.
+        _hw_cache = getattr(coordinator, "_hw_version", {}) or {}
+        hw = cam_info.get("hardwareVersion") or _hw_cache.get(cam_id, "CAMERA")
         from .models import get_model_config
         if get_model_config(hw).generation >= 2:
             has_light = cam_info.get("featureSupport", {}).get("light", False)
+            is_indoor_ii = hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2")
             if has_light:
+                # Outdoor II has the full RGB wallwasher (top + bottom) + front spotlight.
                 entities.append(BoschTopLedLight(coordinator, cam_id, config_entry))
                 entities.append(BoschBottomLedLight(coordinator, cam_id, config_entry))
+                entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
+            elif is_indoor_ii:
+                # Indoor II reports `featureSupport.light=false` from the cloud API,
+                # but the camera DOES have a controllable front spotlight (color-temp,
+                # same `lighting/switch/topdown` endpoint as Outdoor II — confirmed
+                # by the matching `number.*_farbtemperatur_frontlicht` entity that
+                # has worked since v8.x). Surface it as a top-level light entity so
+                # users have an on/off toggle in the dashboard, matching the Bosch
+                # app's UX. Bug 2026-05-20: Thomas reported no light entity visible
+                # for Innenbereich II. Skip Top/Bottom — Indoor II has no RGB
+                # wallwasher.
                 entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
@@ -184,10 +204,16 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)
         if is_lan_reachable is None:
             return False
-        from .shc import _is_gen2
-        if not _is_gen2(self.coordinator, self._cam_id):
+        if not bool(is_lan_reachable(self._cam_id)):
             return False
-        return bool(is_lan_reachable(self._cam_id))
+        # See switch.py BoschPrivacyModeSwitch.available — same relaxation:
+        # if hw_version isn't yet known (cold-start during cloud outage),
+        # allow the toggle. The write fails cleanly for Gen1.
+        from .shc import _is_gen2
+        if _is_gen2(self.coordinator, self._cam_id):
+            return True
+        hw = self.coordinator._hw_version.get(self._cam_id)
+        return hw in (None, "", "CAMERA")
 
     def _load_state_from_cache(self) -> None:
         """Sync state from coordinator lighting/switch cache.

@@ -88,7 +88,7 @@ class TestLightAsyncSetupEntry:
         assert added == [], "No light entities must be registered for Gen1 camera"
 
     def test_no_entities_when_has_light_false(self):
-        """No light entities for Gen2 cameras without featureSupport.light."""
+        """No light entities for Gen2 Outdoor without featureSupport.light."""
         from custom_components.bosch_shc_camera.light import async_setup_entry
         coord = _stub_coord()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -99,6 +99,67 @@ class TestLightAsyncSetupEntry:
         entry = SimpleNamespace(runtime_data=coord, options={})
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert added == [], "No light entities when featureSupport.light=False"
+
+    def test_indoor_ii_gets_front_light_despite_feature_support_false(self):
+        """Gen2 Indoor II reports `featureSupport.light=false` from the cloud
+        but DOES have a controllable front spotlight via the same
+        `lighting/switch/topdown` endpoint. v12.5.0 surfaces this as a single
+        BoschFrontLight entity (color-temp white only, no RGB wallwasher).
+        Bug 2026-05-20: Innenbereich II had no light entity at all in the
+        dashboard despite the working number entities for brightness +
+        color temp.
+        """
+        from custom_components.bosch_shc_camera.light import async_setup_entry
+        coord = _stub_coord()
+        coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
+        coord.data[CAM_ID]["info"]["featureSupport"]["light"] = False
+        added = []
+        def _fake_add(entities, **kw): added.extend(entities)
+        import asyncio
+        entry = SimpleNamespace(runtime_data=coord, options={})
+        asyncio.run(async_setup_entry(None, entry, _fake_add))
+        entity_classes = [type(e).__name__ for e in added]
+        assert entity_classes == ["BoschFrontLight"], (
+            f"Indoor II should get exactly [BoschFrontLight], got {entity_classes}"
+        )
+
+    def test_indoor_ii_alias_also_gets_front_light(self):
+        """`CAMERA_INDOOR_GEN2` is the legacy alias for HOME_Eyes_Indoor —
+        cover both hw strings."""
+        from custom_components.bosch_shc_camera.light import async_setup_entry
+        coord = _stub_coord()
+        coord.data[CAM_ID]["info"]["hardwareVersion"] = "CAMERA_INDOOR_GEN2"
+        coord.data[CAM_ID]["info"]["featureSupport"]["light"] = False
+        added = []
+        def _fake_add(entities, **kw): added.extend(entities)
+        import asyncio
+        entry = SimpleNamespace(runtime_data=coord, options={})
+        asyncio.run(async_setup_entry(None, entry, _fake_add))
+        assert [type(e).__name__ for e in added] == ["BoschFrontLight"]
+
+    def test_hw_version_fallback_from_persistent_cache(self):
+        """When `cam_info.hardwareVersion` is empty (cold-start during cloud
+        outage, rehydrated coordinator.data has just `info.title`), light
+        setup must read from the persistent `_hw_version` store instead.
+        Without this fallback, Indoor II would silently miss its light
+        entity until the cloud comes back."""
+        from custom_components.bosch_shc_camera.light import async_setup_entry
+        coord = _stub_coord()
+        # Simulate cold-start rehydrate: info has title only, no hardwareVersion
+        coord.data[CAM_ID]["info"].pop("hardwareVersion", None)
+        coord.data[CAM_ID]["info"]["featureSupport"] = {"light": False}
+        # Persistent store knows it's Indoor II
+        coord._hw_version = {CAM_ID: "HOME_Eyes_Indoor"}
+        added = []
+        def _fake_add(entities, **kw): added.extend(entities)
+        import asyncio
+        entry = SimpleNamespace(runtime_data=coord, options={})
+        asyncio.run(async_setup_entry(None, entry, _fake_add))
+        assert [type(e).__name__ for e in added] == ["BoschFrontLight"], (
+            "REGRESSION: hw_version fallback from persistent store no longer "
+            "feeds the light entity setup. Indoor II loses its light entity "
+            "during cloud-degraded cold starts."
+        )
 
 
 # ── BoschFrontLight.color_temp_kelvin ─────────────────────────────────────────
