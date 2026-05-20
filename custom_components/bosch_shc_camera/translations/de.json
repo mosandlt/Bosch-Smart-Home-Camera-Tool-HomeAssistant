@@ -73,6 +73,7 @@
               "enable_sensors": "Sensoren (Status, WiFi, Firmware, Events)",
               "enable_snapshot_button": "Schalter & Buttons (Stream, Privat, Licht)",
               "enable_binary_sensors": "Bewegungs-/Audio-Sensoren",
+              "motion_active_window": "Bewegungssensor: Aktiv-Fenster (Sekunden)",
               "audio_default_on": "Audio standardmäßig an",
               "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)"
             },
@@ -80,7 +81,8 @@
               "enable_snapshots": "Zeigt das letzte Bewegungs-JPEG als Kamera-Entity in HA.",
               "enable_sensors": "Erstellt Sensoren für Kamera-Status, WiFi-Signal, Firmware, Ereignisse heute, letztes Ereignis, etc.",
               "enable_snapshot_button": "Erstellt Schalter und Buttons: Live Stream, Audio, Privat-Modus, Kameralicht, Benachrichtigungen, Aktualisieren.",
-              "enable_binary_sensors": "Binärsensoren die nach Bewegung oder Audio-Alarm für 30 Sekunden EIN werden. Nützlich für Automationen.",
+              "enable_binary_sensors": "Binärsensoren die nach Bewegung oder Audio-Alarm für das konfigurierte Aktiv-Fenster EIN werden. Nützlich für Automationen.",
+              "motion_active_window": "Wie viele Sekunden die Bewegungs-/Audio-/Person-Binärsensoren nach einem Ereignis EIN bleiben. Standard: 90 s. Bereich: 10–300 s.",
               "audio_default_on": "Wenn AN: Audio-Schalter ist beim Start automatisch AN (Stream mit Ton). Wenn AUS: Audio startet stumm. Kann jederzeit im Dashboard umgeschaltet werden.",
               "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden."
             }
@@ -361,6 +363,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "Geräusch-Empfindlichkeit"
+      },
+      "intrusion_sensitivity": {
+        "name": "Einbruch-Erkennungsempfindlichkeit"
+      },
+      "intrusion_distance": {
+        "name": "Einbruch-Erkennungsreichweite"
       }
     },
     "button": {

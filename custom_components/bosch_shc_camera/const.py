@@ -24,6 +24,10 @@ LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 TIMEOUT_SNAP = 10             # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10   # PUT /v11/video_inputs/{id}/connection
 
+DEFAULT_MOTION_ACTIVE_WINDOW = 90  # seconds — see binary_sensor.py for rationale
+MOTION_ACTIVE_WINDOW_MIN = 10      # seconds
+MOTION_ACTIVE_WINDOW_MAX = 300     # seconds
+
 DEFAULT_OPTIONS = {
     "scan_interval":      60,
     "interval_status":   300,
@@ -41,6 +45,7 @@ DEFAULT_OPTIONS = {
     # "stable"   → large buffer, ~12-15s lag, no stutter even on weak links
     "live_buffer_mode": "balanced",
     "enable_binary_sensors": True,
+    "motion_active_window": DEFAULT_MOTION_ACTIVE_WINDOW,
     "enable_fcm_push": False,
     "alert_notify_service": "",
     "alert_notify_system": "",

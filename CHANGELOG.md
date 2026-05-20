@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.6.0 — 2026-05-20
+
+Feature release porting four Bosch-app-parity gaps surfaced by a competitive audit against Reolink/Eufy/Ring integrations. All four ship the same day as cross-platform releases (Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3).
+
+- **Mic/Speaker level entities (Gen2).** Two new `number` entities per Gen2 camera: `number.bosch_<cam>_microphone_level` and `number.bosch_<cam>_speaker_level`, range 0-100, slider mode, mapped to `PUT /v11/video_inputs/{id}/audio` body fields `microphoneLevel` / `speakerLevel`. Read-back from the existing audio cache. Indoor II Intercom benefits especially — was previously only adjustable via the Bosch app.
+- **Intrusion-detection sensitivity + distance entities (Gen2).** `number.bosch_<cam>_intrusion_sensitivity` (range 0-7, confirmed from FW 9.40 captures — was 0-5 in older firmware) + `number.bosch_<cam>_intrusion_distance` (range 1-10 m, inferred from iOS app slider). Both PUT `/intrusionDetectionConfig` with a read-modify-write to preserve the existing `mode` field. Write-lock + cache invalidation match the existing privacy/light pattern.
+- **Configurable motion-sensor active window.** New options-flow field `motion_active_window` (range 10-300 s, default 90, NumberSelector slider). `binary_sensor.bosch_<cam>_motion` / `_audio_alarm` / `_person_detected` all read it via the new `_motion_active_window` property on `_BoschBinarySensorBase`, clamped at the boundaries with a fallback to 90 on invalid values. Replaces the hardcoded 90 s; surfaced from a long-standing HA-Forum request thread.
+- **WiFi RSSI + firmware version diagnostic sensors.** Two new entities per camera: `sensor.bosch_<cam>_wifi_signal` (signal_strength device-class, dBm-derived %, diagnostic category) and `sensor.bosch_<cam>_firmware_version` (string, diagnostic category, `mdi:chip` icon). Fed from the existing `/v11/video_inputs/{id}/wifiinfo` slow-tier endpoint (already in the fetch loop) and `cam_info.firmwareVersion`. Matches Reolink/Ring/Eufy standard.
+- **+141 regression tests** across `tests/test_number_audio_intrusion.py` (74), `tests/test_motion_window_option.py` (30), `tests/test_diagnostic_sensors.py` (37). Full suite **4314 passed, 17 skipped, 0 failed**. Mypy strict green on all touched files.
+
 ## v12.5.1 — 2026-05-20
 
 Hotfix: revert the v12.5.0 Indoor II light entity. The Eyes Indoor II has no controllable light hardware (only fixed IR night-vision LEDs managed by the camera firmware itself). v12.5.0 mistakenly created a `BoschFrontLight` for it based on the presence of stale `number.*_helligkeit_*` / `*_farbtemperatur_*` entities that had been left in the registry from an older codepath. Those numbers had always been `unavailable` and were not a signal that the hardware existed. Confirmed by the user (cam owner).

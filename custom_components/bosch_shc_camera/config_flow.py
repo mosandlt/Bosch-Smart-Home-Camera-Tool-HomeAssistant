@@ -40,6 +40,7 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 )
 from homeassistant.helpers.selector import (
     SelectSelector, SelectSelectorConfig, SelectSelectorMode, SelectOptionDict,
+    NumberSelector, NumberSelectorConfig, NumberSelectorMode,
 )
 
 
@@ -57,6 +58,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     ],
     "features": [
         "enable_snapshots", "enable_sensors", "enable_binary_sensors",
+        "motion_active_window",
         "enable_snapshot_button", "audio_default_on", "enable_intercom",
     ],
     "stream": [
@@ -143,6 +145,11 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 from . import DOMAIN, DEFAULT_OPTIONS  # type: ignore[attr-defined]
+from .const import (
+    DEFAULT_MOTION_ACTIVE_WINDOW,
+    MOTION_ACTIVE_WINDOW_MIN,
+    MOTION_ACTIVE_WINDOW_MAX,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -582,6 +589,16 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     "enable_binary_sensors",
                     default=bool(opts.get("enable_binary_sensors", True)),
                 ): bool,
+                vol.Optional(
+                    "motion_active_window",
+                    default=int(opts.get("motion_active_window", DEFAULT_MOTION_ACTIVE_WINDOW)),
+                ): NumberSelector(NumberSelectorConfig(
+                    min=MOTION_ACTIVE_WINDOW_MIN,
+                    max=MOTION_ACTIVE_WINDOW_MAX,
+                    step=5,
+                    mode=NumberSelectorMode.SLIDER,
+                    unit_of_measurement="s",
+                )),
                 vol.Optional(
                     "enable_snapshot_button",
                     default=bool(opts.get("enable_snapshot_button", True)),

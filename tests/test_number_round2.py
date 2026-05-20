@@ -227,10 +227,14 @@ async def test_audio_threshold_set_failure_logs():
 # ── BoschSpeakerLevelNumber ──────────────────────────────────────────────────
 
 
-def _make_speaker_level(current_level=50):
+def _make_speaker_level(speaker_level=50):
     from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
 
-    coord = _coord()
+    coord = _coord(audio_cache={CAM_ID: {
+        "speakerLevel": speaker_level,
+        "microphoneLevel": 60,
+        "audioEnabled": True,
+    }})
     sw = BoschSpeakerLevelNumber.__new__(BoschSpeakerLevelNumber)
     sw.coordinator = coord
     sw._cam_id = CAM_ID
@@ -238,7 +242,6 @@ def _make_speaker_level(current_level=50):
     sw._model_name = "Outdoor"
     sw._fw = "9.40.25"
     sw._mac = ""
-    sw._current_level = float(current_level)
     sw.hass = _make_hass()
     sw.async_write_ha_state = MagicMock()
     return sw
@@ -255,6 +258,7 @@ def _mock_aiohttp_session(status=200):
 
 
 def test_speaker_level_native_value():
+    # native_value now reads from coordinator._audio_cache, not a local field
     sw = _make_speaker_level(75)
     assert sw.native_value == 75.0
 
@@ -262,37 +266,32 @@ def test_speaker_level_native_value():
 @pytest.mark.asyncio
 async def test_speaker_level_set_success():
     sw = _make_speaker_level(50)
-    session = _mock_aiohttp_session(200)
-    with patch("homeassistant.helpers.aiohttp_client.async_get_clientsession", return_value=session):
-        await sw.async_set_native_value(80.0)
-    assert sw._current_level == 80.0
+    # async_put_camera is already an AsyncMock(return_value=True) from _coord()
+    await sw.async_set_native_value(80.0)
+    assert sw.coordinator._audio_cache[CAM_ID]["speakerLevel"] == 80
 
 
 @pytest.mark.asyncio
 async def test_speaker_level_set_non_200():
     sw = _make_speaker_level(50)
-    session = _mock_aiohttp_session(500)
-    with patch("homeassistant.helpers.aiohttp_client.async_get_clientsession", return_value=session):
-        await sw.async_set_native_value(80.0)
-    assert sw._current_level == 50.0
+    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
+    await sw.async_set_native_value(80.0)
+    # Cache must stay at original value when PUT fails
+    assert sw.coordinator._audio_cache[CAM_ID]["speakerLevel"] == 50
 
 
 @pytest.mark.asyncio
 async def test_speaker_level_set_exception():
-    import aiohttp
-
-    @asynccontextmanager
-    async def _bad_put(*args, **kwargs):
-        raise aiohttp.ClientError("net error")
-        yield
-
-    session = MagicMock()
-    session.put = _bad_put
+    # async_put_camera exceptions propagate — HA platform layer catches them.
+    # Cache must not be corrupted on exception.
     sw = _make_speaker_level(50)
-    with patch("homeassistant.helpers.aiohttp_client.async_get_clientsession", return_value=session):
+    sw.coordinator.async_put_camera = AsyncMock(side_effect=Exception("net error"))
+    try:
         await sw.async_set_native_value(90.0)
-    assert sw._current_level == 50.0
-    sw.async_write_ha_state.assert_called()
+    except Exception:
+        pass
+    # Cache must stay at original value
+    assert sw.coordinator._audio_cache[CAM_ID]["speakerLevel"] == 50
 
 
 # ── BoschFrontLightIntensityNumber ───────────────────────────────────────────

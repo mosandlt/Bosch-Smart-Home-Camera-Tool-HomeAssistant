@@ -14,6 +14,17 @@ Creates number entities per camera:
     The configuration field must pair with enabled ("CUSTOM"+true / "OFF"+false),
     otherwise Bosch silently 204s the PUT without applying it.
     Disabled by default.
+
+  • {Name} Intrusion Sensitivity  — intrusion detection sensitivity 0-7 (Gen2 only).
+    Reads from coordinator._intrusion_config_cache[cam_id]["sensitivity"].
+    Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
+    FW 9.40+ supports range 0-7 (capture 2026-04-28 confirmed sensitivity=3, max=7).
+
+  • {Name} Intrusion Distance  — detection range in metres 1-10 (Gen2 only).
+    Reads from coordinator._intrusion_config_cache[cam_id]["distance"].
+    Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
+    Capture 2026-04-28 shows distance=8; range 1-10 from iOS app slider (no raw bounds
+    in capture — range is inferred from app UI, not from API response field).
 """
 
 import asyncio
@@ -59,6 +70,9 @@ async def async_setup_entry(
             # (Indoor II slow-tier returns 200 on this endpoint, confirmed 2026-04-11)
             entities.append(BoschLensElevationNumber(coordinator, cam_id, config_entry))
             entities.append(BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry))
+            # Intrusion detection tuning — available on both Indoor II and Outdoor II.
+            entities.append(BoschIntrusionSensitivityNumber(coordinator, cam_id, config_entry))
+            entities.append(BoschIntrusionDistanceNumber(coordinator, cam_id, config_entry))
             # Light-related entities only for cameras that actually expose Gen2 lighting
             # (Indoor II has no RGB/wallwasher lights — only Power-LED via iconLedBrightness).
             if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
@@ -249,7 +263,10 @@ class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):  # type: ignor
 class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
     """Number entity to control the intercom speaker volume (0–100).
 
-    Writes via PUT /v11/video_inputs/{id}/audio {"SpeakerLevel": value}.
+    Reads from coordinator._audio_cache[cam_id]["speakerLevel"].
+    Writes via PUT /v11/video_inputs/{id}/audio with full body preserved —
+    same pattern as BoschMicrophoneLevelNumber so audioEnabled is not clobbered.
+    Capture 2026-04-08 confirms body shape: {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}.
     Disabled by default — enable in Settings -> Entities.
     """
 
@@ -266,7 +283,6 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry  = entry
-        self._current_level: float = 50  # default speaker level
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
@@ -293,37 +309,37 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
         }
 
     @property
-    def native_value(self) -> float:
-        return self._current_level
+    def native_value(self) -> float | None:
+        """Return speaker level from coordinator audio cache, or None if not yet polled."""
+        audio = self.coordinator._audio_cache.get(self._cam_id, {})
+        val = audio.get("speakerLevel")
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._audio_cache.get(self._cam_id))
+        )
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write the new speaker level to the camera via cloud API."""
-        import aiohttp
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        """Write the new speaker level to the camera via cloud API.
 
+        Sends full audio body (preserves audioEnabled + microphoneLevel) so
+        existing audio settings are not clobbered. Uses async_put_camera for
+        consistent token-refresh handling.
+        """
         level = int(round(value))
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {self.coordinator.token}",
-            "Content-Type": "application/json",
-        }
-        body = {"SpeakerLevel": level}
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._current_level = float(level)
-                        _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
-                    else:
-                        _LOGGER.warning(
-                            "Failed to set speaker level for %s: HTTP %d", self._cam_id, resp.status
-                        )
-        except Exception as err:
-            _LOGGER.warning("Speaker level error for %s: %s", self._cam_id, err)
+        audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
+        audio["speakerLevel"] = level
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "audio", audio
+        )
+        if success:
+            self.coordinator._audio_cache[self._cam_id] = audio
+            _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
+        else:
+            _LOGGER.warning("Failed to set speaker level for %s: HTTP error", self._cam_id)
         self.async_write_ha_state()
 
 
@@ -969,4 +985,130 @@ class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
             cam = self.coordinator.data.get(self._cam_id)
             if cam is not None:
                 cam["audioAlarm"] = current
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gen2 — Intrusion Detection Number Entities
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
+    """Number: intrusion detection sensitivity 0–7 (Gen2 only).
+
+    FW 9.40+ raised the range from 0–5 to 0–7 (confirmed via captures 2026-04-28:
+    value=3 seen, comment in api-findings.md §5 "sensitivity bis 7 (vorher 5)").
+    Reads from coordinator._intrusion_config_cache[cam_id]["sensitivity"].
+    Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body is
+    preserved from cache so detectionMode / distance / enabled are not clobbered.
+    Write-lock timestamp _intrusion_config_set_at is set after successful PUT to
+    prevent slow-tier poll from reverting the optimistic cache update.
+    Available for both Gen2 Indoor II (HOME_Eyes_Indoor) and Gen2 Outdoor II
+    (HOME_Eyes_Outdoor) — intrusion detection is present on both hardware variants.
+    """
+
+    _attr_icon                        = "mdi:shield-alert"
+    _attr_native_min_value            = 0
+    _attr_native_max_value            = 7
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = "Einbruch-Empfindlichkeit"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_sensitivity"
+        self._attr_translation_key = "intrusion_sensitivity"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def native_value(self) -> float | None:
+        cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
+        val = cfg.get("sensitivity")
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
+        if not cfg:
+            return
+        cfg["sensitivity"] = int(round(max(0, min(7, value))))
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "intrusionDetectionConfig", cfg
+        )
+        if success:
+            self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            import time as _time
+            self.coordinator._intrusion_config_set_at[self._cam_id] = _time.monotonic()
+            _LOGGER.debug(
+                "Intrusion sensitivity set to %d for %s",
+                cfg["sensitivity"], self._cam_id[:8],
+            )
+        else:
+            _LOGGER.warning("Failed to set intrusion sensitivity for %s", self._cam_id[:8])
+        self.async_write_ha_state()
+
+
+class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
+    """Number: intrusion detection range in metres 1–10 (Gen2 only).
+
+    Reads from coordinator._intrusion_config_cache[cam_id]["distance"].
+    Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
+    Range note: capture 2026-04-28 (api-findings.md §6.2) shows distance=8; range 1–10
+    is inferred from the iOS app slider — no explicit min/max observed in API responses.
+    Available for both Gen2 Indoor II and Gen2 Outdoor II.
+    Write-lock timestamp _intrusion_config_set_at is set after successful PUT (same guard
+    as BoschIntrusionSensitivityNumber and BoschDetectionModeSelect).
+    """
+
+    _attr_icon                        = "mdi:map-marker-distance"
+    _attr_native_min_value            = 1
+    _attr_native_max_value            = 10
+    _attr_native_step                 = 1
+    _attr_mode                        = NumberMode.SLIDER
+    _attr_native_unit_of_measurement  = "m"
+
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name      = "Einbruch-Erkennungsreichweite"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_distance"
+        self._attr_translation_key = "intrusion_distance"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def native_value(self) -> float | None:
+        cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
+        val = cfg.get("distance")
+        return float(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
+        if not cfg:
+            return
+        cfg["distance"] = int(round(max(1, min(10, value))))
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "intrusionDetectionConfig", cfg
+        )
+        if success:
+            self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            import time as _time
+            self.coordinator._intrusion_config_set_at[self._cam_id] = _time.monotonic()
+            _LOGGER.debug(
+                "Intrusion distance set to %d m for %s",
+                cfg["distance"], self._cam_id[:8],
+            )
+        else:
+            _LOGGER.warning("Failed to set intrusion distance for %s", self._cam_id[:8])
         self.async_write_ha_state()

@@ -73,6 +73,7 @@
               "enable_sensors": "Sensors (Status, WiFi, Firmware, Events)",
               "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
               "enable_binary_sensors": "Motion / Audio alarm sensors",
+              "motion_active_window": "Motion sensor: active window (seconds)",
               "audio_default_on": "Audio on by default",
               "enable_intercom": "Intercom (two-way audio)"
             },
@@ -80,7 +81,8 @@
               "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
               "enable_sensors": "Create sensor entities for camera status, WiFi signal, firmware, events today, last event, etc.",
               "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
-              "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
+              "enable_binary_sensors": "Create binary sensors that turn ON for the configured active window after a motion or audio alarm event. Useful for automations.",
+              "motion_active_window": "How many seconds the motion/audio/person binary sensors stay ON after an event. Default: 90 s. Increase for slower automations; decrease for faster reset. Range: 10–300 s.",
               "audio_default_on": "When ON: audio switch starts enabled (stream with sound). When OFF: audio starts muted. Can be toggled anytime in the dashboard.",
               "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker."
             }
@@ -361,6 +363,12 @@
       },
       "audio_alarm_sensitivity": {
         "name": "Sound Detection Sensitivity"
+      },
+      "intrusion_sensitivity": {
+        "name": "Intrusion Detection Sensitivity"
+      },
+      "intrusion_distance": {
+        "name": "Intrusion Detection Range"
       }
     },
     "button": {

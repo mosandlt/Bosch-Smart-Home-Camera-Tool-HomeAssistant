@@ -274,6 +274,8 @@ class BoschWifiSignalSensor(_BoschSensorBase):
     Attributes: ssid, ip_address, mac_address.
     """
 
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id                  = f"bosch_shc_wifi_signal_{cam_id.lower()}"
@@ -325,6 +327,8 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
     Data source: firmwareVersion field from GET /v11/video_inputs (already in coordinator data).
     Attributes: up_to_date (bool from featureSupport.upToDate or similar field).
     """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)

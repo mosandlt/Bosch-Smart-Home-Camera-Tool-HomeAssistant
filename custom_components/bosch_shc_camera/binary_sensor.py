@@ -34,17 +34,16 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import DOMAIN, BoschCameraCoordinator  # type: ignore[attr-defined]
+from .const import DEFAULT_MOTION_ACTIVE_WINDOW, MOTION_ACTIVE_WINDOW_MIN, MOTION_ACTIVE_WINDOW_MAX
 
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0  # coordinator handles all updates; no per-entity parallelism needed
 
-# How long (seconds) a motion/audio event keeps the binary sensor ON.
-# 90 s covers the polling-only fallback (coordinator scan_interval is 60 s, so
-# an event could be up to 60 s old when first seen by data[]); 30 s would
-# systematically miss events in that path and only fire when an FCM push
-# happens to land between two ticks.
-EVENT_ACTIVE_WINDOW = 90
+# Module-level fallback — keeps tests and external code that reference
+# EVENT_ACTIVE_WINDOW directly working unchanged.  Production code reads
+# the per-entry option via `_motion_active_window` (see below).
+EVENT_ACTIVE_WINDOW = DEFAULT_MOTION_ACTIVE_WINDOW
 
 
 async def async_setup_entry(
@@ -115,8 +114,28 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
                 return ev  # type: ignore[no-any-return]
         return None
 
+    @property
+    def _motion_active_window(self) -> int:
+        """Return the configured active-window duration in seconds.
+
+        Reads `motion_active_window` from the config-entry options, falling
+        back to DEFAULT_MOTION_ACTIVE_WINDOW (90 s) when the key is absent
+        (legacy entries without the option).  The value is clamped to the
+        valid range [MOTION_ACTIVE_WINDOW_MIN, MOTION_ACTIVE_WINDOW_MAX] so
+        persisted out-of-range values (e.g. from a corrupted config) never
+        cause surprising behaviour.
+        """
+        raw: Any = self._entry.options.get(
+            "motion_active_window", DEFAULT_MOTION_ACTIVE_WINDOW
+        )
+        try:
+            value: int = int(raw)
+        except (TypeError, ValueError):
+            value = DEFAULT_MOTION_ACTIVE_WINDOW
+        return max(MOTION_ACTIVE_WINDOW_MIN, min(MOTION_ACTIVE_WINDOW_MAX, value))
+
     def _event_within_window(self, event: dict[str, Any]) -> bool:
-        """Return True if the event timestamp is within EVENT_ACTIVE_WINDOW seconds of now.
+        """Return True if the event timestamp is within the active window seconds of now.
 
         Bosch /v11/events returns timestamps in **UTC** (the API string ends
         with `Z`, e.g. `"2026-03-22T14:30:00.000Z"`). Stripping the suffix
@@ -126,6 +145,10 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
         it really is, far outside the 90-second window. Fix: parse as
         explicit UTC and compare both sides in UTC. Reported via simon42
         forum (geotie) as 'Motion-Sensor wird oft nicht ausgelöst'.
+
+        The window duration is taken from `_motion_active_window` which reads
+        the `motion_active_window` config-entry option (default 90 s, range
+        10-300 s, configurable via Settings → Integrations → Configure).
         """
         ts_str = event.get("timestamp", "")
         if not ts_str:
@@ -135,7 +158,7 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
             ts_clean = ts_str[:19]
             dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=timezone.utc)
             now_utc = datetime.now(tz=timezone.utc)
-            return (now_utc - dt_utc) <= timedelta(seconds=EVENT_ACTIVE_WINDOW)
+            return (now_utc - dt_utc) <= timedelta(seconds=self._motion_active_window)
         except (ValueError, TypeError):
             return False
 

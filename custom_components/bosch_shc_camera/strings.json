@@ -60,7 +60,8 @@
               "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
               "enable_binary_sensors": "Motion / Audio alarm sensors",
               "audio_default_on": "Audio on by default",
-              "enable_intercom": "Intercom (two-way audio)"
+              "enable_intercom": "Intercom (two-way audio)",
+              "motion_active_window": "Motion sensor: active window (seconds)"
             },
             "data_description": {
               "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
@@ -68,7 +69,8 @@
               "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
               "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
               "audio_default_on": "When ON: audio switch starts enabled (stream with sound). When OFF: audio starts muted. Can be toggled anytime in the dashboard.",
-              "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker."
+              "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker.",
+              "motion_active_window": "How long (seconds) the motion binary sensor stays ON after a motion event. Range 10-300, default 90. Lower values give more granular automation triggers; higher values avoid flapping during sustained motion."
             }
           },
           "stream": {
