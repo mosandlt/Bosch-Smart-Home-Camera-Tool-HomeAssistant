@@ -52,6 +52,7 @@ def _stub_coord(**overrides):
             }
         },
         _live_connections={},
+        _user_intent_streams=set(),  # v12.4.12: switch reads from this
         _shc_state_cache={
             CAM_ID: {
                 "privacy_mode": False,

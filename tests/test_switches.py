@@ -40,6 +40,7 @@ def stub_coord():
         },
         # Default coordinator state — every switch reads from these
         _live_connections={},
+        _user_intent_streams=set(),  # v12.4.12: switch reads from this
         _shc_state_cache={
             CAM_ID: {
                 "privacy_mode": False,
@@ -90,11 +91,20 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_is_on_true_when_active_session(self, stub_coord, stub_entry):
+    def test_is_on_true_when_user_intent_set(self, stub_coord, stub_entry):
+        """v12.4.12: switch reads user intent, not raw `_live_connections`."""
+        from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+        stub_coord._user_intent_streams.add(CAM_ID)
+        sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is True
+
+    def test_is_on_false_when_only_live_connections_populated(self, stub_coord, stub_entry):
+        """v12.4.12: auto-opened sessions (Cast / dashboard) populate
+        `_live_connections` but do not flip the switch."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://..."}
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
-        assert sw.is_on is True
+        assert sw.is_on is False
 
     def test_unavailable_during_privacy(self, stub_coord, stub_entry):
         """Privacy ON → live_stream must be unavailable."""

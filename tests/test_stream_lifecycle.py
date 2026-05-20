@@ -30,6 +30,7 @@ def _make_coord(stream_obj=None):
     cam_entity = SimpleNamespace(stream=stream_obj)
     return SimpleNamespace(
         _live_connections={CAM_ID: {"rtspsUrl": "rtsps://x"}},
+        _user_intent_streams={CAM_ID},  # v12.4.12: user intent tracking
         _live_opened_at={CAM_ID: 100.0},
         _stream_error_count={CAM_ID: 2},
         _stream_error_at={CAM_ID: 100.0},
@@ -38,6 +39,7 @@ def _make_coord(stream_obj=None):
         _local_rescue_at={CAM_ID: 100.0},
         _renewal_tasks={},
         _camera_entities={CAM_ID: cam_entity},
+        _live_stream_entities={},  # bug fix 2026-05-19 (teardown state-write)
         _stop_tls_proxy=AsyncMock(),
         _unregister_go2rtc_stream=AsyncMock(),
         # Mini-NVR Phase 1 — _tear_down_live_stream stops the recorder before

@@ -257,11 +257,17 @@ async def async_setup_entry(
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschLiveStreamSwitch(_BoschSwitchBase):
-    """Switch: ON = live stream active, OFF = stopped.
+    """Switch: ON = user explicitly requested a live stream, OFF = idle.
 
-    State is driven by the coordinator's _live_connections dict.
-    Stays ON until manually turned OFF or HA restarts.
-    Default state on HA startup: OFF.
+    State is driven by the coordinator's `_user_intent_streams` set, NOT
+    the internal `_live_connections` dict. HA Core opens streams in the
+    background for Lovelace card preload, Cast / `play_stream`, and
+    snapshot fetch — each populates `_live_connections` but does not
+    reflect explicit user intent. The switch tracks intent separately so
+    those auto-opens don't flip the visible state. Reported 2026-05-20.
+
+    Stays ON until manually turned OFF, privacy mode engages, or HA
+    restarts (intent is not RestoreEntity-persisted).
     """
 
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
@@ -270,10 +276,21 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         self._attr_unique_id       = f"bosch_shc_live_{cam_id.lower()}"
         self._attr_translation_key = "live_stream"
 
+    async def async_added_to_hass(self) -> None:
+        """Register with the coordinator so `_tear_down_live_stream` can
+        push the cleared state to HA immediately. Without the registry the
+        UI shows a stale "on" until the next coordinator tick."""
+        await super().async_added_to_hass()
+        self.coordinator._live_stream_entities[self._cam_id] = self
+
+    async def async_will_remove_from_hass(self) -> None:
+        self.coordinator._live_stream_entities.pop(self._cam_id, None)
+        await super().async_will_remove_from_hass()
+
     @property
     def is_on(self) -> bool:
-        """True if a live session is currently active."""
-        return self._cam_id in self.coordinator._live_connections
+        """True if the user explicitly turned the live stream on."""
+        return self._cam_id in self.coordinator._user_intent_streams
 
     @property
     def available(self) -> bool:
@@ -314,6 +331,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             )
             return
         _LOGGER.info("Live stream ON for %s", self._cam_title)
+        # Mark user intent BEFORE the connection attempt — async_create_stream
+        # auto-opens (Cast / play_stream / Lovelace) can race with this turn-on
+        # and we want the switch to read "on" immediately while we work.
+        self.coordinator._user_intent_streams.add(self._cam_id)
         # No explicit cleanup needed — try_live_connection() sends a new
         # PUT /connection which automatically replaces any stale session.
         result = await self.coordinator.try_live_connection(self._cam_id)
@@ -340,6 +361,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 hc_task.add_done_callback(self.coordinator._bg_tasks.discard)
         else:
             _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
+            # Revert the intent we set before the attempt — the open failed,
+            # the switch should not be left at "on" while the underlying
+            # session is dead.
+            self.coordinator._user_intent_streams.discard(self._cam_id)
             self.coordinator.record_stream_error(self._cam_id)
         self.async_write_ha_state()
 
@@ -428,6 +453,17 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 )
             self.coordinator._live_connections.pop(cam_id, None)
             await self.coordinator._stop_tls_proxy(cam_id)
+            # Re-check user intent after the 60s sleep + tear-down: user
+            # may have toggled the switch OFF in the meantime, in which
+            # case `_tear_down_live_stream` already cleared the intent.
+            # Without this guard the watchdog re-opens the stream against
+            # the user's wishes. Bug 2026-05-20.
+            if cam_id not in self.coordinator._user_intent_streams:
+                _LOGGER.debug(
+                    "Stream health watchdog: %s — user intent gone, "
+                    "skipping reconnect", cam_id[:8],
+                )
+                return
             result = await self.coordinator.try_live_connection(cam_id)
             if result:
                 _LOGGER.info(
@@ -445,6 +481,11 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         """Clear the live session and stop the TLS proxy."""
         self._last_stream_off = time.monotonic()
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
+        # Drop user intent first — health watchdog scheduled by the
+        # previous turn_on may still be sleeping and must see the cleared
+        # intent when it wakes up (Bug 2026-05-20: watchdog re-opened
+        # stream after user OFF if the OFF landed mid-sleep).
+        self.coordinator._user_intent_streams.discard(self._cam_id)
         # Shared teardown: cancels renewal task, pops _live_connections,
         # stops TLS proxy + go2rtc, stops HA's camera.stream so
         # stream_worker can't auto-restart against the dead proxy.

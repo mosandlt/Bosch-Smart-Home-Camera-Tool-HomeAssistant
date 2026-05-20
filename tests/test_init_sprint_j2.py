@@ -436,7 +436,14 @@ class TestCheckAndRecoverWebrtc:
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         cam_ent.async_refresh_providers = AsyncMock(side_effect=Exception("rp boom"))
-        coord = _make_coord(_camera_entities={CAM_A: cam_ent})
+        # `_check_and_recover_webrtc` fires after a successful try_live_connection
+        # — seed `_live_connections` so the post-reload refresh loop reaches
+        # cam_ent. Without this seed the new guard (bug fix 2026-05-20) skips
+        # the cam, and `async_refresh_providers` is never called.
+        coord = _make_coord(
+            _camera_entities={CAM_A: cam_ent},
+            _live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+        )
         coord._last_go2rtc_reload = float('-inf')
 
         go2rtc_entry = MagicMock()
@@ -635,6 +642,10 @@ class TestEnsureGo2rtcSchemesFresh:
         cam_ent.async_refresh_providers = AsyncMock()
         cam_ent.entity_id = "camera.test"
         coord._camera_entities = {CAM_A: cam_ent}
+        # Bug fix 2026-05-20: schemes-fresh loop only refreshes cams with
+        # active sessions. Seed so the test stays focused on the schemes-
+        # refresh path rather than the new idle-cam guard.
+        coord._live_connections = {CAM_A: {"rtspsUrl": "rtsps://x"}}
 
         fake_key = object()
 
@@ -673,6 +684,7 @@ class TestEnsureGo2rtcSchemesFresh:
         cam_ent.async_refresh_providers = AsyncMock(side_effect=Exception("cam rp fail"))
         cam_ent.entity_id = "camera.test"
         coord._camera_entities = {CAM_A: cam_ent}
+        coord._live_connections = {CAM_A: {"rtspsUrl": "rtsps://x"}}  # see fix 2026-05-20
 
         fake_key = object()
 

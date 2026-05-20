@@ -387,6 +387,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._auto_renew_generation: dict[str, int] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict[str, Any] = {}
+        # Live-stream switch entity references — registered by
+        # BoschLiveStreamSwitch.async_added_to_hass. _tear_down_live_stream
+        # uses this to push the cleared "off" state to HA immediately, so the
+        # UI does not show a stale "on" until the next coordinator refresh
+        # tick. Reported by Thomas 2026-05-19: privacy toggle left the
+        # live-stream switch visibly on.
+        self._live_stream_entities: dict[str, Any] = {}
+        # User-intent tracking for the live-stream switch. Decouples the
+        # switch state from `_live_connections`: HA Core opens streams via
+        # `async_create_stream` (Lovelace card preload, Cast, play_stream
+        # service), each of which populates `_live_connections` and would
+        # otherwise flip the switch to "on" even though the user never
+        # toggled it. The set is keyed by cam_id and only mutated by
+        # explicit `BoschLiveStreamSwitch.async_turn_on/off` calls plus
+        # external teardowns (`_tear_down_live_stream` resets it because a
+        # privacy-on / health-watchdog escalation cancels user intent too).
+        # Bug 2026-05-20.
+        self._user_intent_streams: set[str] = set()
         # Image entity references — registered on image platform setup
         # Keyed by cam_id; image entities call async_notify_refreshed() after
         # each disk-persist so WKWebView gets a fresh signed URL.
@@ -956,11 +974,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         task = self._renewal_tasks.pop(cam_id, None)
         if task and not task.done():
             task.cancel()
-        # Stop the NVR sidecar before the proxy goes away so ffmpeg gets a
-        # chance to flush MP4 cleanly. Keep user-intent set so the recorder
-        # auto-restarts when the LAN session comes back. Concept §2.
-        if cam_id in self._nvr_processes:
-            await self.stop_recorder(cam_id, clear_intent=False)
+        # Step 1 — clear visible state FIRST. BoschLiveStreamSwitch.is_on
+        # reads from `_user_intent_streams`; if anything below raises (NVR
+        # child gone, file lock, ...) the user-visible switch would otherwise
+        # stay stuck on "on". Reported by Thomas 2026-05-19 (Mini-NVR BETA).
+        # Reset user intent too — privacy-on, health-watchdog REMOTE-escalation
+        # and external teardowns all genuinely end the user's "live stream
+        # wanted" intent.
+        self._user_intent_streams.discard(cam_id)
         self._live_connections.pop(cam_id, None)
         self._live_opened_at.pop(cam_id, None)
         self._stream_error_count.pop(cam_id, None)
@@ -968,6 +989,31 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._stream_fell_back.pop(cam_id, None)
         self._local_rescue_attempts.pop(cam_id, None)
         self._local_rescue_at.pop(cam_id, None)
+        # Push the cleared state to HA immediately so the UI flips to "off"
+        # without waiting for the next coordinator refresh tick.
+        ls_entity = self._live_stream_entities.get(cam_id)
+        if ls_entity is not None and getattr(ls_entity, "hass", None) is not None:
+            try:
+                ls_entity.async_write_ha_state()
+            except Exception as exc:  # pragma: no cover — defensive: HA state write
+                _LOGGER.debug(
+                    "live-stream switch state write for %s skipped: %s",
+                    cam_id[:8], exc,
+                )
+        # Step 2 — stop the NVR sidecar best-effort. Ordering: BEFORE
+        # _stop_tls_proxy so ffmpeg gets a chance to flush MP4 cleanly,
+        # but AFTER the visible state is corrected. Keep user-intent set
+        # so the recorder auto-restarts when the LAN session comes back.
+        # Concept §2.
+        if cam_id in self._nvr_processes:
+            try:
+                await self.stop_recorder(cam_id, clear_intent=False)
+            except Exception as exc:
+                _LOGGER.warning(
+                    "stop_recorder for %s raised %s during teardown — "
+                    "switch state already cleared, continuing with proxy/stream cleanup",
+                    cam_id[:8], exc,
+                )
         await self._stop_tls_proxy(cam_id)
         await self._unregister_go2rtc_stream(cam_id)
         cam_entity = self._camera_entities.get(cam_id)
@@ -4011,7 +4057,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # only auto-refreshes on `supported_features & STREAM` flips, but our
         # stream is already up. Push the refresh manually so the next
         # `camera/capabilities` query returns the fresh `[web_rtc, hls]`.
-        for cam_ent in list(self._camera_entities.values()):
+        # Filter on `_live_connections` for the same reason as the
+        # schemes-fresh loop below: refreshing providers on an idle cam
+        # triggers `stream_source()` → `try_live_connection()` and opens
+        # an unwanted LOCAL session.
+        for cam_id_x, cam_ent in list(self._camera_entities.items()):
+            if cam_id_x not in self._live_connections:
+                continue
             try:
                 if CameraEntityFeature.STREAM in cam_ent.supported_features:
                     await cam_ent.async_refresh_providers()
@@ -4073,7 +4125,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # `supported_features & STREAM` flips, but our streams may already be up.
         if refreshed:
             from homeassistant.components.camera import CameraEntityFeature
-            for cam_ent in list(self._camera_entities.values()):
+            for cam_id_x, cam_ent in list(self._camera_entities.items()):
+                # Only touch cameras that already have an active session.
+                # HA Core's `async_refresh_providers` calls `stream_source()`
+                # on the entity, which our implementation answers with
+                # `try_live_connection()` — opening a fresh LOCAL stream on
+                # idle cams the user never asked to view. Bug 2026-05-20:
+                # Innenbereich woke up streaming after this loop ran on a
+                # Terrasse stream-open. Guard added so the watchdog stays
+                # scoped to the cam that triggered it.
+                if cam_id_x not in self._live_connections:
+                    continue
                 try:
                     if CameraEntityFeature.STREAM in cam_ent.supported_features:
                         await cam_ent.async_refresh_providers()

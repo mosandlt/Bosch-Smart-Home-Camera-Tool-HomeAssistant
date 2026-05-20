@@ -31,6 +31,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 def _make_coord(**overrides):
     base = dict(
         _live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
+        _user_intent_streams={CAM_ID},  # v12.4.12: watchdog reconnect gate
         _camera_entities={},
         _stream_error_count={},
         _stop_tls_proxy=AsyncMock(),

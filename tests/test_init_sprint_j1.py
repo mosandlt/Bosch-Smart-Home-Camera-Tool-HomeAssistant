@@ -57,7 +57,9 @@ def _make_coord(**overrides):
         _refreshed_token=None,
         _refreshed_refresh=None,
         _camera_entities={},
+        _live_stream_entities={},
         _live_connections={},
+        _user_intent_streams=set(),  # v12.4.12: tracked by teardown
         _live_opened_at={},
         _stream_error_count={},
         _stream_error_at={},
