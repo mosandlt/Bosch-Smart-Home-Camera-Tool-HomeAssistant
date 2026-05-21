@@ -74,16 +74,30 @@ class _FCMNoiseFilter(logging.Filter):
     _DEDUP_WINDOW_SECONDS = 300.0
     _SHARED_ERROR_TIMESTAMPS: list[float] = []  # class-level so the watchdog can read
 
+    # Substrings that mark a self-heal-worthy FCM failure. Match against the
+    # rendered log message of any record on the three FCM-related loggers.
+    # Detected here so the watchdog's trigger-(b) (≥3 errors in 5 min) fires
+    # not only on connectivity drops but ALSO on registration failures —
+    # live bug 2026-05-21: PHONE_REGISTRATION_ERROR went unrecognised, so
+    # only trigger-(c) (`not _fcm_running`, 30 min cadence) caught it, which
+    # produced the visible "FCM ↔ polling" UI flicker.
+    _FAILURE_MARKERS = (
+        "Unexpected exception during read",       # connectivity loop
+        "PHONE_REGISTRATION_ERROR",                # GCM auth rejected
+        "Unable to complete gcm auth request",     # final-give-up after PHONE_REGISTRATION_ERROR retries
+        "Unable to establish subscription",        # fcm.py's wrapper for the above
+    )
+
     def __init__(self) -> None:
         super().__init__()
         self._last_passed = float("-inf")  # monotonic ts of last record we let through
 
     def filter(self, record: logging.LogRecord) -> bool:
-        # Only target the noisy "Unexpected exception during read" record;
-        # other firebase_messaging logs (INFO start/stop, registration) pass
-        # through untouched so we keep diagnostic visibility.
+        # Only target known failure markers; other firebase_messaging logs
+        # (INFO start/stop, debug traces) pass through untouched so we keep
+        # diagnostic visibility.
         msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
-        if "Unexpected exception during read" not in msg:
+        if not any(marker in msg for marker in self._FAILURE_MARKERS):
             return True
         # Drop the multi-thousand-line traceback unconditionally — the
         # message itself is the diagnostic, the trace is library-internal
@@ -371,7 +385,28 @@ async def async_start_fcm_push(coordinator: Any) -> None:
 
     FCM credentials are stored in the config entry data and reused across restarts.
     The push is a silent wake-up signal (no payload) — event data comes from /v11/events.
+
+    Concurrency: serialised by `coordinator._fcm_start_lock`. Without it the
+    setup-time `async_start_fcm_push` and the watchdog's first self-heal
+    could race — both pass the `_fcm_running=False` check, both call
+    `checkin_or_register()`, two device tokens get registered with Bosch
+    CBS in 2 s, and the first client's listener dies with
+    "NoneType is not subscriptable" inside `_login()` because its
+    credentials dict was overwritten by the second registration. (Live bug
+    2026-05-21.) The lock collapses the race: only the first caller does
+    the real start, the second observes `_fcm_running=True` and returns.
     """
+    # Defensive: real coordinators set the lock in __init__; test stubs
+    # (SimpleNamespace) often skip it. Lazy-create so legacy tests don't break.
+    lock = getattr(coordinator, "_fcm_start_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        coordinator._fcm_start_lock = lock
+    async with lock:
+        await _async_start_fcm_push_locked(coordinator)
+
+
+async def _async_start_fcm_push_locked(coordinator: Any) -> None:
     if coordinator._fcm_running:
         return
     if not coordinator.options.get("enable_fcm_push", False):
@@ -656,30 +691,47 @@ async def async_self_heal_fcm_push(coordinator: Any) -> None:
 
     Self-heal flow:
       1. Stop the current client (drains pending tasks via async_stop_fcm_push).
-      2. Delete ``fcm_credentials`` and ``fcm_registered_token`` from
-         ``coordinator._entry.data`` so the next start does a clean checkin.
+      2. Delete EVERY key starting with ``fcm_`` from ``coordinator._entry.data``
+         (fcm_credentials, fcm_registered_token, fcm_registered_device_type,
+         fcm_config) so the next start does a fully clean checkin. Live bug
+         2026-05-21: leaving fcm_config / fcm_registered_device_type behind
+         caused a permanent PHONE_REGISTRATION_ERROR loop — only purging all
+         fcm_* keys recovered FCM in the field.
       3. Restart the client; Bosch CBS gets the new device token on the
-         ``register_fcm_with_bosch`` path because ``fcm_registered_token`` is
-         now unset.
+         ``register_fcm_with_bosch`` path because all stale markers are gone.
 
     Called by the coordinator's FCM watchdog at most once per cool-down
     period (handled in ``__init__.py``) — auto-fires when ≥ 3 errors land in
-    5 min. The user does NOT need to remove + re-add the integration.
+    5 min OR when the listener silently terminates. The user does NOT need
+    to remove + re-add the integration.
     """
-    _LOGGER.warning(
-        "FCM self-heal: ≥3 'Unexpected exception during read' errors in 5 min — "
-        "purging persisted creds and forcing fresh checkin_or_register()"
-    )
-    await async_stop_fcm_push(coordinator)
-    new_data = {**coordinator._entry.data}
-    new_data.pop("fcm_credentials", None)
-    new_data.pop("fcm_registered_token", None)
-    coordinator.hass.config_entries.async_update_entry(
-        coordinator._entry, data=new_data,
-    )
-    reset_fcm_error_counter()
-    if coordinator.options.get("enable_fcm_push", False):
-        await async_start_fcm_push(coordinator)
+    # Acquire the same lock used by `async_start_fcm_push` so a self-heal
+    # cannot race with the setup-time start (two checkin_or_register() calls
+    # in 2 s otherwise registered two device tokens and orphaned the first
+    # listener — live bug 2026-05-21). The lock spans the full
+    # stop/purge/restart cycle so the partial state never leaks to another
+    # caller. Lazy-init covers SimpleNamespace test stubs.
+    lock = getattr(coordinator, "_fcm_start_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        coordinator._fcm_start_lock = lock
+    async with lock:
+        _LOGGER.warning(
+            "FCM self-heal: persistent reconnect/register failure detected — "
+            "purging ALL fcm_* keys from entry data and forcing fresh checkin_or_register()"
+        )
+        await async_stop_fcm_push(coordinator)
+        new_data = {k: v for k, v in coordinator._entry.data.items()
+                    if not k.startswith("fcm_")}
+        purged = sorted(set(coordinator._entry.data) - set(new_data))
+        coordinator.hass.config_entries.async_update_entry(
+            coordinator._entry, data=new_data,
+        )
+        _LOGGER.info("FCM self-heal: purged %d entry-data keys: %s", len(purged), purged)
+        reset_fcm_error_counter()
+        if coordinator.options.get("enable_fcm_push", False):
+            # Call the locked variant directly — we already hold the lock.
+            await _async_start_fcm_push_locked(coordinator)
 
 
 async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:

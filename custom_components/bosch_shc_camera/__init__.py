@@ -23,6 +23,7 @@ No user data is hardcoded. All configuration via the HA UI.
 import asyncio
 import logging
 import os
+import random
 import re as _re_mod
 import ssl
 import threading
@@ -87,6 +88,27 @@ _LOGGER = logging.getLogger(__name__)
 # After an FCM push all HA consumers wake simultaneously and each requests the latest
 # event thumbnail. 8 s covers the burst window; the 60 s scan cycle always gets fresh data.
 _FRESH_SNAP_TTL = 8.0
+
+# FCM self-heal cool-down ladder. The watchdog can trigger a heal at most
+# once per current-step duration. After every heal the index advances; after
+# the listener stays HEALTHY for SELF_HEAL_SUCCESS_WINDOW_SEC the index resets
+# to 0. Once the ladder is exhausted, self-heal is paused until HA restart
+# (polling-fallback continues so cameras keep working).
+#   step 0: 30 min,  1: 1 h,  2: 3 h,  3: 6 h,  4: 24 h
+# Rationale: Google PHONE_REGISTRATION_ERROR is typically transient (minutes)
+# but can also indicate a longer block on our IP / app_id. Initial 30 min
+# matches the original arbitrary cool-down so existing behaviour is preserved
+# on the first attempt; the ramp up to 24 h prevents perpetual hammering.
+SELF_HEAL_COOLDOWNS_SEC: tuple[float, ...] = (1800.0, 3600.0, 10800.0, 21600.0, 86400.0)
+# ±20% jitter on each cool-down. Google recommends jitter on retries to avoid
+# synchronised storms across many clients (multiple HA installs of the same
+# integration would otherwise wake-and-register at the same instant).
+SELF_HEAL_JITTER_FRACTION = 0.2
+# Counter resets to 0 once FCM has been continuously healthy for this long
+# AFTER the most recent self-heal. 10 min is shorter than the smallest
+# cool-down (30 min) so a quick recovery doesn't pre-emptively block the
+# next heal, and long enough to weed out flaky 1-2 min connections.
+SELF_HEAL_SUCCESS_WINDOW_SEC = 600.0
 
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
@@ -497,6 +519,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._fcm_last_push: float = float("-inf")  # monotonic time of last received push
         self._fcm_healthy: bool = False   # True when FCM is connected and receiving
         self._fcm_last_self_heal: float = float("-inf")  # monotonic ts of last creds-purge self-heal
+        # Self-heal failure backoff (live bug 2026-05-21): persistent
+        # PHONE_REGISTRATION_ERROR or other Google-side rejections triggered the
+        # watchdog every 30 min, producing visible "FCM ↔ polling" UI flicker.
+        # Counter increments on every heal attempt and resets after FCM stays
+        # healthy ≥10 min. Effective cool-down = SELF_HEAL_COOLDOWNS_SEC[counter]
+        # ±20% jitter (Google-recommended for distributed clients). After the
+        # last entry is reached, self-heal is paused until HA restart and
+        # polling-fallback carries the integration.
+        self._fcm_self_heal_failures: int = 0
+        self._fcm_self_heal_paused_logged: bool = False
+        # Serialises every FCM start/stop/self-heal so the setup-time start
+        # and the watchdog's self-heal can't run concurrently. Live bug
+        # 2026-05-21: without the lock the initial async_start_fcm_push from
+        # async_setup_entry ran in parallel with the first coordinator tick's
+        # self-heal — two checkin_or_register() calls registered two device
+        # tokens in 2 s; the first listener died with NoneType-in-_login
+        # (orphaned client whose credentials were overwritten by the second).
+        self._fcm_start_lock: asyncio.Lock = asyncio.Lock()
         self._fcm_push_mode: str = "unknown"  # "auto" once FCM listener is up, else "unknown"
         # Lock serializing cross-thread FCM state writes.
         # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
@@ -1626,44 +1666,84 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "FCM push watchdog: FcmPushClient.is_started()=False — "
                     "listener terminated, flagging unhealthy (polling tempo resumes)"
                 )
-            # Self-heal: three triggers share one cool-down (30 min) so a single
-            # transient WAN blip doesn't keep tearing FCM down.
+            # Self-heal: three triggers share one ladder of cool-downs (see
+            # SELF_HEAL_COOLDOWNS_SEC). Failure index advances per heal attempt
+            # and resets after FCM stays healthy ≥SELF_HEAL_SUCCESS_WINDOW_SEC.
             #   (a) silent death just detected (is_started()=False above) — without
             #       this trigger the coordinator stays stuck in
             #       fcm_running=True/healthy=False until the user restarts HA,
             #       because the legacy error-storm path below requires
             #       _fcm_healthy=True and never runs after fcm_dead flips it off.
-            #   (b) persistent reconnect-loop while the library still reports
-            #       "started" (typically stale persisted creds) — detected via the
-            #       noise filter's recorded error timestamps; ≥3 in 5 min => SSL
-            #       session permanently broken, only a fresh checkin recovers.
+            #   (b) persistent reconnect-loop OR registration-failure storm —
+            #       _FCMNoiseFilter now records BOTH "Unexpected exception during
+            #       read" (connectivity) AND PHONE_REGISTRATION_ERROR / "Unable
+            #       to establish subscription" (Google rejecting registration);
+            #       ≥3 in 5 min ⇒ heal.
             #   (c) FCM enabled but not running (e.g. previous self-heal failed
             #       with PHONE_REGISTRATION_ERROR during a transient Google
             #       rate-limit) — without this trigger FCM stayed dead until HA
             #       restart because (a) and (b) both required _fcm_running=True.
             heal_needed = False
-            cool_down_ok = (now - getattr(self, "_fcm_last_self_heal", float("-inf"))) > 1800.0
+            last_heal = getattr(self, "_fcm_last_self_heal", float("-inf"))
+            failures = getattr(self, "_fcm_self_heal_failures", 0)
+
+            # Success detection: if FCM has been healthy continuously for the
+            # success window since the last heal, the recovery stuck — reset
+            # the failure counter so the next outage starts from cool-down 0.
             if (
-                opts.get("enable_fcm_push", False)
-                and cool_down_ok
+                failures > 0
+                and self._fcm_running
+                and self._fcm_healthy
+                and last_heal > float("-inf")
+                and (now - last_heal) > SELF_HEAL_SUCCESS_WINDOW_SEC
             ):
-                if fcm_dead:
-                    heal_needed = True
-                elif self._fcm_running and self._fcm_healthy:
-                    from .fcm import get_recent_fcm_error_count
-                    if get_recent_fcm_error_count(300.0) >= 3:
+                _LOGGER.info(
+                    "FCM self-heal: stable for ≥%d s after recovery — resetting failure counter (was %d)",
+                    int(SELF_HEAL_SUCCESS_WINDOW_SEC), failures,
+                )
+                self._fcm_self_heal_failures = 0
+                self._fcm_self_heal_paused_logged = False
+                failures = 0
+
+            if opts.get("enable_fcm_push", False):
+                if failures >= len(SELF_HEAL_COOLDOWNS_SEC):
+                    # Ladder exhausted — pause heal until HA restart; polling
+                    # fallback carries the integration. Log once so the operator
+                    # sees the pause; subsequent ticks stay silent.
+                    if not getattr(self, "_fcm_self_heal_paused_logged", False):
+                        _LOGGER.warning(
+                            "FCM self-heal: %d consecutive failures — pausing further attempts "
+                            "until HA restart (polling fallback remains active)",
+                            failures,
+                        )
+                        self._fcm_self_heal_paused_logged = True
+                    cool_down_ok = False
+                else:
+                    base = SELF_HEAL_COOLDOWNS_SEC[failures]
+                    # ±20% jitter for distributed-client de-synchronisation. The
+                    # jitter is sampled per tick — small variance over ticks is
+                    # acceptable since the cool-down is large; this avoids
+                    # storing per-coordinator jitter state.
+                    jitter = base * SELF_HEAL_JITTER_FRACTION * (random.random() * 2 - 1)
+                    effective = base + jitter
+                    cool_down_ok = (now - last_heal) > effective
+
+                if cool_down_ok:
+                    if fcm_dead:
                         heal_needed = True
-                elif not self._fcm_running:
-                    # FCM is enabled but not running — a previous self-heal
-                    # attempt failed (e.g. Google returned PHONE_REGISTRATION_ERROR
-                    # during a transient IP rate-limit). Before this branch FCM
-                    # stayed dead until HA restart because every self-heal path
-                    # above required `_fcm_running=True`. The 30 min cool-down
-                    # prevents hammering Google.
-                    heal_needed = True
+                    elif self._fcm_running and self._fcm_healthy:
+                        from .fcm import get_recent_fcm_error_count
+                        if get_recent_fcm_error_count(300.0) >= 3:
+                            heal_needed = True
+                    elif not self._fcm_running:
+                        # FCM enabled but not running — previous heal failed.
+                        heal_needed = True
             _fcm_healthy = self._fcm_healthy
         if heal_needed:
             self._fcm_last_self_heal = now
+            # Increment BEFORE the heal so a cascade of failures advances the
+            # ladder predictably. Success detection (above) clears it later.
+            self._fcm_self_heal_failures = failures + 1
             from .fcm import async_self_heal_fcm_push
             self.hass.async_create_task(async_self_heal_fcm_push(self))
         if _fcm_healthy:

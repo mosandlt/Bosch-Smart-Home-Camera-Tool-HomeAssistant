@@ -96,6 +96,53 @@ class TestInstallNoiseFilter:
         assert bosch_fcm == [f]
 
 
+class TestFailureMarkers:
+    """v12.8.4: filter now also fires on PHONE_REGISTRATION_ERROR / "Unable to
+    establish subscription" / "Unable to complete gcm auth request" so the
+    watchdog's trigger-(b) catches Google-side registration storms, not only
+    library-side connectivity drops."""
+
+    def _make_record(self, msg: str) -> logging.LogRecord:
+        return logging.LogRecord(
+            name="firebase_messaging.fcmregister", level=logging.WARNING,
+            pathname=__file__, lineno=1, msg=msg, args=(), exc_info=None,
+        )
+
+    def test_phone_registration_error_records_timestamp(self):
+        f = _FCMNoiseFilter()
+        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        # First instance passes through (last_passed = -inf) and records a ts.
+        passed = f.filter(self._make_record(
+            "GCM register request attempt 1 out of 2 has failed with Error=PHONE_REGISTRATION_ERROR"
+        ))
+        assert passed is True
+        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+
+    def test_unable_to_complete_gcm_auth_records_timestamp(self):
+        f = _FCMNoiseFilter()
+        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        f.filter(self._make_record(
+            "Unable to complete gcm auth request after 2 tries, last error was Error=PHONE_REGISTRATION_ERROR"
+        ))
+        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+
+    def test_unable_to_establish_subscription_records_timestamp(self):
+        f = _FCMNoiseFilter()
+        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        f.filter(self._make_record(
+            "FCM registration failed: Unable to establish subscription with Google Cloud Messaging."
+        ))
+        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+
+    def test_unrelated_message_does_not_record_timestamp(self):
+        """Non-failure messages must pass through untouched (no ts recorded)."""
+        f = _FCMNoiseFilter()
+        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        passed = f.filter(self._make_record("FCM push listener started"))
+        assert passed is True
+        assert _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS == []
+
+
 class TestPatchClassImportError:
     def test_returns_none_when_library_missing(self):
         # Force the inner `from firebase_messaging import …` to fail.

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.16.9";
+const CARD_VERSION = "2.16.10";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -3064,8 +3064,17 @@ class BoschCameraCard extends HTMLElement {
       pushLabel.textContent = isFcm ? "push" : "poll";
     }
 
-    // Status dot
-    const statusState = hass.states[ents.status]?.state || "UNKNOWN";
+    // Status dot. The sensor's native value is lowercase
+    // (sensor.py uses ENUM options ["online","offline","unknown"]) while
+    // the camera-entity `.attributes.status` is uppercase ("ONLINE"/"OFFLINE").
+    // Normalise to uppercase here so the dot turns red on offline regardless
+    // of which entity feeds the badge. Live bug 2026-05-21: cards showed a
+    // green-ish/unknown dot for Eingang + Kamera (both OFFLINE because the
+    // Gen1 hardware is unplugged) — the sensor returns "offline" lower-case,
+    // the case-sensitive mapping fell through to "unknown", and the
+    // `unknown` class kept the default neutral grey rather than the red
+    // offline tint.
+    const statusState = String(hass.states[ents.status]?.state || "UNKNOWN").toUpperCase();
     const statusDot   = this.shadowRoot.getElementById("status-dot");
     const infoStatus  = this.shadowRoot.getElementById("info-status");
     if (statusDot) statusDot.className = "status-dot " + ({ ONLINE: "online", OFFLINE: "offline" }[statusState] || "unknown");

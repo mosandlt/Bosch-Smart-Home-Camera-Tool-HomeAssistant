@@ -1791,11 +1791,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.8.3** — see the GitHub release page for full notes:
-[**v12.8.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.3)
+Latest: **v12.8.4** — see the GitHub release page for full notes:
+[**v12.8.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.4)
 
 | Version | Highlights |
 |---|---|
+| **v12.8.4** | FCM self-heal hardening: (a) purges every `fcm_*` key from entry data (was only two), recovering from `PHONE_REGISTRATION_ERROR` loops where stale `fcm_config` / `fcm_registered_device_type` markers blocked a fresh checkin; (b) exponential cool-down ladder (30 min → 1 h → 3 h → 6 h → 24 h) with ±20 % jitter and a 6-step ceiling, replacing the fixed 30 min cadence; (c) registration storms (`PHONE_REGISTRATION_ERROR`, "Unable to complete gcm auth request", "Unable to establish subscription") now count toward the watchdog's storm trigger, not just connectivity drops; (d) `asyncio.Lock` collapses the setup-time start vs first self-heal race that registered two device tokens in 2 s. Card v2.16.10: status dot + offline overlay now case-insensitive so offline cameras render red instead of grey. +6 regression tests pinning purge-scope, race, marker set, and case-fix. |
 | **v12.8.3** | FCM push watchdog recovery gap closed: when a previous self-heal failed (e.g. Google returns `PHONE_REGISTRATION_ERROR` during a transient IP rate-limit), event detection used to stay on polling until the next HA restart. The watchdog now retries the self-heal once the 30 min cool-down expires, so push detection recovers automatically. +4 regression tests pinning the retry / cool-down / opt-out / happy-path branches. |
 | **v12.8.2** | Card patch (v2.16.9): suppress the phantom CONNECTING badge + loading overlay that appeared on dashboard open without user intent (snapshot-refresh side-effect was opening live sessions backend-side); LAN badge hidden by default, only "Cloud" shows when stream actually falls back to the Bosch relay. |
 | **v12.8.1** | Tap-to-reveal auto-play gate. New `auto_play_default` option (Features section): `lan` (default — LAN auto-reveals, mobile/tunnel shows a Play overlay), `always`, `never`. Overlay only appears once the backend stream is on; zero HLS bytes to the phone until tap. Browser-side LAN detection via `hass.config.internal_url` origin match + RFC-1918 fallback — works in HA Companion App iOS / Android + browsers. Per-card YAML override `auto_play:`. Card v2.16.7. +17 pin tests; 4408 suite total. |
@@ -1820,7 +1821,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.8.2** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.8.4** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.6 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.10 · beta · npm · MQTT bridge · PTZ presets · cloud-503 hardening · VIS-2 widget alpha |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.5 · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

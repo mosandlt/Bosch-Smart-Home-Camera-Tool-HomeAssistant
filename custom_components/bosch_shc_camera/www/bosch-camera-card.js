@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.16.9";
+const CARD_VERSION = "2.16.10";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
@@ -1383,7 +1383,7 @@ class BoschCameraCard extends HTMLElement {
       pushBadge.className = "push-badge " + (isFcm ? "push" : "poll");
       pushLabel.textContent = isFcm ? "push" : "poll";
     }
-    const statusState = hass.states[ents.status]?.state || "UNKNOWN";
+    const statusState = String(hass.states[ents.status]?.state || "UNKNOWN").toUpperCase();
     const statusDot = this.shadowRoot.getElementById("status-dot");
     const infoStatus = this.shadowRoot.getElementById("info-status");
     if (statusDot) statusDot.className = "status-dot " + ({
