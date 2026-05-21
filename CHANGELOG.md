@@ -5,6 +5,20 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.8.1 — 2026-05-21
+
+Feature release — opt-in tap-to-reveal gate for the live stream, with LAN/remote awareness. Ships alongside Lovelace card v2.16.7.
+
+- **Card auto-play default (integration option).** New `auto_play_default` option in Settings → Features. Three modes: `lan` (default — auto-reveal on LAN, tap-to-reveal overlay on mobile/tunnel), `always` (auto-reveal in every session), `never` (always tap-to-reveal). Exposed as a `camera.*` entity attribute so the Lovelace card picks it up without restart. Per-card YAML override `auto_play: lan|always|never` shadows the integration default for one card; garbage and any legacy value (incl. the dropped `confirm` from earlier internal iterations) collapse to `lan`.
+- **Overlay only when the stream is running.** Opening the card on a cold camera shows the regular snapshot — no gate, no auto-start. When the backend stream transitions OFF→ON (Stream switch, automation, second device), the gate appears in overlay-required modes; ON→OFF hides it. Tap reveals the live video. The decision runs synchronously on every `_update()` pass so the gate is up before the HLS path is even considered — zero HLS bytes flow to the phone until the user explicitly taps.
+- **Bandwidth-gated.** While the gate is shown the card transmits nothing beyond a ~30 KB snapshot per minute (≈ 4 Kbps). Tapping starts the ~2 Mbps HLS pull. Verified in HA logs: no `HlsPlaylistView` / `HlsPartView` requests from the frontend while the gate is up.
+- **LAN/remote detection (browser-side, all platforms).** Primary check compares `window.location.origin` against `hass.config.internal_url` — exact, port-aware. Fallback is an RFC-1918 / `.local` / `.fritz.box` hostname regex. Works inside HA Companion App iOS (WKWebView), HA Companion App Android (WebView), Mobile Safari, Chrome Android. Companion apps already auto-switch to `internal_url` when the device's Wi-Fi SSID matches the configured internal SSIDs, so the detection follows the same signal the app uses.
+- **Card chrome cleanup.** The `HLS-Modus (kein WebRTC über Tunnel)` informational banner is suppressed while the auto-play gate is visible — the transport hint is irrelevant until the user actually starts playback.
+- **Card bumped to v2.16.7.** No-op when `auto_play=always` and on LAN with `auto_play=lan`. No `backdrop-filter: blur` on the gate — the snapshot stays sharp so users can decide based on the current image.
+- **Pin-tests for every mode.** New `tests/test_auto_play_default.py` (17 tests): 3 modes × options-flow round-trip + 3 modes × camera-attribute exposure + DEFAULT_OPTIONS membership + dropdown-options match + section-membership + garbage-collapse + empty-string-collapse + legacy `confirm` collapse. Full suite **4408 passed, 17 skipped, 0 failed**. 100% line coverage maintained on touched files.
+- **Translations.** New `auto_play_default` field translated in all 11 languages (de, en, es, fr, it, nl, pl, pt, ru, uk, zh-Hans) plus `strings.json`. Description covers all three modes + the per-card YAML override.
+- **Mobile compatibility research saved.** `knowledge-base/auto-play-lan-detect-mobile-compat.md` documents the iOS/Android Companion source paths confirming how the WebView URL is selected and what each LAN-detection approach buys. `knowledge-base/auto-play-lan-detect-best-signal.md` records why no better signal exists — Companion App's native `isOnInternalNetwork` decision is not forwarded to the WebView.
+
 ## v12.7.2 — 2026-05-20
 
 Security pass — three findings from a pre-release static-analysis scan (Semgrep + Bandit + detect-secrets). No functional change for end users; mypy --strict stays green; coverage stays at 100% line.

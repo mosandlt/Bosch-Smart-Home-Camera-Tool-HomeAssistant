@@ -75,7 +75,8 @@
               "enable_binary_sensors": "Bewegings-/audioalarmsensoren",
               "audio_default_on": "Audio standaard ingeschakeld",
               "enable_intercom": "Intercom (tweerichtingsaudio)",
-              "motion_active_window": "Bewegingssensor: actief venster (seconden)"
+              "motion_active_window": "Bewegingssensor: actief venster (seconden)",
+              "auto_play_default": "Kaart auto-afspelen (standaard)"
             },
             "data_description": {
               "enable_snapshots": "Toont de laatste door beweging geactiveerde JPEG als camera-entiteit in HA.",
@@ -84,7 +85,8 @@
               "enable_binary_sensors": "Maakt binaire sensoren aan die 30 seconden AAN blijven na een bewegings- of audioalarmgebeurtenis. Handig voor automatiseringen.",
               "audio_default_on": "AAN: audioschakelaar start ingeschakeld (stream met geluid). UIT: audio start gedempt. Kan op elk moment worden omgeschakeld via het dashboard.",
               "enable_intercom": "Schakelt de intercom-entiteit (tweerichtingsaudio) in. Standaard uitgeschakeld. Maakt het mogelijk audio naar de cameraluidspreker te sturen.",
-              "motion_active_window": "Hoe lang (seconden) de binaire bewegingssensor AAN blijft na een gebeurtenis. Bereik 10-300, standaard 90."
+              "motion_active_window": "Hoe lang (seconden) de binaire bewegingssensor AAN blijft na een gebeurtenis. Bereik 10-300, standaard 90.",
+              "auto_play_default": "Bepaalt of de live-stream automatisch verschijnt wanneer de kaart laadt. Per kaart te overschrijven via YAML `auto_play`.\n• **Alleen LAN** (aanbevolen): auto-tonen in het thuisnetwerk; op afstand wordt de stream voorgeladen en een overlay bedekt de video totdat je tikt.\n• **Altijd**: auto-tonen in elke sessie.\n• **Tik om te tonen**: voorlaadt de stream en toont de overlay in elke sessie — je tikt één keer om de video te tonen."
             }
           },
           "stream": {

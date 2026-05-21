@@ -140,10 +140,14 @@ def test_pull_fresh_states_includes_camera_entity(card_source: str) -> None:
         "_pullFreshSwitchStates ids list must include camera — drop it "
         "and the badge stays stale on Companion-App-resume."
     )
-    # First-hass code path must trigger the pull.
+    # First-hass code path must trigger the pull. v12.8.1 introduced a
+    # second `if (firstHass)` before _update() for the synchronous auto-play
+    # gate decision; widen the search window to cover both branches so the
+    # assertion still finds _pullFreshSwitchStates in the LARGER existing
+    # firstHass body that follows.
     first_hass_idx = card_source.find("if (firstHass)")
     assert first_hass_idx > 0
-    first_hass_body = card_source[first_hass_idx : first_hass_idx + 800]
+    first_hass_body = card_source[first_hass_idx : first_hass_idx + 1500]
     assert "_pullFreshSwitchStates" in first_hass_body, (
         "firstHass branch in `set hass()` must call _pullFreshSwitchStates "
         "so the initial mount has authoritative state — otherwise the "

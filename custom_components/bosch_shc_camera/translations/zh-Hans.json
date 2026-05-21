@@ -75,7 +75,8 @@
               "enable_binary_sensors": "运动/音频报警传感器",
               "audio_default_on": "音频默认开启",
               "enable_intercom": "对讲机（双向音频）",
-              "motion_active_window": "运动传感器：激活窗口（秒）"
+              "motion_active_window": "运动传感器：激活窗口（秒）",
+              "auto_play_default": "卡片自动播放(默认)"
             },
             "data_description": {
               "enable_snapshots": "在 HA 中将最新的运动触发 JPEG 显示为摄像头实体。",
@@ -84,7 +85,8 @@
               "enable_binary_sensors": "创建二进制传感器，在运动或音频报警事件后保持开启 30 秒。适用于自动化。",
               "audio_default_on": "开启时：音频开关默认启动（含声音的流媒体）。关闭时：音频默认静音。可在控制面板随时切换。",
               "enable_intercom": "启用对讲机（双向音频）开关实体。默认禁用。允许向摄像头扬声器发送音频。",
-              "motion_active_window": "运动事件后运动二进制传感器保持开启的秒数。范围 10-300，默认 90。"
+              "motion_active_window": "运动事件后运动二进制传感器保持开启的秒数。范围 10-300，默认 90。",
+              "auto_play_default": "控制 Lovelace 卡片加载时是否自动显示直播。每张卡片的 YAML `auto_play` 会覆盖此设置。\n• **仅局域网**(推荐):在家庭网络中自动显示;远程时流在后台预初始化,覆盖层遮住视频,直到你点击。\n• **始终**:每次会话都自动显示。\n• **点击显示**:每次会话都预初始化流并显示覆盖层 — 你每次都点击一次来显示视频。"
             }
           },
           "stream": {

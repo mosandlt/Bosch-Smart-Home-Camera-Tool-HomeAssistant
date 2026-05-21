@@ -75,7 +75,8 @@
               "enable_binary_sensors": "Capteurs d'alarme mouvement / audio",
               "audio_default_on": "Audio activé par défaut",
               "enable_intercom": "Interphone (audio bidirectionnel)",
-              "motion_active_window": "Capteur de mouvement : fenêtre active (secondes)"
+              "motion_active_window": "Capteur de mouvement : fenêtre active (secondes)",
+              "auto_play_default": "Lecture automatique de la carte"
             },
             "data_description": {
               "enable_snapshots": "Affiche le dernier JPEG déclenché par mouvement comme entité caméra dans HA.",
@@ -84,7 +85,8 @@
               "enable_binary_sensors": "Crée des capteurs binaires qui s'activent pendant 30 secondes après un événement mouvement ou alarme audio. Utile pour les automations.",
               "audio_default_on": "Activé : l'interrupteur audio démarre en marche (stream avec son). Désactivé : l'audio démarre en sourdine. Peut être basculé à tout moment depuis le tableau de bord.",
               "enable_intercom": "Active l'entité interrupteur d'interphone (audio bidirectionnel). Désactivé par défaut. Permet d'envoyer de l'audio vers le haut-parleur de la caméra.",
-              "motion_active_window": "Durée (secondes) pendant laquelle le capteur binaire de mouvement reste ACTIVÉ après un événement. Plage 10-300, défaut 90."
+              "motion_active_window": "Durée (secondes) pendant laquelle le capteur binaire de mouvement reste ACTIVÉ après un événement. Plage 10-300, défaut 90.",
+              "auto_play_default": "Contrôle si le flux en direct apparaît automatiquement au chargement de la carte. `auto_play` en YAML par carte a la priorité.\n• **LAN uniquement** (recommandé) : auto-affichage sur le réseau domestique ; à distance, le flux est pré-initialisé et un overlay couvre la vidéo jusqu'à ce que vous tapiez.\n• **Toujours** : auto-affichage à chaque session.\n• **Taper pour afficher** : pré-initialise le flux et affiche l'overlay à chaque session — vous tapez une fois pour révéler la vidéo."
             }
           },
           "stream": {

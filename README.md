@@ -1791,11 +1791,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.7.2** — see the GitHub release page for full notes:
-[**v12.6.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.6.0)
+Latest: **v12.8.1** — see the GitHub release page for full notes:
+[**v12.8.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.1)
 
 | Version | Highlights |
 |---|---|
+| **v12.8.1** | Tap-to-reveal auto-play gate. New `auto_play_default` option (Features section): `lan` (default — LAN auto-reveals, mobile/tunnel shows a Play overlay), `always`, `never`. Overlay only appears once the backend stream is on; zero HLS bytes to the phone until tap. Browser-side LAN detection via `hass.config.internal_url` origin match + RFC-1918 fallback — works in HA Companion App iOS / Android + browsers. Per-card YAML override `auto_play:`. Card v2.16.7. +17 pin tests; 4408 suite total. |
 | **v12.7.2** | Bosch-app-parity sprint: Mic/Speaker level sliders (Gen2), Intrusion-detection sensitivity + distance numbers, configurable motion-sensor active window (10-300s, default 90), WiFi-RSSI + Firmware diagnostic sensors. +141 regression tests, 4314 suite total. Same-day cross-port to Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3. |
 | **v12.5.1** | Hotfix: revert the v12.5.0 Indoor II light entity — Eyes Indoor II has no controllable light hardware. Includes registry cleanup migration that removes the orphan `light.bosch_*_frontlicht` plus three stale Indoor II number orphans on next startup. |
 | **v12.5.0** | LAN-fallback hardening (HTTPS + Digest on RCP writes, hw_version + Digest creds persisted across HA restarts), new `bosch-notifications-card` for the Lovelace dashboard (active / scheduled / recent maintenance + cam status), maintenance + cloud-state notification dedup persisted across restarts (kills 20× duplicate alerts during a single outage), switch / light availability gate now allows hw-unknown + LAN-reachable. Card v2.14.0 with `https://`-scheme guard for sensor-attribute URLs. |
@@ -1817,7 +1818,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.7.2** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.8.1** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.6 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / no-HA standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.10 · beta · npm · MQTT bridge · PTZ presets · cloud-503 hardening · VIS-2 widget alpha |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.5 · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

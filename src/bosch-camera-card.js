@@ -148,7 +148,32 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.14.0";
+const CARD_VERSION = "2.16.7";
+
+// Card auto-play modes. Primary source = integration option
+// `auto_play_default` exposed on the camera entity attribute. Per-card
+// YAML `auto_play` overrides. Garbage (including the dropped v2.15.x
+// "confirm" value) collapses to "lan".
+//   always — auto-reveal the live video in every session.
+//   lan    — auto-reveal on LAN; on remote pre-init the stream in the
+//            background and show a tap-to-reveal overlay (default).
+//   never  — pre-init + overlay in every session; user always taps to reveal.
+const AUTO_PLAY_MODES = ["lan", "always", "never"];
+
+// Minimal card-side i18n. Picks DE for hass.language starting with "de",
+// EN otherwise. Keep keys stable — referenced by _t() lookups.
+const CARD_I18N = {
+  en: {
+    play_gate_label: "Start stream",
+    play_gate_hint_remote: "You're on a remote connection — tap to start",
+    play_gate_hint_default: "Tap to start the live stream",
+  },
+  de: {
+    play_gate_label: "Stream starten",
+    play_gate_hint_remote: "Du bist remote — antippen zum Starten",
+    play_gate_hint_default: "Antippen, um den Live-Stream zu starten",
+  },
+};
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -277,6 +302,9 @@ class BoschCameraCard extends HTMLElement {
       // automations, pan controls) is hidden by default and revealed when the
       // user clicks the ⋮ overflow button. Opt-in via YAML `minimal: true`.
       minimal:                    config.minimal === true,
+      // Card auto-play override. When set, takes precedence over the
+      // integration option `auto_play_default`. null = fall back to integration.
+      auto_play:                  AUTO_PLAY_MODES.includes(config.auto_play) ? config.auto_play : null,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -379,6 +407,13 @@ class BoschCameraCard extends HTMLElement {
       }
     }
     this._applyImageRotation180();
+    // Auto-play gate decision MUST run synchronously BEFORE _update() —
+    // otherwise _update() would see shouldVideo=true (if the backend
+    // stream is already on) and kick off the HLS connect before
+    // _playGateActive is set, leaking bandwidth behind the gate.
+    // hass.config + states are all immediately available on first push;
+    // no defer needed for the decision itself.
+    if (firstHass) this._maybeAutoPlay();
     this._update();
     // _render() calls _scheduleImageLoad(0) before _hass is assigned (HA sets hass
     // AFTER setConfig), so the first image load silently returns early.
@@ -399,7 +434,151 @@ class BoschCameraCard extends HTMLElement {
       // waiting for the WS push (which can lag a few seconds when HA's
       // Companion App resumes from background).
       this._pullFreshSwitchStates();
+      // 800 ms re-check: covers the edge case where switch.state was
+      // 'unavailable' on the very first push (camera in privacy/offline
+      // at mount time) but flips to a real state right after
+      // _pullFreshSwitchStates. _maybeAutoPlay is a no-op if already
+      // decided, so this is safe to call unconditionally.
+      setTimeout(() => this._maybeAutoPlay(), 800);
     }
+  }
+
+  // ── Auto-play gate ────────────────────────────────────────────────────────
+  // Thomas, 2026-05-21 (final spec): the overlay ONLY appears when the
+  // backend stream is actually running. Cold-open with stream=off shows
+  // the regular snapshot card (no gate, no auto-start). When the stream
+  // transitions OFF→ON (turned on here, on another device, or via an
+  // automation), the gate appears in overlay-required modes so the user
+  // can decide whether to display the live video.
+  //
+  // Modes:
+  //   always — never gate; auto-display when stream goes on
+  //   lan    — gate when remote; auto-display when on LAN
+  //   never  — always gate when stream goes on
+  //
+  // Inputs: integration option `auto_play_default` on the camera entity
+  // attribute, per-card YAML override `auto_play`, browser-side LAN
+  // detection (hass.config.internal_url comparison + RFC-1918 fallback).
+  _maybeAutoPlay() {
+    // Kept as a no-op alias so older call sites (set hass firstHass + the
+    // 800 ms re-check) still work. The real work is done by
+    // _evaluateGateForStreamTransition() called from _update() on every
+    // switch-state change.
+    this._evaluateGateForStreamTransition();
+  }
+
+  // Called on every _update() pass after switch state is read. Tracks
+  // OFF→ON transitions to show the gate, and ON→OFF transitions to hide
+  // it. No-op while stream state is unchanged.
+  _evaluateGateForStreamTransition() {
+    if (!this._hass || !this._entities.switch) return;
+    const switchEnt = this._hass.states[this._entities.switch];
+    if (!switchEnt) return;
+    const curr = switchEnt.state;  // "on" | "off" | "unavailable"
+    const prev = this._lastEvaluatedSwitchState;
+    this._lastEvaluatedSwitchState = curr;
+
+    if (curr !== "on") {
+      // Stream off or unavailable → no reason to gate; hide if showing.
+      if (this._playGateActive) this._hidePlayGate();
+      return;
+    }
+    // Stream is ON. Re-decide gate ONLY on transition into "on" — if we
+    // already decided in a previous _update() pass (prev was "on"), don't
+    // reshow the gate; the user's earlier tap stands until stream cycles.
+    if (prev === "on") return;
+    const camEnt = this._hass.states[this._entities.camera];
+    if (camEnt && camEnt.state === "unavailable") return;
+    const mode = this._getAutoPlayMode();
+    if (mode === "always") return;                              // auto-display
+    if (mode === "lan" && this._isLanSession()) return;         // auto-display
+    // mode === "never", or mode === "lan" + remote → gate
+    this._showPlayGate();
+  }
+
+  // Show the tap-to-reveal gate. Keeps the snapshot visible underneath so
+  // the user still sees which camera they're about to start. Also hides
+  // the loading overlay so the spinner doesn't bleed through the gate.
+  _showPlayGate() {
+    this._playGateActive = true;
+    this._setLoadingOverlay(false);
+    const el = this.shadowRoot?.getElementById("auto-play-gate");
+    if (!el) return;
+    const isLan = this._isLanSession();
+    const hint = el.querySelector(".apg-hint");
+    if (hint) {
+      hint.textContent = this._t(
+        isLan ? "play_gate_hint_default" : "play_gate_hint_remote",
+      );
+    }
+    const lbl = el.querySelector(".apg-label");
+    if (lbl) lbl.textContent = this._t("play_gate_label");
+    el.classList.add("visible");
+  }
+
+  _hidePlayGate() {
+    this._playGateActive = false;
+    const el = this.shadowRoot?.getElementById("auto-play-gate");
+    if (el) el.classList.remove("visible");
+  }
+
+  // User said "go". Gate hidden, _update() then connects HLS to the
+  // already-running stream. (New spec: the gate is only shown WHEN the
+  // stream is running, so we never need to turn the switch on here —
+  // it's already on by definition.)
+  _onPlayGateTap() {
+    this._hidePlayGate();
+    this._update();
+  }
+
+  _getAutoPlayMode() {
+    const cfgMode = this._config?.auto_play;
+    if (cfgMode && AUTO_PLAY_MODES.includes(cfgMode)) return cfgMode;
+    const camAttrs = this._hass?.states[this._entities.camera]?.attributes || {};
+    const attrMode = camAttrs.auto_play_default;
+    if (attrMode && AUTO_PLAY_MODES.includes(attrMode)) return attrMode;
+    return "lan";
+  }
+
+  _isLanSession() {
+    if (!this._hass) return false;
+    // Primary: exact origin match against HA-configured internal_url.
+    // Covers the common case (HA Companion App + browsers using internal URL)
+    // and is exact (port-aware). See knowledge-base/auto-play-lan-detect-mobile-compat.md.
+    const cfg = this._hass.config || {};
+    if (cfg.internal_url) {
+      try {
+        if (window.location.origin === new URL(cfg.internal_url).origin) return true;
+      } catch (_) {}
+    }
+    if (cfg.external_url) {
+      try {
+        if (window.location.origin === new URL(cfg.external_url).origin) return false;
+      } catch (_) {}
+    }
+    // Fallback: RFC-1918 / link-local hostname check for setups without
+    // internal_url configured, or where the user navigated via an alias.
+    const h = (window.location.hostname || "").toLowerCase();
+    if (!h) return false;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
+    if (h.endsWith(".local") || h.endsWith(".fritz.box") || h.endsWith(".lan")) return true;
+    if (/^192\.168\./.test(h)) return true;
+    if (/^10\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+    if (/^fe80:/i.test(h)) return true;
+    return false;
+  }
+
+  _autoStartStream() {
+    if (!this._hass || !this._entities.switch) return;
+    this._setOptimistic(this._entities.switch, "on");
+    this._callService("switch", "turn_on", { entity_id: this._entities.switch });
+  }
+
+  _t(key) {
+    const lang = (this._hass?.language || "en").toLowerCase();
+    const dict = lang.startsWith("de") ? CARD_I18N.de : CARD_I18N.en;
+    return dict[key] || CARD_I18N.en[key] || key;
   }
 
   // Apply 180° CSS rotation to the image+video wrapper based on the
@@ -645,6 +824,48 @@ class BoschCameraCard extends HTMLElement {
         .tap-to-play-overlay .ttp-hint {
           font-size: 11px; color: rgba(255,255,255,.5);
           text-align: center; max-width: 200px; line-height: 1.4;
+        }
+
+        /* Auto-play gate — shown when auto_play_default decides the user
+           should explicitly tap to reveal the live video. z-index 11 sits
+           above the video (1) and the tap-to-play overlay (9) but BELOW
+           loading-overlay (10) — except loading is hidden while the gate
+           is active so this is a non-issue. The snapshot remains visible
+           through a translucent backdrop so the user sees which camera. */
+        .auto-play-gate {
+          display: none;
+          position: absolute; inset: 0; z-index: 11;
+          flex-direction: column; align-items: center; justify-content: center;
+          gap: 8px;
+          /* No backdrop-filter — Thomas wants to see the sharp snapshot
+             behind the play button so he can decide based on the current
+             camera image. Dimming only via low-opacity black overlay. */
+          background: rgba(0,0,0,.25);
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .auto-play-gate.visible { display: flex; }
+        .auto-play-gate:hover { background: rgba(0,0,0,.4); }
+        /* Hide the HLS-fallback banner while the play gate is up — the
+           transport hint is irrelevant until the user actually starts
+           the stream, just clutters the view. */
+        .img-wrapper:has(.auto-play-gate.visible) .ios-hls-banner {
+          display: none !important;
+        }
+        .auto-play-gate svg {
+          width: 64px; height: 64px; fill: rgba(255,255,255,.95);
+          filter: drop-shadow(0 2px 12px rgba(0,0,0,.6));
+          transition: transform 0.12s;
+        }
+        .auto-play-gate:active svg { transform: scale(0.92); }
+        .auto-play-gate .apg-label {
+          font-size: 15px; font-weight: 600; color: rgba(255,255,255,.95);
+          text-shadow: 0 1px 4px rgba(0,0,0,.7);
+        }
+        .auto-play-gate .apg-hint {
+          font-size: 11px; color: rgba(255,255,255,.7);
+          text-align: center; max-width: 240px; line-height: 1.4;
+          text-shadow: 0 1px 3px rgba(0,0,0,.6);
         }
 
         /* Push status badge */
@@ -1116,6 +1337,11 @@ class BoschCameraCard extends HTMLElement {
             <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             <span class="ttp-label">Zum Abspielen tippen</span>
             <span class="ttp-hint">Oder in den HA-App-Einstellungen „Videos automatisch abspielen" aktivieren</span>
+          </div>
+          <div class="auto-play-gate" id="auto-play-gate">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span class="apg-label">Stream starten</span>
+            <span class="apg-hint">Antippen, um den Live-Stream zu starten</span>
           </div>
           <div class="loading-overlay visible" id="loading-overlay">
             <div class="spinner"></div>
@@ -1616,6 +1842,10 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-stream").addEventListener("click", () =>
       this._toggleStream()
     );
+    // Auto-play gate (tap-to-reveal) — visible only when auto_play_default
+    // resolves to overlay-required (mode=never, or mode=lan + remote).
+    const apg = this.shadowRoot.getElementById("auto-play-gate");
+    if (apg) apg.addEventListener("click", () => this._onPlayGateTap());
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
     );
@@ -2968,6 +3198,18 @@ class BoschCameraCard extends HTMLElement {
     // dedicated sensor — persistent across sessions, no toggle-click needed).
     const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
     const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    // Auto-play gate transitions: track switch.state changes on every
+    // _update() pass. OFF→ON in overlay-required modes shows the gate;
+    // ON→OFF hides it. Runs synchronously here so the early-return below
+    // sees the freshest _playGateActive value.
+    this._evaluateGateForStreamTransition();
+    // Gate is active → suppress HLS connect + loading spinner. The user
+    // taps the gate to reveal (and tap handler clears _playGateActive,
+    // then triggers another _update() which proceeds to start HLS).
+    if (this._playGateActive) {
+      this._setLoadingOverlay(false);
+      return;
+    }
     if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
       this._waitingForStream = true;
       const overlayText = backendStreamStatus === "warming_up" ? "Kamera wird aufgeweckt…"

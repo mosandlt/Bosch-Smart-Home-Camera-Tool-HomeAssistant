@@ -42,7 +42,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
 from .auth_utils import async_digest_request
-from .const import TIMEOUT_SNAP
+from .const import TIMEOUT_SNAP, AUTO_PLAY_DEFAULT_VALUES
 from .snapshot_store import load_snapshot, save_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -434,6 +434,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # maxBufferLength, lowLatencyMode) is mapped client-side.
         attrs["live_buffer_mode"] = get_options(self._entry).get(
             "live_buffer_mode", "balanced"
+        )
+        # Card auto-play default — collapses any non-canonical value to "lan"
+        # so a typo or stale option from a previous version never disables
+        # stream start. Per-card YAML `auto_play` still overrides this.
+        mode = get_options(self._entry).get("auto_play_default", "lan")
+        attrs["auto_play_default"] = (
+            mode if mode in AUTO_PLAY_DEFAULT_VALUES else "lan"
         )
         return attrs
 

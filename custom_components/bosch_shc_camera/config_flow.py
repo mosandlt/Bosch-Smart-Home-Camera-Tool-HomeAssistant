@@ -60,6 +60,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_snapshots", "enable_sensors", "enable_binary_sensors",
         "motion_active_window",
         "enable_snapshot_button", "audio_default_on", "enable_intercom",
+        "auto_play_default",
     ],
     "stream": [
         "stream_connection_type", "live_buffer_mode", "enable_go2rtc",
@@ -621,6 +622,17 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     "enable_intercom",
                     default=bool(opts.get("enable_intercom", False)),
                 ): bool,
+                vol.Optional(
+                    "auto_play_default",
+                    default=str(opts.get("auto_play_default", "lan")),
+                ): SelectSelector(SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value="lan",    label="LAN auto-play, tap-to-reveal on remote"),
+                        SelectOptionDict(value="always", label="Always auto-play"),
+                        SelectOptionDict(value="never",  label="Tap-to-reveal in every session"),
+                    ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )),
             }),
             {"collapsed": False},
         )

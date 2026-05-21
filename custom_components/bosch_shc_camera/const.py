@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "2.14.0"
+CARD_VERSION = "2.16.7"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -94,7 +94,21 @@ DEFAULT_OPTIONS = {
     # PTZ controls (pan presets) — opt-in. CAMERA_360 indoor only; default off
     # so non-PTZ users do not see a stray select entity in their dashboard.
     "enable_ptz_controls": False,
+    # Card auto-play default — exposed as camera entity attribute so the
+    # Lovelace card can read it. Per-card YAML `auto_play` overrides this.
+    # Values:
+    #   "lan"    — auto-reveal on LAN, tap-to-reveal overlay on remote (default)
+    #   "always" — auto-reveal in every session
+    #   "never"  — tap-to-reveal overlay in every session
+    # The card pre-initializes the backend stream while the overlay is
+    # showing so video is warm by the time the user taps.
+    "auto_play_default": "lan",
 }
+
+# v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
+# of an inline tap-to-reveal overlay. Stale "confirm" values from v12.8.0
+# collapse to "lan" at the read site in camera.py.
+AUTO_PLAY_DEFAULT_VALUES = ("lan", "always", "never")
 
 # ── Webhook delivery ──────────────────────────────────────────────────────────
 CONF_ENABLE_WEBHOOK_DELIVERY = "enable_webhook_delivery"

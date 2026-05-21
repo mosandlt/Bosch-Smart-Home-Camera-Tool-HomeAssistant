@@ -75,7 +75,8 @@
               "enable_binary_sensors": "Czujniki ruchu / alarmu dźwiękowego",
               "audio_default_on": "Dźwięk domyślnie włączony",
               "enable_intercom": "Domofon (dwukierunkowy dźwięk)",
-              "motion_active_window": "Czujnik ruchu: aktywne okno (sekundy)"
+              "motion_active_window": "Czujnik ruchu: aktywne okno (sekundy)",
+              "auto_play_default": "Domyślne automatyczne odtwarzanie karty"
             },
             "data_description": {
               "enable_snapshots": "Wyświetlaj ostatni JPEG wywołany ruchem jako encję kamery w HA.",
@@ -84,7 +85,8 @@
               "enable_binary_sensors": "Twórz czujniki binarne, które włączają się na 30 sekund po zdarzeniu ruchu lub alarmu dźwiękowego. Przydatne do automatyzacji.",
               "audio_default_on": "Gdy WŁĄCZONE: przełącznik dźwięku startuje włączony (stream z dźwiękiem). Gdy WYŁĄCZONE: dźwięk startuje wyciszony. Można przełączać w dowolnym momencie na pulpicie.",
               "enable_intercom": "Włącz encję przełącznika domofonu (dwukierunkowy dźwięk). Domyślnie wyłączony. Umożliwia wysyłanie dźwięku do głośnika kamery.",
-              "motion_active_window": "Jak długo (sekundy) binarny czujnik ruchu pozostaje WŁĄCZONY po zdarzeniu. Zakres 10-300, domyślnie 90."
+              "motion_active_window": "Jak długo (sekundy) binarny czujnik ruchu pozostaje WŁĄCZONY po zdarzeniu. Zakres 10-300, domyślnie 90.",
+              "auto_play_default": "Kontroluje, czy strumień na żywo pojawia się automatycznie po załadowaniu karty. `auto_play` w YAML karty ma pierwszeństwo.\n• **Tylko LAN** (zalecane): autoodtwarzanie w sieci domowej; zdalnie strumień jest wstępnie inicjowany, a overlay zakrywa wideo do dotknięcia.\n• **Zawsze**: autoodtwarzanie w każdej sesji.\n• **Dotknij, aby pokazać**: wstępna inicjalizacja i overlay w każdej sesji — dotykasz raz, aby pokazać wideo."
             }
           },
           "stream": {
