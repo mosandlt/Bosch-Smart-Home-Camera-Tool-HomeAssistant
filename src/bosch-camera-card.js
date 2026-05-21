@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "2.16.7";
+const CARD_VERSION = "2.16.9";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -3142,13 +3142,17 @@ class BoschCameraCard extends HTMLElement {
     }
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
 
-    // Connection type badge (LAN / Cloud)
+    // Connection-type badge — show ONLY when actually streaming via the
+    // Bosch cloud relay. LAN is the configured-default for this setup, so
+    // a LAN badge is just noise on every card every time. A "Cloud" badge
+    // is informative because it signals an unexpected fallback (LAN-first
+    // tried, cloud took over).
     const connType  = hass.states[ents.switch]?.attributes?.connection_type || "";
     const connBadge = this.shadowRoot.getElementById("conn-badge");
     if (connBadge) {
-      if (isStreaming && connType) {
-        connBadge.className = "conn-badge " + (connType === "LOCAL" ? "local" : "remote");
-        connBadge.textContent = connType === "LOCAL" ? "LAN" : "Cloud";
+      if (isStreaming && connType === "REMOTE") {
+        connBadge.className = "conn-badge remote";
+        connBadge.textContent = "Cloud";
       } else {
         connBadge.className = "conn-badge hidden";
       }
@@ -3197,7 +3201,18 @@ class BoschCameraCard extends HTMLElement {
     // "Cold open": if stream_status is warming_up/connecting (read from the
     // dedicated sensor — persistent across sessions, no toggle-click needed).
     const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
-    const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    // `backendWaiting` reflects warming_up/connecting on the backend, but
+    // those states can fire WITHOUT user intent — the snapshot-refresh path
+    // opens a live session, which HA's stream component then prepares,
+    // which sets stream_status=connecting. The card must NOT enter the
+    // visual connecting/loading state for that "phantom" backend warmup:
+    // it would show a CONNECTING badge + 25-35 s loading overlay on every
+    // dashboard open even though the user never asked for video. Gate
+    // backendWaiting on user intent — only meaningful if the switch is on.
+    const userWantsVideo = (hass.states[ents.switch]?.state === "on");
+    const backendWaiting =
+      userWantsVideo &&
+      (backendStreamStatus === "warming_up" || backendStreamStatus === "connecting");
     // Auto-play gate transitions: track switch.state changes on every
     // _update() pass. OFF→ON in overlay-required modes shows the gate;
     // ON→OFF hides it. Runs synchronously here so the early-return below

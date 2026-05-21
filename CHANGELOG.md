@@ -5,6 +5,13 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.8.2 — 2026-05-21
+
+Patch release — card-only fixes for two UX papercuts on the auto-play gate. Ships Lovelace card v2.16.9. No Python code change beyond the `CARD_VERSION` bump.
+
+- **Phantom CONNECTING badge fix.** The `backendWaiting` branch in `_update()` (warming_up / connecting from the `stream_status` sensor) used to trigger the loading overlay + start the HLS connect path even when the user had NOT requested video. The integration's snapshot-refresh path can open a live session backend-side — which then has HA's stream component prepare HLS, which flips `stream_status` to `connecting`. The card now requires `switch.<cam>_live_stream === "on"` (explicit user intent) before honouring `backendWaiting`. Result: opening the dashboard never shows a CONNECTING badge or "LAN-Stream — ca. 25-35 s bis erstes Bild" overlay against the user's will.
+- **LAN-badge hidden by default.** The connection-type badge top-right of the card no longer displays "LAN" for the default-case stream. It only displays "Cloud" when the stream actually fell back to the Bosch cloud relay (the noteworthy case). LAN is the normal, configured-default — surfacing it on every card was pure noise. Card chrome cleanup matching the v12.8.1 "HLS-Modus banner hidden behind gate" idea.
+
 ## v12.8.1 — 2026-05-21
 
 Feature release — opt-in tap-to-reveal gate for the live stream, with LAN/remote awareness. Ships alongside Lovelace card v2.16.7.

@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "2.16.7";
+const CARD_VERSION = "2.16.9";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
@@ -1445,9 +1445,9 @@ class BoschCameraCard extends HTMLElement {
     const connType = hass.states[ents.switch]?.attributes?.connection_type || "";
     const connBadge = this.shadowRoot.getElementById("conn-badge");
     if (connBadge) {
-      if (isStreaming && connType) {
-        connBadge.className = "conn-badge " + (connType === "LOCAL" ? "local" : "remote");
-        connBadge.textContent = connType === "LOCAL" ? "LAN" : "Cloud";
+      if (isStreaming && connType === "REMOTE") {
+        connBadge.className = "conn-badge remote";
+        connBadge.textContent = "Cloud";
       } else {
         connBadge.className = "conn-badge hidden";
       }
@@ -1482,7 +1482,8 @@ class BoschCameraCard extends HTMLElement {
     }
     this._lastStreaming = isStreaming;
     const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
-    const backendWaiting = backendStreamStatus === "warming_up" || backendStreamStatus === "connecting";
+    const userWantsVideo = hass.states[ents.switch]?.state === "on";
+    const backendWaiting = userWantsVideo && (backendStreamStatus === "warming_up" || backendStreamStatus === "connecting");
     this._evaluateGateForStreamTransition();
     if (this._playGateActive) {
       this._setLoadingOverlay(false);
