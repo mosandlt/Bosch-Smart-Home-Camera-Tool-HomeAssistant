@@ -1791,11 +1791,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.8.2** — see the GitHub release page for full notes:
-[**v12.8.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.2)
+Latest: **v12.8.3** — see the GitHub release page for full notes:
+[**v12.8.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.3)
 
 | Version | Highlights |
 |---|---|
+| **v12.8.3** | FCM push watchdog recovery gap closed: when a previous self-heal failed (e.g. Google returns `PHONE_REGISTRATION_ERROR` during a transient IP rate-limit), event detection used to stay on polling until the next HA restart. The watchdog now retries the self-heal once the 30 min cool-down expires, so push detection recovers automatically. +4 regression tests pinning the retry / cool-down / opt-out / happy-path branches. |
 | **v12.8.2** | Card patch (v2.16.9): suppress the phantom CONNECTING badge + loading overlay that appeared on dashboard open without user intent (snapshot-refresh side-effect was opening live sessions backend-side); LAN badge hidden by default, only "Cloud" shows when stream actually falls back to the Bosch relay. |
 | **v12.8.1** | Tap-to-reveal auto-play gate. New `auto_play_default` option (Features section): `lan` (default — LAN auto-reveals, mobile/tunnel shows a Play overlay), `always`, `never`. Overlay only appears once the backend stream is on; zero HLS bytes to the phone until tap. Browser-side LAN detection via `hass.config.internal_url` origin match + RFC-1918 fallback — works in HA Companion App iOS / Android + browsers. Per-card YAML override `auto_play:`. Card v2.16.7. +17 pin tests; 4408 suite total. |
 | **v12.7.2** | Bosch-app-parity sprint: Mic/Speaker level sliders (Gen2), Intrusion-detection sensitivity + distance numbers, configurable motion-sensor active window (10-300s, default 90), WiFi-RSSI + Firmware diagnostic sensors. +141 regression tests, 4314 suite total. Same-day cross-port to Python CLI v10.7.4, ioBroker v0.7.7, MCP v1.3.3. |

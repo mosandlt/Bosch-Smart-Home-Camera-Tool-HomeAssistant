@@ -1626,7 +1626,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "FCM push watchdog: FcmPushClient.is_started()=False — "
                     "listener terminated, flagging unhealthy (polling tempo resumes)"
                 )
-            # Self-heal: two triggers share one cool-down (30 min) so a single
+            # Self-heal: three triggers share one cool-down (30 min) so a single
             # transient WAN blip doesn't keep tearing FCM down.
             #   (a) silent death just detected (is_started()=False above) — without
             #       this trigger the coordinator stays stuck in
@@ -1637,19 +1637,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             #       "started" (typically stale persisted creds) — detected via the
             #       noise filter's recorded error timestamps; ≥3 in 5 min => SSL
             #       session permanently broken, only a fresh checkin recovers.
+            #   (c) FCM enabled but not running (e.g. previous self-heal failed
+            #       with PHONE_REGISTRATION_ERROR during a transient Google
+            #       rate-limit) — without this trigger FCM stayed dead until HA
+            #       restart because (a) and (b) both required _fcm_running=True.
             heal_needed = False
             cool_down_ok = (now - getattr(self, "_fcm_last_self_heal", float("-inf"))) > 1800.0
             if (
                 opts.get("enable_fcm_push", False)
-                and self._fcm_running
                 and cool_down_ok
             ):
                 if fcm_dead:
                     heal_needed = True
-                elif self._fcm_healthy:
+                elif self._fcm_running and self._fcm_healthy:
                     from .fcm import get_recent_fcm_error_count
                     if get_recent_fcm_error_count(300.0) >= 3:
                         heal_needed = True
+                elif not self._fcm_running:
+                    # FCM is enabled but not running — a previous self-heal
+                    # attempt failed (e.g. Google returned PHONE_REGISTRATION_ERROR
+                    # during a transient IP rate-limit). Before this branch FCM
+                    # stayed dead until HA restart because every self-heal path
+                    # above required `_fcm_running=True`. The 30 min cool-down
+                    # prevents hammering Google.
+                    heal_needed = True
             _fcm_healthy = self._fcm_healthy
         if heal_needed:
             self._fcm_last_self_heal = now

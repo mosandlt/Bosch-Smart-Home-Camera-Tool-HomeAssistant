@@ -5,6 +5,13 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v12.8.3 — 2026-05-21
+
+Patch release — closes a recovery gap in the FCM push watchdog so a failed self-heal no longer leaves event detection stuck on polling until the next HA restart.
+
+- **FCM watchdog now retries after a failed self-heal.** When the FCM listener silent-died and the follow-up `checkin_or_register()` failed (e.g. Google returns `PHONE_REGISTRATION_ERROR` while it rate-limits the public IP), `_fcm_running` stayed `False` and every existing self-heal trigger was gated by `_fcm_running=True`. FCM stayed dead until the user reloaded the integration manually. v12.8.3 adds a third self-heal trigger: `enable_fcm_push=True` + `_fcm_running=False` + cool-down expired → re-attempt. The same 30 min cool-down still applies, so a persistent Google rate-limit will not be hammered.
+- **Regression coverage.** New `tests/test_fcm_watchdog_retry.py` (4 tests) pins the retry-after-failed-heal path, the cool-down suppression, the `enable_fcm_push=False` opt-out, and the healthy-listener no-op. Existing self-heal tests (`test_init_sprint_ka::TestFcmWatchdog`, `test_fcm_self_heal.py`) stay green.
+
 ## v12.8.2 — 2026-05-21
 
 Patch release — card-only fixes for two UX papercuts on the auto-play gate. Ships Lovelace card v2.16.9. No Python code change beyond the `CARD_VERSION` bump.
