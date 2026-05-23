@@ -72,7 +72,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) |
 |---|---|---|---|---|
-| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.7+ beta | v1.3+ stable · PyPI |
+| **Maturity** | v13.0+ — HA Quality Scale **Platinum** | v10.7+ stable (Mini-NVR BETA) | v0.7+ beta | v1.3+ stable · PyPI |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) |
@@ -83,13 +83,13 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP | ✅ `bosch_camera_privacy_set` (LAN-fallback via `prefer_local`) |
 | **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) |
 | **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ✅ command | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* |
-| **Panic-alarm siren (Gen2)** | ✅ button entity | ✅ command | ✅ DP | ❌ *(intentionally not exposed)* |
+| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen1 360° only)* | ✅ DP | ❌ *(intentionally not exposed)* |
 | **Image rotation 180°** | ✅ switch | ✅ flag | ✅ DP | ❌ |
 | **Motion / person / audio events** | ✅ FCM push + polling fallback | ✅ event-watch command | ✅ FCM push + polling fallback | ✅ `bosch_camera_events` (on-demand pull) |
 | **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* | n/a *(request-response, no subscription)* |
 | **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* | n/a *(no background loop)* |
 | **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP | ❌ |
-| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
+| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
 | **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ | ❌ |
@@ -226,7 +226,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 | Setting | Description | Default |
 |---|---|---|
 | **FCM Push** | Near-instant (~2 s) event detection via Firebase Cloud Messaging. With FCM enabled the polling interval is automatically tightened to 60 s as a backup. | OFF |
-| **FCM Push Mode** | `Auto` (iOS → Android → polling), `iOS`, `Android`, or `Polling`. `Auto` falls back automatically if iOS registration fails. | Auto |
+| **FCM Push Mode** | `Auto` (FCM with automatic polling fallback on failure) or `Polling` (skip FCM entirely). | Auto |
 | **Event check interval** | Polling fallback interval (seconds). Used only when FCM Push is OFF or as a backup. | 300 (5 min) |
 
 #### Alerts (per-step routing)
@@ -357,7 +357,7 @@ stateDiagram-v2
     Idle --> REMOTE: ON · mode = remote
     Idle --> REMOTE_fallback: ON · auto + LAN down
 
-    LOCAL --> REMOTE_fallback: 5 (indoor) / 10 (outdoor)\nconsecutive stream errors
+    LOCAL --> REMOTE_fallback: 5 (indoor) / 10 (outdoor)<br/>consecutive stream errors
     REMOTE_fallback --> LOCAL: LAN ok · active promotion
 
     LOCAL --> Idle: OFF
@@ -410,7 +410,7 @@ graph LR
 - **Service-action exceptions instead of silent log warnings** — clicking a button that hits HTTP 500 now shows a red error notification with cause; previously failures looked like nothing happened.
 - **Coordinator raises `UpdateFailed`** consistently → HA framework provides `log-when-unavailable` automatically, no manual log-spam guards.
 
-**Platinum tier (v12.0.1, 2026-05-12):**
+**Platinum tier (v12.0.1):**
 
 - `strict-typing` — mypy --strict green across all 24 source files (was 593 errors). `pyproject.toml` strict config added; ~80 targeted `# type: ignore` for unavoidable HA-stub gaps.
 - `async-dependency` — all `requests` imports removed. HTTP Digest auth via `auth_utils.async_digest_request` (aiohttp); sync cloud downloads via stdlib `urllib.request`. `requests>=2.28.0,<3` removed from runtime requirements.
@@ -564,7 +564,7 @@ sequenceDiagram
 | Stream quality | `select` | Auto (~7.5 Mbps) / High (30 Mbps) / Low (1.9 Mbps). LAN always uses max quality; setting only affects REMOTE/cloud streams. Persists across restarts. |
 | Stream mode | `select` | Auto (Lokal → Cloud) / Nur Lokal / Nur Cloud |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
-| FCM Push mode | `select` | Auto / iOS / Android / Polling |
+| FCM Push mode | `select` | Auto / Polling |
 | Motion detected | `binary_sensor` | disabled by default |
 | Audio alarm detected | `binary_sensor` | disabled by default |
 | Person detected | `binary_sensor` | disabled by default |
@@ -657,11 +657,47 @@ The integration uses `GET /v11/video_inputs/{id}/last_event` as a **fast-path** 
 | | FCM Push (recommended) | Polling (default) |
 |---|---|---|
 | **Event latency** | ~2-3 seconds | 5 minutes (configurable) |
-| **How it works** | Firebase Cloud Messaging push from Bosch cloud | Periodic API polling |
+| **How it works** | Firebase Cloud Messaging push from Bosch cloud | Periodic `/v11/events` API polling |
 | **Fallback** | Automatic — if FCM goes down, polling continues | Always active |
 | **Status sensor** | `sensor.bosch_camera_event_detection` = `fcm_push` | `polling` |
 
-Enable FCM Push in **Settings → Configure → FCM Push**. You can also select the push mode (`Auto`, `iOS`, `Android`, or `Polling`) — `Auto` tries iOS first, then Android, then falls back to polling. The mode can also be changed at runtime via the **FCM Push Mode** select entity.
+Enable FCM Push in **Settings → Configure → FCM Push**. Two modes: `Auto` (FCM with automatic polling fallback on failure) or `Polling` (skip FCM entirely). Can be changed at runtime via the **FCM Push Mode** select entity.
+
+#### State machine — registration, push delivery, self-heal, polling fallback
+
+The integration always runs the 60-second coordinator poll for camera status (online/offline, privacy mode, firmware) — that part is independent of FCM. FCM is only for **event** detection (motion / audio / person), which is the latency-critical path. When FCM is healthy the watchdog stretches event polling to 5 min; when FCM is unhealthy it tightens back to 60 s.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Init
+    Init --> Registering : asyncio.Lock acquired<br/>fresh checkin_or_register()
+    Registering --> Active : token registered with Bosch CBS
+    Registering --> Polling : PHONE_REGISTRATION_ERROR<br/>or library failure
+    Active --> EventReceived : push from Bosch CBS
+    EventReceived --> Active : event fetched + alert pipeline
+    Active --> Polling : is_started=False<br/>(listener silently terminated)
+    Polling --> SelfHeal : watchdog trigger<br/>(a) is_started=False<br/>(b) >=3 failures in 5 min<br/>(c) not _fcm_running
+    SelfHeal --> Cooldown : purge ALL fcm_* keys<br/>increment failure counter
+    Cooldown --> Registering : ladder elapsed<br/>30 min / 1 h / 3 h / 6 h / 24 h<br/>+- 20% jitter
+    Cooldown --> Paused : 5 consecutive failures
+    Paused --> Polling : polling fallback continues
+    Paused --> [*] : HA restart resets counter
+    Polling --> PollCycle : every 60 s scan_interval
+    PollCycle --> EventReceived : new event in /v11/events
+    PollCycle --> Polling : no new event
+    Active --> CounterReset : healthy >=10 min<br/>after self-heal
+    CounterReset --> Active : failures = 0
+```
+
+**Recovery behaviour (since v12.8.4):**
+
+- **Self-heal purges every `fcm_*` key** from the config entry (credentials, registered token, Firebase config, device-type marker) on each cycle — leaving any of them behind kept fresh registrations failing with `PHONE_REGISTRATION_ERROR`.
+- **Exponential cool-down ladder** with ±20 % jitter: 30 min → 1 h → 3 h → 6 h → 24 h. After 5 consecutive failures self-heal pauses until the next HA restart; polling fallback keeps event detection alive.
+- **Storm trigger watches registration failures, not just connectivity** — `PHONE_REGISTRATION_ERROR`, "Unable to complete gcm auth request", and "Unable to establish subscription" all count toward the `≥ 3 in 5 min` threshold.
+- **`asyncio.Lock` serialises start + self-heal** so the setup-time registration cannot race the first watchdog tick (the race used to register two device tokens with Bosch CBS in 2 s and orphan the first listener).
+- **Failure counter auto-resets** after FCM stays healthy for ≥ 10 min following a heal — so a one-off blip doesn't burn through the ladder.
+
+Full diagnostic dump available via integration **Settings → Configure → Debug logging** when troubleshooting; lessons-learned write-up: `knowledge-base/fcm-self-heal-lessons.md`.
 
 ### SMB/NAS Upload
 
@@ -1117,18 +1153,16 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v2.12.4 |
-| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline** with colored outlines per tier (green / orange / grey), or by Bosch-app `priority` if `use_bosch_sort: true`. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v1.1.0 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v13.0.0 |
+| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline**. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v13.0.0 |
 
-> **Card version: v2.12.4** — LL-HLS now active for all buffer profiles (was latency-only); HLS startup drops from ~20 s to ~1.5–5 s. tap-to-play overlay when Android WebView blocks autoplay (HA app → "Videos automatisch abspielen" enablen für WebRTC mit ~1–2 s Erstbild), Android starts muted (Ton-Tap unmutes), offline guard prevents stream-start on unavailable cameras, faster WebRTC retry (5 s for first extra attempts), Companion App + external-endpoint detection skips WebRTC and uses HLS directly (Cloudflare-Tunnel/iOS), stale-state guard against accidental toggles after app background, Bosch-app sort, hls.js buffer profiles, hardware-privacy auto-teardown, Gen2 polygon overlays, privacy mask overlay, simplified offline view
+> **v13.0.0 — Apple-style redesign + theme switcher (iOS / Material You).** Glass title pill with camera name + green/orange/grey status dot overlays the top of the video; semantic status badge (LIVE / PRIVAT / Verbinde / Offline) sits in the top-right. Glass pill-bar with six circular buttons (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom — the More button reveals the Audio toggle and every other switch / accordion. The card auto-detects iOS vs Android user-agent and renders in the matching design language; a three-state switcher (Auto / iOS / Android) inside the More menu lets the user override, with the choice persisted in `localStorage` and broadcast to every Bosch card on the page. Opt out of the redesign entirely with `apple_style: false`; pin a theme via YAML with `theme: ios | android | auto` (default `ios`).
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
 
 ---
 
 ### `bosch-camera-card` — single camera
-
-![Bosch Camera Card Screenshot](card-screenshot.png)
 
 #### What the card shows
 
@@ -1201,7 +1235,7 @@ The integration supports three connection modes, configurable in **Settings → 
 |------|-------------|
 | **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
 | **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
-| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes. |
+| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes; restart with one tap from the live-stream switch. |
 
 #### Stream Status Sensor
 
@@ -1485,7 +1519,7 @@ sections:
         content: |
           ### 🏅 Quality Scale: **Platinum**
           - System Health · Logbook · Diagnostics · Repair Issues · Update Entities
-          - mypy --strict green · 99% test coverage · 0 `requests` deps
+          - mypy --strict green · 100% test coverage · 0 `requests` deps
         grid_options: {columns: 12, rows: auto}
       - type: tile
         entity: update.bosch_smart_home_camera_update
@@ -1573,7 +1607,7 @@ Repeat the per-camera grid for each camera you have. The view uses the standard 
 ## Requirements
 
 - Home Assistant 2024.1+
-- Python packages: `requests`, `firebase-messaging`, `smbprotocol` (auto-installed via manifest)
+- Python packages: `firebase-messaging`, `smbprotocol` (auto-installed via manifest)
 - For live video: go2rtc (built into HA) or ffplay/mpv
 
 ---
@@ -1791,11 +1825,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v12.8.4** — see the GitHub release page for full notes:
-[**v12.8.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v12.8.4)
+Latest: **v13.0.0** — see the GitHub release page for full notes:
+[**v13.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.0.0)
 
 | Version | Highlights |
 |---|---|
+| **v13.0.0** | **Major: Apple-style card redesign + theme switcher.** Glass title pill + semantic status badge overlay the top of the video; glass six-button pill-bar (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom; the More menu reveals every other switch and the Auto / iOS / Android theme selector. iOS theme uses the SF-Pro / glass-blur look; Android theme switches to Material You / M3 (solid surface-variant containers, 28 px container radius, tonal buttons, M3 dark color tokens). Theme is detected from the user-agent on first load, overridable via the in-card switcher (persisted in `localStorage` and broadcast to every Bosch card on the page), or pinned via YAML `theme: ios | android | auto`. `apple_style: false` keeps the legacy chrome. Integration and card now share version 13.0.0 so feature parity is visible at a glance. This release also bundles every reliability, connectivity, and feature improvement delivered across the 40+ v12.x patches — see `docs/version-history.md` for the full breakdown. |
 | **v12.8.4** | FCM self-heal hardening: (a) purges every `fcm_*` key from entry data (was only two), recovering from `PHONE_REGISTRATION_ERROR` loops where stale `fcm_config` / `fcm_registered_device_type` markers blocked a fresh checkin; (b) exponential cool-down ladder (30 min → 1 h → 3 h → 6 h → 24 h) with ±20 % jitter and a 6-step ceiling, replacing the fixed 30 min cadence; (c) registration storms (`PHONE_REGISTRATION_ERROR`, "Unable to complete gcm auth request", "Unable to establish subscription") now count toward the watchdog's storm trigger, not just connectivity drops; (d) `asyncio.Lock` collapses the setup-time start vs first self-heal race that registered two device tokens in 2 s. Card v2.16.10: status dot + offline overlay now case-insensitive so offline cameras render red instead of grey. +6 regression tests pinning purge-scope, race, marker set, and case-fix. |
 | **v12.8.3** | FCM push watchdog recovery gap closed: when a previous self-heal failed (e.g. Google returns `PHONE_REGISTRATION_ERROR` during a transient IP rate-limit), event detection used to stay on polling until the next HA restart. The watchdog now retries the self-heal once the 30 min cool-down expires, so push detection recovers automatically. +4 regression tests pinning the retry / cool-down / opt-out / happy-path branches. |
 | **v12.8.2** | Card patch (v2.16.9): suppress the phantom CONNECTING badge + loading overlay that appeared on dashboard open without user intent (snapshot-refresh side-effect was opening live sessions backend-side); LAN badge hidden by default, only "Cloud" shows when stream actually falls back to the Bosch relay. |
@@ -1817,17 +1852,17 @@ Latest: **v12.8.4** — see the GitHub release page for full notes:
 
 ## Related Projects
 
-This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
+This adapter is part of a 5-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
 | 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v12.8.4** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.6 · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / no-HA standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.10 · beta · npm · MQTT bridge · PTZ presets · cloud-503 hardening · VIS-2 widget alpha |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.7.11 · beta · npm · MQTT bridge · PTZ presets · cloud-503 hardening · VIS-2 widget alpha |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.3.5 · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
 | 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.1.0-alpha · skeleton — 4 nodes (event/snapshot/privacy/config) |
 
-HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time per the [Cross-Platform Sync Strategy](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#cross-platform-sync) (linked internally, see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
+HA stays the **reference implementation** — features land here first. The Python CLI and ioBroker Adapter catch up over time (cross-platform sync strategy; see also the project-internal `docs/feature-matrix.md` for HA-vs-Python-vs-ioBroker parity per feature).
 
 Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.0-alpha Phase-1 skeleton (dashboard + camera detail + settings) — community interest welcome
 
