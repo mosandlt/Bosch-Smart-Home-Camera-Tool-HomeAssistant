@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.0.0";
+const CARD_VERSION = "13.1.0";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -262,12 +262,14 @@ class BoschCameraCard extends HTMLElement {
     this._showMotionZones   = false; // runtime toggle for motion zone overlay
     this._showPrivacyMasks  = false; // runtime toggle for privacy mask overlay
     this._lastRulesKey      = null;  // memoization key for rules list HTML
-    // Bind the theme-broadcast handler once so add/removeEventListener use
-    // the same reference. Done in the constructor (not as a class field) so
+    // Bind the theme + mode broadcast handlers once so add/removeEventListener
+    // use the same reference. Done in the constructor (not as class fields) so
     // older WebKit / iOS WKWebView builds without public-class-field support
     // don't ReferenceError during setConfig.
     this._onThemeBroadcast = this._onThemeBroadcast.bind(this);
+    this._onModeBroadcast  = this._onModeBroadcast.bind(this);
     this._activeTheme       = "ios";
+    this._activeMode        = "night";  // resolved by _applyMode after setConfig
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -285,9 +287,17 @@ class BoschCameraCard extends HTMLElement {
     // WS-unsubscribe so go2rtc frees the consumer immediately.
     this._pagehideHandler = () => this._stopLiveVideo();
     window.addEventListener("pagehide", this._pagehideHandler);
-    // Listen to theme-broadcast so all bosch-camera-cards on the page sync
-    // their theme when the user toggles the switcher on any one of them.
+    // Listen to theme + mode broadcast so all bosch-camera-cards on the page
+    // sync when the user toggles either switcher on any one of them.
     window.addEventListener("bosch-card-theme-change", this._onThemeBroadcast);
+    window.addEventListener("bosch-card-mode-change",  this._onModeBroadcast);
+    // Native browser fullscreen state — fired on Esc-exit, F-key, browser-UI
+    // exit etc. Bound here (not as a class field) for older WKWebView compat.
+    this._onFullscreenChange = () => this._updateFullscreenButtonState();
+    document.addEventListener("fullscreenchange",       this._onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", this._onFullscreenChange);
+    document.addEventListener("mozfullscreenchange",    this._onFullscreenChange);
+    document.addEventListener("MSFullscreenChange",     this._onFullscreenChange);
   }
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -326,6 +336,19 @@ class BoschCameraCard extends HTMLElement {
       // localStorage override (set by the in-card theme switcher) wins over
       // this config value so user choice is sticky across reloads.
       theme:                      ["ios", "android", "auto"].includes(config.theme) ? config.theme : "ios",
+      // Day/Night card-chrome mode (v13.0.1): "auto" follows the system
+      // prefers-color-scheme, "day" forces a light card (white ha-card,
+      // dark text, light M3 surface on Android), "night" forces dark. The
+      // glass overlays on the video stay constant — they need to be
+      // legible regardless of background. Same broadcast pattern as theme:
+      // an in-card switcher writes a localStorage override that wins over
+      // this config, and the choice syncs to every Bosch card on the page.
+      mode:                       ["auto", "day", "night"].includes(config.mode) ? config.mode : "auto",
+      // Compact tile mode (v13 follow-up): hide the pill-bar + status badge
+      // so the card is just video + title-pill. Used by the overview card's
+      // `compact: true` for Apple-Home-style grid tiles. Click the video to
+      // expand (existing fullscreen handler).
+      compact:                    config.compact === true,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -411,8 +434,11 @@ class BoschCameraCard extends HTMLElement {
     this.classList.toggle("minimal", this._config.minimal);
     // Apple-style class on host gates the new glass overlay CSS.
     this.classList.toggle("apple-style", this._config.apple_style);
+    this.classList.toggle("compact", this._config.compact);
     // Resolve effective theme: localStorage override > config > UA auto-detect.
     this._applyTheme(this._resolveTheme());
+    // Resolve effective day/night mode the same way.
+    this._applyMode(this._resolveMode());
     this.classList.remove("overflow-open");  // always collapsed on config (re)load
     this._render();
     this._restoreCachedImage();
@@ -485,6 +511,62 @@ class BoschCameraCard extends HTMLElement {
     sw.querySelectorAll("[data-theme]").forEach((b) => {
       b.classList.toggle("on", b.getAttribute("data-theme") === selected);
       b.setAttribute("aria-pressed", b.getAttribute("data-theme") === selected ? "true" : "false");
+    });
+  }
+
+  // ── Day/Night mode (Tag / Nacht) ──────────────────────────────────────────
+  // Parallel architecture to theme. Resolution:
+  //   1. localStorage `bosch-card-mode` (set by the in-card switcher)
+  //   2. YAML `mode: auto | day | night`
+  //   3. `(prefers-color-scheme: dark)` when mode === "auto"
+  //   4. fallback "night"
+  // Only the card-chrome (ha-card background, text colors, dividers, switch
+  // rows) responds. Glass overlays on the video stay dark for legibility.
+
+  _resolveMode() {
+    let stored = null;
+    try { stored = window.localStorage?.getItem("bosch-card-mode"); } catch { /* SSR / quota */ }
+    if (stored === "day" || stored === "night") return stored;
+    const cfg = this._config?.mode || "auto";
+    if (cfg === "day" || cfg === "night") return cfg;
+    return this._detectMode();
+  }
+
+  _detectMode() {
+    try {
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "night";
+    } catch { /* ignore */ }
+    return "day";
+  }
+
+  _applyMode(mode) {
+    this.classList.toggle("mode-day", mode === "day");
+    this.classList.toggle("mode-night", mode === "night");
+    this._activeMode = mode;
+    this._refreshModeSwitcher();
+  }
+
+  _setUserMode(mode) {
+    try {
+      if (mode === "auto") window.localStorage?.removeItem("bosch-card-mode");
+      else if (mode === "day" || mode === "night") window.localStorage?.setItem("bosch-card-mode", mode);
+    } catch { /* private mode / quota */ }
+    window.dispatchEvent(new CustomEvent("bosch-card-mode-change", { detail: { mode } }));
+  }
+
+  _onModeBroadcast(_ev) {
+    this._applyMode(this._resolveMode());
+  }
+
+  _refreshModeSwitcher() {
+    const sw = this.shadowRoot?.getElementById("ap-mode-switcher");
+    if (!sw) return;
+    let stored = null;
+    try { stored = window.localStorage?.getItem("bosch-card-mode"); } catch { /* ignore */ }
+    const selected = stored === "day" || stored === "night" ? stored : "auto";
+    sw.querySelectorAll("[data-mode]").forEach((b) => {
+      b.classList.toggle("on", b.getAttribute("data-mode") === selected);
+      b.setAttribute("aria-pressed", b.getAttribute("data-mode") === selected ? "true" : "false");
     });
   }
 
@@ -661,12 +743,6 @@ class BoschCameraCard extends HTMLElement {
     return false;
   }
 
-  _autoStartStream() {
-    if (!this._hass || !this._entities.switch) return;
-    this._setOptimistic(this._entities.switch, "on");
-    this._callService("switch", "turn_on", { entity_id: this._entities.switch });
-  }
-
   _t(key) {
     const lang = (this._hass?.language || "en").toLowerCase();
     const dict = lang.startsWith("de") ? CARD_I18N.de : CARD_I18N.en;
@@ -710,6 +786,14 @@ class BoschCameraCard extends HTMLElement {
     }
     this._stopLiveVideo();
     window.removeEventListener("bosch-card-theme-change", this._onThemeBroadcast);
+    window.removeEventListener("bosch-card-mode-change",  this._onModeBroadcast);
+    if (this._onFullscreenChange) {
+      document.removeEventListener("fullscreenchange",       this._onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", this._onFullscreenChange);
+      document.removeEventListener("mozfullscreenchange",    this._onFullscreenChange);
+      document.removeEventListener("MSFullscreenChange",     this._onFullscreenChange);
+      this._onFullscreenChange = null;
+    }
   }
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -1045,6 +1129,17 @@ class BoschCameraCard extends HTMLElement {
         :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }
         :host(.fs-active) .cam-img,
         :host(.fs-active) .cam-video { width: 100vw; height: 100vh; object-fit: contain; min-height: unset; }
+        /* Keep Apple-style overlays on top of everything in fullscreen so
+           they remain reachable for tap-to-exit and toggle clicks. Browser
+           chromes (especially iOS) push the video layer aggressively to the
+           foreground; the explicit high z-index ensures the glass pill +
+           pill-bar stay above without changing layout. */
+        :host(.fs-active) .ap-top,
+        :host(.fs-active) .ap-pill-bar,
+        .img-wrapper:fullscreen .ap-top,
+        .img-wrapper:fullscreen .ap-pill-bar,
+        .img-wrapper:-webkit-full-screen .ap-top,
+        .img-wrapper:-webkit-full-screen .ap-pill-bar { z-index: 10000; }
 
         /* Motion zones SVG overlay */
         .motion-zones-overlay {
@@ -1302,16 +1397,29 @@ class BoschCameraCard extends HTMLElement {
           50%     { box-shadow: 0 0 0 3px rgba(255,69,58,.15); }
         }
 
-        /* Privacy placeholder — shown when no image + privacy mode is ON */
+        /* Privacy placeholder — shown when no image + privacy mode is ON.
+           Was rgba(0,0,0,.82) which read as a hard black wall over the
+           camera. Mid-tone .55 + a subtle backdrop blur lets a hint of the
+           dimmed camera image show through, signalling "privacy on but the
+           camera is fine" rather than "this view is dead". */
         .privacy-placeholder {
           position: absolute; inset: 0;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: rgba(0,0,0,.82); gap: 10px;
+          background: rgba(20,20,22,.55);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          gap: 10px;
           opacity: 0; transition: opacity 0.3s; pointer-events: none;
         }
         .privacy-placeholder.visible { opacity: 1; }
-        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.35); }
-        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.45); font-weight: 500; }
+        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.5); }
+        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; }
+        /* Day mode: lighter overlay with darker glyph for legibility */
+        :host(.apple-style.mode-day) .privacy-placeholder {
+          background: rgba(240,240,242,.6);
+        }
+        :host(.apple-style.mode-day) .privacy-placeholder svg { color: rgba(28,28,30,.55); }
+        :host(.apple-style.mode-day) .privacy-placeholder span { color: rgba(28,28,30,.65); }
 
         /* Quality select */
         .quality-section { padding: 0 12px 12px; }
@@ -1425,31 +1533,51 @@ class BoschCameraCard extends HTMLElement {
            lives in the Apple-style overlays, so suppress the old layer. */
         :host(.apple-style) .img-overlay { display: none !important; }
 
-        /* In Apple mode, switch-rows + accordions stay hidden until user
-           taps the Mehr (•••) glass button — same behaviour as legacy
-           minimal mode, but always on. */
+        /* In Apple mode, switch-rows + accordions collapse via max-height
+           transition (smooth slide) instead of hard display:none → block.
+           display:none breaks the transition; max-height:0 + overflow:hidden
+           achieves the same visual hiding while remaining animatable. */
         :host(.apple-style) .switch-rows,
         :host(.apple-style) .accordion,
-        :host(.apple-style) .pan-row { display: none; }
+        :host(.apple-style) .pan-row {
+          max-height: 0;
+          overflow: hidden;
+          opacity: 0;
+          transition: max-height .35s cubic-bezier(.4,0,.2,1),
+                      opacity .25s ease;
+        }
         :host(.apple-style.overflow-open) .switch-rows,
         :host(.apple-style.overflow-open) .accordion,
-        :host(.apple-style.overflow-open) .pan-row { display: block; }
+        :host(.apple-style.overflow-open) .pan-row {
+          max-height: 2000px;
+          opacity: 1;
+        }
 
         /* Glass material primitive ------------------------------- */
+        /* Near-opaque night glass (.92) — earlier mid-tone .42/.55 left the
+           backdrop bleeding through, making text + icons washed out during
+           snapshot-loading (bright loading-overlay backdrop) and on bright
+           daylight scenes. Sacrifice some glass-transparency for guaranteed
+           contrast on every backdrop. The blur still gives the soft Material
+           edges where the pill meets the video. Border bumped to 1px so it
+           renders cleanly on high-DPI mobile (.5px collapsed to 0 on some
+           devices, leaving the pill rim invisible). */
         .ap-glass {
-          background: rgba(20,20,22,.55);
-          backdrop-filter: blur(22px) saturate(1.6);
-          -webkit-backdrop-filter: blur(22px) saturate(1.6);
-          border: 0.5px solid rgba(255,255,255,.18);
+          background: rgba(22,22,24,.92);
+          backdrop-filter: blur(20px) saturate(1.4);
+          -webkit-backdrop-filter: blur(20px) saturate(1.4);
+          border: 1px solid rgba(255,255,255,.12);
           color: #fff;
           box-shadow: 0 2px 8px rgba(0,0,0,.22);
+          /* GPU composite layer — prevents scroll-flicker on iOS WKWebView */
+          transform: translateZ(0);
+          will-change: transform;
         }
         /* Mobile WebKit (HA Companion / iOS Safari) doesn't always honour
-           backdrop-filter — fall back to a darker solid tint so the glass
-           pill stays legible. The @supports-not test catches Safari < 16 and
-           any browser shipping with backdrop-filter disabled. */
+           backdrop-filter — fall back to a slightly denser solid tint so the
+           glass pill stays legible without the blur. */
         @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-          .ap-glass { background: rgba(20,20,22,.78); }
+          .ap-glass { background: rgba(20,20,22,.72); }
         }
 
         /* Top overlay (title pill + status badge) ---------------- */
@@ -1460,21 +1588,30 @@ class BoschCameraCard extends HTMLElement {
         }
         .ap-top > * { pointer-events: auto; }
         .ap-title-pill {
-          display: inline-flex; align-items: center; gap: 9px;
-          padding: 7px 13px 7px 10px; border-radius: 999px;
-          font-size: 13px; font-weight: 600;
-          letter-spacing: .01em;
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 8px 14px 8px 11px; border-radius: 999px;
+          font-size: 14px; font-weight: 600;
+          letter-spacing: .005em;
           max-width: 70%;
+          line-height: 1;
         }
         .ap-title-pill .ap-title-text {
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          /* Drop-shadow improves legibility when the glass blur picks up a
-             light background (bright daylight, white walls). Without this the
-             white text disappears at low backdrop contrast. */
-          text-shadow: 0 1px 2px rgba(0,0,0,.45);
+          /* No text-shadow — relying on solid pill bg for contrast. Earlier
+             multi-layer shadows + halos washed the glyph on certain mobile
+             renderers. Plain glyph on near-opaque pill is the safe bet. */
+          text-shadow: none;
+          /* Force-visible against fragile mobile renderers — color inherits
+             from .ap-glass / mode-day override but pinning it here means
+             no parent class can accidentally null it out via shorthand. */
+          color: inherit;
         }
         .ap-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #8e8e93; }
         .ap-dot.online   { background: #30d158; box-shadow: 0 0 0 3px rgba(48,209,88,.22); }
+        /* Privacy = "shielded" via iOS systemPurple — Apple convention for
+           locked / private states. Old .warn (orange) reflexively read as
+           "caution / warning" which mismatches a deliberate privacy state. */
+        .ap-dot.privacy  { background: #af52de; box-shadow: 0 0 0 3px rgba(175,82,222,.22); }
         .ap-dot.warn     { background: #ff9f0a; box-shadow: 0 0 0 3px rgba(255,159,10,.22); }
         .ap-dot.offline  { background: #ff453a; }
 
@@ -1495,10 +1632,11 @@ class BoschCameraCard extends HTMLElement {
         }
         @keyframes ap-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
         .ap-badge.connecting {
-          background: rgba(255,159,10,.85); color: #fff;
+          /* WCAG fix: dark text on amber (was white-on-amber = 2.7:1, fails AA).
+             Dark on amber yields ~11:1, well above threshold. */
+          background: rgba(255,159,10,.95); color: #1a1a1a;
           border: 0.5px solid rgba(255,255,255,.2);
         }
-        .ap-badge.privacy  { background: rgba(255,149,0,.85); color: #fff; border: 0.5px solid rgba(255,255,255,.2); }
         .ap-badge.offline  { background: rgba(120,120,128,.55); color: #fff; border: 0.5px solid rgba(255,255,255,.18); }
         .ap-badge.hidden   { display: none; }
 
@@ -1566,7 +1704,11 @@ class BoschCameraCard extends HTMLElement {
          * Default theme (.theme-ios) keeps the iOS look above untouched.
          * ====================================================== */
         :host(.apple-style.theme-android) ha-card {
-          border-radius: 28px;
+          /* !important: ha-card's base rule reads --ha-card-border-radius
+             from HA's theme system which sometimes wins through the variable
+             cascade even though our direct selector has higher specificity.
+             Forcing the value is the safe path. */
+          border-radius: 28px !important;
         }
         :host(.apple-style.theme-android) .ap-glass {
           background: rgba(73, 69, 79, .92);   /* M3 surface-variant dark */
@@ -1607,7 +1749,9 @@ class BoschCameraCard extends HTMLElement {
         }
         :host(.apple-style.theme-android) .ap-badge.offline {
           background: rgba(73, 69, 79, .92);
-          color: #CAC4D0;
+          /* WCAG fix: was #CAC4D0 on surface-variant = 4.1:1 (borderline fail
+             for 11px font). #E6E0E9 = M3 on-surface = ~6.5:1. */
+          color: #E6E0E9;
           border: 0;
         }
         :host(.apple-style.theme-android) .ap-pill-bar {
@@ -1649,13 +1793,11 @@ class BoschCameraCard extends HTMLElement {
 
         /* Theme switcher row inside the Mehr menu (visible when overflow-open) */
         .ap-theme-switcher {
-          display: none;
           align-items: center; justify-content: space-between;
           padding: 12px 14px;
           font-size: 14px;
           border-top: 0.5px solid rgba(120,120,128,.18);
         }
-        :host(.apple-style.overflow-open) .ap-theme-switcher { display: flex; }
         .ap-theme-toggle {
           display: inline-flex; align-items: center; gap: 4px;
           padding: 3px; border-radius: 999px;
@@ -1665,11 +1807,14 @@ class BoschCameraCard extends HTMLElement {
           font: inherit; font-size: 13px; font-weight: 500;
           padding: 6px 14px; border-radius: 999px;
           background: transparent; border: 0;
-          color: var(--secondary-text-color, #8e8e93);
+          /* WCAG fix: #8e8e93 on white = 2.85:1 (fails AA). #6c6c70 = ~4.6:1. */
+          color: var(--secondary-text-color, #6c6c70);
           cursor: pointer;
           transition: background .15s ease, color .15s ease;
         }
-        .ap-theme-toggle button:hover { color: var(--primary-text-color, #1c1c1e); }
+        /* currentColor fallback works in both light + dark mode without
+           requiring the user to explicitly set mode-night class. */
+        .ap-theme-toggle button:hover { color: var(--primary-text-color, currentColor); }
         .ap-theme-toggle button.on {
           background: var(--card-background-color, #fff);
           color: var(--primary-text-color, #1c1c1e);
@@ -1679,6 +1824,392 @@ class BoschCameraCard extends HTMLElement {
         :host(.apple-style.theme-android) .ap-theme-toggle button { border-radius: 8px; }
         :host(.apple-style.theme-android) .ap-theme-toggle button.on {
           background: #D0BCFF; color: #381E72;
+        }
+
+        /* ========================================================
+         * Day/Night card-chrome mode (v13.0.1)
+         * .mode-day  -> force light card (white bg, dark text)
+         * .mode-night -> force dark card (M3 dark / iOS systemBackground dark)
+         * No class -> auto, inherit from HA theme CSS vars
+         * Glass overlays on the video are unaffected — they stay dark for
+         * legibility regardless of the chrome mode.
+         * ====================================================== */
+        :host(.apple-style.mode-day) ha-card {
+          background: #ffffff;
+          color: #1c1c1e;
+        }
+        :host(.apple-style.mode-night) ha-card {
+          background: #1c1c1e;
+          color: #ffffff;
+        }
+        /* Android M3 light surface tones when both apple+android+day are on */
+        :host(.apple-style.theme-android.mode-day) ha-card {
+          background: #FEF7FF !important;
+          color: #1D1B20 !important;
+        }
+        :host(.apple-style.theme-android.mode-night) ha-card {
+          background: #211F26 !important;
+          color: #E6E0E9 !important;
+        }
+        /* Force text + secondary-text + divider variables under day mode so
+           switch-row labels, accordion chevrons, slider track edges follow.
+           Night mode also pins the variables explicitly so the user gets a
+           consistent dark card even when HA's active theme is light. */
+        :host(.apple-style.mode-day) {
+          --primary-text-color: #1c1c1e;
+          --secondary-text-color: rgba(60,60,67,.6);
+          --divider-color: rgba(60,60,67,.12);
+          --card-background-color: #ffffff;
+        }
+        :host(.apple-style.mode-night) {
+          --primary-text-color: #ffffff;
+          --secondary-text-color: rgba(235,235,245,.6);
+          --divider-color: rgba(84,84,88,.5);
+          --card-background-color: #1c1c1e;
+        }
+        :host(.apple-style.theme-android.mode-day) {
+          --primary-text-color: #1D1B20;
+          --secondary-text-color: #49454F;
+          --divider-color: rgba(73,69,79,.2);
+          --card-background-color: #FEF7FF;
+        }
+        :host(.apple-style.theme-android.mode-night) {
+          --primary-text-color: #E6E0E9;
+          --secondary-text-color: #CAC4D0;
+          --divider-color: rgba(202,196,208,.2);
+          --card-background-color: #211F26;
+        }
+
+        /* === Day mode lightens the video-overlay glass but keeps the text/
+         *     icons white ===
+         * Earlier attempt at a white-pill in day mode broke text visibility
+         * because dark text on a glass-blended-with-bright-backdrop dropped
+         * below the contrast threshold. Solution: keep text + icons white
+         * (always works on dark glass) but make the glass itself lighter +
+         * more transparent in day so the video shows through and the
+         * overall card feels brighter. Night stays denser/darker. The blur
+         * radius is also higher in day so the lighter glass still feels
+         * like a Material, not a tint film. iOS-day only — :not(.theme-android)
+         * prevents this rule from poaching the Android M3 surface-variant
+         * treatment when both mode-day + theme-android are active. */
+        :host(.apple-style.mode-day:not(.theme-android)) .ap-glass {
+          background: rgba(55,55,60,.42);
+          backdrop-filter: blur(28px) saturate(1.6) brightness(1.05);
+          -webkit-backdrop-filter: blur(28px) saturate(1.6) brightness(1.05);
+          border-color: rgba(255,255,255,.22);
+        }
+        /* The pill-bar's inactive buttons get a brighter inner tint in day
+           so they read clearly as tappable surfaces inside the lighter pill,
+           and the icon stroke gets a touch more weight against the brighter
+           backdrop. Active (.on) buttons stay solid white-tile to read as
+           the primary "selected" state. Danger stays systemRed. */
+        :host(.apple-style.mode-day:not(.theme-android)) .ap-pill-btn {
+          background: rgba(255,255,255,.22);
+          border-color: rgba(255,255,255,.28);
+        }
+        :host(.apple-style.mode-day:not(.theme-android)) .ap-pill-btn:hover { background: rgba(255,255,255,.32); }
+        /* Active "on" button in day mode reads as a raised solid-white tile:
+           full-opacity background, soft drop shadow + thin bright rim, dark
+           icon at full contrast. The combination pops cleanly against the
+           transparent grey pill backdrop without needing a saturated accent
+           colour — matches Apple Home's "selected control" treatment. */
+        :host(.apple-style.mode-day) .ap-pill-btn.on {
+          background: #ffffff;
+          border-color: rgba(255,255,255,.85);
+          box-shadow:
+            0 3px 10px rgba(0,0,0,.32),
+            0 0 0 1px rgba(255,255,255,.5) inset;
+        }
+        :host(.apple-style.mode-day) .ap-pill-btn.on svg { fill: #1c1c1e; }
+        :host(.apple-style.mode-day) .ap-pill-btn.on:hover { background: #ffffff; }
+
+        /* Camera-state ACTIVE buttons: Stream + Privacy get systemRed (a
+           non-neutral hardware state). Light gets amber — a lamp/bulb is
+           conventionally yellow/amber when on (think of every smart-bulb
+           UI ever shipped). Splitting these avoids the audit's "everything
+           red" collision when stream + offline + light are all active at
+           once. Fullscreen.on falls through to the generic white-tile
+           rule above (viewing-mode, not hardware-state). */
+        :host(.apple-style) .ap-pill-btn#ap-btn-stream.on,
+        :host(.apple-style) .ap-pill-btn#ap-btn-privacy.on {
+          background: rgba(255,59,48,.92);
+          border-color: rgba(255,255,255,.22);
+          box-shadow: none;
+        }
+        :host(.apple-style) .ap-pill-btn#ap-btn-stream.on svg,
+        :host(.apple-style) .ap-pill-btn#ap-btn-privacy.on svg { fill: #fff; }
+        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-stream.on,
+        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-privacy.on {
+          background: rgba(255,59,48,.95);
+          box-shadow:
+            0 3px 10px rgba(255,59,48,.35),
+            0 0 0 1px rgba(255,255,255,.3) inset;
+        }
+        /* Light = amber (iOS systemYellow / M3 tertiary tonal) — lamp metaphor */
+        :host(.apple-style) .ap-pill-btn#ap-btn-light.on {
+          background: rgba(255,179,0,.92);
+          border-color: rgba(255,255,255,.22);
+          box-shadow: none;
+        }
+        :host(.apple-style) .ap-pill-btn#ap-btn-light.on svg { fill: #1c1c1e; }
+        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-light.on {
+          background: rgba(255,179,0,.95);
+          box-shadow:
+            0 3px 10px rgba(255,179,0,.4),
+            0 0 0 1px rgba(255,255,255,.4) inset;
+        }
+        /* Android-theme: M3 error tonal for Stream + Privacy, tertiary for Light */
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-stream.on,
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-privacy.on {
+          background: #F2B8B5;
+        }
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-stream.on svg,
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-privacy.on svg { fill: #601410; }
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-light.on {
+          background: #FFD8A8;                  /* M3 tertiary-container dark */
+        }
+        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-light.on svg { fill: #4F2500; }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-stream.on,
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-privacy.on {
+          background: #B3261E;
+        }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-stream.on svg,
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-privacy.on svg { fill: #fff; }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-light.on {
+          background: #7D5260;                  /* M3 tertiary light */
+        }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-light.on svg { fill: #fff; }
+        /* Day-mode badge gets the same lighter treatment so it doesn't pop
+           as a saturated solid color against the airy overlay. */
+        :host(.apple-style.mode-day) .ap-badge.live {
+          background: rgba(255,59,48,.85); border-color: rgba(255,255,255,.22);
+        }
+
+        /* Mode switcher row inside the Mehr menu */
+        .ap-mode-switcher {
+          align-items: center; justify-content: space-between;
+          padding: 12px 14px;
+          font-size: 14px;
+          border-top: 0.5px solid var(--divider-color, rgba(120,120,128,.18));
+        }
+        .ap-mode-toggle {
+          display: inline-flex; align-items: center; gap: 4px;
+          padding: 3px; border-radius: 999px;
+          background: rgba(120,120,128,.16);
+        }
+        .ap-mode-toggle button {
+          font: inherit; font-size: 13px; font-weight: 500;
+          padding: 6px 14px; border-radius: 999px;
+          background: transparent; border: 0;
+          /* WCAG fix: matches theme-toggle (was #8e8e93 = 2.85:1, fails AA). */
+          color: var(--secondary-text-color, #6c6c70);
+          cursor: pointer;
+          transition: background .15s ease, color .15s ease;
+        }
+        .ap-mode-toggle button:hover { color: var(--primary-text-color, #1c1c1e); }
+        .ap-mode-toggle button.on {
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #1c1c1e);
+          box-shadow: 0 1px 2px rgba(0,0,0,.12);
+        }
+        :host(.apple-style.theme-android) .ap-mode-toggle { border-radius: 8px; padding: 2px; }
+        :host(.apple-style.theme-android) .ap-mode-toggle button { border-radius: 8px; }
+        :host(.apple-style.theme-android) .ap-mode-toggle button.on {
+          background: #D0BCFF; color: #381E72;
+        }
+
+        /* === Accessibility + animation polish ============================ */
+        /* Focus-visible: keyboard navigation feedback. systemBlue ring with
+           2px offset on the pill-bar; tighter 1px on the toggle chips so
+           it fits inside the toggle track. */
+        :host(.apple-style) .ap-pill-btn:focus-visible {
+          outline: 2px solid #0a84ff;
+          outline-offset: 2px;
+        }
+        :host(.apple-style) .ap-theme-toggle button:focus-visible,
+        :host(.apple-style) .ap-mode-toggle button:focus-visible {
+          outline: 2px solid #0a84ff;
+          outline-offset: 1px;
+        }
+
+        /* prefers-reduced-motion: suppress all animations + transitions for
+           users with vestibular sensitivity or who set "Reduce Motion" in
+           iOS / macOS Accessibility. WCAG 2.1 SC 2.3.3. */
+        @media (prefers-reduced-motion: reduce) {
+          :host(.apple-style) *,
+          :host(.apple-style) *::before,
+          :host(.apple-style) *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
+        }
+
+        /* prefers-contrast: more (high-contrast OS preference, e.g. macOS
+           "Increase Contrast"). Bumps glass to near-opaque + adds visible
+           hairline borders so the design degrades gracefully. */
+        @media (prefers-contrast: more) {
+          :host(.apple-style) .ap-glass {
+            background: rgba(0,0,0,.95) !important;
+            border: 1.5px solid #fff !important;
+          }
+          :host(.apple-style.mode-day) .ap-glass {
+            background: #fff !important;
+            color: #000 !important;
+            border: 1.5px solid #000 !important;
+          }
+          :host(.apple-style) .ap-pill-btn { border-width: 1.5px !important; }
+        }
+
+        /* Android × Day combined override (higher specificity than the
+           iOS-Day rule) — M3 spec for light mode: solid surface-variant
+           light tint instead of glass blur. */
+        :host(.apple-style.theme-android.mode-day) .ap-glass {
+          background: rgba(231,224,236,.96);    /* M3 surface-variant light */
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+          border: 0;
+          color: #1D1B20;
+          box-shadow: 0 1px 3px rgba(0,0,0,.15);
+        }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-bar {
+          background: rgba(231,224,236,.96);
+        }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn { color: #1D1B20; }
+        :host(.apple-style.theme-android.mode-day) .ap-pill-btn svg { fill: #1D1B20; }
+        :host(.apple-style.theme-android.mode-day) .ap-title-pill .ap-title-text { color: #1D1B20; }
+
+        /* Android theme: drop the iOS-style press-scale because M3 design
+           uses a state-layer overlay (radial ripple in spec, opacity-tint
+           in our implementation) rather than the iOS bounce. */
+        :host(.apple-style.theme-android) .ap-pill-btn:active { transform: none; }
+
+        /* Offline cameras (apple-style): minimalist treatment per user
+           preference — just the camera name (already in the top-left glass
+           pill) and a centered "OFFLINE" label + last-seen subtitle. No
+           icons, no pill-bar — there's nothing meaningful to tap when the
+           camera is unreachable. */
+        /* Compact tile mode: hide pill-bar + status badge so the card reduces
+           to just video + title-pill — used by overview grid for Apple-Home-
+           style tile rows. Click on the video opens fullscreen. */
+        :host(.apple-style.compact) .ap-pill-bar,
+        :host(.apple-style.compact) .ap-badge { display: none; }
+
+        /* Last-event indicator: small glass pill bottom-right of the video
+           showing "🕐 14:23" when the camera fired a motion/audio/person
+           event recently. Hidden while streaming live (the LIVE badge takes
+           that real estate). Wired in JS via _updateLastEventBadge(). */
+        .ap-last-event {
+          position: absolute;
+          right: 12px; bottom: 12px;
+          z-index: 4;
+          display: none;
+          align-items: center; gap: 6px;
+          padding: 5px 10px 5px 8px;
+          border-radius: 999px;
+          font-size: 11px; font-weight: 600;
+          background: rgba(22,22,24,.78);
+          backdrop-filter: blur(14px) saturate(1.3);
+          -webkit-backdrop-filter: blur(14px) saturate(1.3);
+          color: #fff;
+          border: .5px solid rgba(255,255,255,.14);
+          pointer-events: none;
+        }
+        .ap-last-event.visible { display: inline-flex; }
+        .ap-last-event svg { width: 12px; height: 12px; fill: currentColor; opacity: .8; }
+        :host(.apple-style.compact) .ap-last-event { right: 8px; bottom: 8px; padding: 4px 8px; font-size: 10px; }
+        /* Hide when streaming is active — the LIVE badge already occupies
+           the visual attention budget; the last-event indicator only adds
+           value during idle/snapshot mode. */
+        :host(.apple-style) .ap-last-event.hide-during-stream { display: none; }
+
+        :host(.apple-style.cam-offline) .ap-pill-bar { display: none; }
+        :host(.apple-style.cam-offline) .offline-overlay svg { display: none; }
+        /* When the camera is offline, the offline-overlay is the single
+           source of truth. Suppress every other overlay that would otherwise
+           stack on top: the privacy-placeholder (last-known privacy state)
+           bleeds through with its own lock icon and "Privat-Modus aktiv"
+           label, and the last-event pill at bottom-right adds another
+           competing piece of chrome. Both hidden to leave only the title
+           pill + OFFLINE label visible. */
+        :host(.apple-style.cam-offline) .privacy-placeholder,
+        :host(.apple-style.cam-offline) .ap-last-event { display: none !important; }
+        /* Offline overlay: drop the dim red full-cover backdrop so the last
+           cached snapshot stays visible behind. The OFFLINE label + last-seen
+           text sit in a single glass pill centered on the video — same
+           material as the title-pill so the layer reads as a coherent
+           "system overlay" instead of a separate widget. */
+        :host(.apple-style.cam-offline) .offline-overlay {
+          background: transparent;
+          gap: 0;
+          align-items: center; justify-content: center;
+        }
+        :host(.apple-style.cam-offline) .offline-overlay .offline-title,
+        :host(.apple-style.cam-offline) .offline-overlay .offline-subtitle {
+          color: #fff;
+        }
+        :host(.apple-style.cam-offline) .offline-overlay .offline-title {
+          background: rgba(22,22,24,.92);
+          backdrop-filter: blur(20px) saturate(1.4);
+          -webkit-backdrop-filter: blur(20px) saturate(1.4);
+          border: 1px solid rgba(255,255,255,.12);
+          box-shadow: 0 2px 8px rgba(0,0,0,.22);
+          padding: 9px 18px;
+          border-radius: 999px;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: .14em;
+        }
+        :host(.apple-style.cam-offline) .offline-overlay .offline-subtitle {
+          font-size: 11px;
+          margin-top: 8px;
+          opacity: .75;
+          text-shadow: 0 1px 2px rgba(0,0,0,.6);
+        }
+        /* Camera friendly_name on its own line between the OFFLINE pill and
+           the last-seen subtitle. Visible only in apple-style cam-offline
+           state; legacy / non-offline render path stays untouched. */
+        .offline-cam-name { display: none; }
+        :host(.apple-style.cam-offline) .offline-overlay .offline-cam-name {
+          display: block;
+          margin-top: 10px;
+          font-size: 17px;
+          font-weight: 600;
+          letter-spacing: .005em;
+          color: #fff;
+          text-shadow: 0 1px 2px rgba(0,0,0,.6);
+        }
+
+        /* Theme + Mode switcher rows: animate via max-height too so they
+           slide in/out alongside the switch-rows when Mehr is toggled. */
+        :host(.apple-style) .ap-theme-switcher,
+        :host(.apple-style) .ap-mode-switcher {
+          display: flex;
+          max-height: 0;
+          overflow: hidden;
+          opacity: 0;
+          padding-top: 0;
+          padding-bottom: 0;
+          transition: max-height .35s cubic-bezier(.4,0,.2,1),
+                      opacity .25s ease, padding .25s ease;
+        }
+        :host(.apple-style.overflow-open) .ap-theme-switcher,
+        :host(.apple-style.overflow-open) .ap-mode-switcher {
+          max-height: 80px;
+          opacity: 1;
+          padding-top: 12px;
+          padding-bottom: 12px;
+        }
+
+        /* Snapshot success flash: 280ms green pulse on the snapshot button
+           after a service call returns. Triggered by JS adding .ok-flash. */
+        @keyframes ap-snapshot-flash {
+          0%   { background: rgba(48,209,88,.85); transform: scale(1); }
+          50%  { background: rgba(48,209,88,.95); transform: scale(1.04); }
+          100% { background: rgba(255,255,255,.12); transform: scale(1); }
+        }
+        :host(.apple-style) .ap-pill-btn#ap-btn-snapshot.ok-flash {
+          animation: ap-snapshot-flash .42s ease-out;
         }
       </style>
 
@@ -1734,6 +2265,7 @@ class BoschCameraCard extends HTMLElement {
               <line x1="12" y1="20" x2="12.01" y2="20"/>
             </svg>
             <div class="offline-title">Kamera Offline</div>
+            <div class="offline-cam-name" id="offline-cam-name"></div>
             <div class="offline-subtitle" id="offline-subtitle">Keine Verbindung zur Bosch Cloud</div>
           </div>
           <div class="auth-overlay" id="auth-overlay">
@@ -1759,6 +2291,14 @@ class BoschCameraCard extends HTMLElement {
             <span class="last-event-overlay" id="last-event-overlay"></span>
             <span class="events-overlay" id="events-overlay"></span>
           </div>
+
+          <!-- Apple-style "letzte Bewegung" indicator — small glass pill
+               in the bottom-right of the video that surfaces the camera's
+               most recent motion/audio/person event timestamp when idle. -->
+          <span class="ap-last-event" id="ap-last-event">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <span id="ap-last-event-text"></span>
+          </span>
 
           <!-- Apple-style overlays (v2.17.0) — rendered always, gated via CSS :host(.apple-style) -->
           <div class="ap-top">
@@ -1843,13 +2383,21 @@ class BoschCameraCard extends HTMLElement {
             </button>
           </div>
 
-          <!-- Theme switcher (Apple-style only; visible when Mehr is open) -->
+          <!-- Theme + Mode switchers (Apple-style only; visible when Mehr is open) -->
           <div class="ap-theme-switcher" id="ap-theme-switcher">
             <span>Design</span>
             <div class="ap-theme-toggle" role="radiogroup" aria-label="Design">
               <button type="button" data-theme="auto" role="radio" aria-pressed="false" title="Automatisch nach Gerät">Auto</button>
               <button type="button" data-theme="ios" role="radio" aria-pressed="false" title="iOS / Apple Home">iOS</button>
               <button type="button" data-theme="android" role="radio" aria-pressed="false" title="Material You / Android">Android</button>
+            </div>
+          </div>
+          <div class="ap-mode-switcher" id="ap-mode-switcher">
+            <span>Modus</span>
+            <div class="ap-mode-toggle" role="radiogroup" aria-label="Tag- oder Nacht-Modus">
+              <button type="button" data-mode="auto" role="radio" aria-pressed="false" title="System folgen">Auto</button>
+              <button type="button" data-mode="day" role="radio" aria-pressed="false" title="Tag-Modus (hell)">Tag</button>
+              <button type="button" data-mode="night" role="radio" aria-pressed="false" title="Nacht-Modus (dunkel)">Nacht</button>
             </div>
           </div>
 
@@ -2310,6 +2858,19 @@ class BoschCameraCard extends HTMLElement {
         });
       });
       this._refreshThemeSwitcher();
+    }
+
+    // Day/Night mode switcher (Auto / Tag / Nacht) — same pattern.
+    const modeSwitcher = this.shadowRoot.getElementById("ap-mode-switcher");
+    if (modeSwitcher) {
+      modeSwitcher.querySelectorAll("[data-mode]").forEach((b) => {
+        b.addEventListener("click", () => {
+          const m = b.getAttribute("data-mode");
+          this._setUserMode(m);
+          this._applyMode(this._resolveMode());
+        });
+      });
+      this._refreshModeSwitcher();
     }
 
     // Toggle buttons
@@ -3472,6 +4033,17 @@ class BoschCameraCard extends HTMLElement {
     }
     if (label) label.textContent = "Snapshot";
     this._setLoadingOverlay(false);
+    // Apple-style success flash on the pill-bar snapshot button — 420ms
+    // green pulse confirms the snapshot completed. Add then remove the
+    // class so the animation can re-trigger on the next snapshot.
+    const apSnap = this.shadowRoot.getElementById("ap-btn-snapshot");
+    if (apSnap) {
+      apSnap.classList.remove("ok-flash");
+      // Force reflow so the re-add restarts the animation cleanly.
+      void apSnap.offsetWidth;
+      apSnap.classList.add("ok-flash");
+      setTimeout(() => apSnap.classList.remove("ok-flash"), 450);
+    }
   }
 
   // ── State update ──────────────────────────────────────────────────────────
@@ -3543,7 +4115,7 @@ class BoschCameraCard extends HTMLElement {
     if (apDot) {
       let dotCls = "ap-dot ";
       if (statusState === "OFFLINE") dotCls += "offline";
-      else if (hass.states[ents.privacy]?.state === "on") dotCls += "warn";
+      else if (hass.states[ents.privacy]?.state === "on") dotCls += "privacy";
       else if (statusState === "ONLINE") dotCls += "online";
       apDot.className = dotCls;
     }
@@ -3581,6 +4153,14 @@ class BoschCameraCard extends HTMLElement {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {
         const lastChanged = hass.states[ents.status]?.last_changed;
+        // Populate the offline-overlay's camera name line (apple-style only —
+        // legacy mode hides .offline-cam-name via the base display:none rule).
+        const camNameEl = this.shadowRoot.getElementById("offline-cam-name");
+        if (camNameEl) {
+          camNameEl.textContent = this._config?.title
+            || hass.states[ents.camera]?.attributes?.friendly_name
+            || ents.camera;
+        }
         const sub = this.shadowRoot.getElementById("offline-subtitle");
         if (sub && lastChanged) {
           try {
@@ -3591,6 +4171,10 @@ class BoschCameraCard extends HTMLElement {
       }
     }
     this._isOffline = isOffline;
+    // Host class for CSS-side dimming of camera-state buttons (Stream / Light
+    // / Privacy) when the hardware is unreachable. Snapshot / Fullscreen /
+    // More stay fully bright since they operate on cached state.
+    this.classList.toggle("cam-offline", isOffline);
 
     // Streaming state
     const isStreaming  = this._isStreaming();
@@ -3641,7 +4225,10 @@ class BoschCameraCard extends HTMLElement {
       }
     }
     if (apBtnPrivacy) {
-      apBtnPrivacy.classList.toggle("danger", privActive);
+      // Treat privacy as a regular on/off control (white tile when active),
+      // not a "danger" state — privacy is intentional, not an emergency.
+      apBtnPrivacy.classList.toggle("on", privActive);
+      apBtnPrivacy.classList.remove("danger");
       apBtnPrivacy.setAttribute("aria-pressed", privActive ? "true" : "false");
     }
     // Light mirror (Audio toggle lives in the Mehr menu, not the pill-bar)
@@ -3807,6 +4394,32 @@ class BoschCameraCard extends HTMLElement {
       if (a) lastEventStr = a.slice(0, 16).replace("T", " ");
     }
     if (lastEventOverlay) lastEventOverlay.textContent = lastEventStr !== "—" ? `Letztes: ${lastEventStr}` : "";
+    // Apple-style "last event" glass pill (bottom-right of video). Show only
+    // when we have a timestamp AND the stream isn't actively playing — the
+    // LIVE badge already owns the user's attention while a stream is live,
+    // and stacking both would be visual noise.
+    const apLastEvent = this.shadowRoot.getElementById("ap-last-event");
+    const apLastEventText = this.shadowRoot.getElementById("ap-last-event-text");
+    if (apLastEvent && apLastEventText) {
+      const hasEvent = lastEventStr !== "—";
+      // Pretty short time: today → "14:23", earlier → "Mo 14:23" or "23.05."
+      let pretty = lastEventStr;
+      if (hasEvent && lastEventState?.state) {
+        try {
+          const d = new Date(lastEventState.state);
+          if (!isNaN(d)) {
+            const sameDay = d.toDateString() === new Date().toDateString();
+            pretty = sameDay
+              ? d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+              : d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+          }
+        } catch { /* fall back to lastEventStr */ }
+      }
+      apLastEventText.textContent = pretty;
+      apLastEvent.classList.toggle("visible", hasEvent);
+      // Hide-during-stream class hides via CSS while video is playing.
+      apLastEvent.classList.toggle("hide-during-stream", isStreaming);
+    }
 
     // Events today — overlay only now (info-row no longer carries it)
     const evTodayState = hass.states[ents.events_today];
@@ -4785,7 +5398,19 @@ class BoschCameraCard extends HTMLElement {
       this._exitCssFullscreen();
       return;
     }
-    // Try native Fullscreen API first (desktop, Android Chrome)
+    // iOS Safari / HA Companion: native Fullscreen API drags the <video>
+    // into the system AVPlayerViewController which (a) auto-hides any HTML
+    // overlay after ~10s of inactivity (the user's pill-bar vanishes) and
+    // (b) clamps controls visibility outside our DOM. Use the CSS-fallback
+    // path on iOS so the apple-style overlays stay visible the whole time.
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPod|iPad/i.test(ua)
+                  || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+    if (isIOS) {
+      this._enterCssFullscreen();
+      return;
+    }
+    // Desktop / Android: native API works without the auto-hide issue.
     const wrapper = this.shadowRoot.getElementById("img-wrapper");
     const el = wrapper || this;
     const tryNative = () => {
@@ -4804,6 +5429,7 @@ class BoschCameraCard extends HTMLElement {
 
   _enterCssFullscreen() {
     this.classList.add("fs-active");
+    this._updateFullscreenButtonState();
     document.body.style.overflow = "hidden";
     // Tap anywhere outside the image to exit
     this._fsClickOut = (e) => { if (!this.contains(e.target)) this._exitCssFullscreen(); };
@@ -4817,9 +5443,28 @@ class BoschCameraCard extends HTMLElement {
 
   _exitCssFullscreen() {
     this.classList.remove("fs-active");
+    this._updateFullscreenButtonState();
     document.body.style.overflow = "";
     if (this._fsClickOut) { document.removeEventListener("click", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
+  }
+
+  _updateFullscreenButtonState() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-fullscreen");
+    if (!btn) return;
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    // Native fullscreen API: document.fullscreenElement === our wrapper (or
+    // any vendor-prefixed equivalent). CSS-fullscreen fallback: host carries
+    // the .fs-active class. Either signal flips the button to active.
+    const nativeFs = !!(document.fullscreenElement === wrapper
+                       || document.webkitFullscreenElement === wrapper
+                       || document.mozFullScreenElement === wrapper
+                       || document.msFullscreenElement === wrapper);
+    const cssFs = this.classList.contains("fs-active");
+    const active = nativeFs || cssFs;
+    btn.classList.toggle("on", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+    btn.setAttribute("title", active ? "Vollbild verlassen" : "Vollbild");
   }
 
   _callService(domain, service, data) {
@@ -4878,10 +5523,132 @@ class BoschCameraCard extends HTMLElement {
   }
 
   static getStubConfig() { return { camera_entity: "camera.bosch_garten" }; }
+  static getConfigElement() { return document.createElement("bosch-camera-card-editor"); }
   getCardSize() { return 4; }
 }
 
 customElements.define("bosch-camera-card", BoschCameraCard);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Visual editor for `custom:bosch-camera-card`. Shipped in v13 to match the
+ * baseline community expectation set by Mushroom — most popular HA cards
+ * expose a visual editor in the dashboard card-picker. Covers the highest-
+ * impact fields (camera_entity, title, apple_style, theme, mode, minimal,
+ * compact, auto_play); rarer per-entity overrides stay YAML-only. Native
+ * <input>/<select> elements with HA CSS variables for theming — no ha-form
+ * dependency so the editor works in HA 2024.8+ without any extra imports.
+ * ────────────────────────────────────────────────────────────────────────── */
+class BoschCameraCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    if (this.shadowRoot) this._render();
+  }
+  set hass(hass) { this._hass = hass; if (this.shadowRoot) this._render(); }
+  get hass() { return this._hass; }
+  connectedCallback() { this._render(); }
+
+  _bosch_cameras() {
+    const out = [];
+    const states = this._hass?.states || {};
+    for (const id of Object.keys(states)) {
+      if (id.startsWith("camera.")
+          && (id.includes("bosch") || (states[id]?.attributes?.brand || "").toLowerCase().includes("bosch"))) {
+        out.push(id);
+      }
+    }
+    return out.sort();
+  }
+
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    const cfg = this._config || {};
+    const cams = this._bosch_cameras();
+    const sel = (name, val, opts) => `
+      <label>${name}
+        <select name="${name.toLowerCase().replace(/\W/g, "")}">
+          ${opts.map(([v,l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </label>`;
+    const chk = (key, label, def) => `
+      <label class="inline">
+        <input type="checkbox" name="${key}" ${(cfg[key] ?? def) ? "checked" : ""} />
+        <span>${label}</span>
+      </label>`;
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+        label {
+          font-size: 14px; color: var(--primary-text-color);
+          display: flex; flex-direction: column; gap: 4px;
+        }
+        label.inline { flex-direction: row; align-items: center; gap: 10px; }
+        select, input[type="text"] {
+          padding: 9px 10px; border-radius: 6px;
+          border: 1px solid var(--divider-color, rgba(120,120,128,.2));
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #1c1c1e);
+          font: inherit; font-size: 14px;
+        }
+        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }
+        .hint {
+          font-size: 12px; color: var(--secondary-text-color, #6c6c70);
+          margin-top: 2px;
+        }
+        h4 {
+          margin: 12px 0 0; font-size: 11px; font-weight: 700;
+          letter-spacing: .08em; text-transform: uppercase;
+          color: var(--secondary-text-color, #6c6c70);
+        }
+        .help {
+          font-size: 12px;
+          color: var(--secondary-text-color, #6c6c70);
+          background: var(--secondary-background-color, rgba(120,120,128,.08));
+          padding: 8px 10px; border-radius: 6px;
+        }
+      </style>
+      <div class="row">
+        ${cams.length === 0 ? `
+          <div class="help">Keine Bosch-Kameras erkannt. Trage <code>camera.bosch_xxx</code> manuell ein, oder schließe das Bosch-Integration-Setup zuerst ab.</div>
+        ` : ""}
+        <label>Kamera-Entity *
+          <select name="camera_entity">
+            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || "(noch nicht gesetzt)"}</option>`}
+          </select>
+          <span class="hint">Pflichtfeld — alle anderen Entities werden automatisch aus dem Camera-Namen abgeleitet.</span>
+        </label>
+        <label>Titel <small style="color:var(--secondary-text-color)">(optional, überschreibt Friendly-Name)</small>
+          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="z.B. Garten" />
+        </label>
+
+        <h4>Design</h4>
+        ${chk("apple_style", "Apple-Style Glass-Overlay aktiv (Default an)", true)}
+        ${sel("Theme", cfg.theme || "ios", [["auto","Auto (Auto-Detect via User-Agent)"],["ios","iOS (Apple Home)"],["android","Android (Material You)"]])}
+        ${sel("Modus", cfg.mode || "auto", [["auto","Auto (System Light/Dark)"],["day","Tag"],["night","Nacht"]])}
+        ${chk("minimal", "Minimal-Layout (Mehr-Menü versteckt zunächst alle Switches)", false)}
+        ${chk("compact", "Compact-Tile (für Overview-Grid: nur Video + Title-Pill, keine Pill-Bar)", false)}
+
+        <h4>Auto-Play</h4>
+        ${sel("Auto-Play", cfg.auto_play || "lan", [["lan","LAN (Auto-Start nur im Heimnetz)"],["always","Immer"],["never","Nie (Tap-to-Play Gate)"]])}
+        <span class="hint">Steuert wann der Live-Stream automatisch loslegt. Überschreibt die Integration-weite Voreinstellung.</span>
+      </div>`;
+    const root = this.shadowRoot;
+    const fire = (patch) => {
+      this._config = { ...this._config, ...patch };
+      this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true }));
+    };
+    root.querySelector('select[name="camera_entity"]').addEventListener("change", e => fire({ camera_entity: e.target.value }));
+    root.querySelector('input[name="title"]').addEventListener("change", e => fire({ title: e.target.value || undefined }));
+    root.querySelector('input[name="apple_style"]').addEventListener("change", e => fire({ apple_style: e.target.checked }));
+    root.querySelector('select[name="theme"]').addEventListener("change", e => fire({ theme: e.target.value }));
+    root.querySelector('select[name="modus"]').addEventListener("change", e => fire({ mode: e.target.value }));
+    root.querySelector('input[name="minimal"]').addEventListener("change", e => fire({ minimal: e.target.checked }));
+    root.querySelector('input[name="compact"]').addEventListener("change", e => fire({ compact: e.target.checked }));
+    root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value }));
+  }
+}
+customElements.define("bosch-camera-card-editor", BoschCameraCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
@@ -4956,17 +5723,24 @@ class BoschCameraOverviewCard extends HTMLElement {
       // localStorage globally.
       apple_style:          config.apple_style !== false,
       theme:                ["ios", "android", "auto"].includes(config.theme) ? config.theme : "ios",
+      mode:                 ["auto", "day", "night"].includes(config.mode) ? config.mode : "auto",
+      // v13.1.0: compact tile mode propagates to children — hides pill-bar
+      // + status badge so each tile is just video + title-pill (Apple-Home
+      // grid style). Pair with `columns: 2` or `columns: 3` for true 2x2/3x3.
+      compact:              config.compact === true,
       overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
       card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
     };
     if (this._config.minimal) {
       this._config.card_defaults = { ...this._config.card_defaults, minimal: true };
     }
-    // Propagate apple_style + theme to every child card unless an explicit
-    // per-key override already exists in card_defaults.
+    // Propagate apple_style + theme + mode + compact to every child card
+    // unless an explicit per-key override already exists in card_defaults.
     this._config.card_defaults = {
       apple_style: this._config.apple_style,
       theme: this._config.theme,
+      mode: this._config.mode,
+      compact: this._config.compact,
       ...this._config.card_defaults,
     };
     // Apple-style class on overview host gates the CSS that drops the
@@ -5048,6 +5822,17 @@ class BoschCameraOverviewCard extends HTMLElement {
           border: 0;
           border-radius: 22px;
           opacity: 1;
+          /* Smooth scale + shadow on hover so desktop users get a clear
+             "this tile is tappable" affordance. Touch devices ignore :hover
+             so the static state stays unchanged on mobile. */
+          transition: transform .18s ease, box-shadow .18s ease;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          :host(.apple-style) .bco-cell:hover {
+            transform: translateY(-2px) scale(1.012);
+            box-shadow: 0 12px 32px rgba(0,0,0,.18);
+            z-index: 1;
+          }
         }
         .bco-cell bosch-camera-card { display: block; min-width: 0; }
         .bco-section {
