@@ -294,7 +294,14 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
-        """Unavailable while privacy mode is active or the LOCAL keepalive loop has stalled."""
+        """Unavailable while privacy mode is active or the LOCAL keepalive loop has stalled.
+
+        Also unavailable during firmware install — the camera reboots and no
+        stream can start on a rebooting endpoint.
+        """
+        is_updating = getattr(self.coordinator, "is_updating", None)
+        if is_updating is not None and is_updating(self._cam_id):
+            return False
         if not super().available:
             return False
         if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
@@ -694,7 +701,14 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         cached state" gate caused that grey-out after every HA restart that
         landed during a cloud outage — fixed below by letting LAN
         reachability stand on its own merits.
+
+        Exception: during firmware install the camera reboots — neither
+        cloud nor LAN path will accept writes for several minutes. Flip
+        unavailable until the slow-tier poll clears the `updating` flag.
         """
+        is_updating = getattr(self.coordinator, "is_updating", None)
+        if is_updating is not None and is_updating(self._cam_id):
+            return False
         cache = self.coordinator._shc_state_cache.get(self._cam_id, {})
         has_cached_state = cache.get("privacy_mode") is not None
         if self.coordinator.last_update_success and has_cached_state:

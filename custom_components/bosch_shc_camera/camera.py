@@ -366,6 +366,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
     @property
     def available(self) -> bool:
+        # Firmware install reboots the camera (3–7 min). Mark unavailable so
+        # automations and the UI don't poll a dead endpoint or surface stale
+        # snapshots as live state.
+        is_updating = getattr(self.coordinator, "is_updating", None)
+        if is_updating is not None and is_updating(self._cam_id):
+            return False
         return bool(self.coordinator.last_update_success)
 
     @property
@@ -442,6 +448,16 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         attrs["auto_play_default"] = (
             mode if mode in AUTO_PLAY_DEFAULT_VALUES else "lan"
         )
+        # Camera-side timestamp overlay (burned-in date/time, bottom-right of
+        # the video frame). The card reads this to hide its own last-event
+        # glass pill — otherwise the user sees two timestamps stacked, one
+        # burned-in by the camera and one drawn by the card. Defensive
+        # getattr covers test stubs that lack the cache.
+        ts_cache = getattr(self.coordinator, "_timestamp_cache", None)
+        if ts_cache is not None:
+            ts_overlay = ts_cache.get(self._cam_id)
+            if ts_overlay is not None:
+                attrs["camera_timestamp_overlay"] = bool(ts_overlay)
         return attrs
 
     # ── Live stream ───────────────────────────────────────────────────────────

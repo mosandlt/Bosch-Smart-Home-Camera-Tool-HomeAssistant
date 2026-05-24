@@ -191,7 +191,14 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         direct RCP write — so the entity must remain controllable. Without
         this fallback, every Bosch cloud 5xx leaves the light entities grey
         even though they are toggleable on the same LAN via the Bosch app.
+
+        Exception: during a firmware install the camera reboots — writes
+        would fail mid-flight, so flip unavailable until the slow-tier poll
+        clears the `updating` flag.
         """
+        is_updating = getattr(self.coordinator, "is_updating", None)
+        if is_updating is not None and is_updating(self._cam_id):
+            return False
         if self.coordinator.last_update_success:
             return True
         is_lan_reachable = getattr(self.coordinator, "is_lan_reachable", None)

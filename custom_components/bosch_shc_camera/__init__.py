@@ -1526,6 +1526,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return True
         return reachable
 
+    def is_updating(self, cam_id: str) -> bool:
+        """True while firmware install is in progress for `cam_id`.
+
+        Reads `_firmware_cache[cam_id]['updating']` populated by the slow-tier
+        firmware poll. The camera reboots during the install (typically 3–7 min)
+        so dependent entities should flip to unavailable for that window. The
+        camera-status sensor surfaces the same state as the enum value
+        ``"updating"``.
+        """
+        return bool(self._firmware_cache.get(cam_id, {}).get("updating", False))
+
     async def _async_local_tcp_ping(self, cam_id: str, timeout: float = 1.5) -> bool:
         """Quick TCP connect to camera port 443 on LAN — returns True if reachable.
 

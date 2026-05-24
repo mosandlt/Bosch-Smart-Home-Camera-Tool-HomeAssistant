@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.1.0";
+const CARD_VERSION = "13.1.1";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -4416,7 +4416,12 @@ class BoschCameraCard extends HTMLElement {
         } catch { /* fall back to lastEventStr */ }
       }
       apLastEventText.textContent = pretty;
-      apLastEvent.classList.toggle("visible", hasEvent);
+      // When the camera itself burns the current date/time into the video
+      // (camera attribute camera_timestamp_overlay = true), our last-event
+      // pill becomes visually redundant — same info, two places. Hide the
+      // pill entirely in that case. User report 2026-05-24.
+      const camTimestampOverlay = !!(hass.states[ents.camera]?.attributes?.camera_timestamp_overlay);
+      apLastEvent.classList.toggle("visible", hasEvent && !camTimestampOverlay);
       // Hide-during-stream class hides via CSS while video is playing.
       apLastEvent.classList.toggle("hide-during-stream", isStreaming);
     }

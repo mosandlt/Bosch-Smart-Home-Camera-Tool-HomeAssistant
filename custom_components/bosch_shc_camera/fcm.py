@@ -72,21 +72,31 @@ class _FCMNoiseFilter(logging.Filter):
     """
 
     _DEDUP_WINDOW_SECONDS = 300.0
-    _SHARED_ERROR_TIMESTAMPS: list[float] = []  # class-level so the watchdog can read
+    _SHARED_ERROR_TIMESTAMPS: list[float] = []  # any failure marker
+    _SHARED_STALENESS_TIMESTAMPS: list[float] = []  # only creds-rejection markers
 
-    # Substrings that mark a self-heal-worthy FCM failure. Match against the
-    # rendered log message of any record on the three FCM-related loggers.
-    # Detected here so the watchdog's trigger-(b) (≥3 errors in 5 min) fires
-    # not only on connectivity drops but ALSO on registration failures —
-    # live bug 2026-05-21: PHONE_REGISTRATION_ERROR went unrecognised, so
-    # only trigger-(c) (`not _fcm_running`, 30 min cadence) caught it, which
-    # produced the visible "FCM ↔ polling" UI flicker.
-    _FAILURE_MARKERS = (
-        "Unexpected exception during read",       # connectivity loop
+    # Connectivity-loop markers: WAN blip / SSL reset. Library lib retries; our
+    # watchdog notices via is_started()=False or ≥3 in 5 min. Credentials are
+    # typically STILL VALID for these — only the TCP/SSL session died.
+    _CONNECTIVITY_MARKERS = (
+        "Unexpected exception during read",       # library reconnect loop
+    )
+
+    # Credential-rejection markers: Google's gcm_register() endpoint returned
+    # PHONE_REGISTRATION_ERROR (only path that emits this — see
+    # firebase_messaging/fcmregister.py). Reaches us only when the library
+    # falls through to gcm_register() because gcm_check_in(android_id,
+    # security_token) failed or no credentials were persisted. Presence in the
+    # log window is the authoritative signal that credentials are actually
+    # stale — that's when a hard-heal (purge + fresh register) is warranted.
+    _CREDS_STALENESS_MARKERS = (
         "PHONE_REGISTRATION_ERROR",                # GCM auth rejected
         "Unable to complete gcm auth request",     # final-give-up after PHONE_REGISTRATION_ERROR retries
         "Unable to establish subscription",        # fcm.py's wrapper for the above
     )
+
+    # Union of both — used by the watchdog's trigger-(b) (≥3 errors in 5 min).
+    _FAILURE_MARKERS = _CONNECTIVITY_MARKERS + _CREDS_STALENESS_MARKERS
 
     def __init__(self) -> None:
         super().__init__()
@@ -113,6 +123,13 @@ class _FCMNoiseFilter(logging.Filter):
         now = time.monotonic()
         self._SHARED_ERROR_TIMESTAMPS.append(now)
         del self._SHARED_ERROR_TIMESTAMPS[:-10]
+        # Separately track creds-rejection markers so the two-stage self-heal
+        # can decide soft (preserve creds) vs hard (purge + re-register) —
+        # PHONE_REGISTRATION_ERROR in the window means creds are genuinely
+        # stale, otherwise it's a connectivity-only blip.
+        if any(marker in msg for marker in self._CREDS_STALENESS_MARKERS):
+            self._SHARED_STALENESS_TIMESTAMPS.append(now)
+            del self._SHARED_STALENESS_TIMESTAMPS[:-10]
         # Then de-dupe.
         if (now - self._last_passed) < self._DEDUP_WINDOW_SECONDS:
             return False
@@ -134,10 +151,29 @@ def get_recent_fcm_error_count(window_seconds: float = 300.0) -> int:
     return sum(1 for ts in _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS if ts >= cutoff)
 
 
+def get_recent_fcm_creds_staleness_count(window_seconds: float = 600.0) -> int:
+    """How many `PHONE_REGISTRATION_ERROR`-class markers fired in the
+    last ``window_seconds``.
+
+    The two-stage self-heal uses this to decide soft vs hard:
+      - count == 0 → creds likely valid, try soft-heal first (no purge)
+      - count >= 1 → creds genuinely rejected by Google, hard-heal (purge + register)
+
+    Default window 600 s (10 min) is wide enough to catch the prior
+    failure-storm but narrow enough that an old incident doesn't poison a
+    fresh outage hours later.
+    """
+    if not _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS:
+        return 0
+    cutoff = time.monotonic() - window_seconds
+    return sum(1 for ts in _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS if ts >= cutoff)
+
+
 def reset_fcm_error_counter() -> None:
-    """Clear the shared timestamp list. Called by self-heal after the recovery
-    cycle so the next 5-min window starts fresh."""
+    """Clear both shared timestamp lists. Called by self-heal after the
+    recovery cycle so the next 5-min window starts fresh."""
     _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
 def _install_fcm_noise_filter() -> None:
@@ -678,32 +714,45 @@ async def async_stop_fcm_push(coordinator: Any) -> None:
 
 
 async def async_self_heal_fcm_push(coordinator: Any) -> None:
-    """Recover from a persistent ``firebase_messaging`` reconnect-fail loop
-    by dropping the stale persisted FCM credentials and forcing a fresh
-    ``checkin_or_register()``.
+    """Two-stage FCM self-heal: soft (preserve creds) → hard (purge) fallback.
 
-    Symptom: ``ERROR firebase_messaging.fcmpushclient: Unexpected exception
-    during read`` fires once per ~63 s on a running client whose SSL session
-    keeps failing. The library auto-reconnects internally but every new SSL
-    session re-fails for the same reason (typically because the persisted
-    FCM credentials are stale — Google's mtalk endpoint rejects the saved
-    Android-ID / security-token pair until a fresh checkin issues new ones).
+    BACKGROUND
+    ----------
+    `firebase_messaging.checkin_or_register()` has two paths:
+      1. Credentials present → `gcm_check_in(android_id, security_token)` —
+         lightweight refresh against the GCM checkin endpoint. Never returns
+         PHONE_REGISTRATION_ERROR.
+      2. No credentials → `gcm_register()` — full fresh registration against
+         the GCM register endpoint. THIS is the only path that can return
+         PHONE_REGISTRATION_ERROR (server-side transient, hours-long).
 
-    Self-heal flow:
-      1. Stop the current client (drains pending tasks via async_stop_fcm_push).
-      2. Delete EVERY key starting with ``fcm_`` from ``coordinator._entry.data``
-         (fcm_credentials, fcm_registered_token, fcm_registered_device_type,
-         fcm_config) so the next start does a fully clean checkin. Live bug
-         2026-05-21: leaving fcm_config / fcm_registered_device_type behind
-         caused a permanent PHONE_REGISTRATION_ERROR loop — only purging all
-         fcm_* keys recovered FCM in the field.
-      3. Restart the client; Bosch CBS gets the new device token on the
-         ``register_fcm_with_bosch`` path because all stale markers are gone.
+    Our previous self-heal purged credentials unconditionally on every
+    watchdog trigger, forcing path 2 even when the only problem was a TCP
+    blip. Result: PHONE_REGISTRATION_ERROR cascades that paused the heal
+    ladder for 24h while polling-fallback took over.
+
+    DECISION
+    --------
+    Soft-heal (no purge, no risk of PHONE_REGISTRATION_ERROR) when:
+      - persisted `fcm_credentials` exist AND
+      - no `PHONE_REGISTRATION_ERROR`/`Unable to complete gcm auth` marker
+        fired in the last 10 min.
+
+    Hard-heal (purge + fresh register, current behavior) when:
+      - no persisted credentials (first install, or prior hard-heal didn't
+        finish), OR
+      - creds-rejection markers seen recently (Google genuinely rejected
+        our stored android_id / security_token — refresh path would just
+        fail too).
+
+    SOFT-HEAL ESCALATION
+    --------------------
+    If soft-heal completes but `_fcm_running` stays False, escalate to
+    hard-heal in the same call — keeps the watchdog's failure counter
+    accurate.
 
     Called by the coordinator's FCM watchdog at most once per cool-down
-    period (handled in ``__init__.py``) — auto-fires when ≥ 3 errors land in
-    5 min OR when the listener silently terminates. The user does NOT need
-    to remove + re-add the integration.
+    period. The user does NOT need to remove + re-add the integration.
     """
     # Acquire the same lock used by `async_start_fcm_push` so a self-heal
     # cannot race with the setup-time start (two checkin_or_register() calls
@@ -716,22 +765,77 @@ async def async_self_heal_fcm_push(coordinator: Any) -> None:
         lock = asyncio.Lock()
         coordinator._fcm_start_lock = lock
     async with lock:
-        _LOGGER.warning(
-            "FCM self-heal: persistent reconnect/register failure detected — "
-            "purging ALL fcm_* keys from entry data and forcing fresh checkin_or_register()"
+        creds_stale_count = get_recent_fcm_creds_staleness_count(600.0)
+        has_creds = bool(coordinator._entry.data.get("fcm_credentials"))
+
+        if creds_stale_count > 0 or not has_creds:
+            reason = (
+                f"{creds_stale_count} PHONE_REGISTRATION_ERROR-class marker(s) "
+                "in last 10 min — creds genuinely stale"
+                if creds_stale_count > 0
+                else "no persisted credentials — fresh registration required"
+            )
+            _LOGGER.warning("FCM self-heal (hard): %s", reason)
+            await _async_hard_heal_locked(coordinator)
+            return
+
+        # Soft-heal path: stop + restart, REUSE persisted credentials.
+        # Library's checkin_or_register() will hit gcm_check_in() (lightweight
+        # refresh) instead of gcm_register() (the PHONE_REGISTRATION_ERROR
+        # source). See module-level _CREDS_STALENESS_MARKERS docstring.
+        _LOGGER.info(
+            "FCM self-heal (soft): listener died but creds look valid — "
+            "reconnecting without purge (avoids PHONE_REGISTRATION_ERROR path)"
         )
         await async_stop_fcm_push(coordinator)
-        new_data = {k: v for k, v in coordinator._entry.data.items()
-                    if not k.startswith("fcm_")}
-        purged = sorted(set(coordinator._entry.data) - set(new_data))
-        coordinator.hass.config_entries.async_update_entry(
-            coordinator._entry, data=new_data,
-        )
-        _LOGGER.info("FCM self-heal: purged %d entry-data keys: %s", len(purged), purged)
         reset_fcm_error_counter()
-        if coordinator.options.get("enable_fcm_push", False):
-            # Call the locked variant directly — we already hold the lock.
-            await _async_start_fcm_push_locked(coordinator)
+        # FCM intentionally disabled in options — stop is the right outcome;
+        # do NOT proceed to start (would no-op) and do NOT fall through to
+        # the escalation branch below (would purge valid credentials).
+        if not coordinator.options.get("enable_fcm_push", False):
+            return
+        await _async_start_fcm_push_locked(coordinator)
+
+        if getattr(coordinator, "_fcm_running", False):
+            _LOGGER.info("FCM self-heal (soft): succeeded — push restored without re-register")
+            # Reset failure counter — soft-heal recovered fast.
+            if hasattr(coordinator, "_fcm_self_heal_failures"):
+                coordinator._fcm_self_heal_failures = 0
+                coordinator._fcm_self_heal_paused_logged = False
+            return
+
+        # Soft-heal didn't bring the listener back. Escalate to hard-heal in
+        # the same call — the watchdog's counter increment already happened.
+        _LOGGER.warning(
+            "FCM self-heal (soft → hard): soft restart did not start the "
+            "listener — escalating to credential purge"
+        )
+        await _async_hard_heal_locked(coordinator)
+
+
+async def _async_hard_heal_locked(coordinator: Any) -> None:
+    """Hard self-heal: purge ALL fcm_* keys + fresh checkin_or_register().
+
+    Caller MUST hold ``coordinator._fcm_start_lock``. This is the original
+    self-heal behavior — used when credentials are absent OR proven stale by
+    recent PHONE_REGISTRATION_ERROR markers (see `async_self_heal_fcm_push`).
+
+    Live bug 2026-05-21: leaving fcm_config / fcm_registered_device_type
+    behind caused a permanent PHONE_REGISTRATION_ERROR loop — only purging
+    EVERY key beginning with `fcm_` recovered FCM in the field.
+    """
+    await async_stop_fcm_push(coordinator)
+    new_data = {k: v for k, v in coordinator._entry.data.items()
+                if not k.startswith("fcm_")}
+    purged = sorted(set(coordinator._entry.data) - set(new_data))
+    coordinator.hass.config_entries.async_update_entry(
+        coordinator._entry, data=new_data,
+    )
+    _LOGGER.info("FCM self-heal: purged %d entry-data keys: %s", len(purged), purged)
+    reset_fcm_error_counter()
+    if coordinator.options.get("enable_fcm_push", False):
+        # Call the locked variant directly — we already hold the lock.
+        await _async_start_fcm_push_locked(coordinator)
 
 
 async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:

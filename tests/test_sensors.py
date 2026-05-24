@@ -106,6 +106,50 @@ class TestStatusSensor:
         assert attrs["firmware_update_status"] == "downloading"
         assert attrs["firmware_up_to_date"] is False
 
+    def test_updating_state_overrides_online(self, stub_coord, stub_entry):
+        """When coordinator.is_updating(cam_id) is True, native_value must
+        return 'updating' regardless of the cached cloud `status` field.
+        Cloud still reports ONLINE during the install window (cached pre-reboot),
+        but the camera is actually rebooting and dependent entities should
+        flip to unavailable."""
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        stub_coord.is_updating = lambda cam_id: cam_id == CAM_ID
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "updating"
+
+    def test_updating_state_overrides_offline(self, stub_coord, stub_entry):
+        """Even if cloud reports OFFLINE (which it will during reboot),
+        is_updating must take precedence so the operator sees the cause."""
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "OFFLINE"
+        stub_coord.is_updating = lambda cam_id: True
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "updating"
+
+    def test_updating_state_listed_in_options(self, stub_coord, stub_entry):
+        """The enum's options tuple must contain 'updating' so HA renders
+        the state in the entity selector + history."""
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert "updating" in s._attr_options
+
+    def test_no_updating_when_helper_returns_false(self, stub_coord, stub_entry):
+        """is_updating present but returns False → falls through to cloud status."""
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        stub_coord.is_updating = lambda cam_id: False
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "online"
+
+    def test_no_updating_when_helper_missing(self, stub_coord, stub_entry):
+        """Backward compat: coordinator without is_updating helper still works."""
+        from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+        # stub_coord fixture has no is_updating attribute → getattr returns None
+        assert not hasattr(stub_coord, "is_updating")
+        s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "online"
+
     def test_offline_when_latest_event_is_trouble_disconnect(self, stub_coord, stub_entry):
         """Bosch cloud reports ONLINE forever after a disconnect; override via events.
 

@@ -493,6 +493,7 @@
         "state": {
           "online": "Online",
           "offline": "Offline",
+          "updating": "Firmware update",
           "unknown": "Unknown"
         }
       },

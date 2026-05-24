@@ -152,17 +152,28 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):  # type: ignore[misc]
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschCameraStatusSensor(_BoschSensorBase):
-    """Sensor: online / offline / unknown."""
+    """Sensor: online / offline / updating / unknown.
+
+    `updating` takes precedence over online/offline because the camera
+    reboots during a firmware install and any cloud "online" reading is
+    cached from before the reboot. Dashboard auto-entities and automations
+    can use this single sensor to drive both visibility and alerting.
+    """
 
     def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_status_{cam_id.lower()}"
         self._attr_translation_key = "status"
-        self._attr_options         = ["online", "offline", "unknown"]
+        self._attr_options         = ["online", "offline", "updating", "unknown"]
         self._attr_device_class    = SensorDeviceClass.ENUM
 
     @property
     def native_value(self) -> str:
+        # Firmware install in progress trumps the cloud-cached status —
+        # the camera is rebooting and dependent entities should reflect that.
+        is_updating = getattr(self.coordinator, "is_updating", None)
+        if is_updating is not None and is_updating(self._cam_id):
+            return "updating"
         raw = str(self._cam_data.get("status", "UNKNOWN")).lower()
         if raw == "online":
             events = self._cam_data.get("events", [])

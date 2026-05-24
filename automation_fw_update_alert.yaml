@@ -1,0 +1,86 @@
+# Bosch Camera Firmware Update Alerts (template)
+#
+# Three notifications:
+#   1. "Update available" — when update.bosch_*_firmware flips to "on"
+#      (Bosch published a new firmware that the camera has not yet installed).
+#   2. "Update started"   — when sensor.bosch_*_status flips to "updating"
+#      (user pressed install in the Bosch app; camera is rebooting).
+#   3. "Update complete"  — when sensor.bosch_*_status leaves "updating"
+#      (camera came back online; firmware_version sensor shows the new value).
+#
+# Bosch does not publish itemized changelogs — release-info pages contain only
+# a generic "new and optimized functions + bug fixes" sentence. The URL in the
+# template links to the camera-solutions index for manual lookup.
+#
+# Place under your `automations:` block (configuration.yaml or
+# automations.yaml). Edit the `service:` lines to point at YOUR notify target
+# (notify.mobile_app_xxx, notify.signal, notify.discord, …).
+
+- alias: Bosch Camera FW — Update Available
+  description: >
+    Notify when a new Bosch Smart Home camera firmware version becomes
+    available. Edit the trigger entity_id list to match your camera names.
+  trigger:
+    - platform: state
+      entity_id:
+        - update.bosch_terrasse_firmware
+        - update.bosch_innenbereich_firmware
+        - update.bosch_garten_firmware
+        - update.bosch_kamera_firmware
+      to: "on"
+  action:
+    - service: notify.notify  # ← change to your notify target
+      data:
+        title: "Bosch Camera Firmware Update"
+        message: >
+          {{ state_attr(trigger.entity_id, 'friendly_name') }}:
+          {{ state_attr(trigger.entity_id, 'installed_version') }} →
+          {{ state_attr(trigger.entity_id, 'latest_version') }}.
+          Release notes:
+          https://www.bosch-smarthome.com/de/de/support/release-informationen/camera-solutions/
+  mode: single
+
+- alias: Bosch Camera FW — Install Started
+  description: >
+    Notify when a Bosch camera enters the firmware install state (user has
+    pressed install in the Bosch app; camera reboots, all dependent entities
+    flip to unavailable).
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.bosch_terrasse_status
+        - sensor.bosch_innenbereich_status
+        - sensor.bosch_garten_status
+        - sensor.bosch_kamera_status
+      to: "updating"
+  action:
+    - service: notify.notify  # ← change to your notify target
+      data:
+        title: "Bosch Camera — Firmware Install Started"
+        message: >
+          {{ state_attr(trigger.entity_id, 'friendly_name') }} is installing
+          new firmware. Camera will be offline for ~3–7 min during reboot.
+  mode: single
+
+- alias: Bosch Camera FW — Install Complete
+  description: >
+    Notify when a Bosch camera returns from the firmware install state to
+    online. The firmware_version sensor reports the new version string.
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.bosch_terrasse_status
+        - sensor.bosch_innenbereich_status
+        - sensor.bosch_garten_status
+        - sensor.bosch_kamera_status
+      from: "updating"
+      to: "online"
+  action:
+    - service: notify.notify  # ← change to your notify target
+      data:
+        title: "Bosch Camera — Firmware Install Complete"
+        message: >
+          {{ state_attr(trigger.entity_id, 'friendly_name') }} is back online.
+          New firmware version:
+          {{ states('sensor.' ~ trigger.entity_id.split('.')[1].replace('_status', '_firmware_version')) }}.
+  mode: single
