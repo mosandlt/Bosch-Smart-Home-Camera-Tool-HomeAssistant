@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## v13.1.2 — 2026-05-24
+
+Patch release — fixes two issues surfaced by live HA logs: an FCM-push crash during integration setup, and a 5-minute startup-wait warning caused by the LOCAL session keepalive being registered as a tracked task instead of a background task.
+
+- **FCM push during setup no longer crashes.** `async_handle_fcm_push()` accessed `coordinator.data.keys()` unconditionally. When an FCM push arrives in the narrow window between `async_setup_entry` and the first coordinator refresh, `coordinator.data` is still `None`, which raised `AttributeError: 'NoneType' object has no attribute 'keys'` and surfaced in the system log (count=4 in a single boot). Added the equivalent `or not coordinator.data` early-return guard already used elsewhere in the coordinator (`__init__.py:1576`). The caller's bookkeeping side effects (`_fcm_last_push`, `_fcm_healthy`, push logging) run before the schedule, so an early return is the correct behaviour when the coordinator data is not yet warm.
+- **HA startup no longer waits 5 minutes for the LOCAL session keepalive.** `_replace_renewal_task()` scheduled `_auto_renew_local_session` — a `while True` keepalive coroutine that only exits on stream-off — through `hass.async_create_task()`. HA Core blocks the startup-wrap-up phase until every tracked task finishes; the keepalive never finished, so HA waited the full 5 min before logging "Something is blocking Home Assistant from wrapping up the start up phase" and continuing anyway. Switched to `hass.async_create_background_task(coro, "bosch_shc_camera_renewal_<short_id>")`, which is the documented HA API for permanent loops (exempt from startup-wait, still cancelled on shutdown). The same code path schedules `_remote_session_terminator`, so REMOTE sessions benefit too.
+- **Regression tests.** New `tests/test_fcm_push_data_none.py` (3 tests — `coordinator.data is None`, `coordinator.data == {}`, `token == ""`) pins the FCM guard. `tests/test_init_async_methods.py::TestReplaceRenewalTask` updated to mock `async_create_background_task` and adds `test_replace_uses_background_task_api_not_tracked` which pins the task-API choice and the debuggable name prefix. Existing renewal-task tests (cancel-old / no-cancel-done / done-callback) stay green. Full suite stays green; 100 % line coverage on touched files preserved.
+
 ## v12.8.3 — 2026-05-21
 
 Patch release — closes a recovery gap in the FCM push watchdog so a failed self-heal no longer leaves event detection stuck on polling until the next HA restart.

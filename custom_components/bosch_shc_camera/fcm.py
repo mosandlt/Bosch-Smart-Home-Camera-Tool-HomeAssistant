@@ -880,7 +880,10 @@ def _on_fcm_push(coordinator: Any, notification: dict[str, Any], persistent_id: 
 async def async_handle_fcm_push(coordinator: Any) -> None:
     """Handle an FCM push — fetch fresh events for all cameras and fire HA events."""
     token = coordinator.token
-    if not token:
+    if not token or not coordinator.data:
+        # Race: FCM push can arrive during setup, before the first coordinator
+        # refresh has populated .data. Without this guard we crash with
+        # `AttributeError: 'NoneType' object has no attribute 'keys'`.
         return
 
     session = async_get_clientsession(coordinator.hass, verify_ssl=False)

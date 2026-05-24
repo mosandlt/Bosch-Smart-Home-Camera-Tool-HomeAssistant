@@ -1203,11 +1203,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 pending.discard(cam_id)
 
     def _replace_renewal_task(self, cam_id: str, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
-        """Cancel any existing renewal task for cam_id, then create and track the new one."""
+        """Cancel any existing renewal task for cam_id, then create and track the new one.
+
+        Uses async_create_background_task: the keepalive coroutines run as
+        `while True` loops that only return on stream-off. Tracked-task API
+        (async_create_task) makes HA's startup-wait phase block on these
+        loops, which never end — surfaces as a 5-minute "Something is
+        blocking Home Assistant from wrapping up the start up phase" warning.
+        """
         old = self._renewal_tasks.get(cam_id)
         if old and not old.done():
             old.cancel()
-        task = self.hass.async_create_task(coro)
+        task = self.hass.async_create_background_task(
+            coro, f"bosch_shc_camera_renewal_{cam_id[:8]}"
+        )
         self._renewal_tasks[cam_id] = task
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)

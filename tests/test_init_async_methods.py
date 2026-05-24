@@ -106,6 +106,7 @@ def _make_coord(**overrides):
         is_camera_online=lambda cid: True,
         hass=SimpleNamespace(
             async_create_task=MagicMock(side_effect=_create_task),
+            async_create_background_task=MagicMock(side_effect=lambda coro, name: _create_task(coro)),
             async_add_executor_job=AsyncMock(),
             loop=SimpleNamespace(
                 call_later=MagicMock(return_value=MagicMock()),
@@ -1061,9 +1062,33 @@ class TestReplaceRenewalTask:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         coord = _make_coord()
         task = BoschCameraCoordinator._replace_renewal_task(coord, CAM_A, _noop_coro())
-        coord.hass.async_create_task.assert_called_once()
+        coord.hass.async_create_background_task.assert_called_once()
+        coord.hass.async_create_task.assert_not_called()
         assert coord._renewal_tasks[CAM_A] is task
         assert task in coord._bg_tasks
+
+    def test_replace_uses_background_task_api_not_tracked(self):
+        """Regression: keepalive loops are while-True. Tracked-task API
+        (async_create_task) makes HA's startup-wait block on them — surfaces
+        as 'Something is blocking Home Assistant from wrapping up the start
+        up phase' (5-min timeout). Background-task API is exempt from that
+        wait.
+
+        Source: production HA core warning 2026-05-24, task name
+        'BoschCameraCoordinator._auto_renew_local_session()' pinned in
+        system.waiting-for-tasks set.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        coord = _make_coord()
+        BoschCameraCoordinator._replace_renewal_task(coord, CAM_A, _noop_coro())
+        coord.hass.async_create_task.assert_not_called()
+        coord.hass.async_create_background_task.assert_called_once()
+        args, kwargs = coord.hass.async_create_background_task.call_args
+        name = args[1] if len(args) > 1 else kwargs.get("name", "")
+        assert "bosch_shc_camera_renewal" in name, (
+            "Task name must be debuggable in 'system is waiting for tasks' "
+            "dumps. Got: %r" % (name,)
+        )
 
     def test_replace_cancels_old_task(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
