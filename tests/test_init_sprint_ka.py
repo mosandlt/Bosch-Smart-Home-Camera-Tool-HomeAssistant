@@ -139,7 +139,6 @@ def _make_coord(**overrides):
         _pan_cache={},
         # Additional slow-tier caches (needed if do_slow=True)
         _ambient_light_cache={},
-        _audio_alarm_cache={},
         _firmware_cache={},
         _unread_events_cache={},
         _privacy_sound_cache={},
@@ -163,7 +162,6 @@ def _make_coord(**overrides):
         _integration_version="11.0.10",
         _OFFLINE_EXTENDED_INTERVAL=900,
         # Per-cam audio/privacy/notif write-at dicts
-        _audio_alarm_set_at={},
         _privacy_sound_set_at={},
         _timestamp_set_at={},
         _ledlights_set_at={},

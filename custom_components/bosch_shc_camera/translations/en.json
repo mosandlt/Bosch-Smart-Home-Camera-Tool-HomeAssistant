@@ -95,12 +95,14 @@
             "data": {
               "stream_connection_type": "Stream connection type",
               "live_buffer_mode": "Player buffer profile (HLS)",
-              "enable_go2rtc": "go2rtc WebRTC (low-latency streaming ~2s)"
+              "enable_go2rtc": "go2rtc WebRTC (low-latency streaming ~2s)",
+              "use_mjpeg_snapshot": "MJPEG inst=3 snapshot (Gen2, LAN)"
             },
             "data_description": {
               "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
               "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
-              "enable_go2rtc": "Automatically register live streams with HA's bundled go2rtc for WebRTC playback (~2 s latency vs. ~10 s HLS). Recommended. Disable only if you run a custom go2rtc setup."
+              "enable_go2rtc": "Automatically register live streams with HA's bundled go2rtc for WebRTC playback (~2 s latency vs. ~10 s HLS). Recommended. Disable only if you run a custom go2rtc setup.",
+              "use_mjpeg_snapshot": "**Gen2 cameras only (LAN required).** When ON: snapshot requests capture one JPEG frame directly from the camera via its RTSP inst=3 MJPEG stream using FFmpeg. Faster than the cloud-proxy path (~150–300 ms vs ~500 ms) and works without an active live-stream session. Requires cached LAN credentials — populated automatically on first live-stream open. Falls back to the normal snapshot path if FFmpeg fails or credentials are missing. **On by default — silently falls back to the cloud-proxy path when not applicable (Gen1 cams, no LAN creds, FFmpeg error).**"
             }
           },
           "fcm": {
@@ -326,9 +328,6 @@
       "pre_alarm": {
         "name": "Pre-Alarm"
       },
-      "audio_alarm": {
-        "name": "Sound Detection"
-      },
       "panic_alarm": {
         "name": "Trigger Siren"
       },
@@ -342,9 +341,6 @@
     "number": {
       "pan_position": {
         "name": "Pan Position"
-      },
-      "audio_threshold": {
-        "name": "Audio Threshold"
       },
       "speaker_level": {
         "name": "Speaker Level"
@@ -384,9 +380,6 @@
       },
       "pre_alarm_delay": {
         "name": "Pre-Alarm Duration"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "Sound Detection Sensitivity"
       },
       "intrusion_sensitivity": {
         "name": "Intrusion Detection Sensitivity"
@@ -521,9 +514,6 @@
       "motion_sensitivity": {
         "name": "Motion Sensitivity"
       },
-      "audio_alarm": {
-        "name": "Audio Alarm"
-      },
       "last_event_type": {
         "name": "Last Event Type",
         "state": {
@@ -632,6 +622,15 @@
       },
       "stream_url_sub": {
         "name": "Stream URL (sub)"
+      },
+      "onvif_scopes": {
+        "name": "ONVIF Scopes"
+      },
+      "rcp_version": {
+        "name": "RCP Version"
+      },
+      "cloud_feature_flags": {
+        "name": "Cloud Feature Flags"
       }
     }
   },

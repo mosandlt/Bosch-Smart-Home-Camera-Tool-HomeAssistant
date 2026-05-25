@@ -84,8 +84,6 @@ def _stub_coord(**overrides):
         _arming_set_at={},
         _alarm_status_cache={},
         _alarm_settings_cache={},
-        _audio_alarm_cache={CAM_ID: {}},
-        _audio_alarm_set_at={},
         _image_rotation_180={},
         _nvr_user_intent={},
         _nvr_processes={},
@@ -100,7 +98,6 @@ def _stub_coord(**overrides):
         is_session_stale=lambda cid: False,
         is_stream_warming=lambda cid: False,
         motion_settings=lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH"},
-        audio_alarm_settings=lambda cid: {"enabled": True, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"},
         recording_options=lambda cid: {"recordSound": False},
         async_put_camera=AsyncMock(return_value=True),
         async_request_refresh=AsyncMock(),
@@ -952,65 +949,6 @@ class TestIntrusionDetectionPrivacyGuard:
         await sw.async_turn_on()
         stub_coord.async_put_camera.assert_awaited_once()
         assert stub_coord._intrusion_config_cache[CAM_ID]["enabled"] is True
-
-
-# ── BoschAudioAlarmSwitch gen2 privacy guard ──────────────────────────────────
-
-class TestAudioAlarmSwitchPrivacyGuard:
-    @pytest.mark.asyncio
-    async def test_turn_on_blocked_for_gen2_indoor_with_privacy(self, stub_coord, stub_entry):
-        """Line 1620: gen2 indoor + privacy ON blocks the PUT."""
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
-        stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"}
-        sw = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        _bind_hass(sw)
-        await sw.async_turn_on()
-        stub_coord.async_put_camera.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_turn_on_allowed_for_outdoor(self, stub_coord, stub_entry):
-        """Outdoor camera not blocked even with privacy ON."""
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
-        stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"}
-        stub_coord.async_put_camera = AsyncMock(return_value=True)
-        sw = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        sw.async_write_ha_state = MagicMock()
-        _bind_hass(sw)
-        await sw.async_turn_on()
-        stub_coord.async_put_camera.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_turn_on_delegates_to_set(self, stub_coord, stub_entry):
-        """Lines 1636-1637: turn_on calls _set(True)."""
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"}
-        stub_coord.async_put_camera = AsyncMock(return_value=True)
-        sw = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        sw.async_write_ha_state = MagicMock()
-        _bind_hass(sw)
-        await sw.async_turn_on()
-        # cam_data["audioAlarm"] updated on success
-        cam_data = stub_coord.data.get(CAM_ID)
-        if cam_data is not None:
-            assert cam_data.get("audioAlarm", {}).get("enabled") is True
-
-    @pytest.mark.asyncio
-    async def test_turn_off_delegates_to_set(self, stub_coord, stub_entry):
-        """Lines 1639-1640: turn_off calls _set(False)."""
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": True, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"}
-        stub_coord.async_put_camera = AsyncMock(return_value=True)
-        sw = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        sw.async_write_ha_state = MagicMock()
-        _bind_hass(sw)
-        await sw.async_turn_off()
-        cam_data = stub_coord.data.get(CAM_ID)
-        if cam_data is not None:
-            assert cam_data.get("audioAlarm", {}).get("enabled") is False
 
 
 # ── BoschNvrRecordingSwitch.async_added_to_hass ───────────────────────────────

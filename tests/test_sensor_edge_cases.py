@@ -67,7 +67,6 @@ def _stub_coord(**overrides):
         _wifi_cache={},
         _ambient_light_cache={},
         _motion_sensitivity_cache={},
-        _audio_alarm_cache={},
         _ledlight_brightness_cache={},
         _clock_offset_cache={},
         _ledlights_cache={},
@@ -98,7 +97,6 @@ def _stub_coord(**overrides):
         # Coordinator helpers used by sensors
         rcp_product_name=lambda cid: None,
         motion_settings=lambda cid: {},
-        audio_alarm_settings=lambda cid: {},
         clock_offset=lambda cid: None,
         # FCM monotonic sentinel — use float('-inf') per SENTINEL_RULE
         _fcm_last_push=float('-inf'),
@@ -182,21 +180,6 @@ class TestMotionSensitivityEmptyAttributes:
         stub_coord.motion_settings = lambda cid: {}
         s = BoschMotionSensitivitySensor(stub_coord, CAM_ID, stub_entry)
         assert s.extra_state_attributes == {}
-
-
-# ── L502 / L506 — AudioAlarm name + unique_id ──────────────────────────────
-
-
-class TestAudioAlarmNameAndUid:
-    def test_name(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        s = BoschAudioAlarmSensor(stub_coord, CAM_ID, stub_entry)
-        assert "Audio Alarm" in s.name
-
-    def test_unique_id(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        s = BoschAudioAlarmSensor(stub_coord, CAM_ID, stub_entry)
-        assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_audio_alarm"
 
 
 # ── L540 / L544 / L559-560 — LastEventTypeSensor ───────────────────────────

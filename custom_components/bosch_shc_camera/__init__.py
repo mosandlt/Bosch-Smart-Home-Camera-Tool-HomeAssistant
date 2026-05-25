@@ -344,6 +344,63 @@ def _redact_creds(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _parse_onvif_scopes(raw: bytes) -> dict[str, Any]:
+    """Parse ONVIF scope TLV payload from RCP 0x0a98 (ASCII, ~720 bytes).
+
+    The payload is a series of null-terminated ASCII strings, each of which
+    may be an ONVIF scope URI of the form:
+        onvif://www.onvif.org/name/Bosch%20Smart%20Home%20Camera
+        onvif://www.onvif.org/hardware/HOME_Eyes_Outdoor
+        onvif://www.onvif.org/Profile/Streaming
+
+    Returns a dict with parsed fields and the raw scope list:
+        {
+            "raw_scopes": [...],
+            "name": "Bosch Smart Home Camera",
+            "hardware": "HOME_Eyes_Outdoor",
+            "profiles": ["Streaming", ...],
+            "supported": True,
+        }
+
+    Returns {"supported": True, "raw_scopes": [], "name": "", "hardware": "", "profiles": []}
+    on parse error (non-None raw means camera answered, so ONVIF is supported).
+    """
+    import re as _re_onvif
+    from urllib.parse import unquote as _unquote
+
+    result: dict[str, Any] = {
+        "supported": True,
+        "raw_scopes": [],
+        "name": "",
+        "hardware": "",
+        "profiles": [],
+    }
+    try:
+        # Null-terminated or newline-separated ASCII strings
+        text = raw.decode("ascii", errors="replace")
+        # Split on null bytes, newlines, or whitespace runs
+        scopes = [s.strip() for s in _re_onvif.split(r"[\x00\n\r]+", text) if s.strip()]
+        result["raw_scopes"] = scopes
+        for scope in scopes:
+            if not scope.startswith("onvif://www.onvif.org/"):
+                continue
+            path = scope[len("onvif://www.onvif.org/"):]
+            if "/" not in path:
+                continue
+            key, _, val = path.partition("/")
+            val_decoded = _unquote(val).replace("+", " ")
+            if key == "name":
+                result["name"] = val_decoded
+            elif key == "hardware":
+                result["hardware"] = val_decoded
+            elif key == "Profile":
+                profiles: list[str] = result["profiles"]  # type: ignore[assignment]
+                profiles.append(val_decoded)
+    except Exception:  # pragma: no cover — defensive; raw bytes from live camera
+        pass
+    return result
+
+
 from .const import (  # noqa: E402
     DOMAIN,
     CLOUD_API,
@@ -469,6 +526,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._rcp_tls_cert_cache: dict[str, dict[str, Any]] = {}             # TLS cert info from 0x0b91
         self._rcp_network_services_cache: dict[str, list[str]] = {} # network services from 0x0c62
         self._rcp_iva_catalog_cache: dict[str, list[dict[str, Any]]] = {}    # IVA analytics from 0x0b60
+        # F4: ONVIF scopes cache — keyed by cam_id, from RCP 0x0a98 via LAN cbs-auth (300s slow-tier)
+        self._rcp_onvif_scopes_cache: dict[str, dict[str, Any]] = {}
+        # F6: RCP protocol version cache — keyed by cam_id, from RCP 0xff00+0xff04 via LAN (300s slow-tier)
+        self._rcp_version_cache: dict[str, str | None] = {}
         # Commands that consistently return error=0x90 (not supported via proxy).
         # Key: cam_id, value: set of command hex strings. After 3 consecutive
         # failures the command is skipped for the rest of the session.
@@ -634,12 +695,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
         #          preAlarmMode, preAlarmDelayInSeconds
         self._alarm_settings_cache: dict[str, dict[str, Any]] = {}
-        # Audio alarm cache — from GET /audioAlarm (all cameras with mic).
-        # Persistent across ticks (unlike data[cam_id]["audioAlarm"] which is
-        # rebuilt every 60s — audioAlarm is only fetched in the slow tier / 300s,
-        # so it disappears from data[cam_id] between slow ticks). Stored here
-        # for stable entity availability.
-        self._audio_alarm_cache: dict[str, dict[str, Any]] = {}
         # Alarm status cache — from GET /alarmStatus (Gen2 Indoor II only).
         self._alarm_status_cache: dict[str, dict[str, Any]] = {}
         # Intrusion system arming cache — derived from alarmStatus (armed/disarmed).
@@ -669,7 +724,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._timestamp_set_at:     dict[str, float] = {}  # timestamp overlay write
         self._ledlights_set_at:     dict[str, float] = {}  # status LED write
         self._arming_set_at:        dict[str, float] = {}  # alarm system arm/disarm write
-        self._audio_alarm_set_at:   dict[str, float] = {}  # audioAlarm config write
         self._intrusion_config_set_at: dict[str, float] = {}  # intrusionDetectionConfig write
         self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
@@ -2350,7 +2404,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     is_gen2 = _gmc2(hw).generation >= 2
                     endpoints = [
                         "wifiinfo", "ambient_light_sensor_level", "motion",
-                        "audioAlarm", "firmware", "recording_options",
+                        "firmware", "recording_options",
                         "unread_events_count", "commissioned", "timestamp",
                         "notifications", "rules",
                     ]
@@ -2402,14 +2456,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             self._ambient_light_cache[cam_id_key] = ep_data.get("ambientLightSensorLevel")
                         elif ep == "motion":
                             data[cam_id_key]["motion"] = ep_data
-                        elif ep == "audioAlarm":
-                            # Persistent cache (self-level) so entities stay available
-                            # between slow-tier ticks. Also mirror into data[cam_id]
-                            # for backward compatibility with audio_alarm_settings().
-                            # Honor write-lock to avoid clobbering a fresh user-toggle.
-                            if not self._is_write_locked(cam_id_key, self._audio_alarm_set_at):
-                                self._audio_alarm_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
-                            data[cam_id_key]["audioAlarm"] = ep_data
                         elif ep == "firmware":
                             self._firmware_cache[cam_id_key] = ep_data
                         elif ep == "recording_options":
@@ -2546,6 +2592,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 _LOGGER.debug("RCP proxy connect error for %s: %s", cam_id_key, err)
                     except Exception as err:
                         _LOGGER.debug("RCP update skipped for %s: %s", cam_id_key, err)
+
+                # ── F4/F6 LAN diagnostic sensors (slow tier) ─────────────────
+                # Reads ONVIF scopes (0x0a98) and RCP version (0xff00) directly
+                # from camera HTTPS LAN endpoint using cached cbs Digest creds.
+                # Only runs when LAN IP and cbs creds are available — fully
+                # non-blocking (errors are swallowed, sensor stays unavailable).
+                if is_online and do_slow and self._get_cam_lan_ip(cam_id_key) and self._local_creds_cache.get(cam_id_key):
+                    try:
+                        await self._async_update_lan_diagnostic_sensors(cam_id_key)
+                    except Exception as err:
+                        _LOGGER.debug("LAN diagnostic sensors skipped for %s: %s", cam_id_key, err)
 
             # ── 5. SHC states (supplementary + offline fallback) ────────────────
             # Cloud is primary (step 4, ~113ms). SHC supplements with camera
@@ -3887,12 +3944,26 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             return None
                         if snap_resp.status == 200 and "image" in ct:
                             data: bytes = await snap_resp.read()
-                            # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON
+                            # Bosch returns HTTP 200 with 0 bytes when privacy mode is ON.
+                            # F2 (2026-05-25): cross-check the camera's "privacy is on"
+                            # signal against HA's cached privacy state — if HA still thinks
+                            # privacy is OFF, we have a state drift (toggled in the Bosch
+                            # app, not yet reflected via cloud poll) and emit a WARNING.
                             if not data:
-                                _LOGGER.debug(
-                                    "fetch_live_snapshot: %s → empty response (privacy mode ON?)",
-                                    cam_id,
-                                )
+                                cam_raw = self.data.get(cam_id, {})
+                                ha_privacy_on = str(cam_raw.get("privacyMode", "")).upper() == "ON"
+                                if ha_privacy_on:
+                                    _LOGGER.debug(
+                                        "fetch_live_snapshot: %s → empty response (privacy mode ON, HA agrees)",
+                                        cam_id,
+                                    )
+                                else:
+                                    _LOGGER.warning(
+                                        "fetch_live_snapshot: %s → empty response but HA "
+                                        "privacy state is OFF — state drift (likely toggled "
+                                        "via Bosch app, cloud poll lag). Forcing refresh.",
+                                        cam_id,
+                                    )
                                 return None
                             _LOGGER.debug(
                                 "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
@@ -5060,6 +5131,112 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """
         await async_update_rcp_data(self, cam_id, proxy_host, proxy_hash)
 
+    async def _fetch_rcp_lan(
+        self,
+        cam_id: str,
+        opcode_hex: str,
+    ) -> bytes | None:
+        """Read an RCP value directly from the camera's LAN HTTPS endpoint (cbs Digest auth).
+
+        Uses the cached LOCAL session credentials (``_local_creds_cache``) which
+        are populated on every successful PUT /connection LOCAL. The camera's
+        ``rcp.xml`` endpoint on port 443 requires HTTP Digest auth with the
+        rotating cbs-XXXXXXXX user/password pair.
+
+        Returns the decoded payload bytes on success, None on any error
+        (no LAN IP, no creds, network error, auth failure, RCP error).
+
+        IMPORTANT: Do NOT call this from the event loop for opcodes that would
+        rotate cbs creds (i.e. never issue PUT /connection LOCAL here — use
+        the existing slow-tier RCP proxy path for writes). This helper is
+        READ-ONLY and purely supplementary to the cloud-proxy path.
+        """
+        ip = self._get_cam_lan_ip(cam_id)
+        if not ip:
+            return None
+        creds = self._local_creds_cache.get(cam_id)
+        if not creds:
+            return None
+        user: str = creds.get("user", "")
+        password: str = creds.get("password", "")
+        if not (user and password):
+            return None
+        port: int = creds.get("port", 443)
+        base = f"https://{ip}:{port}/rcp.xml"
+        params: dict[str, str] = {
+            "command":   opcode_hex,
+            "direction": "READ",
+            "type":      "P_OCTET",
+            "num":       "1",
+        }
+        from urllib.parse import urlencode
+        url = f"{base}?{urlencode(params)}"
+        try:
+            import re as _re_lan
+            async with await async_digest_request(
+                async_get_clientsession(self.hass, verify_ssl=False),
+                "GET",
+                url,
+                user,
+                password,
+                timeout=8.0,
+                ssl=False,
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        "_fetch_rcp_lan: %s@%s HTTP %d", opcode_hex, ip, resp.status
+                    )
+                    return None
+                raw = await resp.read()
+                # Check for RCP-level error
+                if b"<err>" in raw.lower():
+                    _LOGGER.debug(
+                        "_fetch_rcp_lan: %s@%s RCP error: %s",
+                        opcode_hex, ip, raw[:120]
+                    )
+                    return None
+                # Extract payload from <str>HEXDATA</str>
+                m = _re_lan.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re_lan.IGNORECASE)
+                if m:
+                    return bytes.fromhex(m.group(1).decode("ascii"))
+                # Fallback: raw bytes if not XML envelope
+                if raw and not raw.lstrip(b"\n\r\t ").startswith(b"<"):
+                    return bytes(raw)
+                return None
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug("_fetch_rcp_lan: %s@%s %s", opcode_hex, ip, err)
+            return None
+        except Exception as err:  # pragma: no cover
+            _LOGGER.debug("_fetch_rcp_lan: %s@%s unexpected: %s", opcode_hex, ip, err)
+            return None
+
+    async def _async_update_lan_diagnostic_sensors(self, cam_id: str) -> None:
+        """Fetch F4 (ONVIF scopes) and F6 (RCP version) for a single camera via LAN.
+
+        Called on slow-tier when the camera is ONLINE, LAN IP is known, and
+        cbs creds are cached. Failures are non-fatal: caches keep their last
+        known value or remain absent (sensor shows unavailable).
+        """
+        # F4: ONVIF scopes via RCP 0x0a98 — ~720 B ASCII TLV
+        try:
+            raw_onvif = await self._fetch_rcp_lan(cam_id, "0x0a98")
+            if raw_onvif:
+                scopes_dict = _parse_onvif_scopes(raw_onvif)
+                self._rcp_onvif_scopes_cache[cam_id] = scopes_dict
+                _LOGGER.debug("ONVIF scopes for %s: %s", cam_id[:8], scopes_dict)
+        except Exception as err:
+            _LOGGER.debug("ONVIF scopes fetch error for %s: %s", cam_id[:8], err)
+
+        # F6: RCP protocol versions via 0xff00 (primary) + 0xff04 (secondary)
+        try:
+            raw_ver = await self._fetch_rcp_lan(cam_id, "0xff00")
+            if raw_ver and len(raw_ver) >= 4:
+                version_str = f"{raw_ver[0]}.{raw_ver[1]}.{raw_ver[2]}.{raw_ver[3]}"
+                self._rcp_version_cache[cam_id] = version_str
+                _LOGGER.debug("RCP version for %s: %s", cam_id[:8], version_str)
+        except Exception as err:
+            _LOGGER.debug("RCP version fetch error for %s: %s", cam_id[:8], err)
+
     def clock_offset(self, cam_id: str) -> float | None:
         """Return clock offset in seconds (camera time − server time), or None."""
         return self._rcp_clock_offset_cache.get(cam_id)
@@ -5107,18 +5284,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     def motion_settings(self, cam_id: str) -> dict[str, Any]:
         """Return motion detection settings dict, or empty dict."""
         return self.data.get(cam_id, {}).get("motion", {})  # type: ignore[no-any-return]
-
-    def audio_alarm_settings(self, cam_id: str) -> dict[str, Any]:
-        """Return audio alarm settings dict, or empty dict.
-
-        Prefers the persistent self-level cache (_audio_alarm_cache) because
-        `data[cam_id]["audioAlarm"]` is only present right after a slow-tier
-        fetch — `data` is rebuilt every 60s tick while slow-tier runs every
-        300s, so the transient key disappears on intermediate ticks.
-        """
-        if self._audio_alarm_cache.get(cam_id):
-            return self._audio_alarm_cache[cam_id]
-        return self.data.get(cam_id, {}).get("audioAlarm", {})  # type: ignore[no-any-return]
 
     def recording_options(self, cam_id: str) -> dict[str, Any]:
         """Return recording options dict, or empty dict."""
@@ -5420,6 +5585,124 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BoschCameraCoordinator(hass, entry)
+
+    # Post-update feedback prompt — one-time per integration version. When the
+    # user updates to a new version we file a persistent notification pointing
+    # to GitHub Discussions so feedback channels are discoverable from the HA
+    # UI itself, not buried in the README. Stored per-version in entry.options;
+    # we only fire when the persisted "feedback_hint_version" != current.
+    # Multi-lang: picks message text per `hass.config.language`; falls back to
+    # English when the language isn't in the small inline dict below (we keep
+    # this inline rather than in translations/ because persistent_notification
+    # doesn't go through the entity-translation pipeline).
+    try:
+        last_hint_version = entry.options.get("feedback_hint_version", "")
+        if last_hint_version != _INTEGRATION_VERSION and _INTEGRATION_VERSION != "unknown":
+            _disc_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/discussions"
+            _iss_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues"
+            _lang_messages: dict[str, tuple[str, str]] = {
+                "de": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Update auf **v{_INTEGRATION_VERSION}** abgeschlossen. "
+                    f"Feedback, Fragen, Ideen? Nutze die neuen "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bug-Reports weiter via [Issues]({_iss_url}).",
+                ),
+                "en": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Updated to **v{_INTEGRATION_VERSION}**. "
+                    f"Feedback, questions, ideas? Use the new "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bug reports still on [Issues]({_iss_url}).",
+                ),
+                "fr": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Mise à jour vers **v{_INTEGRATION_VERSION}** terminée. "
+                    f"Commentaires, questions, idées ? Utilisez les nouvelles "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Rapports de bugs toujours via [Issues]({_iss_url}).",
+                ),
+                "es": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Actualización a **v{_INTEGRATION_VERSION}** completada. "
+                    f"¿Comentarios, preguntas, ideas? Usa las nuevas "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Informes de errores siguen en [Issues]({_iss_url}).",
+                ),
+                "it": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Aggiornamento a **v{_INTEGRATION_VERSION}** completato. "
+                    f"Feedback, domande, idee? Usa le nuove "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Segnalazioni di bug ancora su [Issues]({_iss_url}).",
+                ),
+                "nl": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Bijgewerkt naar **v{_INTEGRATION_VERSION}**. "
+                    f"Feedback, vragen, ideeën? Gebruik de nieuwe "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bugmeldingen nog steeds via [Issues]({_iss_url}).",
+                ),
+                "pl": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Aktualizacja do **v{_INTEGRATION_VERSION}** zakończona. "
+                    f"Opinie, pytania, pomysły? Skorzystaj z nowych "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Zgłoszenia błędów nadal przez [Issues]({_iss_url}).",
+                ),
+                "pt": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Atualização para **v{_INTEGRATION_VERSION}** concluída. "
+                    f"Feedback, perguntas, ideias? Use as novas "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Relatórios de bugs ainda via [Issues]({_iss_url}).",
+                ),
+                "ru": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Обновление до **v{_INTEGRATION_VERSION}** завершено. "
+                    f"Отзывы, вопросы, идеи? Используйте новые "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Сообщения об ошибках по-прежнему в [Issues]({_iss_url}).",
+                ),
+                "uk": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"Оновлення до **v{_INTEGRATION_VERSION}** завершено. "
+                    f"Відгуки, питання, ідеї? Використовуйте нові "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Звіти про помилки досі через [Issues]({_iss_url}).",
+                ),
+                "zh-Hans": (
+                    f"Bosch Smart Home Camera v{_INTEGRATION_VERSION}",
+                    f"已更新至 **v{_INTEGRATION_VERSION}**。"
+                    f"反馈、问题、建议？请使用新的 "
+                    f"[GitHub Discussions]({_disc_url})。"
+                    f"错误报告请继续通过 [Issues]({_iss_url}) 提交。",
+                ),
+            }
+            _lang_raw = (hass.config.language or "en").lower()
+            # zh-CN / zh-Hans normalisation
+            if _lang_raw.startswith("zh"):
+                _lang_key = "zh-Hans"
+            else:
+                _lang_key = _lang_raw.split("-", 1)[0]
+            _title, _message = _lang_messages.get(_lang_key, _lang_messages["en"])
+            hass.async_create_task(
+                hass.services.async_call(
+                    "persistent_notification", "create",
+                    {
+                        "notification_id": f"{DOMAIN}_feedback_v{_INTEGRATION_VERSION}",
+                        "title": _title,
+                        "message": _message,
+                    },
+                    blocking=False,
+                )
+            )
+            # Persist version so the prompt won't fire again until next update
+            new_opts = dict(entry.options)
+            new_opts["feedback_hint_version"] = _INTEGRATION_VERSION
+            hass.config_entries.async_update_entry(entry, options=new_opts)
+    except Exception as _fb_err:
+        _LOGGER.debug("feedback-hint suppressed: %s", _fb_err)
 
     # Load the persistent maintenance-notification dedup key so a restart
     # mid-window does not re-fire the "Wartung läuft" alert. Stored as

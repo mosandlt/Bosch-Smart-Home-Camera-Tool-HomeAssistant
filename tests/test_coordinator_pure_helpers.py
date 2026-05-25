@@ -14,7 +14,7 @@ Methods covered:
   - `_proxy_hash_from_rcp_base`     — static URL parser
   - `clock_offset`, `rcp_lan_ip`, `rcp_product_name`, `rcp_bitrate_ladder`
   - `get_quality`, `set_quality`, `get_quality_params`
-  - `motion_settings`, `audio_alarm_settings`, `recording_options`
+  - `motion_settings`, `recording_options`
   - `clear_stream_warming`, `is_stream_warming` (3 stale-clear scenarios)
   - `record_stream_error`, `record_stream_success`
   - `get_model_config`
@@ -56,7 +56,6 @@ def _make_coord(**overrides) -> SimpleNamespace:
         _rcp_session_cache={},
         _quality_preference={},
         _proxy_url_cache={},
-        _audio_alarm_cache={},
         _hw_version={},
         _last_status=0.0,
         _offline_since={},
@@ -476,21 +475,6 @@ class TestSettingsReaders:
         assert BoschCameraCoordinator.motion_settings(coord, CAM_A) == {
             "enabled": True, "motionAlarmConfiguration": "HIGH",
         }
-
-    def test_audio_alarm_settings_prefers_persistent_cache(self):
-        """data[cam_id]['audioAlarm'] is transient (rebuilt each tick).
-        The persistent cache must win so stale `data` doesn't drop the
-        user's audio-alarm config between slow-tier ticks."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord(data={CAM_A: {"audioAlarm": {"transient": True}}})
-        coord._audio_alarm_cache[CAM_A] = {"persisted": True}
-        # Persistent cache wins
-        assert BoschCameraCoordinator.audio_alarm_settings(coord, CAM_A) == {"persisted": True}
-
-    def test_audio_alarm_settings_falls_back_to_data(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord(data={CAM_A: {"audioAlarm": {"only-in-data": True}}})
-        assert BoschCameraCoordinator.audio_alarm_settings(coord, CAM_A) == {"only-in-data": True}
 
     def test_recording_options(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator

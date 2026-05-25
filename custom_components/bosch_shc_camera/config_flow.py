@@ -64,6 +64,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     ],
     "stream": [
         "stream_connection_type", "live_buffer_mode", "enable_go2rtc",
+        "use_mjpeg_snapshot",
     ],
     "fcm": [
         "enable_fcm_push", "fcm_push_mode", "mark_events_read",
@@ -528,7 +529,8 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                       "enable_nvr",
                       "enable_go2rtc",
                       "enable_webhook_delivery",
-                      "enable_ptz_controls"]:
+                      "enable_ptz_controls",
+                      "use_mjpeg_snapshot"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
@@ -664,6 +666,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 vol.Optional(
                     "enable_go2rtc",
                     default=bool(opts.get("enable_go2rtc", True)),
+                ): bool,
+                vol.Optional(
+                    "use_mjpeg_snapshot",
+                    default=bool(opts.get("use_mjpeg_snapshot", False)),
                 ): bool,
             }),
             {"collapsed": True},

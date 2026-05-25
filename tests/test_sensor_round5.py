@@ -77,7 +77,6 @@ def _coord(**overrides):
         is_camera_online=lambda cid: True,
         clock_offset=lambda cid: None,
         motion_settings=lambda cid: None,
-        audio_alarm_settings=lambda cid: None,
         recording_options=lambda cid: None,
         rcp_lan_ip=lambda cid: None,
         rcp_bitrate_ladder=lambda cid: None,
@@ -428,41 +427,6 @@ def test_motion_sensitivity_extra_attrs():
     sw = _make_sensor(BoschMotionSensitivitySensor, c)
     attrs = sw.extra_state_attributes
     assert attrs["enabled"] is True
-
-
-# ── BoschAudioAlarmSensor ─────────────────────────────────────────────────────
-
-
-def test_audio_alarm_sensor_none():
-    from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-
-    sw = _make_sensor(BoschAudioAlarmSensor)
-    assert sw.native_value is None
-
-
-def test_audio_alarm_sensor_enabled():
-    from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-
-    c = _coord()
-    c.audio_alarm_settings = lambda cid: {"enabled": True, "threshold": 54}
-    sw = _make_sensor(BoschAudioAlarmSensor, c)
-    assert sw.native_value == "enabled"
-
-
-def test_audio_alarm_sensor_disabled():
-    from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-
-    c = _coord()
-    c.audio_alarm_settings = lambda cid: {"enabled": False, "threshold": 54}
-    sw = _make_sensor(BoschAudioAlarmSensor, c)
-    assert sw.native_value == "disabled"
-
-
-def test_audio_alarm_sensor_extra_attrs_empty():
-    from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-
-    sw = _make_sensor(BoschAudioAlarmSensor)
-    assert sw.extra_state_attributes == {}
 
 
 # ── BoschLastEventTypeSensor ──────────────────────────────────────────────────

@@ -33,9 +33,6 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 @pytest.fixture
 def coord():
-    def _audio_alarm_settings(cam_id: str) -> dict:
-        return {"threshold": 54, "enabled": True, "audioAlarmConfiguration": "CUSTOM", "sensitivity": 0}
-
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -45,7 +42,6 @@ def coord():
                     "firmwareVersion": "9.40.25",
                     "macAddress": "aa:bb:cc:dd:ee:ff",
                 },
-                "audioAlarm": {},
             }
         },
         last_update_success=True,
@@ -61,7 +57,6 @@ def coord():
         _icon_led_brightness_cache={},
         _alarm_settings_cache={},
         _shc_state_cache={CAM_ID: {}},
-        audio_alarm_settings=_audio_alarm_settings,
         async_put_camera=AsyncMock(return_value=True),
         async_cloud_set_pan=AsyncMock(),
         async_cloud_set_light_component=AsyncMock(),
@@ -88,11 +83,6 @@ def coord_indoor(coord):
 def _make_pan(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschPanNumber
     return BoschPanNumber(coord, CAM_ID, entry, pan_limit=120)
-
-
-def _make_audio_threshold(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-    return BoschAudioThresholdNumber(coord, CAM_ID, entry)
 
 
 def _make_speaker_level(coord, entry):
@@ -160,17 +150,11 @@ def _make_pre_alarm_delay(coord_indoor, entry):
     return BoschPreAlarmDelayNumber(coord_indoor, CAM_ID, entry)
 
 
-def _make_audio_alarm_sensitivity(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import BoschAudioAlarmSensitivityNumber
-    return BoschAudioAlarmSensitivityNumber(coord_indoor, CAM_ID, entry)
-
-
 # ── outdoor-coord classes ─────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("factory", [
     _make_pan,
-    _make_audio_threshold,
     _make_speaker_level,
     _make_front_light_intensity,
     _make_lens_elevation,
@@ -192,7 +176,6 @@ def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
 
 @pytest.mark.parametrize("factory", [
     _make_pan,
-    _make_audio_threshold,
     _make_speaker_level,
     _make_front_light_intensity,
     _make_lens_elevation,
@@ -223,7 +206,6 @@ def test_has_entity_name_true_outdoor(factory, coord, entry):
     _make_alarm_delay,
     _make_alarm_activation_delay,
     _make_pre_alarm_delay,
-    _make_audio_alarm_sensitivity,
 ])
 def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
     """_attr_name must not start with 'Bosch ' for indoor-coord classes."""
@@ -239,7 +221,6 @@ def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
     _make_alarm_delay,
     _make_alarm_activation_delay,
     _make_pre_alarm_delay,
-    _make_audio_alarm_sensitivity,
 ])
 def test_has_entity_name_true_indoor(factory, coord_indoor, entry):
     """_attr_has_entity_name must be True (own or inherited) for all indoor-coord classes."""

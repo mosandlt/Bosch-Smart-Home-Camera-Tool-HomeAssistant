@@ -95,12 +95,14 @@
             "data": {
               "stream_connection_type": "Stream-Verbindungstyp",
               "live_buffer_mode": "Puffer-Verhalten (HLS Player)",
-              "enable_go2rtc": "go2rtc WebRTC (geringe Latenz ~2 Sek.)"
+              "enable_go2rtc": "go2rtc WebRTC (geringe Latenz ~2 Sek.)",
+              "use_mjpeg_snapshot": "MJPEG inst=3 Snapshot (Gen2, LAN)"
             },
             "data_description": {
               "stream_connection_type": "Standard-Verbindungstyp für Live-Streams.\n• **auto** (empfohlen): Erst lokales Netzwerk (LAN) versuchen, bei Fehler automatisch auf Bosch Cloud-Proxy wechseln.\n• **local**: Nur direktes LAN — kein Internet nötig. Schnelleres RTSP, aber langsamere Snapshots (~6–10 s). Verbindung wird alle 50 s automatisch erneuert.\n• **remote**: Immer über Bosch Cloud-Proxy. Snapshots schneller (~0.4–1.9 s). Standard-Fallback wenn LAN nicht erreichbar.\nDer 'Stream Modus'-Select-Entity überschreibt diese Einstellung zur Laufzeit ohne Neustart.",
               "live_buffer_mode": "Wie viele Sekunden Video der Player zwischenpuffert, bevor er anzeigt. Mehr Puffer = weniger Ruckler, aber höhere Verzögerung zur Echtzeit.\n• **Latenz**: kleiner Puffer (~4-6 s Verzögerung). Auf Wi-Fi mit Schwankungen kann es ruckeln.\n• **Ausgewogen** (empfohlen): mittlerer Puffer (~8-10 s). Robust gegen typische Wi-Fi-Hänger.\n• **Stabil**: großer Puffer (~12-15 s). Kein Ruckeln auch bei schwachen Verbindungen, aber spürbar verzögert.\nÄndert nur die Card-Anzeige — keine Auswirkung auf Kamera, Aufnahme oder Snapshots.",
-              "enable_go2rtc": "Live-Streams automatisch beim mitgelieferten go2rtc von HA registrieren — ermöglicht WebRTC-Wiedergabe (~2 Sek. Latenz statt ~10 Sek. HLS). Empfohlen. Nur deaktivieren wenn du eine eigene go2rtc-Konfiguration nutzt."
+              "enable_go2rtc": "Live-Streams automatisch beim mitgelieferten go2rtc von HA registrieren — ermöglicht WebRTC-Wiedergabe (~2 Sek. Latenz statt ~10 Sek. HLS). Empfohlen. Nur deaktivieren wenn du eine eigene go2rtc-Konfiguration nutzt.",
+              "use_mjpeg_snapshot": "**Nur Gen2-Kameras (LAN erforderlich).** Wenn AN: Snapshot-Anfragen erfassen direkt einen JPEG-Frame aus dem RTSP inst=3 MJPEG-Stream der Kamera via FFmpeg. Schneller als der Cloud-Proxy-Pfad (~150–300 ms statt ~500 ms) und funktioniert ohne aktive Live-Stream-Sitzung. Benötigt zwischengespeicherte LAN-Zugangsdaten — diese werden automatisch gespeichert, wenn das erste Mal ein Live-Stream geöffnet wird. Fällt auf den normalen Snapshot-Pfad zurück wenn FFmpeg fehlschlägt oder Zugangsdaten fehlen. **Standardmäßig aktiviert — fällt automatisch auf den Cloud-Proxy-Pfad zurück wenn nicht anwendbar (Gen1-Kameras, keine LAN-Zugangsdaten, FFmpeg-Fehler).**"
             }
           },
           "fcm": {
@@ -326,9 +328,6 @@
       "pre_alarm": {
         "name": "Pre-Alarm"
       },
-      "audio_alarm": {
-        "name": "Geräusch-Erkennung"
-      },
       "panic_alarm": {
         "name": "Sirene auslösen"
       },
@@ -342,9 +341,6 @@
     "number": {
       "pan_position": {
         "name": "Schwenkposition"
-      },
-      "audio_threshold": {
-        "name": "Audio-Schwellenwert"
       },
       "speaker_level": {
         "name": "Lautsprecher-Lautstärke"
@@ -384,9 +380,6 @@
       },
       "pre_alarm_delay": {
         "name": "Pre-Alarm-Dauer"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "Geräusch-Empfindlichkeit"
       },
       "intrusion_sensitivity": {
         "name": "Einbruch-Erkennungsempfindlichkeit"
@@ -521,9 +514,6 @@
       "motion_sensitivity": {
         "name": "Bewegungsempfindlichkeit"
       },
-      "audio_alarm": {
-        "name": "Audio-Alarm"
-      },
       "last_event_type": {
         "name": "Letzter Ereignistyp",
         "state": {
@@ -632,6 +622,15 @@
       },
       "stream_url_sub": {
         "name": "Stream-URL (Sub)"
+      },
+      "onvif_scopes": {
+        "name": "ONVIF-Scopes"
+      },
+      "rcp_version": {
+        "name": "RCP-Version"
+      },
+      "cloud_feature_flags": {
+        "name": "Cloud-Feature-Flags"
       }
     }
   },

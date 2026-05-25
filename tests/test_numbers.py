@@ -45,7 +45,6 @@ def stub_coord():
         _mic_level_cache={CAM_ID: 50},
         _speaker_level_cache={CAM_ID: 75},
         _white_balance_cache={CAM_ID: 5000},
-        _audio_alarm_cache={CAM_ID: {"enabled": True, "threshold": 65}},
         _motion_light_sensitivity_cache={CAM_ID: 0.6},
         _darkness_threshold_cache={CAM_ID: 0.3},
         _power_led_brightness_cache={CAM_ID: 0.5},
@@ -123,24 +122,6 @@ class TestPanNumber:
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         await n.async_set_native_value(50)
         stub_coord.async_cloud_set_pan.assert_called_once_with(CAM_ID, 50)
-
-
-# ── BoschAudioThresholdNumber ───────────────────────────────────────────
-
-
-class TestAudioThresholdNumber:
-    def test_construction(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        n = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        # threshold range 0-100 dB
-        assert n._attr_native_min_value == 0
-        assert n._attr_native_max_value == 100
-        assert n._attr_native_unit_of_measurement == "dB"
-
-    def test_disabled_by_default(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        n = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert n._attr_entity_registry_enabled_default is False
 
 
 # ── BoschSpeakerLevelNumber ─────────────────────────────────────────────

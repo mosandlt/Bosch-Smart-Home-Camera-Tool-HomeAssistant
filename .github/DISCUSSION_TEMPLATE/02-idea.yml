@@ -1,0 +1,56 @@
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got a feature idea? Great! Describe it below so others can vote and comment.
+        (Feature-Wunsch? Beschreib ihn unten damit andere abstimmen können.)
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration Version you are using
+      placeholder: "v13.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: cam_model
+    attributes:
+      label: Relevant Camera Model(s)
+      options:
+        - Eyes Outdoor (Gen1)
+        - 360° Indoor (Gen1)
+        - Eyes Outdoor II (Gen2)
+        - Eyes Indoor II (Gen2)
+        - All / model-agnostic
+      multiple: true
+    validations:
+      required: false
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case
+      description: "What problem does this solve? What workflow would it enable?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: "Describe your idea in detail. If you have a UI mockup or config snippet, paste it here."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: "Any workarounds you already tried?"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing Ideas discussions and did not find a duplicate
+          required: true

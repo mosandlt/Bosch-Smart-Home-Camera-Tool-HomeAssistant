@@ -19,7 +19,6 @@ from custom_components.bosch_shc_camera.switch import (
     BoschAmbientLightSwitch,
     BoschSoftLightFadingSwitch,
     BoschIntrusionDetectionSwitch,
-    BoschAudioAlarmSwitch,
 )
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
@@ -57,7 +56,6 @@ def _make_coord(**overrides):
         hass=MagicMock(),
         options={"recording_quality": "high"},
         _intrusion_config={CAM_ID: {}},
-        _audio_alarm_settings={CAM_ID: {}},
         _notifications_pref={CAM_ID: False},
         _audio_enabled={CAM_ID: True},
         _privacy_sound_cache={CAM_ID: False},
@@ -74,10 +72,7 @@ def _make_coord(**overrides):
         _ambient_light_cache={CAM_ID: False},
         _soft_light_fading_cache={CAM_ID: False},
         _intrusion_detection_cache={CAM_ID: False},
-        _audio_alarm_cache={CAM_ID: False},
-        _audio_alarm_set_at={},
         _intrusion_config_cache={CAM_ID: {}},
-        audio_alarm_settings=lambda cid: {},
         _alarm_system_cache={CAM_ID: False},
         _alarm_mode_cache={CAM_ID: "STANDARD"},
         _pre_alarm_cache={CAM_ID: False},
@@ -258,21 +253,6 @@ async def test_intrusion_detection_empty_config_returns():
     coord.async_put_camera.assert_not_called()
 
 
-# ── Line 1624: BoschAudioAlarmSwitch empty settings early return ─────────────
-
-@pytest.mark.asyncio
-async def test_audio_alarm_empty_settings_returns():
-    """Line 1624: empty _settings dict → early return without async_put_camera."""
-    coord = _make_coord()
-    coord.audio_alarm_settings = lambda cid: None  # → _settings returns {}
-    sw = BoschAudioAlarmSwitch(coord, CAM_ID, _make_entry())
-    sw.async_write_ha_state = MagicMock()
-    with patch(f"{switch_mod.__name__}._warn_if_privacy_on", new=AsyncMock(return_value=False)):
-        with patch(f"{switch_mod.__name__}._is_gen2_indoor", return_value=False):
-            await sw._set(True)
-    coord.async_put_camera.assert_not_called()
-
-
 # ── Lines 195, 219, 222-225: async_setup_entry entity creation gates ─────────
 
 @pytest.mark.asyncio
@@ -318,10 +298,7 @@ async def test_setup_entry_audio_notification_when_sound_supported():
 async def test_setup_entry_gen2_indoor_alarm_switches():
     """Lines 222-226: 3 alarm switches added for Gen2 Indoor cameras.
 
-    BoschAudioAlarmSwitch parked in v12.0.4 — Bosch cloud accepts the PUT but
-    the camera's mic processing doesn't actually activate; trigger not yet
-    found in HTTPS traffic. Switch class is kept but removed from setup until
-    the missing piece is identified.
+    BoschAudioAlarmSwitch removed in v13.x — audio alarm feature dropped.
     """
     coord = _make_coord()
     coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
@@ -336,9 +313,6 @@ async def test_setup_entry_gen2_indoor_alarm_switches():
     assert "BoschAlarmSystemArmSwitch" in classes
     assert "BoschAlarmModeSwitch" in classes
     assert "BoschPreAlarmSwitch" in classes
-    assert "BoschAudioAlarmSwitch" not in classes, (
-        "BoschAudioAlarmSwitch parked in v12.0.4 — see CHANGELOG"
-    )
     assert "BoschPanicAlarmSwitch" in classes, (
         "BoschPanicAlarmSwitch added in v12.0.4 for Gen2 siren trigger"
     )

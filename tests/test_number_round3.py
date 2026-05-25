@@ -44,7 +44,6 @@ def _stub_coord(**overrides):
         token="tok-A",
         options={},
         motion_settings=lambda cid: {},
-        audio_alarm_settings=lambda cid: {"enabled": True, "threshold": 50, "sensitivity": 0, "audioAlarmConfiguration": "CUSTOM"},
         async_put_camera=AsyncMock(return_value=True),
         async_cloud_set_light_component=AsyncMock(),
         is_camera_online=lambda cid: True,
@@ -169,58 +168,6 @@ class TestAsyncSetupEntryNumberGating:
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschWhiteBalanceNumber" not in entity_classes, \
             "WhiteBalanceNumber must NOT be added for HOME_Eyes_Indoor (Indoor II has no RGB lights)"
-
-
-# ── BoschAudioThresholdNumber ─────────────────────────────────────────────────
-
-class TestAudioThresholdNumber:
-    def test_native_value_from_audio_alarm_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        stub_coord.audio_alarm_settings = lambda cid: {"threshold": 72, "enabled": True}
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity.native_value == 72.0, "Must read threshold from audio_alarm_settings"
-
-    def test_native_value_none_when_no_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        stub_coord.audio_alarm_settings = lambda cid: {}  # empty dict — threshold key missing (None guard is in available)
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity.native_value is None, "Must return None when threshold key absent from settings dict"
-
-    def test_available_requires_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        stub_coord.audio_alarm_settings = lambda cid: {}
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity.available is False, "Must be unavailable when settings empty"
-
-    def test_available_true_with_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        stub_coord.audio_alarm_settings = lambda cid: {"threshold": 50}
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity.available is True, "Must be available when settings exist"
-
-    def test_disabled_by_default(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity._attr_entity_registry_enabled_default is False, \
-            "AudioThreshold must be opt-in (disabled by default)"
-
-    @pytest.mark.asyncio
-    async def test_set_value_sends_full_body(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        stub_coord.audio_alarm_settings = lambda cid: {
-            "threshold": 50, "enabled": True, "sensitivity": 0, "audioAlarmConfiguration": "CUSTOM"
-        }
-        stub_coord.data[CAM_ID]["audioAlarm"] = {"threshold": 50}
-        entity = BoschAudioThresholdNumber(stub_coord, CAM_ID, stub_entry)
-        entity.async_write_ha_state = MagicMock()
-        entity._cam_id = CAM_ID
-        entity.coordinator = stub_coord
-        entity.hass = SimpleNamespace()
-        await entity.async_set_native_value(75.0)
-        call_args = stub_coord.async_put_camera.call_args
-        assert call_args[0][1] == "audioAlarm", "Must PUT to audioAlarm endpoint"
-        assert call_args[0][2]["threshold"] == 75, "Must send threshold=75"
-        assert "enabled" in call_args[0][2], "Must preserve enabled field in body"
 
 
 # ── BoschFrontLightIntensityNumber ────────────────────────────────────────────

@@ -267,7 +267,6 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._lighting_options_cache == {}
     assert coord._intrusion_config_cache == {}
     assert coord._alarm_settings_cache == {}
-    assert coord._audio_alarm_cache == {}
     assert coord._alarm_status_cache == {}
     assert coord._arming_cache == {}
     assert coord._icon_led_brightness_cache == {}
@@ -284,7 +283,6 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
         "_timestamp_set_at",
         "_ledlights_set_at",
         "_arming_set_at",
-        "_audio_alarm_set_at",
     ):
         assert getattr(coord, attr) == {}, f"{attr} must default to {{}}"
     assert coord._WRITE_LOCK_SECS == 30.0

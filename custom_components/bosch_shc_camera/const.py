@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.1.1"
+CARD_VERSION = "13.2.0"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -103,6 +103,21 @@ DEFAULT_OPTIONS = {
     # The card pre-initializes the backend stream while the overlay is
     # showing so video is warm by the time the user taps.
     "auto_play_default": "lan",
+    # MJPEG inst=3 snapshot source (Gen2 cameras only).
+    # When True: async_camera_image() tries to fetch one JPEG frame directly
+    # from the camera's LAN RTSP inst=3 stream via FFmpeg subprocess before
+    # falling back to the normal cloud-proxy / snap.jpg path. Bypasses the
+    # H.264-transcode overhead for snapshot requests (~150-300 ms vs ~500 ms
+    # cloud-proxy round-trip on a healthy LAN).
+    # KNOWN ISSUE (2026-05-25): FFmpeg's built-in TLS stack does not negotiate
+    # cleanly with Bosch's RTSPS server on port 443 — returns "Invalid data
+    # found when processing input" (FFmpeg code 183) even with `-tls_verify 0`.
+    # The reliable path is to route FFmpeg through our existing tls_proxy.py
+    # (plain RTSP on 127.0.0.1:<port>), but that requires non-trivial setup-
+    # tearing per snapshot which would defeat the speed benefit. Until that's
+    # implemented, opt-in only — keeps the code path available for testing
+    # and skips it for normal users so warn-spam stays out of the logs.
+    "use_mjpeg_snapshot": False,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.1.1";
+const CARD_VERSION = "13.2.0";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -416,13 +416,11 @@ class BoschCameraCard extends HTMLElement {
       alarmSystemArm:  config.alarm_system_arm_entity  || `switch.${base}_alarmanlage`,
       alarmMode:       config.alarm_mode_entity        || `switch.${base}_sirene`,
       preAlarm:        config.pre_alarm_entity         || `switch.${base}_pre_alarm`,
-      audioAlarm:      config.audio_alarm_entity       || `switch.${base}_audio_plus`,
       alarmState:      config.alarm_state_entity       || `sensor.${base}_alarm_status`,
       sirenDuration:   config.siren_duration_entity    || `number.${base}_sirenen_dauer`,
       alarmActivationDelay: config.alarm_activation_delay_entity || `number.${base}_alarm_verzogerung`,
       preAlarmDelay:   config.prealarm_delay_entity    || `number.${base}_pre_alarm_dauer`,
       powerLedBrightness: config.power_led_entity      || `number.${base}_power_led`,
-      audioAlarmSensitivity: config.audio_alarm_sensitivity_entity || `number.${base}_audio_plus_empfindlichkeit`,
       // Image rotation 180° (indoor cameras only — Gen1 360 + Gen2 Indoor II).
       // HA slugifies "180°" to "180deg" — this default matches the actual entity slug.
       imageRotation180: config.image_rotation_180_entity || `switch.${base}_bild_180deg_drehen`,
@@ -2639,7 +2637,6 @@ class BoschCameraCard extends HTMLElement {
                 <div class="sw-row" id="btn-alarm-arm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span>Alarmanlage scharf</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div class="sw-row" id="btn-alarm-mode" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span>Sirene (75 dB)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div class="sw-row" id="btn-prealarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span>Pre-Alarm (rote LED)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div class="sw-row" id="btn-audio-alarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 013 3v8a3 3 0 01-6 0V4a3 3 0 013-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4"/></svg><span>Geräusch-Erkennung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div id="power-led-row" style="display:none;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Power-LED</span><input type="range" id="power-led-slider" min="0" max="100" step="5" style="flex:1;accent-color:#ff9500;height:4px"><span id="power-led-value" style="min-width:34px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
@@ -3011,10 +3008,6 @@ class BoschCameraCard extends HTMLElement {
     const preAlarmBtn = this.shadowRoot.getElementById("btn-prealarm");
     if (preAlarmBtn) preAlarmBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
       this._toggleSwitch(this._entities.preAlarm)
-    );
-    const audioAlarmBtn = this.shadowRoot.getElementById("btn-audio-alarm");
-    if (audioAlarmBtn) audioAlarmBtn.querySelector(".sw-toggle")?.addEventListener("click", () =>
-      this._toggleSwitch(this._entities.audioAlarm)
     );
     // Gen2 Indoor II: Power-LED brightness slider
     const powerLedSlider = this.shadowRoot.getElementById("power-led-slider");
@@ -4490,7 +4483,6 @@ class BoschCameraCard extends HTMLElement {
       ["btn-alarm-arm",   ents.alarmSystemArm],
       ["btn-alarm-mode",  ents.alarmMode],
       ["btn-prealarm",    ents.preAlarm],
-      ["btn-audio-alarm", ents.audioAlarm],
     ]) {
       const row = this.shadowRoot.getElementById(rowId);
       if (row) row.style.display = (hasAlarmSystem && entId && hass.states[entId]) ? "flex" : "none";
@@ -4498,7 +4490,6 @@ class BoschCameraCard extends HTMLElement {
     this._updateToggleBtn("btn-alarm-arm",   ents.alarmSystemArm, hass.states[ents.alarmSystemArm]);
     this._updateToggleBtn("btn-alarm-mode",  ents.alarmMode,      hass.states[ents.alarmMode]);
     this._updateToggleBtn("btn-prealarm",    ents.preAlarm,       hass.states[ents.preAlarm]);
-    this._updateToggleBtn("btn-audio-alarm", ents.audioAlarm,     hass.states[ents.audioAlarm]);
 
     // Gen2 Indoor II — Power-LED brightness slider
     const powerLedRow = this.shadowRoot.getElementById("power-led-row");

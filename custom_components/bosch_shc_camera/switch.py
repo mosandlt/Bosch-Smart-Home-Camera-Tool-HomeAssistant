@@ -219,19 +219,11 @@ async def async_setup_entry(
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
         if has_sound:
             entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio"))
-        # Gen2 Indoor II — alarm system (integrated 75 dB siren) + audio alarm (glass/smoke/CO)
+        # Gen2 Indoor II — alarm system (integrated 75 dB siren)
         if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             entities.append(BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
-            # BoschAudioAlarmSwitch parked v12.0.4: PUT body matches the iOS app
-            # byte-for-byte (verified via mitm capture) and Bosch returns 204, but
-            # the camera's mic processing does NOT activate. Re-toggling via the
-            # official app (with same body shape) does activate it. Difference
-            # not visible at the HTTP layer — possibly an implicit RCP local
-            # call or push-token-subscription side-effect that the app does over
-            # its LOCAL stream connection (binary, not in HTTP traffic).
-            # Re-enable once we know the actual trigger.
         # Gen2 panic-alarm — manual siren trigger via PUT /panic_alarm.
         # Gen1 keeps the auto-stop button in button.py (BoschAcousticAlarmButton).
         if get_model_config(hw_version).generation >= 2:
@@ -1681,98 +1673,6 @@ class BoschPreAlarmSwitch(_BoschAlarmSettingsSwitchBase):
         self._attr_icon            = "mdi:led-on"
         self._attr_translation_key = "pre_alarm"
         self._attr_entity_category = EntityCategory.CONFIG
-
-
-class BoschAudioAlarmSwitch(_BoschSwitchBase):
-    """Switch: basic sound/noise detection ON/OFF (free tier, not Audio+ premium).
-
-    Maps to the "Geräusche" toggle in the iOS app under Ereignisse → Audio.
-    This is the FREE sound-threshold detection that triggers an event when the
-    ambient noise level exceeds the configured threshold.
-
-    Do NOT confuse with Audio+ (paid subscription) which adds glass-break / smoke /
-    CO detection — Audio+ uses a different `audioAlarmConfiguration` value and is
-    gated behind a /v11/purchases check. When this switch is ON, the camera's
-    audioAlarmConfiguration is "CUSTOM" (free threshold-based detection); "OFF"
-    fully disables sound detection.
-
-    PUT /v11/video_inputs/{id}/audioAlarm preserves sensitivity/threshold and
-    flips both `enabled` and `audioAlarmConfiguration` together — the cloud
-    accepts a mismatched pair (enabled=true + config="OFF") with 204 but never
-    applies it. Confirmed via mitm capture of the iOS app 2026-05-13.
-    """
-
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Geraeusch-Erkennung"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_audio_alarm"
-        self._attr_icon            = "mdi:ear-hearing"
-        self._attr_translation_key = "audio_alarm"
-        self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def _settings(self) -> dict[str, Any]:
-        return self.coordinator.audio_alarm_settings(self._cam_id) or {}
-
-    @property
-    def is_on(self) -> bool | None:
-        s = self._settings
-        if not s:
-            return None
-        return bool(s.get("enabled", False))
-
-    @property
-    def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-            and bool(self._settings)
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        s = self._settings
-        return {
-            "sensitivity":  s.get("sensitivity"),
-            "threshold":    s.get("threshold"),
-            "configuration": s.get("audioAlarmConfiguration"),
-        }
-
-    async def _set(self, enabled: bool) -> None:
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Geräusch-Erkennung"):
-            return
-        current = dict(self._settings)
-        if not current:
-            return
-        current["enabled"] = enabled
-        # Bosch-Cloud silently 204s a PUT with enabled=true but
-        # audioAlarmConfiguration="OFF" — the value never actually flips.
-        # mitm capture (2026-05-13) of the iOS app confirms: app always pairs
-        # enabled=true with "CUSTOM" and enabled=false with "OFF". Also pin
-        # sensitivity to 0 (CGI default) when the GET response omitted it,
-        # since the app always sends it.
-        current["audioAlarmConfiguration"] = "CUSTOM" if enabled else "OFF"
-        current.setdefault("sensitivity", 0)
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "audioAlarm", current
-        )
-        if success:
-            # is_on reads from coordinator._audio_alarm_cache (persistent across
-            # ticks), not data[cam_id]["audioAlarm"] (rebuilt every 60 s). Without
-            # updating the cache + write-lock, the next slow-tier poll within the
-            # eventual-consistency window reverts to the stale enabled=False.
-            self.coordinator._audio_alarm_cache[self._cam_id] = current
-            self.coordinator._audio_alarm_set_at[self._cam_id] = time.monotonic()
-            cam_data = self.coordinator.data.get(self._cam_id)
-            if cam_data is not None:
-                cam_data["audioAlarm"] = current
-        self.async_write_ha_state()
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._set(True)
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._set(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -68,7 +68,6 @@ def _stub_coord(**overrides):
         last_update_success=True,
         options={"enable_fcm_push": True, "enable_sensors": True, "enable_nvr": False},
         motion_settings=lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH"},
-        audio_alarm_settings=lambda cid: {"enabled": True, "threshold": 50},
         is_camera_online=lambda cid: True,
         is_stream_warming=lambda cid: False,
     )

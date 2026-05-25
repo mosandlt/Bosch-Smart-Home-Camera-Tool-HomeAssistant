@@ -64,7 +64,6 @@ def _stub_coord(**overrides):
         token="tok-A",
         options={},
         motion_settings=lambda cid: {},
-        audio_alarm_settings=lambda cid: {},
         async_put_camera=AsyncMock(return_value=True),
         async_cloud_set_light_component=AsyncMock(),
         is_camera_online=lambda cid: True,
@@ -136,14 +135,6 @@ class TestDeviceInfoReturns:
         assert info["model"] == "Eyes Outdoor"
         assert info["sw_version"] == "9.40.25"
 
-    def test_audio_threshold_device_info(self):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        e = _make_entity(BoschAudioThresholdNumber)
-        info = e.device_info
-        assert info["manufacturer"] == "Bosch"
-        # mac populated → non-empty connections
-        assert info["connections"]
-
     def test_speaker_level_device_info(self):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
         e = _make_entity(BoschSpeakerLevelNumber)
@@ -162,35 +153,6 @@ class TestDeviceInfoReturns:
         e = _make_entity(BoschLensElevationNumber)
         info = e.device_info
         assert info["manufacturer"] == "Bosch"
-
-
-# ── L224 — AudioThresholdNumber privacy early return ───────────────────────
-
-
-class TestAudioThresholdPrivacyGuard:
-    """On Gen2-indoor cameras, setting audio threshold while privacy mode is on
-    must short-circuit before async_put_camera (line 224)."""
-
-    @pytest.mark.asyncio
-    async def test_privacy_on_skips_put(self):
-        from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-        # Indoor Gen2 to make _is_gen2_indoor return True
-        coord = _stub_coord()
-        coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
-        e = _make_entity(BoschAudioThresholdNumber, coord=coord)
-        # Need _model to match the gen2-indoor check the real switch helper uses
-        e._model = "HOME_Eyes_Indoor"
-
-        with patch(
-            "custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=True,
-        ), patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-            new=AsyncMock(return_value=True),
-        ):
-            await e.async_set_native_value(72)
-
-        # async_put_camera must NOT have been called
-        coord.async_put_camera.assert_not_called()
 
 
 # ── L541 — WhiteBalanceNumber.available ────────────────────────────────────
@@ -337,49 +299,3 @@ class TestDarknessThresholdAvailable:
         assert e.available is False
 
 
-# ── L943 — AudioAlarmSensitivity.available ────────────────────────────────
-
-
-class TestAudioAlarmSensitivityAvailable:
-    """`available` is the AND of coordinator-ok and non-empty audio_alarm_settings()."""
-
-    def test_available_true_when_settings_populated(self):
-        from custom_components.bosch_shc_camera.number import BoschAudioAlarmSensitivityNumber
-        coord = _stub_coord(
-            audio_alarm_settings=lambda cid: {"enabled": True, "threshold": 54},
-        )
-        e = _make_entity(BoschAudioAlarmSensitivityNumber, coord=coord)
-        assert e.available is True
-
-    def test_available_false_when_settings_empty(self):
-        from custom_components.bosch_shc_camera.number import BoschAudioAlarmSensitivityNumber
-        coord = _stub_coord(audio_alarm_settings=lambda cid: {})
-        e = _make_entity(BoschAudioAlarmSensitivityNumber, coord=coord)
-        assert e.available is False
-
-
-# ── L951 — AudioAlarmSensitivity empty-settings early return ───────────────
-
-
-class TestAudioAlarmSensitivityEmptySettingsGuard:
-    """Bug guard: if the slow-tier cache hasn't filled yet,
-    `async_set_native_value` must early-return rather than PUT an empty body
-    that would later fail validation on the cloud (line 951)."""
-
-    @pytest.mark.asyncio
-    async def test_empty_settings_returns_without_put(self):
-        from custom_components.bosch_shc_camera.number import BoschAudioAlarmSensitivityNumber
-
-        coord = _stub_coord(audio_alarm_settings=lambda cid: {})
-        e = _make_entity(BoschAudioAlarmSensitivityNumber, coord=coord)
-
-        # Force gen2-indoor path off so the privacy guard doesn't fire first
-        with patch(
-            "custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=False,
-        ):
-            await e.async_set_native_value(5)
-
-        # PUT must NOT have happened
-        coord.async_put_camera.assert_not_called()
-        # _last_written stays at default 0 (no optimistic update)
-        assert e._last_written == 0

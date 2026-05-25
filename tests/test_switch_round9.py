@@ -70,7 +70,6 @@ def _stub_coord(**overrides):
         is_session_stale=lambda cid: False,
         is_stream_warming=lambda cid: False,
         motion_settings=lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH"},
-        audio_alarm_settings=lambda cid: {"enabled": True, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "CUSTOM"},
         recording_options=lambda cid: {"recordSound": False},
         async_put_camera=AsyncMock(return_value=True),
         async_request_refresh=AsyncMock(),
@@ -389,77 +388,6 @@ class TestAlarmSettingsSwitchBase:
         stub_coord._alarm_settings_cache[CAM_ID] = {"alarmMode": "OFF", "preAlarmMode": "ON"}
         entity = BoschPreAlarmSwitch(stub_coord, CAM_ID, stub_entry)
         assert entity.is_on is True, "BoschPreAlarmSwitch must read preAlarmMode not alarmMode"
-
-
-# ── BoschAudioAlarmSwitch ─────────────────────────────────────────────────────
-
-class TestAudioAlarmSwitch:
-    def test_is_on_reads_enabled_from_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": True, "threshold": 60}
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        assert entity.is_on is True, "is_on must reflect enabled flag from audio_alarm_settings"
-
-    def test_is_on_false_when_disabled(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {"enabled": False}
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        assert entity.is_on is False, "is_on must be False when enabled=False"
-
-    def test_is_on_none_when_no_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: None
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        assert entity.is_on is None, "is_on must be None when audio_alarm_settings returns None"
-
-    def test_available_requires_settings(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {}
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        assert entity.available is False, "Must be unavailable when settings dict is empty"
-
-    def test_extra_attrs_expose_threshold_and_config(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.audio_alarm_settings = lambda cid: {
-            "enabled": True, "threshold": 42, "sensitivity": "LOW",
-            "audioAlarmConfiguration": "CUSTOM",
-        }
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        attrs = entity.extra_state_attributes
-        assert attrs["threshold"] == 42, "extra_attrs must expose threshold"
-        assert attrs["configuration"] == "CUSTOM", "extra_attrs must expose audioAlarmConfiguration"
-
-    @pytest.mark.asyncio
-    async def test_turn_on_updates_enabled_in_cam_data(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        settings = {"enabled": False, "threshold": 50, "sensitivity": "MEDIUM", "audioAlarmConfiguration": "OFF"}
-        stub_coord.audio_alarm_settings = lambda cid: dict(settings)
-        stub_coord.data[CAM_ID]["audioAlarm"] = dict(settings)
-        # v12.0.4: switch also writes to _audio_alarm_cache + _audio_alarm_set_at
-        stub_coord._audio_alarm_cache = {CAM_ID: dict(settings)}
-        stub_coord._audio_alarm_set_at = {}
-        stub_coord.async_put_camera = AsyncMock(return_value=True)
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        entity.async_write_ha_state = MagicMock()
-        await entity.async_turn_on()
-        assert stub_coord.data[CAM_ID]["audioAlarm"]["enabled"] is True, \
-            "coordinator.data audioAlarm must be updated on successful turn_on"
-        # v12.0.4: audioAlarmConfiguration must flip to "CUSTOM" when enabling
-        assert stub_coord.data[CAM_ID]["audioAlarm"]["audioAlarmConfiguration"] == "CUSTOM", \
-            "audioAlarmConfiguration must pair with enabled (Bosch silently 204s mismatched pairs)"
-
-    @pytest.mark.asyncio
-    async def test_gen2_indoor_privacy_blocks_turn_on(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-        stub_coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
-        stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
-        entity = BoschAudioAlarmSwitch(stub_coord, CAM_ID, stub_entry)
-        entity.async_write_ha_state = MagicMock()
-        hass_mock = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
-        entity.hass = hass_mock
-        stub_coord.async_put_camera = AsyncMock()
-        await entity.async_turn_on()
-        stub_coord.async_put_camera.assert_not_called()
 
 
 # ── BoschImageRotation180Switch ───────────────────────────────────────────────

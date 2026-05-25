@@ -57,7 +57,6 @@ def stub_coord():
         _ledlights_cache={CAM_ID: True},
         _arming_cache={},
         _rcp_privacy_cache={},
-        _audio_alarm_cache={CAM_ID: {}},
         last_update_success=True,
         options={"audio_default_on": True},
         token="token-AAA",
@@ -74,7 +73,6 @@ def stub_coord():
         _tear_down_live_stream=AsyncMock(),
         motion_settings=lambda cid: {"enabled": False, "motionAlarmConfiguration": "MEDIUM"},
         recording_options=lambda cid: {"recordSound": False},
-        audio_alarm_settings=lambda cid: {},
     )
     return coord
 

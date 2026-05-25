@@ -53,7 +53,6 @@ def _stub_coord(**overrides):
         _commissioned_cache={},
         _rules_cache={},
         _unread_events_cache={},
-        _audio_alarm_cache={},
         _rcp_alarm_catalog_cache={},
         _rcp_tls_cert_cache={},
         _rcp_network_services_cache={},
@@ -63,7 +62,6 @@ def _stub_coord(**overrides):
         # Coord helpers
         last_update_success=True,
         motion_settings=lambda cid: {},
-        audio_alarm_settings=lambda cid: {},
         clock_offset=lambda cid: None,
         rcp_lan_ip=lambda cid: None,
         rcp_bitrate_ladder=lambda cid: [],
@@ -263,38 +261,6 @@ class TestMotionSensitivitySensor:
         attrs = s.extra_state_attributes
         assert attrs["enabled"] is True
         assert attrs["sensitivity"] == "HIGH"
-
-
-# ── BoschAudioAlarmSensor ───────────────────────────────────────────────
-
-
-class TestAudioAlarmSensor:
-    def test_enabled(self, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        coord = _stub_coord()
-        coord.audio_alarm_settings = lambda cid: {"enabled": True, "threshold": 70}
-        s = BoschAudioAlarmSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == "enabled"
-
-    def test_disabled(self, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        coord = _stub_coord()
-        coord.audio_alarm_settings = lambda cid: {"enabled": False}
-        s = BoschAudioAlarmSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == "disabled"
-
-    def test_no_settings_returns_none(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        s = BoschAudioAlarmSensor(stub_coord, CAM_ID, stub_entry)
-        assert s.native_value is None
-
-    def test_extra_state_passes_through_threshold(self, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioAlarmSensor
-        coord = _stub_coord()
-        coord.audio_alarm_settings = lambda cid: {"enabled": True, "threshold": 65}
-        s = BoschAudioAlarmSensor(coord, CAM_ID, stub_entry)
-        attrs = s.extra_state_attributes
-        assert attrs["threshold"] == 65
 
 
 # ── BoschMovementEventsTodaySensor / BoschAudioEventsTodaySensor ────────

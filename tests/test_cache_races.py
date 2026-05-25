@@ -37,7 +37,6 @@ def coord_with_helpers():
         _privacy_set_at={},
         _light_set_at={},
         _notif_set_at={},
-        _audio_alarm_set_at={},
         _WRITE_LOCK_SECS=30.0,
     )
     return coord, BoschCameraCoordinator._is_write_locked

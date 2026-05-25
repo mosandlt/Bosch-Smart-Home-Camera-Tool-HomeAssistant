@@ -54,7 +54,6 @@ def _coord(
     image_rotation_180=None,
     nvr_user_intent=None,
     live_connections=None,
-    audio_alarm_settings_val=None,
     **kwargs,
 ):
     shc_state = {CAM_ID: {"privacy_mode": privacy_on}}
@@ -64,9 +63,6 @@ def _coord(
 
     def _ros(cam_id):
         return recording_options or {}
-
-    def _aas(cam_id):
-        return audio_alarm_settings_val or {}
 
     coord = SimpleNamespace(
         data={
@@ -78,7 +74,6 @@ def _coord(
                     "macAddress": "aa:bb:cc:dd:ee:ff",
                 },
                 "autofollow": autofollow_data,
-                "audioAlarm": audio_alarm_settings_val or {},
             }
         },
         last_update_success=True,
@@ -102,8 +97,6 @@ def _coord(
         _alarm_status_cache={},
         _arming_cache=arming_cache if arming_cache is not None else {},
         _arming_set_at={},
-        _audio_alarm_cache={CAM_ID: dict(audio_alarm_settings_val or {})},
-        _audio_alarm_set_at={},
         _image_rotation_180=image_rotation_180 if image_rotation_180 is not None else {},
         _nvr_user_intent=nvr_user_intent if nvr_user_intent is not None else {},
         _nvr_processes={},
@@ -113,7 +106,6 @@ def _coord(
         _privacy_sound_set_at={},
         motion_settings=_ms,
         recording_options=_ros,
-        audio_alarm_settings=_aas,
         token="test-token",
         async_put_camera=AsyncMock(return_value=True),
         async_request_refresh=AsyncMock(),
@@ -860,55 +852,6 @@ async def test_alarm_mode_turn_off():
 async def test_alarm_mode_set_skips_when_no_settings():
     """_set with empty settings exits early without calling async_put_camera."""
     sw = _make_alarm_mode_switch(settings={})
-    await sw.async_turn_on()
-    sw.coordinator.async_put_camera.assert_not_awaited()
-
-
-# ── BoschAudioAlarmSwitch ────────────────────────────────────────────────────
-
-
-def _make_audio_alarm_switch(audio_settings=None, hw="HOME_Eyes_Outdoor", privacy_on=False):
-    from custom_components.bosch_shc_camera.switch import BoschAudioAlarmSwitch
-
-    coord = _coord(hw=hw, privacy_on=privacy_on, audio_alarm_settings_val=audio_settings or {})
-    sw = BoschAudioAlarmSwitch.__new__(BoschAudioAlarmSwitch)
-    sw.coordinator = coord
-    sw._cam_id = CAM_ID
-    sw._cam_title = "Terrasse"
-    sw._model_name = "Outdoor"
-    sw._fw = "9.40.25"
-    sw._mac = ""
-    sw.hass = _make_hass()
-    sw.async_write_ha_state = MagicMock()
-    return sw
-
-
-def test_audio_alarm_is_on_true():
-    sw = _make_audio_alarm_switch({"enabled": True, "threshold": 54})
-    assert sw.is_on is True
-
-
-def test_audio_alarm_is_on_none_no_settings():
-    sw = _make_audio_alarm_switch()
-    assert sw.is_on is None
-
-
-@pytest.mark.asyncio
-async def test_audio_alarm_turn_on():
-    sw = _make_audio_alarm_switch({"enabled": False, "sensitivity": 0, "threshold": 54, "audioAlarmConfiguration": "CUSTOM"})
-    await sw.async_turn_on()
-    sw.coordinator.async_put_camera.assert_awaited_once()
-    body = sw.coordinator.async_put_camera.call_args[0][2]
-    assert body["enabled"] is True
-
-
-@pytest.mark.asyncio
-async def test_audio_alarm_gen2_indoor_privacy_blocked():
-    sw = _make_audio_alarm_switch(
-        audio_settings={"enabled": False, "threshold": 54},
-        hw="HOME_Eyes_Indoor",
-        privacy_on=True,
-    )
     await sw.async_turn_on()
     sw.coordinator.async_put_camera.assert_not_awaited()
 

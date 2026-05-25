@@ -58,7 +58,6 @@ async def async_setup_entry(
             BoschAmbientLightSensor(coordinator, cam_id, config_entry),
             BoschClockOffsetSensor(coordinator, cam_id, config_entry),
             BoschMotionSensitivitySensor(coordinator, cam_id, config_entry),
-            BoschAudioAlarmSensor(coordinator, cam_id, config_entry),
             BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
             BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
             BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
@@ -91,6 +90,10 @@ async def async_setup_entry(
         # Gen2 Indoor II — alarm state sensor
         if hw_setup in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             entities.append(BoschAlarmStateSensor(coordinator, cam_id, config_entry))
+        # F4: ONVIF scopes sensor (LAN, disabled by default)
+        entities.append(BoschOnvifScopesSensor(coordinator, cam_id, config_entry))
+        # F6: RCP protocol version sensor (LAN, disabled by default)
+        entities.append(BoschRcpVersionSensor(coordinator, cam_id, config_entry))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -99,6 +102,8 @@ async def async_setup_entry(
         # Stays available even when the cloud is unreachable — that is the
         # scenario it exists for.
         entities.append(BoschCloudMaintenanceSensor(coordinator, first_cam_id, config_entry))
+        # F13: Cloud feature-flags sensor (account-level, one per integration, disabled by default)
+        entities.append(BoschCloudFeatureFlagsSensor(coordinator, first_cam_id, config_entry))
     # Mini-NVR diagnostic sensor — surfaces drain-watcher state per camera so
     # users can answer "is recording reaching the target?". Disabled by
     # default; enable via the entity registry. One per camera.
@@ -518,41 +523,6 @@ class BoschMotionSensitivitySensor(_BoschSensorBase):
         return {
             "enabled": settings.get("enabled"),
             "sensitivity": settings.get("motionAlarmConfiguration"),
-        }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioAlarmSensor(_BoschSensorBase):
-    """Shows audio alarm enabled state and detection threshold."""
-
-    _attr_icon = "mdi:volume-high"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_entity_registry_enabled_default = False
-    _attr_translation_key = "audio_alarm"
-
-    @property
-    def name(self) -> str:
-        return f"Bosch {self._cam_title} Audio Alarm"
-
-    @property
-    def unique_id(self) -> str:
-        return f"bosch_shc_camera_{self._cam_id}_audio_alarm"
-
-    @property
-    def native_value(self) -> str | None:
-        settings = self.coordinator.audio_alarm_settings(self._cam_id)
-        if not settings:
-            return None
-        return "enabled" if settings.get("enabled", False) else "disabled"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        settings = self.coordinator.audio_alarm_settings(self._cam_id)
-        if not settings:
-            return {}
-        return {
-            "enabled": settings.get("enabled"),
-            "threshold": settings.get("threshold"),
         }
 
 
@@ -1502,3 +1472,157 @@ class BoschStreamUrlSubSensor(_BoschStreamUrlSensorBase):
         self._attr_unique_id       = f"bosch_shc_stream_url_sub_{cam_id.lower()}"
         self._attr_translation_key = "stream_url_sub"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F4: ONVIF Scopes Sensor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BoschOnvifScopesSensor(_BoschSensorBase):
+    """Sensor: ONVIF scope advertisement from camera firmware (RCP 0x0a98 via LAN).
+
+    State: "ONVIF supported" when the camera answered the LAN RCP read, else
+    the entity stays unavailable. Attributes contain the parsed scope dict
+    (camera name, hardware model, advertised ONVIF profiles).
+
+    Data source: RCP command 0x0a98 read directly from cam:443 over HTTPS
+    with Digest auth (cbs credentials from _local_creds_cache). Slow-tier
+    (300 s) — cbs creds rotate on every PUT /connection so the RCP read
+    is always authenticated with fresh credentials from the last LAN session.
+
+    Disabled by default — enable in HA entity settings.
+    """
+
+    _attr_icon = "mdi:video-box"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_onvif_scopes"
+        self._attr_translation_key = "onvif_scopes"
+
+    @property
+    def native_value(self) -> str | None:
+        scopes = self.coordinator._rcp_onvif_scopes_cache.get(self._cam_id)
+        if not scopes:
+            return None
+        return "ONVIF supported"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_onvif_scopes_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        scopes = self.coordinator._rcp_onvif_scopes_cache.get(self._cam_id, {})
+        return {
+            "name":        scopes.get("name", ""),
+            "hardware":    scopes.get("hardware", ""),
+            "profiles":    scopes.get("profiles", []),
+            "raw_scopes":  scopes.get("raw_scopes", []),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F6: RCP Version Sensor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BoschRcpVersionSensor(_BoschSensorBase):
+    """Sensor: RCP protocol version from camera firmware (RCP 0xff00 via LAN).
+
+    State: version string "major.minor.patch.build" (e.g. "1.2.38.150").
+    Gen1 cameras report ~1.2.9.225; Gen2 FW 9.40.102 reports 1.2.38.150.
+
+    Data source: RCP command 0xff00 read directly from cam:443 over HTTPS
+    with Digest auth (cbs credentials from _local_creds_cache). Slow-tier
+    (300 s). Returns 4 bytes which map to the four version components.
+
+    Disabled by default — enable in HA entity settings.
+    """
+
+    _attr_icon = "mdi:protocol"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_rcp_version"
+        self._attr_translation_key = "rcp_version"
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator._rcp_version_cache.get(self._cam_id)  # type: ignore[no-any-return]
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator._rcp_version_cache.get(self._cam_id) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        ver = self.coordinator._rcp_version_cache.get(self._cam_id, "")
+        if not ver:
+            return {}
+        parts = ver.split(".")
+        return {
+            "major":  parts[0] if len(parts) > 0 else "",
+            "minor":  parts[1] if len(parts) > 1 else "",
+            "patch":  parts[2] if len(parts) > 2 else "",
+            "build":  parts[3] if len(parts) > 3 else "",
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F13: Cloud Feature Flags Sensor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BoschCloudFeatureFlagsSensor(_BoschSensorBase):
+    """Sensor: Bosch cloud feature flags for this account (GET /v11/feature_flags).
+
+    State: comma-separated list of enabled flag names (those with value=True).
+    Attributes: full dict of all flags with their boolean values.
+
+    Data source: GET /v11/feature_flags — fetched once at startup and cached
+    in coordinator._feature_flags. Rarely changes (account-level server-side
+    config). Account-level entity — one per integration, not per camera.
+
+    Disabled by default — enable in HA entity settings.
+    """
+
+    _attr_icon = "mdi:flag-checkered"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        # Account-level unique_id — not per camera
+        self._attr_unique_id       = "bosch_shc_camera_cloud_feature_flags"
+        self._attr_translation_key = "cloud_feature_flags"
+
+    @property
+    def native_value(self) -> str | None:
+        flags = self.coordinator._feature_flags
+        if not flags:
+            return None
+        enabled = sorted(k for k, v in flags.items() if v)
+        return ", ".join(enabled) if enabled else "none"
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and bool(self.coordinator._feature_flags)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        flags = self.coordinator._feature_flags
+        if not flags:
+            return {}
+        return dict(flags)

@@ -6,15 +6,6 @@ Creates number entities per camera:
     Uses cloud API: PUT /v11/video_inputs/{id}/pan
     State is read from GET /v11/video_inputs/{id}/pan (polled each coordinator tick).
 
-  • {Name} Audio Threshold  — audio alarm trigger threshold in dB (0–100).
-    Available for all cameras.
-    Reads from coordinator.audio_alarm_settings(cam_id)["threshold"].
-    Writes via PUT /v11/video_inputs/{id}/audioAlarm — sends full body
-    {"sensitivity":..., "threshold": value, "enabled":..., "audioAlarmConfiguration":...}.
-    The configuration field must pair with enabled ("CUSTOM"+true / "OFF"+false),
-    otherwise Bosch silently 204s the PUT without applying it.
-    Disabled by default.
-
   • {Name} Intrusion Sensitivity  — intrusion detection sensitivity 0-7 (Gen2 only).
     Reads from coordinator._intrusion_config_cache[cam_id]["sensitivity"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
@@ -57,7 +48,6 @@ async def async_setup_entry(
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
             entities.append(BoschPanNumber(coordinator, cam_id, config_entry, pan_limit))
-        entities.append(BoschAudioThresholdNumber(coordinator, cam_id, config_entry))
         entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
@@ -81,13 +71,12 @@ async def async_setup_entry(
                 entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
                 entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
                 entities.append(BoschDarknessThresholdNumber(coordinator, cam_id, config_entry))
-        # Gen2 Indoor II — alarm delays + power-LED brightness + audio alarm sensitivity
+        # Gen2 Indoor II — alarm delays + power-LED brightness
         if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             entities.append(BoschPowerLedBrightnessNumber(coordinator, cam_id, config_entry))
             entities.append(BoschAlarmDelayNumber(coordinator, cam_id, config_entry))
             entities.append(BoschAlarmActivationDelayNumber(coordinator, cam_id, config_entry))
             entities.append(BoschPreAlarmDelayNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschAudioAlarmSensitivityNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -160,103 +149,6 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
         # direction matches the camera-physical pan direction.
         actual = -int(value) if self._rotation_180() else int(value)
         await self.coordinator.async_cloud_set_pan(self._cam_id, actual)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioThresholdNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
-    """Number entity to set the audio alarm trigger threshold (dB).
-
-    Range: 0–100 dB, step 1.
-    Reads from coordinator.audio_alarm_settings(cam_id)["threshold"].
-    Writes via PUT /v11/video_inputs/{id}/audioAlarm {"threshold": value, "enabled": true}.
-    Disabled by default — enable in Settings → Entities.
-    """
-
-    _attr_icon                        = "mdi:volume-high"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.BOX
-    _attr_native_unit_of_measurement  = "dB"
-    _attr_has_entity_name             = True
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-        self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
-        self._attr_name      = "Audio Threshold"
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_threshold"
-        self._attr_translation_key = "audio_threshold"
-        self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current audio alarm threshold in dB."""
-        settings = self.coordinator.audio_alarm_settings(self._cam_id)
-        val = settings.get("threshold")
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
-
-    @property
-    def available(self) -> bool:
-        """Available only when audio alarm settings have been fetched (slow tier)."""
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator.audio_alarm_settings(self._cam_id))
-        )
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Write the new threshold to the camera via cloud API.
-
-        Preserves sensitivity + audioAlarmConfiguration fields — the Bosch app
-        sends the full body (capture 2026-04-11):
-            {"sensitivity":0,"threshold":72,"enabled":true,"audioAlarmConfiguration":"CUSTOM"}
-        """
-        from .switch import _is_gen2_indoor, _warn_if_privacy_on
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Audio-Schwellenwert"):
-            return
-        threshold = int(round(value))
-        current   = dict(self.coordinator.audio_alarm_settings(self._cam_id) or {})
-        current["threshold"] = threshold
-        current.setdefault("enabled", True)
-        current.setdefault("sensitivity", 0)
-        current.setdefault("audioAlarmConfiguration", "CUSTOM")
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "audioAlarm", current
-        )
-        if success:
-            # Optimistically update coordinator data so UI reflects immediately
-            if self._cam_id in self.coordinator.data:
-                self.coordinator.data[self._cam_id]["audioAlarm"] = current
-            _LOGGER.debug("Audio threshold set to %d dB for %s", threshold, self._cam_id)
-        else:
-            _LOGGER.warning("Failed to set audio threshold for %s", self._cam_id)
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -925,67 +817,6 @@ class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
         self._attr_name      = "Pre-Alarm Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm_delay"
         self._attr_translation_key = "pre_alarm_delay"
-
-
-class BoschAudioAlarmSensitivityNumber(_BoschGen2NumberBase):
-    """Number: audio alarm sensitivity (audioAlarm.sensitivity, 0-10).
-
-    Write-only — `GET /audioAlarm` returns only {threshold, enabled, audioAlarmConfiguration}
-    (confirmed by direct API test 2026-04-11). The sensitivity field is sent in PUT bodies
-    but not echoed back. We track the last-written value optimistically and default to 0.
-    Disabled by default since there's no read-side value to show.
-    """
-
-    _attr_icon                        = "mdi:microphone"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 10
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_entity_category             = EntityCategory.CONFIG
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Geraeusch Empfindlichkeit"
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_sensitivity"
-        self._last_written: int = 0
-        self._attr_translation_key = "audio_alarm_sensitivity"
-
-    @property
-    def _settings(self) -> dict[str, Any]:
-        return self.coordinator.audio_alarm_settings(self._cam_id) or {}
-
-    @property
-    def native_value(self) -> float | None:
-        # GET response doesn't echo sensitivity — return last-written value (default 0)
-        val = self._settings.get("sensitivity", self._last_written)
-        return float(val)
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success and bool(self._settings)
-
-    async def async_set_native_value(self, value: float) -> None:
-        from .switch import _is_gen2_indoor, _warn_if_privacy_on
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Geräusch-Empfindlichkeit"):
-            return
-        current = dict(self._settings)
-        if not current:
-            return
-        new_val = int(round(value))
-        current["sensitivity"] = new_val
-        current.setdefault("enabled", True)
-        current.setdefault("threshold", 54)
-        current.setdefault("audioAlarmConfiguration", "CUSTOM")
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "audioAlarm", current
-        )
-        if success:
-            self._last_written = new_val
-            cam = self.coordinator.data.get(self._cam_id)
-            if cam is not None:
-                cam["audioAlarm"] = current
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

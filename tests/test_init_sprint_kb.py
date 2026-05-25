@@ -165,7 +165,6 @@ def _make_coord(**overrides):
         _privacy_set_at={},
         _light_set_at={},
         _notif_set_at={},
-        _audio_alarm_set_at={},
         _privacy_sound_set_at={},
         _timestamp_set_at={},
         _ledlights_set_at={},

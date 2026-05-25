@@ -77,6 +77,7 @@ def _stub_coord(**kwargs):
         _live_connections={},
         _fresh_snap_cache={},
         _fresh_snap_locks={},
+        data={},  # needed by _async_fetch_live_snapshot_impl for privacy cross-check
     )
     coord.get_quality_params = MagicMock(return_value=(True, 0))
     coord._get_cached_rcp_session = AsyncMock(return_value=None)

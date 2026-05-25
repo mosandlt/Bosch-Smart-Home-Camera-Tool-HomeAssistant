@@ -35,7 +35,6 @@ def stub_coord():
         _wifi_cache={CAM_ID: {"signal": 75, "ssid": "WLAN"}},
         _ambient_light_cache={CAM_ID: 0.42},
         _motion_sensitivity_cache={CAM_ID: "MEDIUM_HIGH"},
-        _audio_alarm_cache={CAM_ID: {"enabled": True, "threshold": 65}},
         _ledlight_brightness_cache={CAM_ID: 80},
         _clock_offset_cache={CAM_ID: 1.23},
         _ledlights_cache={CAM_ID: True},

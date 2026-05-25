@@ -23,7 +23,6 @@ def coord():
         _rcp_clock_offset_cache={},
         _rcp_lan_ip_cache={},
         _rcp_product_name_cache={},
-        _audio_alarm_cache={},
     )
 
 
@@ -36,7 +35,6 @@ def helpers():
         "rcp_lan_ip": BoschCameraCoordinator.rcp_lan_ip,
         "rcp_product_name": BoschCameraCoordinator.rcp_product_name,
         "motion_settings": BoschCameraCoordinator.motion_settings,
-        "audio_alarm_settings": BoschCameraCoordinator.audio_alarm_settings,
     }
 
 
@@ -97,44 +95,3 @@ class TestMotionSettings:
         """If `data[cam_id]` exists but has no `motion` key, return {} (no NPE)."""
         coord.data[CAM_ID] = {"info": {"title": "x"}}  # no "motion" key
         assert helpers["motion_settings"](coord, CAM_ID) == {}
-
-
-# ── audio_alarm_settings ───────────────────────────────────────────────
-
-
-class TestAudioAlarmSettings:
-    def test_returns_persistent_cache_when_populated(self, coord, helpers):
-        """Persistent cache wins over transient `data[cam_id]['audioAlarm']`."""
-        coord._audio_alarm_cache[CAM_ID] = {
-            "enabled": True, "threshold": 65, "sensitivity": "MEDIUM",
-        }
-        coord.data[CAM_ID]["audioAlarm"] = {
-            "enabled": False, "threshold": 99,  # different/stale
-        }
-        result = helpers["audio_alarm_settings"](coord, CAM_ID)
-        # Persistent cache wins
-        assert result["enabled"] is True
-        assert result["threshold"] == 65
-
-    def test_falls_back_to_transient_data(self, coord, helpers):
-        """When persistent cache is empty, fall back to data[cam_id]['audioAlarm']."""
-        coord.data[CAM_ID]["audioAlarm"] = {"enabled": True, "threshold": 70}
-        result = helpers["audio_alarm_settings"](coord, CAM_ID)
-        assert result["threshold"] == 70
-
-    def test_returns_empty_dict_when_both_empty(self, coord, helpers):
-        assert helpers["audio_alarm_settings"](coord, CAM_ID) == {}
-
-    def test_empty_cache_dict_does_not_block_fallback(self, coord, helpers):
-        """An empty {} in the persistent cache must be falsy → fall back to data."""
-        coord._audio_alarm_cache[CAM_ID] = {}
-        coord.data[CAM_ID]["audioAlarm"] = {"enabled": True, "threshold": 50}
-        result = helpers["audio_alarm_settings"](coord, CAM_ID)
-        assert result["threshold"] == 50, (
-            "Empty persistent cache must not shadow fresh transient data — "
-            "the `if self._audio_alarm_cache.get(cam_id):` truthiness check "
-            "was meant to skip empty-dict cache entries"
-        )
-
-    def test_unknown_camera_returns_empty(self, coord, helpers):
-        assert helpers["audio_alarm_settings"](coord, "unknown-cam") == {}

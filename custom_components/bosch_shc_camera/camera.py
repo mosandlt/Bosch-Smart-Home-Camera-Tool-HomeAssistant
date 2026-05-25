@@ -43,6 +43,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
 from .auth_utils import async_digest_request
 from .const import TIMEOUT_SNAP, AUTO_PLAY_DEFAULT_VALUES
+from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .snapshot_store import load_snapshot, save_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -701,6 +702,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         """
         Return the best available JPEG snapshot, tried in order:
 
+        0. MJPEG inst=3 LAN snapshot (Gen2 opt-in) — when use_mjpeg_snapshot is
+           enabled: FFmpeg subprocess captures one frame from RTSP inst=3.
+           Requires Gen2 hardware + cached LOCAL Digest credentials.
+           ~150-300 ms on healthy LAN. Falls through on any error.
         1. Cloud proxy live snap  — if a live connection has been opened
            (proxy-NN.live.cbs.boschsecurity.com snap.jpg, no auth needed)
            Updated every coordinator tick while live switch is ON.
@@ -731,6 +736,42 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
         # True when card requests a mobile/thumbnail-sized image
         prefer_small = width is not None and width <= 640
+
+        # ── 0. MJPEG inst=3 snapshot (Gen2 opt-in, LAN-only) ─────────────────
+        # When use_mjpeg_snapshot is enabled: capture one JPEG frame directly
+        # from the camera's RTSP inst=3 stream via FFmpeg subprocess.
+        # Requires Gen2 hardware and valid LOCAL Digest credentials cached by
+        # the coordinator from the most recent PUT /connection.
+        # Estimated latency: ~150-300 ms on LAN (vs ~500-1500 ms cloud-proxy).
+        # Falls through silently on any error — existing paths take over.
+        opts = get_options(self._entry)
+        if opts.get("use_mjpeg_snapshot", False):
+            from .models import get_model_config
+            model_cfg = get_model_config(self._hw_version)
+            if model_cfg.generation >= 2:
+                creds = self.coordinator._local_creds_cache.get(self._cam_id)
+                # cbs creds rotate ~60 s after each PUT /connection without
+                # heartbeat. Skip MJPEG when creds are stale — FFmpeg would
+                # fail "Invalid data found when processing input" otherwise.
+                # Threshold 45 s keeps a safety margin.
+                creds_age = time.monotonic() - creds.get("ts", 0.0) if creds else float("inf")
+                if creds and creds_age < 45.0:
+                    _local_user_m = creds.get("user", "")
+                    _local_pass_m = creds.get("password", "")
+                    _local_host_m = creds.get("host", "")
+                    _local_port_m = int(creds.get("port", 443))
+                    if _local_user_m and _local_pass_m and _local_host_m:
+                        mjpeg_data = await fetch_mjpeg_snapshot(
+                            _local_host_m,
+                            _local_port_m,
+                            _local_user_m,
+                            _local_pass_m,
+                            timeout=float(opts.get("mjpeg_snapshot_timeout", TIMEOUT_SNAP)),
+                        )
+                        if mjpeg_data:
+                            self._cached_image = mjpeg_data
+                            self._last_image_fetch = time.monotonic()
+                            return mjpeg_data
 
         # ── 1. Cloud proxy live snapshot (active live-stream session) ─────────
         live = self.coordinator._live_connections.get(self._cam_id, {})

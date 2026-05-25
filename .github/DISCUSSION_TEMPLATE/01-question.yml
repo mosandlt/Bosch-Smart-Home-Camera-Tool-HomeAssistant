@@ -1,0 +1,63 @@
+title: "[Q&A] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for posting! Please fill in all required fields so we can help efficiently.
+        (Danke! Bitte füll alle Pflichtfelder aus damit wir schnell helfen können.)
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration Version
+      description: "e.g. v13.2.0 — found under Settings → Devices & Services → Bosch SHC Camera → three-dot-menu → Info, or in HACS."
+      placeholder: "v13.2.0"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Core Version
+      description: "e.g. 2025.5.3 — found under Settings → About."
+      placeholder: "2025.5.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: cam_model
+    attributes:
+      label: Camera Model (Kamera-Modell)
+      options:
+        - Eyes Outdoor (Gen1)
+        - 360° Indoor (Gen1)
+        - Eyes Outdoor II (Gen2)
+        - Eyes Indoor II (Gen2)
+        - Multiple / mixed (Mehrere / gemischt)
+      multiple: true
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: "What do you want to know? Please be specific — describe what you tried and what happened."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: HA Logs (if relevant)
+      description: |
+        Paste relevant log lines — Bosch-related lines are enough, not the full log.
+        Enable debug logging first: Integration → Options → Debug logging.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read the [README](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#readme) and checked existing discussions
+          required: true
+        - label: I am running a supported HA version (2024.1+)
+          required: false

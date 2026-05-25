@@ -35,7 +35,6 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 def _coord(
     pan_cache=None,
-    audio_alarm_settings_val=None,
     lens_elevation_cache=None,
     audio_cache=None,
     lighting_switch_cache=None,
@@ -47,9 +46,6 @@ def _coord(
     hw="HOME_Eyes_Outdoor",
     **overrides,
 ):
-    def _aas(cam_id):
-        return audio_alarm_settings_val or {}
-
     coord = SimpleNamespace(
         data={
             CAM_ID: {
@@ -59,7 +55,6 @@ def _coord(
                     "firmwareVersion": "9.40.25",
                     "macAddress": "aa:bb:cc:dd:ee:ff",
                 },
-                "audioAlarm": audio_alarm_settings_val or {},
             }
         },
         last_update_success=True,
@@ -75,7 +70,6 @@ def _coord(
         _icon_led_brightness_cache=icon_led_brightness_cache if icon_led_brightness_cache is not None else {},
         _alarm_settings_cache=alarm_settings_cache if alarm_settings_cache is not None else {},
         _shc_state_cache=shc_state_cache if shc_state_cache is not None else {CAM_ID: {}},
-        audio_alarm_settings=_aas,
         async_put_camera=AsyncMock(return_value=True),
         is_camera_online=lambda cid: True,
         **overrides,
@@ -155,73 +149,6 @@ async def test_pan_set_native_value_inverted_when_rotated():
     sw = _make_pan(pan_cache={CAM_ID: 0}, rotation_180=True)
     await sw.async_set_native_value(30.0)
     sw.coordinator.async_cloud_set_pan.assert_awaited_once_with(CAM_ID, -30)
-
-
-# ── BoschAudioThresholdNumber ─────────────────────────────────────────────────
-
-
-def _make_audio_threshold(settings=None, shc_privacy=False):
-    from custom_components.bosch_shc_camera.number import BoschAudioThresholdNumber
-
-    shc_state = {CAM_ID: {"privacy_mode": shc_privacy}}
-    coord = _coord(
-        audio_alarm_settings_val=settings,
-        shc_state_cache=shc_state,
-    )
-    sw = BoschAudioThresholdNumber.__new__(BoschAudioThresholdNumber)
-    sw.coordinator = coord
-    sw._cam_id = CAM_ID
-    sw._cam_title = "Terrasse"
-    sw._model_name = "Outdoor"
-    sw._fw = "9.40.25"
-    sw._mac = ""
-    sw.hass = _make_hass()
-    sw.async_write_ha_state = MagicMock()
-    return sw
-
-
-def test_audio_threshold_native_value_valid():
-    sw = _make_audio_threshold(settings={"threshold": 72, "enabled": True})
-    assert sw.native_value == 72.0
-
-
-def test_audio_threshold_native_value_none():
-    sw = _make_audio_threshold(settings={})
-    assert sw.native_value is None
-
-
-def test_audio_threshold_native_value_bad_type():
-    sw = _make_audio_threshold(settings={"threshold": "bad"})
-    assert sw.native_value is None
-
-
-def test_audio_threshold_available_true():
-    sw = _make_audio_threshold(settings={"threshold": 72})
-    assert sw.available is True
-
-
-def test_audio_threshold_available_false():
-    sw = _make_audio_threshold(settings={})
-    assert sw.available is False
-
-
-@pytest.mark.asyncio
-async def test_audio_threshold_set_success():
-    sw = _make_audio_threshold(settings={"threshold": 50, "enabled": True, "sensitivity": 0, "audioAlarmConfiguration": "CUSTOM"})
-    await sw.async_set_native_value(72.0)
-    sw.coordinator.async_put_camera.assert_awaited_once()
-    body = sw.coordinator.async_put_camera.call_args[0][2]
-    assert body["threshold"] == 72
-    assert body["enabled"] is True
-
-
-@pytest.mark.asyncio
-async def test_audio_threshold_set_failure_logs():
-    sw = _make_audio_threshold(settings={"threshold": 50, "enabled": True})
-    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
-    # Should not raise
-    await sw.async_set_native_value(60.0)
-    sw.async_write_ha_state.assert_called()
 
 
 # ── BoschSpeakerLevelNumber ──────────────────────────────────────────────────
@@ -764,70 +691,3 @@ async def test_alarm_delay_set_empty_noop():
     sw.coordinator.async_put_camera.assert_not_awaited()
 
 
-# ── BoschAudioAlarmSensitivityNumber ─────────────────────────────────────────
-
-
-def _make_audio_alarm_sens(settings=None, hw="HOME_Eyes_Indoor", privacy_on=False):
-    from custom_components.bosch_shc_camera.number import BoschAudioAlarmSensitivityNumber
-
-    shc_state = {CAM_ID: {"privacy_mode": privacy_on}}
-    coord = _coord(
-        hw=hw,
-        audio_alarm_settings_val=settings,
-        shc_state_cache=shc_state,
-    )
-    sw = BoschAudioAlarmSensitivityNumber.__new__(BoschAudioAlarmSensitivityNumber)
-    sw.coordinator = coord
-    sw._cam_id = CAM_ID
-    sw._cam_title = "Terrasse"
-    sw._model_name = "Indoor"
-    sw._fw = "9.40.25"
-    sw._mac = ""
-    sw._last_written = 0
-    sw.hass = _make_hass()
-    sw.async_write_ha_state = MagicMock()
-    return sw
-
-
-def test_audio_alarm_sens_native_value_from_settings():
-    sw = _make_audio_alarm_sens(settings={"sensitivity": 5, "threshold": 54, "enabled": True})
-    assert sw.native_value == 5.0
-
-
-def test_audio_alarm_sens_native_value_fallback():
-    sw = _make_audio_alarm_sens(settings={"threshold": 54, "enabled": True})
-    sw._last_written = 3
-    assert sw.native_value == 3.0
-
-
-@pytest.mark.asyncio
-async def test_audio_alarm_sens_privacy_blocked():
-    sw = _make_audio_alarm_sens(
-        settings={"sensitivity": 0, "threshold": 54, "enabled": True, "audioAlarmConfiguration": "CUSTOM"},
-        hw="HOME_Eyes_Indoor",
-        privacy_on=True,
-    )
-    await sw.async_set_native_value(5.0)
-    sw.coordinator.async_put_camera.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_audio_alarm_sens_set_success():
-    sw = _make_audio_alarm_sens(
-        settings={"sensitivity": 0, "threshold": 54, "enabled": True, "audioAlarmConfiguration": "CUSTOM"},
-        hw="HOME_Eyes_Outdoor",
-    )
-    await sw.async_set_native_value(7.0)
-    sw.coordinator.async_put_camera.assert_awaited_once()
-    body = sw.coordinator.async_put_camera.call_args[0][2]
-    assert body["sensitivity"] == 7
-    assert sw._last_written == 7
-
-
-@pytest.mark.asyncio
-async def test_audio_alarm_sens_updates_cam_data():
-    """On success, cam_data["audioAlarm"] is updated."""
-    settings = {"sensitivity": 0, "threshold": 54, "enabled": True, "audioAlarmConfiguration": "CUSTOM"}
-    sw = _make_audio_alarm_sens(settings=settings, hw="HOME_Eyes_Outdoor")
-    await sw.async_set_native_value(3.0)
-    assert sw.coordinator.data[CAM_ID]["audioAlarm"]["sensitivity"] == 3

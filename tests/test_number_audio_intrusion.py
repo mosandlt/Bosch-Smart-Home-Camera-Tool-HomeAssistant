@@ -51,9 +51,6 @@ def _coord(
     shc_state_cache: dict | None = None,
     put_return: bool = True,
 ) -> SimpleNamespace:
-    def _aas(cid: str) -> dict:
-        return {}
-
     return SimpleNamespace(
         data={
             cam_id: {
@@ -72,7 +69,6 @@ def _coord(
         _intrusion_config_cache=intrusion_cache if intrusion_cache is not None else {},
         _intrusion_config_set_at=intrusion_set_at if intrusion_set_at is not None else {},
         _shc_state_cache=shc_state_cache if shc_state_cache is not None else {cam_id: {}},
-        audio_alarm_settings=_aas,
         async_put_camera=AsyncMock(return_value=put_return),
         is_camera_online=lambda cid: True,
     )
