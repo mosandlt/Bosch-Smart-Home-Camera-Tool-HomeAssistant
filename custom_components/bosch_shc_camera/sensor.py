@@ -537,7 +537,7 @@ class BoschLastEventTypeSensor(_BoschSensorBase):
     _attr_translation_key = "last_event_type"
     _attr_options       = [
         "movement", "person", "audio_alarm", "trouble",
-        "trouble_disconnect", "trouble_reconnect", "none",
+        "trouble_disconnect", "trouble_reconnect", "trouble_connect", "none",
     ]
     _attr_device_class  = SensorDeviceClass.ENUM
 
