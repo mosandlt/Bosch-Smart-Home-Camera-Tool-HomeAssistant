@@ -487,6 +487,7 @@
           "online": "Online",
           "offline": "Offline",
           "updating": "Firmware-Update",
+          "session_limit": "Sitzungslimit",
           "unknown": "Unbekannt"
         }
       },

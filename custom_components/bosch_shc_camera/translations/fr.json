@@ -493,6 +493,7 @@
         "state": {
           "online": "En ligne",
           "offline": "Hors ligne",
+          "session_limit": "Limite de session",
           "unknown": "Inconnu"
         }
       },

@@ -169,7 +169,7 @@ class BoschCameraStatusSensor(_BoschSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id       = f"bosch_shc_status_{cam_id.lower()}"
         self._attr_translation_key = "status"
-        self._attr_options         = ["online", "offline", "updating", "unknown"]
+        self._attr_options         = ["online", "offline", "updating", "session_limit", "unknown"]
         self._attr_device_class    = SensorDeviceClass.ENUM
 
     @property
@@ -184,6 +184,9 @@ class BoschCameraStatusSensor(_BoschSensorBase):
             events = self._cam_data.get("events", [])
             if events and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT":
                 return "offline"
+        # session_limit: HTTP 444 — not offline, just too many concurrent sessions
+        if raw == "session_limit":
+            return "session_limit"
         return raw
 
     @property

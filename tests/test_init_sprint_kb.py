@@ -173,6 +173,9 @@ def _make_coord(**overrides):
         _integration_version="11.0.10",
         _OFFLINE_EXTENDED_INTERVAL=900,
         _WRITE_LOCK_SECS=30.0,
+        _session_quota_hits={},
+        _SESSION_QUOTA_WINDOW_S=300.0,
+        _SESSION_QUOTA_NOTIFY_THRESHOLD=3,
         shc_ready=False,
 
         # ── stream / connection ──────────────────────────────────────────────
@@ -465,8 +468,12 @@ class TestCheckStatusCloudPing:
         )
 
     @pytest.mark.asyncio
-    async def test_cloud_ping_444_is_offline(self):
-        """TCP miss + /ping 444 → status OFFLINE, _offline_since set."""
+    async def test_cloud_ping_444_is_session_limit(self):
+        """TCP miss + /ping 444 → status SESSION_LIMIT, NOT OFFLINE, _offline_since NOT set.
+
+        HTTP 444 = Bosch session-quota exceeded (too many concurrent sessions).
+        Camera is reachable — do not treat as offline. Changed in v13.2.x.
+        """
         coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=False))
         ping_resp = _make_resp(444)
         session = _url_session(_base_url_map(**{f"/{CAM_A}/ping": ping_resp}))
@@ -477,11 +484,11 @@ class TestCheckStatusCloudPing:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._cached_status.get(CAM_A) == "OFFLINE", (
-            "HTTP 444 from /ping must map to OFFLINE"
+        assert coord._cached_status.get(CAM_A) == "SESSION_LIMIT", (
+            "HTTP 444 from /ping must map to SESSION_LIMIT, not OFFLINE"
         )
-        assert CAM_A in coord._offline_since, (
-            "OFFLINE camera must be tracked in _offline_since"
+        assert CAM_A not in coord._offline_since, (
+            "SESSION_LIMIT must NOT be tracked in _offline_since — camera is reachable"
         )
 
 
@@ -536,8 +543,11 @@ class TestCheckStatusCommissionedFallback:
         )
 
     @pytest.mark.asyncio
-    async def test_commissioned_444_is_offline(self):
-        """/commissioned 444 → OFFLINE."""
+    async def test_commissioned_444_is_session_limit(self):
+        """/commissioned 444 → SESSION_LIMIT (not OFFLINE). Changed in v13.2.x.
+
+        HTTP 444 = session quota, not a connectivity failure.
+        """
         coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=False))
         ping_resp = _make_resp(503)
         comm_resp = _make_resp(444)
@@ -553,8 +563,8 @@ class TestCheckStatusCommissionedFallback:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._cached_status.get(CAM_A) == "OFFLINE", (
-            "HTTP 444 from /commissioned must also map to OFFLINE"
+        assert coord._cached_status.get(CAM_A) == "SESSION_LIMIT", (
+            "HTTP 444 from /commissioned must map to SESSION_LIMIT, not OFFLINE"
         )
 
     @pytest.mark.asyncio
@@ -588,8 +598,32 @@ class TestCheckStatusOfflineTracking:
     """
 
     @pytest.mark.asyncio
-    async def test_offline_since_set_when_offline(self):
-        """OFFLINE status → _offline_since[CAM_A] populated."""
+    async def test_offline_since_set_when_truly_offline(self):
+        """True OFFLINE (503 configured-not-connected) → _offline_since[CAM_A] populated.
+
+        Uses a genuine OFFLINE path (ping 503 + commissioned {configured:True, connected:False}),
+        NOT a 444 (which is SESSION_LIMIT and must NOT set _offline_since).
+        """
+        coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=False))
+        ping_resp = _make_resp(503)
+        comm_resp = _make_resp(200, json_val={"configured": True, "connected": False})
+        session = _url_session(
+            _base_url_map(**{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp})
+        )
+
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_clientsession",
+            return_value=session,
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert CAM_A in coord._offline_since, (
+            "_offline_since must be populated when status is truly OFFLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_limit_does_not_set_offline_since(self):
+        """444 → SESSION_LIMIT — must NOT set _offline_since (camera reachable, just quota hit)."""
         coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=False))
         ping_resp = _make_resp(444)
         session = _url_session(_base_url_map(**{f"/{CAM_A}/ping": ping_resp}))
@@ -600,8 +634,8 @@ class TestCheckStatusOfflineTracking:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert CAM_A in coord._offline_since, (
-            "_offline_since must be populated when status is OFFLINE"
+        assert CAM_A not in coord._offline_since, (
+            "SESSION_LIMIT (444) must NOT set _offline_since — camera is reachable"
         )
 
     @pytest.mark.asyncio
@@ -612,8 +646,12 @@ class TestCheckStatusOfflineTracking:
             _async_local_tcp_ping=AsyncMock(return_value=False),
             _offline_since={CAM_A: original_ts},
         )
-        ping_resp = _make_resp(444)
-        session = _url_session(_base_url_map(**{f"/{CAM_A}/ping": ping_resp}))
+        # Use a genuine OFFLINE (503 + configured-not-connected), not 444
+        ping_resp = _make_resp(503)
+        comm_resp = _make_resp(200, json_val={"configured": True, "connected": False})
+        session = _url_session(
+            _base_url_map(**{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp})
+        )
 
         with patch(
             "custom_components.bosch_shc_camera.async_get_clientsession",

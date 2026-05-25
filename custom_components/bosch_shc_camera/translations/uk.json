@@ -493,6 +493,7 @@
         "state": {
           "online": "Online",
           "offline": "Offline",
+          "session_limit": "Ліміт сеансів",
           "unknown": "Невідомо"
         }
       },

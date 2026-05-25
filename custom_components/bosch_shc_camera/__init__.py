@@ -831,6 +831,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._cloud_outage_started_at: float | None = None
         self._cloud_outage_notified: bool = False
         self._CLOUD_OUTAGE_NOTIFY_AFTER_S: float = 60.0
+        # ── Session-quota (HTTP 444) tracker ─────────────────────────────────
+        # Timestamps of recent 444 hits per camera (monotonic). Entries older
+        # than _SESSION_QUOTA_WINDOW_S are pruned on each new hit. When ≥3
+        # hits occur within the window a persistent notification is shown.
+        self._session_quota_hits: dict[str, list[float]] = {}
+        self._SESSION_QUOTA_WINDOW_S: float = 300.0   # 5 minutes
+        self._SESSION_QUOTA_NOTIFY_THRESHOLD: int = 3
         # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
         # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
         # _nvr_user_intent: persisted switch state (True = user wants to record).
@@ -2013,7 +2020,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     status = ping_result  # "ONLINE" or "OFFLINE"
                                 ping_ok = True
                             elif pr.status == 444:
-                                status = "OFFLINE"
+                                _LOGGER.warning(
+                                    "Bosch session-quota hit for %s — too many simultaneous"
+                                    " live sessions across all clients (HA, Bosch App, ioBroker, etc.)."
+                                    " Close unused sessions to recover.",
+                                    cam_id[:8],
+                                )
+                                status = "SESSION_LIMIT"
                                 ping_ok = True
                 except Exception as err:
                     _LOGGER.debug("Ping check error for %s: %s", cam_id, err)
@@ -2032,17 +2045,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     elif comm.get("configured"):
                                         status = "OFFLINE"
                                 elif r.status == 444:
-                                    status = "OFFLINE"
+                                    _LOGGER.warning(
+                                        "Bosch session-quota hit for %s (commissioned fallback)"
+                                        " — too many simultaneous live sessions across all clients.",
+                                        cam_id[:8],
+                                    )
+                                    status = "SESSION_LIMIT"
                     except Exception as err:
                         _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
 
                 self._per_cam_status_at[cam_id] = now
-                # Track offline duration for extended interval
+                # Track offline duration for extended interval.
+                # SESSION_LIMIT is NOT a connectivity failure — do not add to _offline_since
+                # so the camera does not get penalised with extended check intervals.
                 if status in ("OFFLINE", "UPDATING"):
                     if cam_id not in self._offline_since:
                         self._offline_since[cam_id] = now
                 else:
                     self._offline_since.pop(cam_id, None)
+                # Fire persistent notification if 444 hits accumulate
+                if status == "SESSION_LIMIT":
+                    _handle_quota = getattr(self, "_async_handle_session_quota_hit", None)
+                    if _handle_quota is not None:
+                        self.hass.async_create_task(_handle_quota(cam_id))
                 return (cam_id, status)
 
             # Run all status checks in parallel
@@ -2373,9 +2398,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
                 # These values change rarely — fetching every tick wastes bandwidth.
-                # Skipped entirely when camera is offline — all endpoints return 444.
+                # Skipped when camera is offline or session-quota hit (444) — endpoints
+                # would return 444 too, and the camera isn't truly unreachable.
                 if do_slow and not is_online:
-                    _LOGGER.debug("Slow-tier skipped for %s (offline)", cam_id_key)
+                    _LOGGER.debug("Slow-tier skipped for %s (%s)", cam_id_key, cam_status.lower())
                 if do_slow and is_online:
                     # ── Parallel slow-tier fetch ──────────────────────────────
                     # All endpoints are independent — fetch in parallel with
@@ -2960,6 +2986,51 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     "Camera status announce via notify.%s for %s failed: %s",
                     svc, cam_name, exc,
                 )
+
+    async def _async_handle_session_quota_hit(self, cam_id: str) -> None:
+        """Track HTTP 444 hits per camera and fire a persistent notification if repeated.
+
+        After _SESSION_QUOTA_NOTIFY_THRESHOLD (3) hits within _SESSION_QUOTA_WINDOW_S (5 min)
+        a HA persistent_notification is created advising the user to close other clients.
+        Non-fatal — any failure is swallowed so the caller's status update is unaffected.
+        """
+        try:
+            now = time.monotonic()
+            hits = self._session_quota_hits.setdefault(cam_id, [])
+            # Prune hits outside the window
+            hits[:] = [t for t in hits if (now - t) < self._SESSION_QUOTA_WINDOW_S]
+            hits.append(now)
+
+            if len(hits) >= self._SESSION_QUOTA_NOTIFY_THRESHOLD:
+                cam_info = self.data.get(cam_id, {}).get("info", {}) if self.data else {}
+                cam_name = cam_info.get("title") or cam_id[:8]
+                notification_id = f"bosch_session_quota_{cam_id[:8].lower()}"
+                title = f"Bosch Kamera {cam_name}: Sitzungslimit erreicht"
+                message = (
+                    f"Kamera {cam_name} meldet HTTP 444 (Session-Quota). "
+                    "Zu viele gleichzeitige Live-Verbindungen im Bosch-Konto. "
+                    "Bitte schließen Sie die Bosch App auf weiteren Geräten "
+                    "oder deaktivieren Sie parallele Integrationen (ioBroker, Python CLI). "
+                    "Die Integration wiederholt den Verbindungsaufbau automatisch."
+                )
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "title": title,
+                        "message": message,
+                        "notification_id": notification_id,
+                    },
+                    blocking=False,
+                )
+                _LOGGER.warning(
+                    "Session-quota persistent notification created for %s (%d hits in %.0fs)",
+                    cam_id[:8],
+                    len(hits),
+                    self._SESSION_QUOTA_WINDOW_S,
+                )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Session-quota notification failed (non-fatal): %s", exc)
 
     async def _async_maybe_announce_cloud_state(self, success: bool) -> None:
         """Fire a user notification on cloud-reachability transitions.

@@ -493,6 +493,7 @@
         "state": {
           "online": "在线",
           "offline": "离线",
+          "session_limit": "会话限制",
           "unknown": "未知"
         }
       },

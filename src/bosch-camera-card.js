@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.2.0";
+const CARD_VERSION = "13.2.1";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -3814,6 +3814,11 @@ class BoschCameraCard extends HTMLElement {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
+    // Outer-scope reject + timeout so the subscribeMessage error handler
+    // can short-circuit the Promise below. Set by the Promise constructor.
+    let webrtcReject = null;
+    let webrtcTimeout = null;
+
     // Subscribe to answer/candidates via HA WS
     const unsub = await this._hass.connection.subscribeMessage(
       (event) => {
@@ -3822,7 +3827,25 @@ class BoschCameraCard extends HTMLElement {
         } else if (event.type === "candidate") {
           pc.addIceCandidate(event.candidate);
         } else if (event.type === "error") {
-          console.warn("bosch-camera-card: WebRTC error:", event.message);
+          // 2026-05-25 fix: previously this branch only logged and let the
+          // 5s setTimeout fall through — visible to the user as a 5-second
+          // delay before "HLS wird geladen…" appears. Bosch cameras report
+          // "Camera does not support WebRTC" on first offer when HA's
+          // frontend_stream_types race hasn't propagated yet; the existing
+          // _check_and_recover_webrtc watchdog repairs it for the next try.
+          // Fast-fail here so HLS kicks in immediately (~100 ms vs 5 s).
+          const msg = event.message || "webrtc_offer_error";
+          const isRace = typeof msg === "string" && (
+            msg.includes("does not support WebRTC") ||
+            msg.includes("frontend_stream_types")
+          );
+          if (isRace) {
+            console.debug("bosch-camera-card: WebRTC offer rejected (HA stream-type race), fast-falling to HLS:", msg);
+          } else {
+            console.warn("bosch-camera-card: WebRTC error:", msg);
+          }
+          if (webrtcTimeout) clearTimeout(webrtcTimeout);
+          if (webrtcReject) webrtcReject(new Error(typeof msg === "string" ? msg : "webrtc_offer_error"));
         }
       },
       { type: "camera/webrtc/offer", entity_id: entityId, offer: offer.sdp }
@@ -3836,7 +3859,9 @@ class BoschCameraCard extends HTMLElement {
     // we'd otherwise stall the full timeout. Reject early so HLS fallback
     // kicks in fast.
     await new Promise((resolve, reject) => {
+      webrtcReject = reject;
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 5s")), 5000);
+      webrtcTimeout = timeout;
       pc.addEventListener("iceconnectionstatechange", () => {
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
           clearTimeout(timeout);

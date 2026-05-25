@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.2.0";
+const CARD_VERSION = "13.2.1";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
@@ -1307,6 +1307,8 @@ class BoschCameraCard extends HTMLElement {
     };
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    let webrtcReject = null;
+    let webrtcTimeout = null;
     const unsub = await this._hass.connection.subscribeMessage(event => {
       if (event.type === "answer") {
         pc.setRemoteDescription({
@@ -1316,7 +1318,15 @@ class BoschCameraCard extends HTMLElement {
       } else if (event.type === "candidate") {
         pc.addIceCandidate(event.candidate);
       } else if (event.type === "error") {
-        console.warn("bosch-camera-card: WebRTC error:", event.message);
+        const msg = event.message || "webrtc_offer_error";
+        const isRace = typeof msg === "string" && (msg.includes("does not support WebRTC") || msg.includes("frontend_stream_types"));
+        if (isRace) {
+          console.debug("bosch-camera-card: WebRTC offer rejected (HA stream-type race), fast-falling to HLS:", msg);
+        } else {
+          console.warn("bosch-camera-card: WebRTC error:", msg);
+        }
+        if (webrtcTimeout) clearTimeout(webrtcTimeout);
+        if (webrtcReject) webrtcReject(new Error(typeof msg === "string" ? msg : "webrtc_offer_error"));
       }
     }, {
       type: "camera/webrtc/offer",
@@ -1325,7 +1335,9 @@ class BoschCameraCard extends HTMLElement {
     });
     this._webrtcUnsub = unsub;
     await new Promise((resolve, reject) => {
+      webrtcReject = reject;
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 5s")), 5e3);
+      webrtcTimeout = timeout;
       pc.addEventListener("iceconnectionstatechange", () => {
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
           clearTimeout(timeout);
