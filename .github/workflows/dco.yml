@@ -1,0 +1,48 @@
+name: DCO
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco-check:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Signed-off-by on every PR commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r sha; do
+            name=$(git log -1 --format='%an' "$sha")
+            email=$(git log -1 --format='%ae' "$sha")
+            msg=$(git log -1 --format='%B' "$sha")
+            expected="Signed-off-by: ${name} <${email}>"
+            if ! printf '%s\n' "$msg" | grep -qxF "$expected"; then
+              short=$(git log -1 --format='%h %s' "$sha")
+              echo "::error::Commit '${short}' missing or mismatched DCO sign-off"
+              echo "  expected: ${expected}"
+              missing=$((missing+1))
+            fi
+          done < <(git log --format='%H' "${BASE_SHA}..${HEAD_SHA}")
+
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "::error::${missing} commit(s) lack a valid DCO sign-off."
+            echo "Fix one commit:   git commit --amend -s --no-edit && git push --force-with-lease"
+            echo "Fix N commits:    git rebase -i HEAD~N  (mark all 'reword' or 'edit', then add -s on each)"
+            echo "Or:               git rebase --signoff main && git push --force-with-lease"
+            exit 1
+          fi
+          echo "All commits properly signed off ✓"
