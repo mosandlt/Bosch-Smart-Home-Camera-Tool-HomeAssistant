@@ -398,9 +398,6 @@
     "button": {
       "refresh_snapshot": {
         "name": "Odśwież Migawkę"
-      },
-      "acoustic_alarm": {
-        "name": "Syrena"
       }
     },
     "select": {
@@ -770,13 +767,6 @@
       "cameras_loaded": "Kamery załadowane",
       "last_fcm_push_ago": "Ostatni FCM Push",
       "platinum_quality": "Quality Scale"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "bosch_shc_camera_motion": "Wykryto ruch",
-      "bosch_shc_camera_audio_alarm": "Wykryto alarm dźwiękowy",
-      "bosch_shc_camera_person": "Wykryto osobę"
     }
   }
 }

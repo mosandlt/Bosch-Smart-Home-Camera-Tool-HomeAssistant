@@ -16,14 +16,13 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
+from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN
 from . import BoschCameraCoordinator, get_options
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,7 +72,7 @@ async def async_setup_entry(
         # PTZ preset select — only for cameras with panLimit > 0 (CAMERA_360 indoor)
         # AND opt-in via options. Default off so non-PTZ users see no extra entity.
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
-        ptz_enabled = config_entry.options.get("enable_ptz_controls", False)
+        ptz_enabled = config_entry.options.get(CONF_ENABLE_PTZ_CONTROLS, False)
         if pan_limit and ptz_enabled:
             entities.append(BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit))
     # Integration-level selects (one per integration, not per camera)

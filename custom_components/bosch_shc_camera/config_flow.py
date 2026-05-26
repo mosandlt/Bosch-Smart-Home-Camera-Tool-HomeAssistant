@@ -85,6 +85,8 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "nvr_smb_subpath", "nvr_retention_days",
         "nvr_quality", "nvr_preroll_seconds", "nvr_preroll_cache_dir",
     ],
+    # NOTE: literal strings here (not the CONF_* constants) — this dict
+    # is built before the .const import at module load time.
     "webhook": [
         "enable_webhook_delivery", "webhook_url",
     ],
@@ -159,6 +161,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MAX,
     CONF_ENABLE_WEBHOOK_DELIVERY,
     CONF_WEBHOOK_URL,
+    CONF_ENABLE_PTZ_CONTROLS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -528,8 +531,8 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                       "enable_smb_upload",
                       "enable_nvr",
                       "enable_go2rtc",
-                      "enable_webhook_delivery",
-                      "enable_ptz_controls",
+                      CONF_ENABLE_WEBHOOK_DELIVERY,
+                      CONF_ENABLE_PTZ_CONTROLS,
                       "use_mjpeg_snapshot"]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
@@ -839,12 +842,12 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         sectioned_schema[vol.Required("webhook")] = section(
             vol.Schema({
                 vol.Optional(
-                    "enable_webhook_delivery",
-                    default=bool(opts.get("enable_webhook_delivery", False)),
+                    CONF_ENABLE_WEBHOOK_DELIVERY,
+                    default=bool(opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False)),
                 ): bool,
                 vol.Optional(
-                    "webhook_url",
-                    description={"suggested_value": opts.get("webhook_url", "")},
+                    CONF_WEBHOOK_URL,
+                    description={"suggested_value": opts.get(CONF_WEBHOOK_URL, "")},
                 ): str,
             }),
             {"collapsed": True},
@@ -853,8 +856,8 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         sectioned_schema[vol.Required("ptz")] = section(
             vol.Schema({
                 vol.Optional(
-                    "enable_ptz_controls",
-                    default=bool(opts.get("enable_ptz_controls", False)),
+                    CONF_ENABLE_PTZ_CONTROLS,
+                    default=bool(opts.get(CONF_ENABLE_PTZ_CONTROLS, False)),
                 ): bool,
             }),
             {"collapsed": True},

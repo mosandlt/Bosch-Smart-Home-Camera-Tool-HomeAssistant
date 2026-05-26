@@ -102,7 +102,7 @@
               "stream_connection_type": "Default connection type for live streams.\n• **auto** (recommended): Try local LAN first, automatically fall back to Bosch cloud proxy on failure.\n• **local**: Direct LAN only — no internet required. Faster RTSP, but slower snapshots (~6–10 s). Session auto-renewed every 50 s.\n• **remote**: Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Best default when HA is not on the same LAN.\nThe 'Stream Mode' select entity overrides this setting at runtime without restart.",
               "live_buffer_mode": "How many seconds of video the player pre-buffers before showing it. More buffer = fewer stutters but larger lag behind real time.\n• **Latency**: small buffer (~4-6 s lag). May stutter on flaky Wi-Fi.\n• **Balanced** (recommended): medium buffer (~8-10 s). Robust against typical Wi-Fi hiccups.\n• **Stable**: large buffer (~12-15 s). Smooth even on weak links, but noticeably delayed.\nAffects only the card display — has no effect on the camera, recording, or snapshots.",
               "enable_go2rtc": "Automatically register live streams with HA's bundled go2rtc for WebRTC playback (~2 s latency vs. ~10 s HLS). Recommended. Disable only if you run a custom go2rtc setup.",
-              "use_mjpeg_snapshot": "**Gen2 cameras only (LAN required).** When ON: snapshot requests capture one JPEG frame directly from the camera via its RTSP inst=3 MJPEG stream using FFmpeg. Faster than the cloud-proxy path (~150–300 ms vs ~500 ms) and works without an active live-stream session. Requires cached LAN credentials — populated automatically on first live-stream open. Falls back to the normal snapshot path if FFmpeg fails or credentials are missing. **On by default — silently falls back to the cloud-proxy path when not applicable (Gen1 cams, no LAN creds, FFmpeg error).**"
+              "use_mjpeg_snapshot": "**Gen2 cameras only, LAN required, experimental.** When ON: snapshot requests try to capture one JPEG frame directly from the camera via its RTSP inst=3 MJPEG stream using FFmpeg. Goal is ~150–300 ms vs ~500 ms via the cloud proxy. **Off by default** — FFmpeg's built-in TLS stack currently fails to negotiate with the camera's RTSPS server on port 443 (FFmpeg error 183), so most users will see the normal cloud-proxy path even with this enabled. Falls back automatically when FFmpeg fails."
             }
           },
           "fcm": {
@@ -391,9 +391,6 @@
     "button": {
       "refresh_snapshot": {
         "name": "Refresh Snapshot"
-      },
-      "acoustic_alarm": {
-        "name": "Siren"
       }
     },
     "select": {
@@ -781,13 +778,6 @@
       "cameras_loaded": "Cameras loaded",
       "last_fcm_push_ago": "Last FCM push",
       "platinum_quality": "Quality Scale"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "bosch_shc_camera_motion": "Motion detected",
-      "bosch_shc_camera_audio_alarm": "Audio alarm detected",
-      "bosch_shc_camera_person": "Person detected"
     }
   }
 }

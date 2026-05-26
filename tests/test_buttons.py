@@ -62,31 +62,6 @@ def test_refresh_button_device_info(stub_coord, stub_entry):
     assert info["connections"] == {("mac", "aa:bb:cc:dd:ee:01")}
 
 
-# ── BoschAcousticAlarmButton ────────────────────────────────────────────
-
-
-def test_acoustic_alarm_button_disabled_by_default(stub_coord, stub_entry):
-    """Siren button starts hidden — `_attr_entity_registry_enabled_default = False`."""
-    from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-    btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-    assert btn._attr_entity_registry_enabled_default is False
-
-
-def test_acoustic_alarm_button_construction(stub_coord, stub_entry):
-    from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-    btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-    assert btn._attr_translation_key == "acoustic_alarm"
-    assert btn._attr_unique_id.startswith("bosch_shc_siren_")
-
-
-def test_acoustic_alarm_button_in_config_category(stub_coord, stub_entry):
-    """Siren button must be in the CONFIG entity category, not in the default UI."""
-    from homeassistant.helpers.entity import EntityCategory
-    from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-    btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-    assert btn._attr_entity_category == EntityCategory.CONFIG
-
-
 # ── No mac → no connection entry ────────────────────────────────────────
 
 
@@ -99,14 +74,6 @@ def test_device_info_no_mac_skipped(stub_coord, stub_entry):
     assert info["connections"] == set()
 
 
-def test_acoustic_alarm_device_info(stub_coord, stub_entry):
-    """BoschAcousticAlarmButton.device_info propagates identifiers and manufacturer."""
-    from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-    from custom_components.bosch_shc_camera import DOMAIN
-    btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-    info = btn.device_info
-    assert info["manufacturer"] == "Bosch"
-    assert (DOMAIN, CAM_ID) in info["identifiers"]
     assert info["sw_version"] == "9.40.25"
 
 
@@ -145,43 +112,6 @@ class TestRefreshSnapshotPress:
         assert len(tasks_created) == 2
 
 
-class TestAcousticAlarmPress:
-    @pytest.mark.asyncio
-    async def test_press_calls_put_camera_acoustic_alarm(self, stub_coord, stub_entry):
-        """async_press must call coordinator.async_put_camera with acoustic_alarm payload."""
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        from unittest.mock import MagicMock
-        btn.hass = MagicMock()
-        await btn.async_press()
-        stub_coord.async_put_camera.assert_called_once_with(
-            CAM_ID, "acoustic_alarm", {"enabled": True}
-        )
-
-    @pytest.mark.asyncio
-    async def test_press_logs_warning_on_false_return(self, stub_coord, stub_entry):
-        """Non-success return from put_camera → warning logged, no exception raised."""
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        from unittest.mock import MagicMock
-        stub_coord.async_put_camera = AsyncMock(return_value=False)
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        btn.hass = MagicMock()
-        await btn.async_press()  # must not raise
-
-    @pytest.mark.asyncio
-    async def test_press_swallows_exception(self, stub_coord, stub_entry):
-        """Exception from async_put_camera is logged as error and not re-raised."""
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        from unittest.mock import MagicMock
-        stub_coord.async_put_camera = AsyncMock(side_effect=RuntimeError("boom"))
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        btn.hass = MagicMock()
-        try:
-            await btn.async_press()
-        except RuntimeError:
-            pytest.fail("async_press must swallow RuntimeError from async_put_camera")
-
-
 # ── async_setup_entry ────────────────────────────────────────────────────
 
 
@@ -190,12 +120,12 @@ class TestSetupEntry:
     async def test_creates_one_button_per_camera(self, stub_coord, stub_entry):
         """Default options → 1 button entity per camera (Refresh only).
 
-        BoschAcousticAlarmButton was removed from async_setup_entry in v12.0.4:
-        Gen1 cameras have no integrated siren, Gen2 cameras use the panic_alarm
-        endpoint via switch.py BoschPanicAlarmSwitch instead.
+        BoschAcousticAlarmButton was removed entirely in v13.3 (was kept as
+        an orphan since v12.0.4). Gen1 cameras have no integrated siren;
+        Gen2 cameras use BoschPanicAlarmSwitch via /panic_alarm in switch.py.
         """
         from custom_components.bosch_shc_camera.button import (
-            async_setup_entry, BoschRefreshSnapshotButton, BoschAcousticAlarmButton,
+            async_setup_entry, BoschRefreshSnapshotButton,
         )
         stub_entry.runtime_data = stub_coord
         captured: list = []
@@ -203,10 +133,6 @@ class TestSetupEntry:
                                 async_add_entities=lambda e, update_before_add=False: captured.extend(e))
         types_ = {type(e) for e in captured}
         assert BoschRefreshSnapshotButton in types_
-        assert BoschAcousticAlarmButton not in types_, (
-            "AcousticAlarmButton must not be instantiated — Gen1 has no siren, "
-            "Gen2 uses BoschPanicAlarmSwitch via /panic_alarm endpoint"
-        )
         assert len(captured) == 1
 
     @pytest.mark.asyncio

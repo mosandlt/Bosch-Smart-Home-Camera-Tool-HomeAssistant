@@ -22,7 +22,7 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, Iterable
+from typing import Any, Generator
 
 from aiohttp import web
 

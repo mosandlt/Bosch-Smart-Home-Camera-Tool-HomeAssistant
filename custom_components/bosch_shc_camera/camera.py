@@ -40,7 +40,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
+from . import DOMAIN, LIVE_SESSION_TTL, get_options, _is_safe_bosch_url, BoschCameraCoordinator  # type: ignore[attr-defined]
 from .auth_utils import async_digest_request
 from .const import TIMEOUT_SNAP, AUTO_PLAY_DEFAULT_VALUES
 from .mjpeg_snapshot import fetch_mjpeg_snapshot

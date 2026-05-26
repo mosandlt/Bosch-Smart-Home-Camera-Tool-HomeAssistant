@@ -398,9 +398,6 @@
     "button": {
       "refresh_snapshot": {
         "name": "Оновити Знімок"
-      },
-      "acoustic_alarm": {
-        "name": "Сирена"
       }
     },
     "select": {
@@ -770,13 +767,6 @@
       "cameras_loaded": "Камери завантажені",
       "last_fcm_push_ago": "Останній FCM Push",
       "platinum_quality": "Quality Scale"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "bosch_shc_camera_motion": "Виявлено рух",
-      "bosch_shc_camera_audio_alarm": "Виявлено звукову тривогу",
-      "bosch_shc_camera_person": "Виявлено людину"
     }
   }
 }

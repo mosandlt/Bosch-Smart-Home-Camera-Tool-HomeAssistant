@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.2.1";
+const CARD_VERSION = "13.2.3";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -1180,14 +1180,16 @@ class BoschCameraCard extends HTMLElement {
         .loading-overlay.visible { opacity: 1; pointer-events: auto; }
         /* Semi-transparent overlay when refreshing an existing image — old image stays visible, spinner on top */
         .loading-overlay.refreshing { background: rgba(0,0,0,.4); }
+        /* SVG spinner with SMIL <animateTransform> — replaces the CSS @keyframes
+           div-spinner because iOS Safari + HA mobile WebView were rendering the
+           CSS-animated rotation as static (animation paused on opacity:0→1
+           parent transition inside shadow DOM). SMIL animations run independently
+           of CSS animation scheduling and work reliably across all WebKit versions. */
         .spinner {
           width: 36px; height: 36px;
-          border: 3px solid rgba(255,255,255,.2);
-          border-top-color: #fff;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
+          flex: 0 0 auto;
+          display: block;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
         .loading-text {
           font-size: 13px; color: rgba(255,255,255,.75); font-weight: 500;
         }
@@ -1549,6 +1551,20 @@ class BoschCameraCard extends HTMLElement {
         :host(.apple-style.overflow-open) .pan-row {
           max-height: 2000px;
           opacity: 1;
+        }
+        /* Default .pan-section { padding: 0 12px 12px } produces a 12 px
+           white bar below the image when pan-row is hidden (apple-style,
+           overflow closed). Drop padding to zero in that state; bring the
+           breathing room back only when the section actually shows content. */
+        :host(.apple-style) .pan-section { padding: 0; }
+        :host(.apple-style.overflow-open) .pan-section { padding: 0 12px 12px; }
+
+        /* Suppress redundant top-right "connecting" badge while the central
+           loading overlay is up — both convey the same state, and the overlay
+           carries the timer/hint ("ca. 25–35 s bis erstes Bild"). Once the
+           overlay hides, the badge re-appears as LIVE / OFFLINE / etc. */
+        :host(.apple-style) .img-wrapper:has(.loading-overlay.visible) .ap-badge.connecting {
+          display: none;
         }
 
         /* Glass material primitive ------------------------------- */
@@ -2248,7 +2264,12 @@ class BoschCameraCard extends HTMLElement {
             <span class="apg-hint">Antippen, um den Live-Stream zu starten</span>
           </div>
           <div class="loading-overlay visible" id="loading-overlay">
-            <div class="spinner"></div>
+            <svg class="spinner" width="36" height="36" viewBox="0 0 40 40" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="3"/>
+              <circle cx="20" cy="20" r="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-dasharray="25 75">
+                <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 20 20" to="360 20 20" dur="0.8s" repeatCount="indefinite"/>
+              </circle>
+            </svg>
             <span class="loading-text" id="loading-text">Bild wird geladen…</span>
             <span class="loading-hint" id="loading-hint"></span>
           </div>

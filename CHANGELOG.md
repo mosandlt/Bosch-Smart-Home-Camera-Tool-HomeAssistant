@@ -5,6 +5,37 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.2.3] - 2026-05-26
+
+Patch release — fixes two real production bugs surfaced during a thorough code scan, plus quality-of-life improvements in logging, options-flow correctness, and async hygiene.
+
+- **`bosch_shc_camera_intrusion` webhook event now actually fires.** The event type was registered as a webhook target and exposed via `send_event_webhook` selector, but no code path ever fired it. Added rising-edge detection on `alarmStatus.alarmType`: a transition from `"NONE"` (or empty) to a real alarm type fires the event once with a payload `{camera_id, camera_name, alarm_type, intrusion_system, timestamp}`. Falling edges and repeats do not fire (avoids spam). Pinned with 12 regression tests covering every transition.
+- **Stale go2rtc + Stream-object state on integration reload.** `_async_cancel_coordinator_tasks` only stopped TLS proxies but never per-cam tore down active streams. Result: go2rtc kept producer URLs pointing at dead proxy ports, and HA's `Stream` object on the camera entity held the dead URL — the browser polled a 404 m3u8 until the user hard-refreshed the card. Now iterates `_live_connections` and calls `_tear_down_live_stream(cam_id)` before `stop_all_proxies` (unregisters go2rtc + `stream.stop()` + `cam_entity.stream = None`). Pinned with 4 regression tests.
+- **RCP-LAN HTTP 401 throttle.** CBS users lack permission for some RCP opcodes (`iconLedBrightness` etc.). The slow-tier polled them every ~5 min forever — 100+ unnecessary 401s/hour in real logs. Added a per-`(cam_id, opcode_hex)` denied cache (24 h TTL) that short-circuits the next call without a network request; cleared automatically on the next 200 so a permission change recovers within the next slow-tier cycle. Pinned with 8 regression tests.
+- **Empty-message exception logs now show the type.** `_LOGGER.debug("X fetch error for %s: %s", cam, err)` produced `"X fetch error for AAAA: "` with no trailing message for `asyncio.TimeoutError()` and several `aiohttp` errors whose `str()` returns `""`. New `_err_str(err)` helper falls back to `repr(err)` when the str is empty. Applied to 6 fetch-error sites.
+- **`use_mjpeg_snapshot` documentation rewritten.** All three translation files (`strings.json`, `en.json`, `de.json`) claimed "On by default — silently falls back …" while `DEFAULT_OPTIONS["use_mjpeg_snapshot"] = False`. Rewritten to "Off by default, experimental" and explains the FFmpeg-TLS-stack incompatibility with Bosch's RTSPS server (FFmpeg error 183).
+- **`enable_intercom` option now actually controls visibility.** The option toggle in Settings had no effect — `BoschIntercomSwitch` was always registered (only hidden via `_attr_entity_registry_enabled_default = False`). Now gated on `opts.get("enable_intercom", False)` OR a legacy entity-registry entry (preserves existing installs that enabled the entity via the UI). The hide-by-default attribute is dropped so a fresh opt-in shows the entity immediately.
+- **`threading.Event.wait(timeout=2)` removed from the asyncio event loop.** `tls_proxy.start_tls_proxy` allocated a `threading.Event` and waited on it on the asyncio thread purely to confirm the daemon thread had started. The port is already listening before the thread starts, so the wait was both blocking-on-async-loop and pointless. Removed.
+- **`_SHC_MAX_FAILS` / `_SHC_RETRY_INTERVAL` migrated to `const.py`.** Were instance variables for what are truly immutable thresholds; now class-level constants mirrored from `const.py`. Test pins on `coord._SHC_MAX_FAILS` keep working.
+- **Inline timeouts centralized.** Recorder (grace/stderr-drain/ffmpeg-init/stop-grace) and tls_proxy (TCP-connect, RTSP DESCRIBE-read) inline `timeout=N` literals moved to named constants in `const.py`. Same values — tunable in one place going forward.
+- **Dead-code cleanup.** Removed 7 unused imports across 6 modules. `BoschAcousticAlarmButton` class deleted entirely — never instantiated since v12.0.4 (Gen1 cams have no integrated siren; Gen2 uses `BoschPanicAlarmSwitch`). 11 dead OAuth-abort translation keys + `pick_implementation` step removed from `strings.json`. `device_automation.trigger_type.*` section removed from `strings.json` + 11 translation files (no `device_automation.py` exists). Config-flow + select.py use the `CONF_ENABLE_WEBHOOK_DELIVERY` / `CONF_WEBHOOK_URL` / `CONF_ENABLE_PTZ_CONTROLS` constants instead of inline string literals.
+- **Test suite.** Net new: 7 test files, +47 tests. Full suite **4514 passed / 17 skipped / 0 failed** in ~101 s.
+
+## [v13.2.2] - 2026-05-25
+
+- `trouble_connect` added to `last_event_type` enum options. Fixes `ValueError: provides state value trouble_connect, which is not in the list of options` log spam on Gen1 camera reconnect events.
+
+## [v13.2.1] - 2026-05-25
+
+- WebRTC fast-fail in card: Promise reject hoisted out of subscribeMessage scope so 5 s delay no longer applies when WebRTC negotiation rejects synchronously.
+- Bosch session-quota 444 mapped to `SESSION_LIMIT` sensor state instead of `OFFLINE` in 3 call sites.
+
+## [v13.2.0] - 2026-05-25
+
+- audioAlarm cleanup: removed unactivatable Geräusch-Erkennung switch + threshold/sensitivity number entities + diagnostic sensor + coordinator helper.
+- Bosch iOS app v2.11.2+ activates the microphone via a pinned LAN HTTPS call that cannot be replicated from HA, so the entity could never activate.
+- Cross-version mirror of Python CLI v10.8.0.
+
 ## v13.1.2 — 2026-05-24
 
 Patch release — fixes two issues surfaced by live HA logs: an FCM-push crash during integration setup, and a 5-minute startup-wait warning caused by the LOCAL session keepalive being registered as a tracked task instead of a background task.

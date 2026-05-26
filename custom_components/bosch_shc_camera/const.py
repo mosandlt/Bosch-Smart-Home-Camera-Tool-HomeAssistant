@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.2.1"
+CARD_VERSION = "13.2.3"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -13,7 +13,6 @@ ALL_PLATFORMS = [
     "switch", "number", "select", "update", "light",
 ]
 
-LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 
 # ── Network timeouts (seconds) ────────────────────────────────────────────────
@@ -23,6 +22,24 @@ LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 # inconsistent (CLI 5/15s vs. integration 10s).
 TIMEOUT_SNAP = 10             # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10   # PUT /v11/video_inputs/{id}/connection
+
+# Subprocess-lifecycle timeouts (recorder.py). Grace = SIGTERM→SIGKILL window;
+# kill_wait = post-SIGKILL wait_for; stderr_drain = drain pipe before close;
+# ffmpeg_init = NVR FFmpeg process init wait.
+TIMEOUT_RECORDER_GRACE = 5.0
+TIMEOUT_RECORDER_KILL_WAIT = 2.0
+TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
+TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
+
+# tls_proxy.py — TCP connect to camera + RTSP pre-warm DESCRIBE response wait.
+TIMEOUT_TLS_PROXY_CONNECT = 10
+TIMEOUT_TLS_PROXY_RTSP_READ = 5
+
+# SHC local-API fallback retry policy. Used by shc.py's circuit breaker
+# (offline mode). Centralized so the values are not buried as instance
+# attributes inside the coordinator.
+SHC_MAX_FAILS = 3             # mark SHC offline after this many consecutive failures
+SHC_RETRY_INTERVAL = 120      # seconds — retry SHC after this long while offline
 
 DEFAULT_MOTION_ACTIVE_WINDOW = 90  # seconds — see binary_sensor.py for rationale
 MOTION_ACTIVE_WINDOW_MIN = 10      # seconds

@@ -13,7 +13,6 @@ from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -40,13 +39,6 @@ async def async_setup_entry(
     entities = []
     for cam_id in coordinator.data:
         entities.append(BoschRefreshSnapshotButton(coordinator, cam_id, config_entry))
-        # Acoustic alarm button removed 2026-05-13: Gen1 cameras (360 Indoor +
-        # Eyes Outdoor) have no integrated siren — confirmed with hardware
-        # owner. Gen2 siren is exposed as a stateful switch (panic_alarm) in
-        # switch.py because the endpoint is /panic_alarm with {"status":"ON/OFF"},
-        # not /acoustic_alarm — see mitm capture 2026-05-13_160946. The
-        # BoschAcousticAlarmButton class is kept for backward compat with the
-        # entity registry but is no longer instantiated.
     async_add_entities(entities, update_before_add=False)
 
 
@@ -103,63 +95,3 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):  # type: igno
             self.hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-class BoschAcousticAlarmButton(CoordinatorEntity, ButtonEntity):  # type: ignore[misc]
-    """Button: trigger the camera siren (acoustic alarm).
-
-    Sends PUT /v11/video_inputs/{id}/acoustic_alarm to activate the built-in siren.
-    Discovered from iOS app analysis (GetAcousticAlarmActivationUrl).
-    Created for all cameras — if a model doesn't support it, the API returns HTTP 442
-    which is handled gracefully. Disabled by default to avoid UI clutter.
-    """
-
-    _attr_entity_registry_enabled_default = False
-    _attr_has_entity_name = True
-    _attr_translation_key = "acoustic_alarm"
-    _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry  = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-        self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
-
-        self._attr_name            = "Siren"
-        self._attr_unique_id       = f"bosch_shc_siren_{cam_id.lower()}"
-        self._attr_icon            = "mdi:alarm-light"
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
-        }
-
-    async def async_press(self) -> None:
-        """Trigger the acoustic alarm (siren) on the camera."""
-        _LOGGER.info("Triggering acoustic alarm (siren) for %s", self._cam_title)
-        try:
-            success = await self.coordinator.async_put_camera(
-                self._cam_id, "acoustic_alarm", {"enabled": True}
-            )
-            if success:
-                _LOGGER.info("Siren activated for %s", self._cam_title)
-            else:
-                _LOGGER.warning(
-                    "Siren activation returned non-success for %s — "
-                    "endpoint may not be supported or payload format differs",
-                    self._cam_title,
-                )
-        except Exception as err:
-            _LOGGER.error("Siren activation failed for %s: %s", self._cam_title, err)

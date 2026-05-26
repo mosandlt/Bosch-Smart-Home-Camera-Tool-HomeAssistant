@@ -46,6 +46,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -195,8 +196,17 @@ async def async_setup_entry(
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
             entities.append(BoschAutoFollowSwitch(coordinator, cam_id, config_entry))
-        # Intercom (two-way audio) — disabled by default
-        entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
+        # Intercom (two-way audio) — gated on the `enable_intercom` option so
+        # the option toggle has actual effect. Legacy users who enabled the
+        # entity via the UI keep it (registry already has the entry); new
+        # users see nothing until they enable the option explicitly.
+        intercom_uid = f"bosch_shc_camera_{cam_id}_intercom"
+        intercom_in_registry = (
+            er.async_get(hass).async_get_entity_id("switch", DOMAIN, intercom_uid)
+            is not None
+        )
+        if opts.get("enable_intercom", False) or intercom_in_registry:
+            entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
         # Privacy sound — only for cameras where the endpoint returns 200 (not 442)
         # Indoor CAMERA_360 (Gen1) + HOME_Eyes_Indoor (Gen2) support it; outdoor returns 442.
         hw_version = cam_info.get("hardwareVersion", "")
@@ -990,7 +1000,6 @@ class BoschIntercomSwitch(_BoschSwitchBase):
     """
 
     _attr_icon = "mdi:microphone"
-    _attr_entity_registry_enabled_default = False
     _attr_translation_key = "intercom"
     _attr_entity_category = EntityCategory.CONFIG
 

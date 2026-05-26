@@ -31,7 +31,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import dt as dt_util
 
 from . import DOMAIN, BoschCameraCoordinator  # type: ignore[attr-defined]
 from .const import DEFAULT_MOTION_ACTIVE_WINDOW, MOTION_ACTIVE_WINDOW_MIN, MOTION_ACTIVE_WINDOW_MAX

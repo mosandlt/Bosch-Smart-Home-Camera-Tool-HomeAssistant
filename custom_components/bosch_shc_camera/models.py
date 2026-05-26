@@ -15,7 +15,7 @@ Supported models (Gen2, firmware 9.40.25):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

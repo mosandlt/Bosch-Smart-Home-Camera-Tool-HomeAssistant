@@ -29,6 +29,12 @@ import signal
 import time
 from typing import TYPE_CHECKING, Any
 
+from .const import (
+    TIMEOUT_RECORDER_GRACE,
+    TIMEOUT_RECORDER_KILL_WAIT,
+    TIMEOUT_RECORDER_STDERR_DRAIN,
+    TIMEOUT_RECORDER_FFMPEG_INIT,
+)
 from .smb import _safe_name
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
@@ -45,7 +51,9 @@ DEFAULT_SEGMENT_SECONDS = 300  # 5 minutes, wall-aligned
 _RESPAWN_WINDOW_SECONDS = 30.0
 _RESPAWN_DELAY_SECONDS = 5.0
 # Stop timeout — give ffmpeg time to flush the trailing moov atom on SIGTERM.
-_STOP_GRACE_SECONDS = 5.0
+# Centralized in const.py so the SIGTERM/SIGKILL/stderr timing is tunable
+# without touching the recorder.
+_STOP_GRACE_SECONDS = TIMEOUT_RECORDER_GRACE
 
 # When the NVR switch is toggled on right after Live Stream ON, the TLS
 # proxy URL is still empty until the RTSP DESCRIBE handshake completes
@@ -406,7 +414,7 @@ async def stop_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: s
         except ProcessLookupError:
             pass
         try:
-            await asyncio.wait_for(proc.wait(), timeout=2.0)
+            await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
         except asyncio.TimeoutError:
             pass
 
@@ -488,7 +496,7 @@ async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str,
         return False
 
     try:
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT_RECORDER_FFMPEG_INIT)
     except asyncio.TimeoutError:
         try:
             proc.kill()
@@ -694,7 +702,7 @@ async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> N
         except ProcessLookupError:
             pass
         try:
-            await asyncio.wait_for(proc.wait(), timeout=2.0)
+            await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
         except asyncio.TimeoutError:
             _LOGGER.warning(
                 "NVR stop_recorder: ffmpeg still alive after SIGKILL for %s",
@@ -735,7 +743,7 @@ async def _watch_recorder(
     err_tail = ""
     if proc.stderr is not None:
         try:
-            err_bytes = await asyncio.wait_for(proc.stderr.read(2048), timeout=1.0)
+            err_bytes = await asyncio.wait_for(proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN)
             err_tail = err_bytes.decode("utf-8", errors="replace").strip()
         except (asyncio.TimeoutError, Exception):
             pass

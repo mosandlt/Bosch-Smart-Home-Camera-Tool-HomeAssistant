@@ -28,7 +28,7 @@ import re as _re_mod
 import ssl
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Coroutine, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ from .smb import (
     sync_smb_cleanup,
 )
 from . import recorder as nvr_recorder
-from .tls_proxy import pre_warm_rtsp, rtsp_keepalive, start_tls_proxy, stop_tls_proxy, stop_all_proxies
+from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_tls_proxy, stop_all_proxies
 from . import shc as shc_mod
 from .rcp import async_update_rcp_data, get_cached_rcp_session
 from .auth_utils import async_digest_request
@@ -405,9 +405,10 @@ from .const import (  # noqa: E402
     DOMAIN,
     CLOUD_API,
     ALL_PLATFORMS,
-    LIVE_TYPE_CANDIDATES,
     LIVE_SESSION_TTL,
     DEFAULT_OPTIONS,
+    SHC_MAX_FAILS,
+    SHC_RETRY_INTERVAL,
     TIMEOUT_SNAP,
     TIMEOUT_PUT_CONNECTION,
 )
@@ -429,6 +430,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     All entity types (camera, sensor, button) read from coordinator.data
     rather than making independent API calls.
     """
+
+    # How long a (cam_id, opcode_hex) entry stays in the RCP-LAN denied cache
+    # after a 401. 24 h is short enough that a real permission grant recovers
+    # the same day, long enough that a wrong CBS user does not respawn log
+    # noise every 5 min.
+    _RCP_LAN_DENIED_TTL: float = 86400.0
+
+    # SHC local-API circuit-breaker thresholds, mirrored from const.py.
+    # Exposed as class attrs so shc.py + existing tests can read them as
+    # `coordinator._SHC_MAX_FAILS` without per-instance assignment.
+    _SHC_MAX_FAILS: int = SHC_MAX_FAILS
+    _SHC_RETRY_INTERVAL: int = SHC_RETRY_INTERVAL
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
@@ -504,8 +517,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._shc_available: bool = True        # assume available until proven otherwise
         self._shc_fail_count: int = 0           # consecutive failures
         self._shc_last_check: float = 0.0       # last time we probed SHC after it went offline
-        self._SHC_MAX_FAILS = 3                 # mark offline after this many consecutive failures
-        self._SHC_RETRY_INTERVAL = 120          # seconds — retry SHC after this long when offline
+        # _SHC_MAX_FAILS + _SHC_RETRY_INTERVAL are class-level constants
+        # mirrored from const.py — see top-of-class declaration.
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
         self._pan_cache: dict[str, int | None] = {}
         # WiFi info cache — keyed by cam_id, populated from GET /wifiinfo
@@ -697,6 +710,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._alarm_settings_cache: dict[str, dict[str, Any]] = {}
         # Alarm status cache — from GET /alarmStatus (Gen2 Indoor II only).
         self._alarm_status_cache: dict[str, dict[str, Any]] = {}
+        # Last observed alarmType per cam — for rising-edge detection of intrusion
+        # events. Fires `bosch_shc_camera_intrusion` when alarmType transitions
+        # from NONE/empty to a real alarm type (e.g. INTRUSION_DETECTED).
+        self._last_alarm_type: dict[str, str] = {}
         # Intrusion system arming cache — derived from alarmStatus (armed/disarmed).
         # Set by BoschAlarmSystemArmSwitch on successful PUT /intrusionSystem/arming.
         self._arming_cache: dict[str, bool] = {}
@@ -726,6 +743,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._arming_set_at:        dict[str, float] = {}  # alarm system arm/disarm write
         self._intrusion_config_set_at: dict[str, float] = {}  # intrusionDetectionConfig write
         self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
+        # RCP-LAN denied-cache: (cam_id, opcode_hex) → monotonic timestamp when
+        # the 401 was observed. CBS users lack permission for some opcodes
+        # (e.g. 0x0a98 iconLedBrightness); without this throttle, each slow-tier
+        # cycle (~5 min) re-issues the same 401 forever. After 24 h we try
+        # once more in case permissions changed. See _fetch_rcp_lan.
+        self._rcp_lan_denied_until: dict[tuple[str, str], float] = {}
         # Camera hardware version cache — keyed by cam_id, e.g. "CAMERA_360", "CAMERA_EYES"
         # Used for model-specific timing (encoder warm-up) and feature gating.
         self._hw_version: dict[str, str] = {}
@@ -874,6 +897,85 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         from .models import get_model_config
         hw = self._hw_version.get(cam_id, "CAMERA")
         return get_model_config(hw)
+
+    @staticmethod
+    def _err_str(err: BaseException) -> str:
+        """Format an exception so empty-message types (TimeoutError, some
+        aiohttp errors) still produce meaningful log output. Falls back to
+        repr(err) when str(err) is empty — the original "fetch error: "
+        empty-tail bug shipped for months before this helper."""
+        s = str(err)
+        return s if s else repr(err)
+
+    def _is_rcp_lan_denied(self, cam_id: str, opcode_hex: str) -> bool:
+        """Return True if this (cam, opcode) is currently denied (24 h cache).
+
+        Defensive against minimal test-fixture coordinators (no `__init__`)
+        that don't have the `_rcp_lan_denied_until` attribute — treat absence
+        as "not denied" rather than raising.
+        """
+        cache: dict[tuple[str, str], float] | None = getattr(self, "_rcp_lan_denied_until", None)
+        if not cache:
+            return False
+        ts = cache.get((cam_id, opcode_hex))
+        if ts is None:
+            return False
+        return bool((time.monotonic() - ts) < self._RCP_LAN_DENIED_TTL)
+
+    def _mark_rcp_lan_denied(self, cam_id: str, opcode_hex: str) -> None:
+        """Record a 401 for this (cam, opcode). Future calls skip for 24 h."""
+        if not hasattr(self, "_rcp_lan_denied_until"):
+            self._rcp_lan_denied_until = {}
+        self._rcp_lan_denied_until[(cam_id, opcode_hex)] = time.monotonic()
+
+    def _clear_rcp_lan_denied(self, cam_id: str, opcode_hex: str) -> None:
+        """Clear a denied entry after a successful 200 — permissions may have
+        changed (firmware upgrade, CBS user re-provision)."""
+        cache = getattr(self, "_rcp_lan_denied_until", None)
+        if cache is not None:
+            cache.pop((cam_id, opcode_hex), None)
+
+    def _maybe_fire_intrusion_event(
+        self, cam_id: str, cam_name: str, alarm_status: dict[str, Any]
+    ) -> None:
+        """Fire `bosch_shc_camera_intrusion` on rising edge of `alarmType`.
+
+        Bosch /v11/video_inputs/{id}/alarmStatus returns
+        `{"alarmType": "NONE" | "INTRUSION_DETECTED" | ..., "intrusionSystem": "ACTIVE" | "INACTIVE" | ...}`.
+        Real intrusion → alarmType transitions from "NONE"/empty to something
+        else. We fire once per rising edge; identical repeats and falling
+        edges do not fire (those would either spam or be misleading).
+
+        Without this, the event type was registered as a webhook target and
+        exposed via send_event_webhook but never auto-fired — webhook users
+        only got the manual test event.
+
+        Defensive against SimpleNamespace test stubs that lack
+        `_last_alarm_type` — lazy-init on first call.
+        """
+        if not alarm_status:
+            return
+        raw = alarm_status.get("alarmType")
+        if raw is None:
+            return
+        if not hasattr(self, "_last_alarm_type"):
+            self._last_alarm_type = {}
+        new_type = str(raw).strip().upper()
+        prev_type = self._last_alarm_type.get(cam_id, "NONE").strip().upper()
+        was_idle = prev_type in ("", "NONE")
+        is_idle = new_type in ("", "NONE")
+        if was_idle and not is_idle:
+            self.hass.bus.async_fire(
+                "bosch_shc_camera_intrusion",
+                {
+                    "camera_id":        cam_id,
+                    "camera_name":      cam_name,
+                    "alarm_type":       new_type,
+                    "intrusion_system": str(alarm_status.get("intrusionSystem", "")).upper(),
+                    "timestamp":        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                },
+            )
+        self._last_alarm_type[cam_id] = new_type
 
     def _is_write_locked(self, cam_id: str, set_at_dict: dict[str, float]) -> bool:
         """Return True if a fresh user-write is still inside the eventual-consistency window.
@@ -2121,7 +2223,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 if r.status == 200:
                                     events = await r.json()
                     except Exception as err:
-                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, err)
+                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, BoschCameraCoordinator._err_str(err))
                 return (cam_id, events)
 
             if do_events:
@@ -2376,7 +2478,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     pan_data = await pan_resp.json()
                                     self._pan_cache[cam_id_key] = pan_data.get("currentAbsolutePosition")
                     except Exception as err:
-                        _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, err)
+                        _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, BoschCameraCoordinator._err_str(err))
 
                 # ── Gen2 lighting/switch — fetched every tick (60s) ──
                 # Bosch app polls this every ~40s. Slow tier (300s) is too slow
@@ -2393,7 +2495,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 if ls_resp.status == 200:
                                     self._lighting_switch_cache[cam_id_key] = await ls_resp.json()
                     except Exception as err:
-                        _LOGGER.debug("lighting/switch fetch error for %s: %s", cam_id_key, err)
+                        _LOGGER.debug("lighting/switch fetch error for %s: %s", cam_id_key, BoschCameraCoordinator._err_str(err))
 
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
@@ -2422,7 +2524,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         return (endpoint, 200, await r.json())
                                     return (endpoint, r.status, None)
                         except Exception as err:
-                            _LOGGER.debug("%s fetch error for %s: %s", endpoint, cam_id_key, err)
+                            _LOGGER.debug("%s fetch error for %s: %s", endpoint, cam_id_key, BoschCameraCoordinator._err_str(err))
                             return (endpoint, 0, None)
 
                     # Build task list (skip endpoints not applicable to this camera)
@@ -2548,6 +2650,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     self._arming_cache[cam_id_key] = True
                                 elif intrusion == "INACTIVE":
                                     self._arming_cache[cam_id_key] = False
+                            if isinstance(ep_data, dict):
+                                # Class-method dispatch (not bound `self.`) because
+                                # existing test fixtures inject `SimpleNamespace`
+                                # stubs as `self`. Those lack instance methods, so
+                                # the bound-method lookup raises AttributeError —
+                                # the explicit `Class.method(self, ...)` form binds
+                                # at call-site instead. The helper itself is
+                                # defensive (lazy-inits `_last_alarm_type`).
+                                BoschCameraCoordinator._maybe_fire_intrusion_event(
+                                    self,
+                                    cam_id_key,
+                                    cam_raw.get("title", cam_id_key),
+                                    ep_data,
+                                )
                         elif ep == "iconLedBrightness":
                             # Power-LED brightness 0-4 (5 discrete steps: off + 4 levels)
                             try:
@@ -5222,6 +5338,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         the existing slow-tier RCP proxy path for writes). This helper is
         READ-ONLY and purely supplementary to the cloud-proxy path.
         """
+        if self._is_rcp_lan_denied(cam_id, opcode_hex):
+            return None
         ip = self._get_cam_lan_ip(cam_id)
         if not ip:
             return None
@@ -5257,7 +5375,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     _LOGGER.debug(
                         "_fetch_rcp_lan: %s@%s HTTP %d", opcode_hex, ip, resp.status
                     )
+                    if resp.status == 401:
+                        # CBS user lacks permission for this opcode — stop hammering
+                        # the camera every 5 min. Retry once the TTL expires.
+                        self._mark_rcp_lan_denied(cam_id, opcode_hex)
                     return None
+                self._clear_rcp_lan_denied(cam_id, opcode_hex)
                 raw = await resp.read()
                 # Check for RCP-level error
                 if b"<err>" in raw.lower():
@@ -5296,7 +5419,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 self._rcp_onvif_scopes_cache[cam_id] = scopes_dict
                 _LOGGER.debug("ONVIF scopes for %s: %s", cam_id[:8], scopes_dict)
         except Exception as err:
-            _LOGGER.debug("ONVIF scopes fetch error for %s: %s", cam_id[:8], err)
+            _LOGGER.debug("ONVIF scopes fetch error for %s: %s", cam_id[:8], BoschCameraCoordinator._err_str(err))
 
         # F6: RCP protocol versions via 0xff00 (primary) + 0xff04 (secondary)
         try:
@@ -5306,7 +5429,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 self._rcp_version_cache[cam_id] = version_str
                 _LOGGER.debug("RCP version for %s: %s", cam_id[:8], version_str)
         except Exception as err:
-            _LOGGER.debug("RCP version fetch error for %s: %s", cam_id[:8], err)
+            _LOGGER.debug("RCP version fetch error for %s: %s", cam_id[:8], BoschCameraCoordinator._err_str(err))
 
     def clock_offset(self, cam_id: str) -> float | None:
         """Return clock offset in seconds (camera time − server time), or None."""
@@ -6279,7 +6402,32 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
         await nvr_recorder.stop_all(coord)
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("NVR stop_all on unload raised: %s", err)
+    # Tear down every active LOCAL/REMOTE live stream cleanly BEFORE
+    # stop_all_proxies. Without this, integration reload leaves stale state
+    # behind: go2rtc keeps the producer URL with the now-dead proxy port,
+    # and HA's Stream object on the camera entity keeps the dead URL —
+    # the browser then polls a 404 m3u8 until the user hard-refreshes the
+    # card. _tear_down_live_stream handles per-cam: unregister go2rtc,
+    # stop_tls_proxy, stream.stop() + cam_entity.stream = None.
+    # Symptom hit 2026-05-26 after two mjpeg-test reloads back-to-back left
+    # a stale `cbs-76512325@127.0.0.1:32987` Terrasse entry in go2rtc that
+    # had to be cleaned manually.
+    # `getattr(..., {})` keeps minimal SimpleNamespace test fixtures working —
+    # they often don't populate every coordinator attribute.
+    for cam_id in list(getattr(coord, "_live_connections", {}).keys()):
+        teardown = getattr(coord, "_tear_down_live_stream", None)
+        if teardown is None:
+            break
+        try:
+            await teardown(cam_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug(
+                "teardown live stream for %s on unload raised: %s",
+                cam_id[:8], err,
+            )
     # Stop all TLS proxies (closes server sockets, terminates threads).
+    # Idempotent — _tear_down_live_stream already stopped per-cam proxies,
+    # this catches anything left in the port_cache (defensive).
     stop_all_proxies(coord._tls_proxy_ports)
     # Remove the stream-worker log listener so the handler doesn't outlive
     # the coordinator and keep a reference to a dead object.

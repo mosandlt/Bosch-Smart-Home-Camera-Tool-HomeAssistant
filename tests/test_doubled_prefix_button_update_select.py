@@ -84,27 +84,6 @@ class TestRefreshSnapshotButtonNaming:
         assert btn._attr_has_entity_name is True
 
 
-# ── BoschAcousticAlarmButton ────────────────────────────────────────────────
-
-class TestAcousticAlarmButtonNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        assert not btn._attr_name.startswith("Bosch "), (
-            f"_attr_name '{btn._attr_name}' still contains the 'Bosch' prefix"
-        )
-
-    def test_name_is_siren_suffix(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        assert btn._attr_name == "Siren"
-
-    def test_has_entity_name_is_true(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.button import BoschAcousticAlarmButton
-        btn = BoschAcousticAlarmButton(stub_coord, CAM_ID, stub_entry)
-        assert btn._attr_has_entity_name is True
-
-
 # ── BoschFirmwareUpdate ─────────────────────────────────────────────────────
 
 class TestFirmwareUpdateNaming:

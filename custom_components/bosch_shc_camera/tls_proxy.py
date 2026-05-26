@@ -22,6 +22,8 @@ import socket
 import time
 import ssl
 import threading
+
+from .const import TIMEOUT_TLS_PROXY_CONNECT, TIMEOUT_TLS_PROXY_RTSP_READ
 from typing import Callable
 
 
@@ -80,7 +82,7 @@ def start_tls_proxy(
             except OSError:
                 break
             try:
-                raw = socket.create_connection((cam_host, cam_port), timeout=10)
+                raw = socket.create_connection((cam_host, cam_port), timeout=TIMEOUT_TLS_PROXY_CONNECT)
                 # TCP keep-alive: prevent OS from dropping idle connections.
                 raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 try:
@@ -224,19 +226,16 @@ def start_tls_proxy(
             t1.start()
             t2.start()
 
-    ready = threading.Event()
-
-    def _proxy_thread_with_signal() -> None:
-        ready.set()
-        _proxy_thread()
-
+    # Port is already listening (srv.bind + srv.listen above) — the daemon
+    # thread only handles connections that arrive after this point. Don't
+    # block the event loop on a thread-start signal: even with a microsecond
+    # `ready.wait()`, the call was a sync primitive on the asyncio thread.
     t = threading.Thread(
-        target=_proxy_thread_with_signal,
+        target=_proxy_thread,
         daemon=True,
         name=f"tls_proxy_{cam_id[:8]}",
     )
     t.start()
-    ready.wait(timeout=2)
     port_cache[cam_id] = port
     _LOGGER.info(
         "TLS proxy for %s started on 127.0.0.1:%d -> %s:%d (threading)",
@@ -295,7 +294,7 @@ async def rtsp_keepalive(
             f"\r\n".encode()
         )
         await writer.drain()
-        resp1 = await asyncio.wait_for(reader.read(4096), timeout=5)
+        resp1 = await asyncio.wait_for(reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ)
         resp1_str = resp1.decode("utf-8", errors="replace")
 
         nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
@@ -331,7 +330,7 @@ async def rtsp_keepalive(
             f"\r\n".encode()
         )
         await writer.drain()
-        resp2 = await asyncio.wait_for(reader.read(4096), timeout=5)
+        resp2 = await asyncio.wait_for(reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ)
         resp2_str = resp2.decode("utf-8", errors="replace")
         writer.close()
         try:

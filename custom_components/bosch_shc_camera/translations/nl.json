@@ -398,9 +398,6 @@
     "button": {
       "refresh_snapshot": {
         "name": "Snapshot vernieuwen"
-      },
-      "acoustic_alarm": {
-        "name": "Sirene"
       }
     },
     "select": {
@@ -770,13 +767,6 @@
       "cameras_loaded": "Camera's geladen",
       "last_fcm_push_ago": "Laatste FCM Push",
       "platinum_quality": "Quality Scale"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "bosch_shc_camera_motion": "Beweging gedetecteerd",
-      "bosch_shc_camera_audio_alarm": "Audioalarm gedetecteerd",
-      "bosch_shc_camera_person": "Persoon gedetecteerd"
     }
   }
 }

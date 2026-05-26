@@ -398,9 +398,6 @@
     "button": {
       "refresh_snapshot": {
         "name": "刷新快照"
-      },
-      "acoustic_alarm": {
-        "name": "警报器"
       }
     },
     "select": {
@@ -770,13 +767,6 @@
       "cameras_loaded": "已加载摄像头",
       "last_fcm_push_ago": "最近 FCM Push",
       "platinum_quality": "Quality Scale"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "bosch_shc_camera_motion": "检测到运动",
-      "bosch_shc_camera_audio_alarm": "检测到音频报警",
-      "bosch_shc_camera_person": "检测到人员"
     }
   }
 }
