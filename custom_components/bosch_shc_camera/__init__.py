@@ -4109,7 +4109,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # 0x0a88 only reports the *configured* snapshot resolution, not that
                 # 0x099e delivers bytes. Skip on Gen2 to silence log noise; snap.jpg
                 # works uniformly.
-                hw_gen2 = self._hw_version.get(cam_id, "") in ("HOME_Eyes_Indoor", "HOME_Eyes_Outdoor")
+                # Defensive getattr — _hw_version is a real-coordinator attribute
+                # set in __init__, but tests use ``SimpleNamespace`` stubs that
+                # don't auto-populate dicts. Without the fallback every snapshot
+                # test (~14 cases across test_init_round7, test_init_sprint_*)
+                # raises AttributeError before reaching the gate logic.
+                hw_gen2 = getattr(self, "_hw_version", {}).get(cam_id, "") in ("HOME_Eyes_Indoor", "HOME_Eyes_Outdoor")
                 parts = url_entry.split("/", 1)
                 if len(parts) == 2 and not hw_gen2:
                     proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]

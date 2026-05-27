@@ -285,13 +285,27 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     # ── Streaming state ───────────────────────────────────────────────────────
     @property
     def is_streaming(self) -> bool:
-        """True when a live proxy connection is active.
+        """True when a live proxy connection is active AND the RTSP URL is ready.
 
         Controls the HA camera state: True → "streaming", False → "idle".
-        This reflects whether the live stream switch is ON and the proxy
-        session is still valid (not expired).
+        Returning True only when `rtspsUrl` is populated (not just when the
+        coordinator's `_live_connections` entry exists) prevents a race that
+        broke WebRTC on first stream-start: try_live_connection writes the
+        cred-bearing result into `_live_connections` BEFORE pre-warm finishes
+        (~25-35 s for Gen2), and only sets `rtspsUrl` after pre-warm completes.
+        If `is_streaming` flipped to True at the first write, the camera card's
+        `_waitForStreamReady` would observe `cam.state === "streaming"`,
+        immediately fire `camera/webrtc/offer`, and HA's go2rtc provider would
+        reject with `Camera has no stream source` (because `stream_source()`
+        below also gates on `rtspsUrl`). The card then 5-s-timed-out and fell
+        back to HLS — which is what made WebRTC look like "only works after a
+        browser reload" (after a reload, pre-warm was already done and rtspsUrl
+        was present from the first state read). Bug 2026-05-27 Innenbereich.
         """
-        return self._cam_id in self.coordinator._live_connections
+        live = self.coordinator._live_connections.get(self._cam_id, {})
+        if not live:
+            return False
+        return bool(live.get("rtspsUrl") or live.get("rtspUrl"))
 
     @property
     def is_recording(self) -> bool:
