@@ -353,9 +353,14 @@ class TestHandleCoordinatorUpdate:
         assert len(tasks) == 1
 
     def test_streaming_no_action(self):
-        """Was streaming, still streaming → no refresh, no transition."""
+        """Was streaming, still streaming → no refresh, no transition.
+
+        `is_streaming` gates on rtspsUrl as of v13.2.5 (was: just entry
+        presence) to prevent the WebRTC-race-on-first-stream-start bug —
+        so the stub must include a non-empty rtspsUrl for the True branch.
+        """
         from custom_components.bosch_shc_camera.camera import BoschCamera
-        coord = _make_coord(_live_connections={CAM_ID: {}})
+        coord = _make_coord(_live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}})
         cam = _make_camera(coord=coord, _was_streaming=True)
         tasks = self._create_task_collector(cam)
         with patch(
@@ -458,9 +463,13 @@ class TestAsyncTriggerImageRefresh:
     async def test_skips_live_snapshot_when_streaming(self):
         """Opening PUT /connection while a stream is live tears down
         the active RTSP session. Skip both live paths when streaming;
-        only the quick-seed (event) path runs."""
+        only the quick-seed (event) path runs.
+
+        `is_streaming` gates on rtspsUrl as of v13.2.5 — the stub must
+        include a non-empty rtspsUrl so the True branch fires.
+        """
         from custom_components.bosch_shc_camera.camera import BoschCamera
-        coord = _make_coord(_live_connections={CAM_ID: {}})  # → is_streaming True
+        coord = _make_coord(_live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}})  # → is_streaming True
         cam = _make_camera(coord=coord)
         await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_not_awaited()

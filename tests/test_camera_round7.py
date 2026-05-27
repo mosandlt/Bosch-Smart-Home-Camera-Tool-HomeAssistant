@@ -559,7 +559,7 @@ class TestEventSnapshotUnsafeUrl:
         return _make_coord(
             data={CAM_ID: {"info": {}, "events": events}},
             # CAM_ID present in _live_connections → is_streaming=True
-            _live_connections={CAM_ID: {}},  # no proxyUrl → proxy_url = ""
+            _live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}},  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
             _local_creds_cache={},           # no cached creds → outage path skipped
             _auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
@@ -626,7 +626,7 @@ class TestEventSnapshot4xx:
         """Coordinator: is_streaming=True, no proxyUrl, no outage → event snapshot path."""
         return _make_coord(
             data={CAM_ID: {"info": {}, "events": events}},
-            _live_connections={CAM_ID: {}},  # no proxyUrl → proxy_url = ""
+            _live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}},  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
             _local_creds_cache={},
             _auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
