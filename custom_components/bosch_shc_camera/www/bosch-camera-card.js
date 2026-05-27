@@ -116,6 +116,17 @@ class BoschCameraCard extends HTMLElement {
     document.addEventListener("visibilitychange", this._visibilityHandler);
     this._pagehideHandler = () => this._stopLiveVideo();
     window.addEventListener("pagehide", this._pagehideHandler);
+    // Global user-gesture flag for Chrome autoplay policy: any pointer or
+    // key event after card mount counts as user interaction → unmute can
+    // proceed without the browser pausing the video element. Captured at
+    // window level + capture phase so we observe gestures even on first
+    // page paint (before Shadow DOM event listeners are bound).
+    if (!this._userGestureHandler) {
+      this._userGestureHandler = () => { this._userInteracted = true; };
+      window.addEventListener("pointerdown", this._userGestureHandler, { capture: true, once: true });
+      window.addEventListener("keydown", this._userGestureHandler, { capture: true, once: true });
+      window.addEventListener("touchstart", this._userGestureHandler, { capture: true, once: true, passive: true });
+    }
     window.addEventListener("bosch-card-theme-change", this._onThemeBroadcast);
     window.addEventListener("bosch-card-mode-change", this._onModeBroadcast);
     this._onFullscreenChange = () => this._updateFullscreenButtonState();
@@ -489,7 +500,15 @@ class BoschCameraCard extends HTMLElement {
   }
   async _pullFreshSwitchStates() {
     if (!this._hass) return;
-    const ids = [ this._entities.camera, this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(Boolean);
+    // Skip entities that aren't tracked in hass.states. Without this filter,
+    // a config that points the card at e.g. `switch.X_camera_light` when the
+    // integration only exposes `light.X_camera_light` (Gen2 LED-ring → light
+    // domain, not switch) hits the REST endpoint and gets HTTP 404 per cycle,
+    // spamming the browser console even though the catch swallows the throw.
+    const ids = [
+      this._entities.camera, this._entities.switch, this._entities.privacy,
+      this._entities.audio, this._entities.light,
+    ].filter(id => id && this._hass.states && id in this._hass.states);
     let changed = false;
     for (const id of ids) {
       try {
@@ -2036,9 +2055,18 @@ class BoschCameraCard extends HTMLElement {
       const video = this.shadowRoot.getElementById("cam-video");
       const audioOn = this._getEffectiveState(ents.audio) === "on";
       if (video) {
-        if (!audioOn || this._androidAudioMuted) {
+        const wantMuted = !audioOn || this._androidAudioMuted;
+        // Only mutate video.muted when the desired state DIFFERS from the
+        // current state. Chrome's autoplay policy treats every assignment
+        // of `video.muted = false` as an unmute attempt: when no user
+        // gesture is in scope it rejects + pauses the element, producing
+        // "Unmuting failed and the element was paused" + visible stutter
+        // every hass-state-update tick (bug 2026-05-27, ~11×/refresh).
+        // Additionally gate the unmute on a user-gesture flag so the first
+        // page-load (with audio=on by config) doesn't auto-pause.
+        if (wantMuted && !video.muted) {
           video.muted = true;
-        } else if (!video.paused) {
+        } else if (!wantMuted && video.muted && !video.paused && this._userInteracted) {
           video.muted = false;
         }
       }

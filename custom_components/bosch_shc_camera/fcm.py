@@ -547,7 +547,26 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
             coordinator._fcm_token = await coordinator._fcm_client.checkin_or_register()
             _LOGGER.debug("FCM registered — token: %s...", coordinator._fcm_token[:8])
         except Exception as err:
-            _LOGGER.warning("FCM registration failed: %s", err)
+            # Log diagnostic details that survive _FCMNoiseFilter. The raw
+            # error message often contains substrings the filter dedups
+            # ("PHONE_REGISTRATION_ERROR", "Unable to establish subscription"),
+            # which can starve the operator of visibility into WHY the heal
+            # ladder keeps tripping. Mask the marker substrings so the
+            # filter doesn't dedup this diagnostic line.
+            err_type = type(err).__name__
+            err_short = str(err)[:240].replace("\n", " ")
+            # Mask FCMNoiseFilter markers so this line passes through.
+            for marker in (
+                "PHONE_REGISTRATION_ERROR",
+                "Unable to complete gcm auth request",
+                "Unable to establish subscription",
+                "Unexpected exception during read",
+            ):
+                err_short = err_short.replace(marker, marker.replace("_", "·").replace(" ", "·"))
+            _LOGGER.warning(
+                "FCM checkin/register raised %s — %s",
+                err_type, err_short,
+            )
             coordinator._fcm_client = None
             return False
 

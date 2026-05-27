@@ -1275,13 +1275,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         left, so we just keep counting and let HA's internal backoff keep
         retrying — the error entries in the HA log are the diagnostic trail
         for any future debugging.
+
+        Exception: HTTP 401 errors trigger the LOCAL rescue path *immediately*
+        without waiting for the threshold. 401 is an unambiguous "Bosch
+        rotated the session creds" signal — there is no value in burning
+        4 additional retry cycles before re-issuing PUT /connection. Each
+        retry just hits 401 again, and HA's stream component coalesces
+        repeated identical errors so the counter may never reach the
+        threshold (live bug 2026-05-27, Indoor Gen2: 4 errors, threshold 5,
+        rescue never fired, frozen image until manual restart).
         """
         pending = getattr(self, "_stream_worker_dispatch_pending", None)
         try:
             self.record_stream_error(cam_id)
             cfg = self.get_model_config(cam_id)
-            if self._stream_error_count.get(cam_id, 0) < cfg.max_stream_errors:
-                return  # below threshold — let HA's auto-restart keep trying
             live = self._live_connections.get(cam_id, {})
             conn_type = live.get("_connection_type")
 
@@ -1298,6 +1305,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             is_auth_error = (
                 "401" in msg or "Unauthorized" in msg or "authorization failed" in msg
             )
+
+            # Threshold guard — but 401 bypasses it (see docstring).
+            if (
+                not is_auth_error
+                and self._stream_error_count.get(cam_id, 0) < cfg.max_stream_errors
+            ):
+                return  # below threshold — let HA's auto-restart keep trying
             # Time-decay the rescue counter: rescues older than 5 min belong
             # to a previous failure burst. Without this the counter sticks at
             # 1 (record_stream_success never fires when no HLS consumer is
@@ -3831,8 +3845,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 cam_entity.stream = None
 
                         # ── Register with go2rtc (AFTER pre-warm) ────────
+                        go2rtc_ok = False
                         if rtsps_url:
-                            await self._register_go2rtc_stream(cam_id, rtsps_url)
+                            go2rtc_ok = await self._register_go2rtc_stream(cam_id, rtsps_url)
                             # Synchronously push provider discovery on the cam
                             # entity NOW so `frontend_stream_types` includes
                             # WEB_RTC by the time the next state-write fires.
@@ -3854,6 +3869,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         "post-register refresh_providers failed for %s: %s",
                                         cam_id[:8], err,
                                     )
+                            # NOTE: An earlier patch (2026-05-27) auto-stopped
+                            # HA's FFmpeg Stream after a successful go2rtc
+                            # register to avoid double-subscription on the
+                            # camera. Reverted: Lovelace cards may still use
+                            # LL-HLS (not WebRTC) — killing the Stream object
+                            # leaves the HLS pipeline dead, producing 404 on
+                            # /api/hls/.../playlist.m3u8?_HLS_part=N requests.
+                            # If double-subscription becomes a recurring
+                            # problem on weak setups, gate this behind an
+                            # opt-in option (e.g. "stream_mode=webrtc_only").
 
                         # ── LOCAL session auto-renewal ───────────────────
                         if type_val == "LOCAL" and local_user and local_pass:
@@ -4078,12 +4103,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if not url_entry:
                     return None
 
-                # ── RCP 0x099e: 320×180 JPEG (faster and lower bandwidth than snap.jpg) ──
-                # 0x0a88 READ confirms the camera's snapshot resolution is 320×180.
-                # 0x099e returns a JPEG at that resolution via the proxy RCP endpoint.
-                # Falls back to snap.jpg below if RCP session or read fails.
+                # ── RCP 0x099e: 320×180 JPEG (Gen1 only) ──
+                # Gen1 (INDOOR/OUTDOOR/CAMERA_360) returns a JPEG via the proxy RCP
+                # endpoint. Gen2 (HOME_Eyes_*) responds with non-JPEG payload —
+                # 0x0a88 only reports the *configured* snapshot resolution, not that
+                # 0x099e delivers bytes. Skip on Gen2 to silence log noise; snap.jpg
+                # works uniformly.
+                hw_gen2 = self._hw_version.get(cam_id, "") in ("HOME_Eyes_Indoor", "HOME_Eyes_Outdoor")
                 parts = url_entry.split("/", 1)
-                if len(parts) == 2:
+                if len(parts) == 2 and not hw_gen2:
                     proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                     rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
                     try:
@@ -4582,7 +4610,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         getattr(cam_ent, "entity_id", "?"), err,
                     )
 
-    async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> None:
+    async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> bool:
         """Register the Bosch RTSP stream in go2rtc for WebRTC support.
 
         go2rtc is HA's built-in RTSP→WebRTC bridge. Once registered, HA's
@@ -4679,7 +4707,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     resp.status,
                                     ", yaml-persist warn ignored" if is_yaml_persist_warning else "",
                                 )
-                                return  # success
+                                return True  # verified-registered success
                             _LOGGER.debug(
                                 "go2rtc PUT returned %d via %s but verify GET missed '%s' — trying next endpoint",
                                 resp.status, "unix socket" if connector else url, stream_name,
@@ -4696,6 +4724,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 continue
 
         _LOGGER.debug("go2rtc API not reachable on any endpoint — using TLS proxy + HLS")
+        return False
 
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
         """Remove the camera stream from go2rtc when the live session ends.
