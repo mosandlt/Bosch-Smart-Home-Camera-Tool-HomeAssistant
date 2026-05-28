@@ -24,7 +24,7 @@ import pytest
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16 + b"\xff\xd9"  # minimal valid-looking JPEG
-CAM_HOST = "192.0.2.149"
+CAM_HOST = "10.0.0.149"
 CAM_PORT = 443
 USER = "cbs-ABCDEF12"
 PASS = "supersecret"
@@ -60,6 +60,20 @@ class TestFetchMjpegSnapshot:
         proc = _mock_proc()
         # Make communicate() hang by raising TimeoutError at wait_for level
         proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        with patch(
+            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
+        ), patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001)
+        assert result is None
+        proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timeout_kill_raises_process_lookup_error_returns_none(self):
+        """Race: process exits between timeout detection and kill() call.
+        kill() raises ProcessLookupError → swallowed, None still returned (line 144)."""
+        proc = _mock_proc()
+        proc.kill = MagicMock(side_effect=ProcessLookupError("already gone"))
         with patch(
             "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
         ), patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):

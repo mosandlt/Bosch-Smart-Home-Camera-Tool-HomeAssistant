@@ -41,9 +41,28 @@
         video.muted = true;
         video.play().catch(() => {});
       });
+      // mosandlt 2026-05-28: cap the recovery loop. Old code unconditionally
+      // called hls.startLoad() on every fatal NETWORK_ERROR — when HA's stream
+      // worker is gone (playlist 404), startLoad re-fetches the same dead URL,
+      // gets 404 again, fires ERROR again, recurses forever. Browser console
+      // logged hundreds of "GET .../playlist.m3u8 404" per minute. Now we
+      // bail on 404 outright (dead playlist) and cap other NETWORK_ERROR
+      // retries at 3 with exponential backoff.
+      let _hlsNetRetries = 0;
+      const _HLS_MAX_RETRIES = 3;
       hls.on(Hls.Events.ERROR, (_ev, data) => {
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad(); else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          const code = data.response && data.response.code;
+          if (code === 404 || _hlsNetRetries >= _HLS_MAX_RETRIES) {
+            try { hls.destroy(); } catch (_) {}
+            delete video._watchdogHls;
+            return;
+          }
+          _hlsNetRetries++;
+          setTimeout(() => { try { hls.startLoad(); } catch (_) {} }, 500 * _hlsNetRetries);
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
         }
       });
       video._watchdogHls = hls;

@@ -5,6 +5,21 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.3.0] - 2026-05-28
+
+Minor release — five fixes in the same live-camera debugging session that produced the matching MCP v1.6.0 and Python CLI v10.10.0 releases. All five were reproduced against the user's prod hardware (Eyes Außenkamera II "Terrasse" + Eyes Innenkamera II "Innenbereich" + Gen1 Outdoor + Gen1 360° Indoor) and verified by HA-integration reload + live re-test.
+
+- **`light.bosch_<cam>_frontlicht` would never turn on, every time.** The `_put_lighting_switch` PUT to `/v11/video_inputs/{id}/lighting/switch` succeeds with **HTTP 204 No Content** — but the code path tried to update `_lighting_switch_cache` from `resp.json()`, which raised on the empty body, was caught by a silent `except Exception: pass`, and left the cache untouched. The entity's `is_on` property reads through `_load_state_from_cache()` which then returned the stale `brightness=0` value, so `async_write_ha_state()` pushed `False` to HA even though the camera had already turned the spotlight on. HA's verify timeout fired with "could not verify state change" 100 % of the time. Now on JSON-parse failure of a 2xx response we write the sent body (already the merged post-write state, computed from cache + user updates) into the cache — the cache stays in sync with reality. The 200/JSON happy path is unchanged. Confirmed root cause via 45/45 round-5 test pass; pre-existing test `test_204_no_content_updates_cache_from_body` and two new regression guards added.
+
+- **Four service handlers no longer fail silently when the camera is in privacy mode.** The Bosch cloud rejects every privacy-gated write with HTTP 443 `sh:camera.in.privacy.mode`; the integration's `async_put_camera` helper logs a warning and returns `False`, but four entity-write paths didn't check the helper's existing `_warn_if_privacy_on()` guard — so the PUT failed, the cache wasn't updated, and HA emitted "Service executed but state change could not be verified" with no path forward for the user. Added the guard to:
+  - `BoschFrontLight.async_turn_on` (light.py — Eyes Außenkamera II front spotlight)
+  - `_BoschRgbLedLight.async_turn_on` (light.py — top + bottom RGB LED rings)
+  - `BoschPanicAlarmSwitch._set` (switch.py — Gen2 Indoor II 75 dB siren) — the live test confirmed the siren never actually fired the first time it was triggered against `privacy=ON` on 2026-05-28; after this fix + privacy off the siren works reliably
+  - `_BoschAlarmDelayBase.async_set_native_value` (number.py — Gen2 Indoor only, the `Sirenen-Dauer` / `Pre-Alarm-Dauer` / `Alarm-Verzögerung` sliders)
+  Each path now early-returns after posting the persistent-notification, instead of issuing a PUT that's doomed by the cloud.
+
+- **Internal:** 3 new test modules (`tests/test_camera_coverage_gaps.py`, `tests/test_fcm_coverage_gaps.py`, `tests/test_privacy_guard_branches.py`) and updates to 3 existing test modules cover the new branches.
+
 ## [v13.2.5] - 2026-05-27
 
 Patch release — second wave of fixes developed in the same live debugging session as v13.2.4. Six visible-state bugs in the Lovelace card and one race in the integration's `is_streaming` property, all surfaced via osascript-driven Chrome testing against the running install.

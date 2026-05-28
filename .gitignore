@@ -10,3 +10,4 @@ package-lock.json
 .coverage
 .pytest_cache/
 htmlcov/
+backups/

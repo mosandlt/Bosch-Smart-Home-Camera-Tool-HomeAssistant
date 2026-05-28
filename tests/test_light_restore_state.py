@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-CAM_ID = "11111111-1111-1111-1111-111111111111"
+CAM_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _stub_coord(**overrides):
@@ -174,14 +174,13 @@ class TestPutLightingSwitchDefensiveMerge:
 class TestPutLightingSwitchJsonParseError:
     """If the Bosch cloud returns 200 but with a malformed body (HTML error
     page, gzip-stripped, etc.), `resp.json()` raises. The except branch
-    swallows it so the cache is left untouched but the PUT still counts as
-    success (line 245-246)."""
+    (BUG-FIX 2026-05-28) now falls back to updating the cache from the sent body
+    so is_on reads True after a successful write even when the server returns
+    204 No Content or an unparseable body."""
 
     @pytest.mark.asyncio
-    async def test_json_parse_error_returns_true_without_cache_update(self):
+    async def test_json_parse_error_returns_true_with_optimistic_cache_update(self):
         light = _make_light()
-        # Pre-populate cache so we can detect that it WASN'T overwritten
-        light.coordinator._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
         session, resp = _make_put_session(
             status=200,
             json_raises=ValueError("not JSON"),
@@ -194,8 +193,15 @@ class TestPutLightingSwitchJsonParseError:
             ok = await light._put_lighting_switch({"topLedLightSettings": {"brightness": 50}})
 
         assert ok is True, "200 status should still count as success even if body unparseable"
-        # Cache preserved — the except branch skipped the write
-        assert light.coordinator._lighting_switch_cache[CAM_ID] == {"sentinel": "preserved"}
+        # BUG-FIX 2026-05-28: cache IS updated from the sent body (optimistic update),
+        # NOT left untouched. This ensures is_on reads True after a 204 No Content response.
+        cache = light.coordinator._lighting_switch_cache[CAM_ID]
+        assert "topLedLightSettings" in cache, (
+            "Cache must be updated from sent body when resp.json() raises (fallback path)"
+        )
+        assert cache["topLedLightSettings"]["brightness"] == 50, (
+            "Optimistic update must apply the written brightness value"
+        )
 
 
 # ── L330 — async_turn_on remembers brightness ──────────────────────────────

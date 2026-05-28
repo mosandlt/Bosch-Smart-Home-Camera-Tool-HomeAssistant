@@ -754,6 +754,12 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
         cfg = dict(self._settings)
         if not cfg:
             return
+        # Privacy mode blocks /alarm_settings PUT with HTTP 443 on Gen2 Indoor cameras.
+        # Without this guard the write silently fails — the cache isn't updated, so
+        # native_value re-reads the old value and HA's verify-timeout fires.
+        from .switch import _is_gen2_indoor, _warn_if_privacy_on  # local to avoid cycle
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Sirenen-/Alarm-Einstellung"):
+            return
         cfg[self._field] = int(round(value))
         success = await self.coordinator.async_put_camera(
             self._cam_id, "alarm_settings", cfg

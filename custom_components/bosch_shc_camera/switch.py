@@ -1787,6 +1787,10 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
     async def _set(self, enabled: bool) -> None:
         if not hasattr(self.coordinator, "_panic_alarm_cache"):
             self.coordinator._panic_alarm_cache = {}  # lazy init for older coordinators
+        # Privacy mode blocks /panic_alarm with HTTP 443 — warn the user explicitly
+        # rather than letting the PUT fail silently and HA's verify-timeout fire.
+        if enabled and await _warn_if_privacy_on(self, "Sirene auslösen"):
+            return
         success = await self.coordinator.async_put_camera(
             self._cam_id, "panic_alarm", {"status": "ON" if enabled else "OFF"}
         )

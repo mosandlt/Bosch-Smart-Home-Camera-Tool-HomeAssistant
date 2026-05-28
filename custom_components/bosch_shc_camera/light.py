@@ -280,12 +280,24 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
                     headers=headers, json=body,
                 ) as resp:
                     if resp.status in (200, 201, 204):
-                        # Update cache with response
+                        # Update cache with response body (200/201) OR fall back to
+                        # the optimistic local `body` we sent (204 No Content).
+                        #
+                        # BUG-FIX 2026-05-28: The /lighting/switch endpoint returns
+                        # 204 No Content (empty body). The old code called resp.json()
+                        # which raised → except swallowed it → cache was never updated
+                        # → _load_state_from_cache() kept reading brightness=0 → is_on
+                        # stayed False even after a successful write.
                         try:
-                            rsp = await resp.json()
-                            self.coordinator._lighting_switch_cache[self._cam_id] = rsp
+                            rsp = await resp.json(content_type=None)
+                            if rsp and isinstance(rsp, dict):
+                                self.coordinator._lighting_switch_cache[self._cam_id] = rsp
+                            else:
+                                # Empty JSON or non-dict → treat as no-content, use body
+                                self.coordinator._lighting_switch_cache[self._cam_id] = body
                         except Exception:
-                            pass
+                            # 204 No Content or unparseable → update cache from sent body
+                            self.coordinator._lighting_switch_cache[self._cam_id] = body
                         return True
                     _LOGGER.warning("lighting/switch HTTP %d for %s", resp.status, self._cam_id[:8])
         except Exception as err:
@@ -352,6 +364,10 @@ class _BoschRgbLedLight(_BoschLightBase):
         self.coordinator.async_update_listeners()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
+        from .switch import _warn_if_privacy_on  # local import: avoid module cycle
+        if await _warn_if_privacy_on(self, "RGB-Licht"):
+            return
         self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
@@ -480,6 +496,10 @@ class BoschFrontLight(_BoschLightBase):
         return int(4250 - wb * 2250)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
+        from .switch import _warn_if_privacy_on  # local import: avoid module cycle
+        if await _warn_if_privacy_on(self, "Frontlicht"):
+            return
         self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         color_temp_k = kwargs.get(ATTR_COLOR_TEMP_KELVIN)

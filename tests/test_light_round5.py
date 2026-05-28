@@ -36,7 +36,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-CAM_ID = "11111111-1111-1111-1111-111111111111"
+CAM_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _stub_coord(**overrides):
@@ -578,3 +578,128 @@ class TestRgbColor:
         light._color_hex = None
         light._last_color_hex = "#22DD44"
         assert light.rgb_color == (0x22, 0xDD, 0x44)
+
+
+# ── BUG-FIX regression: 204 No Content cache update ────────────────────
+#
+# Root cause: /lighting/switch returns 204 No Content (empty body).
+# Old code: resp.json() raised (no JSON body) → except swallowed silently
+# → _lighting_switch_cache[cam_id] never updated
+# → _load_state_from_cache() read brightness=0 → is_on stayed False
+# → HA warned "state change could not be verified".
+#
+# Fix: on json() failure, fall back to updating cache from the sent body.
+
+
+class TestPutLightingSwitch204NoCacheUpdate:
+    """Regression: PUT returns 204 No Content → cache must still be updated
+    from the sent body so is_on reads True after turn_on succeeds."""
+
+    @pytest.mark.asyncio
+    async def test_204_no_content_updates_cache_from_body(self):
+        """204 with empty response → cache updated from the PUT body, not empty."""
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        @asynccontextmanager
+        async def _put_204(*args, **kw):
+            r = MagicMock()
+            r.status = 204
+            # Simulate 204 No Content: resp.json() raises because there is no body
+            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            yield r
+
+        session = MagicMock()
+        session.put = _put_204
+        coord = _stub_coord(_lighting_switch_cache={
+            CAM_ID: {
+                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            }
+        })
+        light = _make_light(coord, led_key="frontLightSettings")
+        with patch(
+            "custom_components.bosch_shc_camera.light.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await BoschTopLedLight._put_lighting_switch(
+                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+            )
+        assert ok is True
+        # Cache must be updated from the body we sent — brightness 100, NOT 0
+        assert coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] == 100
+
+    @pytest.mark.asyncio
+    async def test_204_no_content_is_on_reads_true_after_turn_on(self):
+        """End-to-end: after a 204 response, is_on reflects the written state
+        (not the stale cache), so HA stops warning about unverifiable state."""
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        @asynccontextmanager
+        async def _put_204(*args, **kw):
+            r = MagicMock()
+            r.status = 204
+            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            yield r
+
+        session = MagicMock()
+        session.put = _put_204
+        coord = _stub_coord(_lighting_switch_cache={
+            CAM_ID: {
+                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            }
+        })
+        light = _make_light(coord, led_key="frontLightSettings")
+
+        with patch(
+            "custom_components.bosch_shc_camera.light.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await BoschTopLedLight._put_lighting_switch(
+                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+            )
+        assert ok is True
+        # After the PUT, is_on must read True (not False)
+        assert light.is_on is True
+
+    @pytest.mark.asyncio
+    async def test_200_with_valid_json_still_uses_response_body(self):
+        """200 with valid JSON body → cache updated from response (not sent body).
+        Ensures the fallback doesn't regress the happy-path."""
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        server_response = {
+            "frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0},
+            "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+        }
+
+        @asynccontextmanager
+        async def _put_200(*args, **kw):
+            r = MagicMock()
+            r.status = 200
+            r.json = AsyncMock(return_value=server_response)
+            yield r
+
+        session = MagicMock()
+        session.put = _put_200
+        coord = _stub_coord(_lighting_switch_cache={
+            CAM_ID: {
+                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            }
+        })
+        light = _make_light(coord, led_key="frontLightSettings")
+        with patch(
+            "custom_components.bosch_shc_camera.light.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await BoschTopLedLight._put_lighting_switch(
+                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+            )
+        assert ok is True
+        # Cache must be the server response object (not a copy of sent body)
+        assert coord._lighting_switch_cache[CAM_ID] is server_response

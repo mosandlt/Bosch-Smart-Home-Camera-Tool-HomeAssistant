@@ -33,6 +33,7 @@ def _make_coord() -> SimpleNamespace:
             },
         }},
         _panic_alarm_cache={},
+        _shc_state_cache={},  # required by _warn_if_privacy_on (privacy_mode defaults to False)
         last_update_success=True,
         is_camera_online=lambda cid: True,
         async_put_camera=AsyncMock(return_value=True),
