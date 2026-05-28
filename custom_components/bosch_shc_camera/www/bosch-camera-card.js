@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.2.5";
+const CARD_VERSION = "13.3.0";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
