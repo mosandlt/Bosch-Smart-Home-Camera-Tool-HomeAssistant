@@ -21,7 +21,7 @@ import pytest
 # Helpers
 # --------------------------------------------------------------------------- #
 
-VALID_CAM_ID = "11111111-1111-1111-1111-111111111111"
+VALID_CAM_ID = "AABBCCDD-EEFF-1122-3344-556677889900"
 VALID_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 200  # 204 B — passes min-size guard
 
 

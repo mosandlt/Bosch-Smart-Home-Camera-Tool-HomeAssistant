@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.3.1";
+const CARD_VERSION = "13.3.2";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -349,6 +349,12 @@ class BoschCameraCard extends HTMLElement {
       // `compact: true` for Apple-Home-style grid tiles. Click the video to
       // expand (existing fullscreen handler).
       compact:                    config.compact === true,
+      // Element-hiding toggles (issue #15): let users strip the title-pill and
+      // the last-event badge for a clean video-only tile. Both default to true
+      // so existing cards are unchanged. Independent of `compact` (which only
+      // drops the pill-bar + status badge).
+      show_title:                 config.show_title !== false,
+      show_last_event:            config.show_last_event !== false,
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -433,11 +439,22 @@ class BoschCameraCard extends HTMLElement {
     // Apple-style class on host gates the new glass overlay CSS.
     this.classList.toggle("apple-style", this._config.apple_style);
     this.classList.toggle("compact", this._config.compact);
+    // Element-hiding flags (issue #15): :host(.no-title)/:host(.no-last-event).
+    this.classList.toggle("no-title", !this._config.show_title);
+    this.classList.toggle("no-last-event", !this._config.show_last_event);
     // Resolve effective theme: localStorage override > config > UA auto-detect.
     this._applyTheme(this._resolveTheme());
     // Resolve effective day/night mode the same way.
     this._applyMode(this._resolveMode());
-    this.classList.remove("overflow-open");  // always collapsed on config (re)load
+    // "minimal meaningful" (2026-05-29): a non-minimal apple-style card shows
+    // the full control stack (switches + accordions) expanded by default — the
+    // ⋮ menu starts open. minimal:true keeps it collapsed behind ⋮; compact
+    // tiles stay clean (no pill-bar, always collapsed). Legacy mode is
+    // unaffected (its non-minimal layout shows everything regardless).
+    this.classList.toggle(
+      "overflow-open",
+      this._config.apple_style && !this._config.minimal && !this._config.compact,
+    );
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
@@ -1585,6 +1602,14 @@ class BoschCameraCard extends HTMLElement {
           max-height: 0;
           overflow: hidden;
           opacity: 0;
+          /* max-height:0 does NOT clip padding/borders (content-box), so the
+             switch-rows' 12px bottom padding + each accordion's 1px divider
+             rendered as a white strip below the video when collapsed (issue:
+             white gap, 2026-05-29). Zero them while collapsed; restore on open. */
+          padding-top: 0;
+          padding-bottom: 0;
+          border-top-width: 0;
+          border-bottom-width: 0;
           transition: max-height .35s cubic-bezier(.4,0,.2,1),
                       opacity .25s ease;
         }
@@ -1594,6 +1619,8 @@ class BoschCameraCard extends HTMLElement {
           max-height: 2000px;
           opacity: 1;
         }
+        :host(.apple-style.overflow-open) .switch-rows { padding: 0 12px 12px; }
+        :host(.apple-style.overflow-open) .accordion { border-top-width: 1px; }
         /* Default .pan-section { padding: 0 12px 12px } produces a 12 px
            white bar below the image when pan-row is hidden (apple-style,
            overflow closed). Drop padding to zero in that state; bring the
@@ -2179,6 +2206,10 @@ class BoschCameraCard extends HTMLElement {
            value during idle/snapshot mode. */
         :host(.apple-style) .ap-last-event.hide-during-stream { display: none; }
 
+        /* Element-hiding toggles (issue #15): show_title:false / show_last_event:false. */
+        :host(.no-title) .ap-top { display: none; }
+        :host(.no-last-event) .ap-last-event { display: none !important; }
+
         :host(.apple-style.cam-offline) .ap-pill-bar { display: none; }
         :host(.apple-style.cam-offline) .offline-overlay svg { display: none; }
         /* When the camera is offline, the offline-overlay is the single
@@ -2190,6 +2221,28 @@ class BoschCameraCard extends HTMLElement {
            pill + OFFLINE label visible. */
         :host(.apple-style.cam-offline) .privacy-placeholder,
         :host(.apple-style.cam-offline) .ap-last-event { display: none !important; }
+        /* The offline-overlay already shows the camera name on its own line
+           (.offline-cam-name), so the top-left title pill is redundant when
+           offline. On short/compact tiles the centered "Kamera Offline" pill
+           landed on top of the title pill, superimposing two texts into glyph
+           soup (issue: garbled offline label, 2026-05-29). Hide the top pill
+           when offline — the overlay is the single source of truth. */
+        :host(.apple-style.cam-offline) .ap-top { display: none !important; }
+        /* Offline cameras can't be operated, so in the default EXPANDED layout
+           (minimal NOT enabled) the control stack — switches, light/pan/
+           diagnostics accordions, theme/mode switchers — is just noise. Hide it
+           all, keeping ONLY the Automations accordion (those run HA-side and
+           still work while the camera is down). When minimal IS enabled the
+           whole stack is collapsed behind the ⋮ anyway, so this is scoped to
+           :not(.minimal). (2026-05-29 user feedback: offline shows too much.) */
+        :host(.apple-style.cam-offline:not(.minimal)) .switch-rows,
+        :host(.apple-style.cam-offline:not(.minimal)) .pan-row,
+        :host(.apple-style.cam-offline:not(.minimal)) .pan-section,
+        :host(.apple-style.cam-offline:not(.minimal)) .ap-theme-switcher,
+        :host(.apple-style.cam-offline:not(.minimal)) .ap-mode-switcher,
+        :host(.apple-style.cam-offline:not(.minimal)) .accordion:not(#acc-automations) {
+          display: none !important;
+        }
         /* Offline overlay: drop the dim red full-cover backdrop so the last
            cached snapshot stays visible behind. The OFFLINE label + last-seen
            text sit in a single glass pill centered on the video — same
@@ -2246,6 +2299,10 @@ class BoschCameraCard extends HTMLElement {
           opacity: 0;
           padding-top: 0;
           padding-bottom: 0;
+          /* 0.5px border-top renders even at max-height:0 → contributes to the
+             white gap below the video. Zero it while collapsed (issue: white
+             gap, 2026-05-29); restore on open. */
+          border-top-width: 0;
           transition: max-height .35s cubic-bezier(.4,0,.2,1),
                       opacity .25s ease, padding .25s ease;
         }
@@ -2255,6 +2312,7 @@ class BoschCameraCard extends HTMLElement {
           opacity: 1;
           padding-top: 12px;
           padding-bottom: 12px;
+          border-top-width: 0.5px;
         }
 
         /* Snapshot success flash: 280ms green pulse on the snapshot button
@@ -2901,12 +2959,15 @@ class BoschCameraCard extends HTMLElement {
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
     apBindClick("ap-btn-more",       () => {
       this.classList.toggle("overflow-open");
-      const btn = this.shadowRoot.getElementById("ap-btn-more");
-      if (btn) btn.setAttribute("aria-expanded", this.classList.contains("overflow-open"));
+      this._syncMoreButton();
       // Sync the switcher's selected chip whenever the menu opens — handles
       // the case where another bosch card on the page changed the theme.
       this._refreshThemeSwitcher();
     });
+    // Reflect the initial overflow state on the ⋮ button — non-minimal cards
+    // start expanded (issue 2026-05-29 "minimal meaningful"), so the button
+    // must render pressed (.on) from the first paint, not only after a click.
+    this._syncMoreButton();
 
     // Theme switcher buttons (Auto / iOS / Android) — bind once after render.
     const themeSwitcher = this.shadowRoot.getElementById("ap-theme-switcher");
@@ -5549,6 +5610,15 @@ class BoschCameraCard extends HTMLElement {
     }
     // Desktop / Android: native API works without the auto-hide issue.
     const wrapper = this.shadowRoot.getElementById("img-wrapper");
+    // Toggle: if we are already in native fullscreen, the button exits it
+    // instead of re-requesting (issue #16 — clicking the button again exits).
+    if (this._isNativeFullscreen()) {
+      if (document.exitFullscreen)       return document.exitFullscreen();
+      if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+      if (document.mozCancelFullScreen)  return document.mozCancelFullScreen();
+      if (document.msExitFullscreen)     return document.msExitFullscreen();
+      return;
+    }
     const el = wrapper || this;
     const tryNative = () => {
       if (el.requestFullscreen)            return el.requestFullscreen();
@@ -5588,14 +5658,45 @@ class BoschCameraCard extends HTMLElement {
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
   }
 
+  _syncMoreButton() {
+    // Keep the ⋮ (Mehr) button's pressed state + aria in sync with whether the
+    // control stack is expanded (.overflow-open on host).
+    const open = this.classList.contains("overflow-open");
+    const more = this.shadowRoot?.getElementById("ap-btn-more");
+    if (more) {
+      more.classList.toggle("on", open);
+      more.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    const legacy = this.shadowRoot?.getElementById("btn-overflow");
+    if (legacy) legacy.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  _isNativeFullscreen() {
+    // We call requestFullscreen() on #img-wrapper, which lives inside this
+    // card's shadow root. Per the Fullscreen spec, document.fullscreenElement
+    // is RETARGETED to the shadow host (=== this), NOT the inner wrapper — so
+    // a `document.fullscreenElement === wrapper` check is always false and the
+    // exit branch never fired (issue #16: button opened fullscreen but could
+    // not close it). The reliable signals are shadowRoot.fullscreenElement
+    // (the real inner element) and document.fullscreenElement === this (host).
+    const sr = this.shadowRoot;
+    const shadowFs = sr && sr.fullscreenElement;
+    const docFs = document.fullscreenElement
+               || document.webkitFullscreenElement
+               || document.mozFullScreenElement
+               || document.msFullscreenElement;
+    return !!shadowFs || docFs === this;
+  }
+
   _updateFullscreenButtonState() {
     const btn = this.shadowRoot?.getElementById("ap-btn-fullscreen");
     if (!btn) return;
     const wrapper = this.shadowRoot?.getElementById("img-wrapper");
-    // Native fullscreen API: document.fullscreenElement === our wrapper (or
-    // any vendor-prefixed equivalent). CSS-fullscreen fallback: host carries
-    // the .fs-active class. Either signal flips the button to active.
-    const nativeFs = !!(document.fullscreenElement === wrapper
+    // Native fullscreen API: shadow-DOM-aware detection (see _isNativeFullscreen
+    // — document.fullscreenElement retargets to the host, not the wrapper).
+    // CSS-fullscreen fallback: host carries the .fs-active class. Either signal
+    // flips the button to active.
+    const nativeFs = this._isNativeFullscreen() || !!(document.fullscreenElement === wrapper
                        || document.webkitFullscreenElement === wrapper
                        || document.mozFullScreenElement === wrapper
                        || document.msFullscreenElement === wrapper);
@@ -5661,7 +5762,19 @@ class BoschCameraCard extends HTMLElement {
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  static getStubConfig() { return { camera_entity: "camera.bosch_garten" }; }
+  static getStubConfig(hass) {
+    // Pick the first real Bosch camera from THIS install (issue #17 — never
+    // hardcode a specific entity; "camera.bosch_garten" only exists in the
+    // author's setup, so every freshly-added card was stuck on it). Falls back
+    // to the first camera.* entity, then to an empty string the editor flags.
+    const states = (hass && hass.states) || {};
+    const ids = Object.keys(states).filter((id) => id.startsWith("camera."));
+    const bosch = ids.find(
+      (id) => id.includes("bosch")
+        || (states[id]?.attributes?.brand || "").toLowerCase().includes("bosch")
+    );
+    return { camera_entity: bosch || ids[0] || "" };
+  }
   static getConfigElement() { return document.createElement("bosch-camera-card-editor"); }
   getCardSize() { return 4; }
 }
@@ -5695,6 +5808,14 @@ class BoschCameraCardEditor extends HTMLElement {
         out.push(id);
       }
     }
+    // Fallback: if no Bosch-tagged camera is detected, list every camera.*
+    // entity so the picker is never empty/single-option (issue #17 — entity
+    // ids without "bosch" and no brand attribute left the dropdown stuck).
+    if (out.length === 0) {
+      for (const id of Object.keys(states)) {
+        if (id.startsWith("camera.")) out.push(id);
+      }
+    }
     return out.sort();
   }
 
@@ -5702,6 +5823,11 @@ class BoschCameraCardEditor extends HTMLElement {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     const cfg = this._config || {};
     const cams = this._bosch_cameras();
+    // Keep the configured entity in the option list even if discovery missed
+    // it, so it stays the selected value rather than silently snapping to the
+    // first option without firing a change (issue #17).
+    if (cfg.camera_entity && !cams.includes(cfg.camera_entity)) cams.push(cfg.camera_entity);
+    cams.sort();
     const sel = (name, val, opts) => `
       <label>${name}
         <select name="${name.toLowerCase().replace(/\W/g, "")}">
@@ -5767,6 +5893,8 @@ class BoschCameraCardEditor extends HTMLElement {
         ${sel("Modus", cfg.mode || "auto", [["auto","Auto (System Light/Dark)"],["day","Tag"],["night","Nacht"]])}
         ${chk("minimal", "Minimal-Layout (Mehr-Menü versteckt zunächst alle Switches)", false)}
         ${chk("compact", "Compact-Tile (für Overview-Grid: nur Video + Title-Pill, keine Pill-Bar)", false)}
+        ${chk("show_title", "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)", true)}
+        ${chk("show_last_event", "Letztes-Ereignis-Badge anzeigen", true)}
 
         <h4>Auto-Play</h4>
         ${sel("Auto-Play", cfg.auto_play || "lan", [["lan","LAN (Auto-Start nur im Heimnetz)"],["always","Immer"],["never","Nie (Tap-to-Play Gate)"]])}
@@ -5784,6 +5912,8 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('select[name="modus"]').addEventListener("change", e => fire({ mode: e.target.value }));
     root.querySelector('input[name="minimal"]').addEventListener("change", e => fire({ minimal: e.target.checked }));
     root.querySelector('input[name="compact"]').addEventListener("change", e => fire({ compact: e.target.checked }));
+    root.querySelector('input[name="show_title"]').addEventListener("change", e => fire({ show_title: e.target.checked }));
+    root.querySelector('input[name="show_last_event"]').addEventListener("change", e => fire({ show_last_event: e.target.checked }));
     root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value }));
   }
 }
@@ -5840,7 +5970,6 @@ class BoschCameraOverviewCard extends HTMLElement {
       columns:   config.columns   ?? "auto",  // "auto" | 1 | 2 | 3 | 4
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
       include:   Array.isArray(config.include) ? config.include : [],
-      compact:   !!config.compact,
       // When true, sort cameras inside each tier (live → privacy → offline)
       // by the Bosch-app priority instead of alphabetically. Priority is
       // read from the `bosch_priority` attribute that the camera entity
@@ -5848,12 +5977,14 @@ class BoschCameraOverviewCard extends HTMLElement {
       // without a priority value fall back to alphabetic at the end of
       // their tier so foreign / non-Bosch include entries don't disappear.
       use_bosch_sort: config.use_bosch_sort === true,
-      // Top-level `minimal: true` applies the compact child-card layout to
-      // every discovered camera. Per-camera overrides can still opt in/out
-      // individually via `overrides.<entity>.minimal`. Folded into
-      // card_defaults so the child-card setConfig receives it via the
-      // same merge path as any other default.
-      minimal:   config.minimal === true,
+      // Grid tiles default to the minimal layout (switches behind the ⋮ menu)
+      // so the overview stays glanceable — standalone single cards expand by
+      // default, but a grid of fully-expanded cards is unusable (2026-05-29).
+      // Default ON; set `minimal: false` to expand every tile. Per-camera
+      // overrides still win via `overrides.<entity>.minimal`. Folded into
+      // card_defaults so the child-card setConfig receives it via the same
+      // merge path as any other default.
+      minimal:   config.minimal !== false,
       // v13.0.0: top-level apple_style toggle (default true) + theme
       // selector ("ios" | "android" | "auto", default "ios"). Both flow
       // into card_defaults so every child card picks them up. Set
@@ -5868,19 +5999,26 @@ class BoschCameraOverviewCard extends HTMLElement {
       // + status badge so each tile is just video + title-pill (Apple-Home
       // grid style). Pair with `columns: 2` or `columns: 3` for true 2x2/3x3.
       compact:              config.compact === true,
+      // Element-hiding toggles propagated to every tile (issue #15 parity):
+      // show_title:false / show_last_event:false strip the title pill / badge.
+      show_title:           config.show_title !== false,
+      show_last_event:      config.show_last_event !== false,
       overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
       card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
     };
     if (this._config.minimal) {
       this._config.card_defaults = { ...this._config.card_defaults, minimal: true };
     }
-    // Propagate apple_style + theme + mode + compact to every child card
-    // unless an explicit per-key override already exists in card_defaults.
+    // Propagate apple_style + theme + mode + compact + hide-toggles to every
+    // child card unless an explicit per-key override already exists in
+    // card_defaults.
     this._config.card_defaults = {
       apple_style: this._config.apple_style,
       theme: this._config.theme,
       mode: this._config.mode,
       compact: this._config.compact,
+      show_title: this._config.show_title,
+      show_last_event: this._config.show_last_event,
       ...this._config.card_defaults,
     };
     // Apple-style class on overview host gates the CSS that drops the
@@ -6563,13 +6701,30 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     const isAuto = cfg.columns === "auto" || cfg.columns == null;
     const minW = cfg.min_width || "650px";
     const minWpx = parseInt(minW) || 650;
+    // Design/behaviour/hide sub-features mirror the single-card editor so both
+    // cards expose the same options in the GUI (feature parity). These flow
+    // into every tile via the overview card's card_defaults propagation.
+    const seldd = (name, val, opts) => `
+      <label>${name}
+        <select name="${name.toLowerCase().replace(/\W/g, "")}">
+          ${opts.map(([v,l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </label>`;
+    const chk = (key, label, def) => `
+      <label class="inline">
+        <input type="checkbox" name="${key}" ${(cfg[key] ?? def) ? "checked" : ""} />
+        <span>${label}</span>
+      </label>`;
     this.shadowRoot.innerHTML = `
       <style>
         .row{display:flex;flex-direction:column;gap:12px;padding:16px}
         label{font-size:14px;color:var(--primary-text-color);display:flex;flex-direction:column;gap:4px}
-        select,input{padding:8px;border-radius:4px;border:1px solid var(--divider-color);
+        label.inline{flex-direction:row;align-items:center;gap:10px}
+        select,input[type="text"],input[type="number"]{padding:8px;border-radius:4px;border:1px solid var(--divider-color);
           background:var(--card-background-color);color:var(--primary-text-color);font-size:14px}
+        input[type="checkbox"]{width:18px;height:18px;accent-color:#0a84ff}
         .hint{font-size:12px;color:var(--secondary-text-color)}
+        h4{margin:12px 0 0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color)}
         [hidden]{display:none}
       </style>
       <div class="row">
@@ -6587,8 +6742,21 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
           <span class="hint">Bei Auto: 1 Spalte unter, 2+ Spalten über diesem Wert. Standard: 650 px</span>
         </label>
         <label>Titel <small style="color:var(--secondary-text-color)">(optional)</small>
-          <input type="text" name="title" value="${cfg.title || ""}" placeholder="Bosch Kameras" />
+          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="Bosch Kameras" />
         </label>
+
+        <h4>Anzeige</h4>
+        ${chk("online_offline_view", "Offline-Kameras anzeigen", true)}
+        ${chk("use_bosch_sort", "Nach Bosch-App-Reihenfolge sortieren", false)}
+
+        <h4>Design (für alle Kacheln)</h4>
+        ${chk("apple_style", "Apple-Style Glass-Overlay aktiv (Default an)", true)}
+        ${seldd("Theme", cfg.theme || "ios", [["auto","Auto (User-Agent)"],["ios","iOS (Apple Home)"],["android","Android (Material You)"]])}
+        ${seldd("Modus", cfg.mode || "auto", [["auto","Auto (System Light/Dark)"],["day","Tag"],["night","Nacht"]])}
+        ${chk("compact", "Compact-Tile (nur Video + Title-Pill, keine Pill-Bar)", false)}
+        ${chk("minimal", "Minimal-Layout (Switches hinter dem Mehr-Menü) — empfohlen fürs Grid", true)}
+        ${chk("show_title", "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)", true)}
+        ${chk("show_last_event", "Letztes-Ereignis-Badge anzeigen", true)}
       </div>`;
     const colSel = this.shadowRoot.querySelector('select[name="columns"]');
     const minwRow = this.shadowRoot.getElementById("minw-row");
@@ -6604,6 +6772,17 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('input[name="title"]').addEventListener("change", e => {
       this._fire({ ...this._config, title: e.target.value });
     });
+    const onChk = (name, key) => this.shadowRoot.querySelector(`input[name="${name}"]`)
+      .addEventListener("change", e => this._fire({ ...this._config, [key]: e.target.checked }));
+    onChk("online_offline_view", "online_offline_view");
+    onChk("use_bosch_sort", "use_bosch_sort");
+    onChk("apple_style", "apple_style");
+    onChk("compact", "compact");
+    onChk("minimal", "minimal");
+    onChk("show_title", "show_title");
+    onChk("show_last_event", "show_last_event");
+    this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({ ...this._config, theme: e.target.value }));
+    this.shadowRoot.querySelector('select[name="modus"]').addEventListener("change", e => this._fire({ ...this._config, mode: e.target.value }));
   }
   _fire(config) {
     this._config = config;
