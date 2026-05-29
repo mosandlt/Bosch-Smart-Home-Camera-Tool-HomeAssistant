@@ -285,7 +285,7 @@ async def async_shc_set_camera_light(
     if result and isinstance(result, dict) and result.get("ok", result.get("status", 0) in (200, 201, 204)):
         coordinator._shc_state_cache[cam_id]["camera_light"] = on
         coordinator.async_update_listeners()
-        coordinator.hass.async_create_task(coordinator.async_request_refresh())
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
         return True
     return False
 
@@ -308,7 +308,10 @@ async def async_shc_set_privacy_mode(
         coordinator._shc_state_cache[cam_id]["privacy_mode"] = enabled
         coordinator._privacy_set_at[cam_id] = time.monotonic()
         coordinator.async_update_listeners()
-        coordinator.hass.async_create_task(coordinator.async_request_refresh())
+        # No forced refresh — see async_cloud_set_privacy_mode (path C,
+        # 2026-05-29): a privacy toggle must not re-register go2rtc streams and
+        # tear down unrelated cameras' live sessions. Optimistic push above +
+        # the regular tick are sufficient; privacy-OFF still snapshots below.
         if not enabled:
             _schedule_privacy_off_snapshot(coordinator, cam_id)
         return True
@@ -413,9 +416,15 @@ async def async_cloud_set_privacy_mode(
                             "ON" if enabled else "OFF",
                             resp.status,
                         )
-                        coordinator.hass.async_create_task(
-                            coordinator.async_request_refresh()
-                        )
+                        # NO async_request_refresh() here. The cache + listeners
+                        # above already push the new privacy state to the UI
+                        # optimistically. A forced (un-throttled) coordinator
+                        # refresh re-touches go2rtc stream registration for ALL
+                        # active cameras, which made go2rtc TEARDOWN + reconnect
+                        # an UNRELATED camera's live session (~1 s blip → "HLS
+                        # reload" overlay). Incident 2026-05-29, path C. The
+                        # regular 60 s tick confirms the state; privacy-OFF still
+                        # triggers a lightweight snapshot refresh below.
                         if not enabled:
                             _schedule_privacy_off_snapshot(coordinator, cam_id)
                         return True
@@ -433,9 +442,9 @@ async def async_cloud_set_privacy_mode(
                                         cam_id, {}
                                     )["privacy_mode"] = enabled
                                     coordinator.async_update_listeners()
-                                    coordinator.hass.async_create_task(
-                                        coordinator.async_request_refresh()
-                                    )
+                                    # See primary path above: no forced refresh
+                                    # (path C — avoids tearing down unrelated
+                                    # cameras' live sessions). 2026-05-29.
                                     if not enabled:
                                         _schedule_privacy_off_snapshot(coordinator, cam_id)
                                     return True
@@ -595,7 +604,7 @@ async def async_cloud_set_camera_light(
                 "cloud_set_camera_light: %s -> %s (gen%d)",
                 cam_id[:8], "ON" if on else "OFF", 2 if gen2 else 1,
             )
-            coordinator.hass.async_create_task(coordinator.async_request_refresh())
+            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
             return True
 
     # -- SHC local API fallback (offline mode) ---------------------------------
@@ -757,7 +766,7 @@ async def async_cloud_set_light_component(
             "cloud_set_light_component: %s %s=%s (gen%d)",
             cam_id[:8], component, value, 2 if gen2 else 1,
         )
-        coordinator.hass.async_create_task(coordinator.async_request_refresh())
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
         return True
 
     # -- Gen2 LOCAL RCP fallback for front-light (cloud outage) ---------------
@@ -848,9 +857,7 @@ async def async_cloud_set_notifications(
                         status,
                         resp.status,
                     )
-                    coordinator.hass.async_create_task(
-                        coordinator.async_request_refresh()
-                    )
+                    # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
                     return True
                 _LOGGER.warning(
                     "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
@@ -904,6 +911,7 @@ async def async_cloud_set_pan(
                         except Exception:  # noqa: BLE001 — body is optional
                             pass
                     coordinator._pan_cache[cam_id] = actual
+                    coordinator.async_update_listeners()
                     _LOGGER.debug(
                         "cloud_set_pan: %s -> %d deg (HTTP %d, ETA %dms)",
                         cam_id,
@@ -911,9 +919,7 @@ async def async_cloud_set_pan(
                         resp.status,
                         eta,
                     )
-                    coordinator.hass.async_create_task(
-                        coordinator.async_request_refresh()
-                    )
+                    # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
                     return True
                 _LOGGER.warning(
                     "cloud_set_pan: HTTP %d for %s", resp.status, cam_id

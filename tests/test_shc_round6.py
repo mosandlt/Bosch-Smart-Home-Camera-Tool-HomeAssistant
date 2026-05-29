@@ -460,11 +460,14 @@ class TestCloudSetCameraLightBranches:
              patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=False), \
              patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False):
             result = await async_cloud_set_camera_light(coord, CAM_ID, False)
-        # Verify PUT was called and the call body doesn't contain intensity
+        # Verify PUT was called with the correct URL (contains cam ID) and body excludes intensity
         assert session.put.called
+        call_url = session.put.call_args[0][0]
+        assert CAM_ID in call_url, f"PUT URL must contain camera ID; got: {call_url}"
         _, call_kwargs = session.put.call_args
         body = call_kwargs.get("json", {})
         assert "frontLightIntensity" not in body
+        assert result is False or result is True  # returns bool, not None
 
     @pytest.mark.asyncio
     async def test_gen1_http_failure_returns_false(self):

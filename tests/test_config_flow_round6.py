@@ -226,7 +226,10 @@ class TestConfigFlowSteps:
              patch.object(AbstractOAuth2FlowHandler, "async_step_user",
                           AsyncMock(return_value={"type": "form"})):
             result = await flow.async_step_user(None)
-        assert mock_reg.called
+        assert mock_reg.called, "async_register_implementation must be called in async_step_user"
+        # Verify the result is a form (from the mocked OAuth2 step_user), not None
+        assert result is not None
+        assert result.get("type") == "form"
 
     @pytest.mark.asyncio
     async def test_reauth_confirm_with_user_input_calls_step_user(self):

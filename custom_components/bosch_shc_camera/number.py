@@ -11,11 +11,10 @@ Creates number entities per camera:
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
     FW 9.40+ supports range 0-7 (capture 2026-04-28 confirmed sensitivity=3, max=7).
 
-  • {Name} Intrusion Distance  — detection range in metres 1-10 (Gen2 only).
+  • {Name} Intrusion Distance  — detection range in metres 1-8 (Gen2 only).
     Reads from coordinator._intrusion_config_cache[cam_id]["distance"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
-    Capture 2026-04-28 shows distance=8; range 1-10 from iOS app slider (no raw bounds
-    in capture — range is inferred from app UI, not from API response field).
+    API rejects distance > 8 with HTTP 400 (verified FW 9.40.102). Max clamped to 8.
 """
 
 import asyncio
@@ -892,12 +891,11 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
 
 
 class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
-    """Number: intrusion detection range in metres 1–10 (Gen2 only).
+    """Number: intrusion detection range in metres 1–8 (Gen2 only).
 
     Reads from coordinator._intrusion_config_cache[cam_id]["distance"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
-    Range note: capture 2026-04-28 (api-findings.md §6.2) shows distance=8; range 1–10
-    is inferred from the iOS app slider — no explicit min/max observed in API responses.
+    Range: API rejects distance > 8 with HTTP 400 (verified live FW 9.40.102 2026-05-29).
     Available for both Gen2 Indoor II and Gen2 Outdoor II.
     Write-lock timestamp _intrusion_config_set_at is set after successful PUT (same guard
     as BoschIntrusionSensitivityNumber and BoschDetectionModeSelect).
@@ -905,7 +903,7 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
 
     _attr_icon                        = "mdi:map-marker-distance"
     _attr_native_min_value            = 1
-    _attr_native_max_value            = 10
+    _attr_native_max_value            = 8
     _attr_native_step                 = 1
     _attr_mode                        = NumberMode.SLIDER
     _attr_native_unit_of_measurement  = "m"
@@ -934,7 +932,7 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
-        cfg["distance"] = int(round(max(1, min(10, value))))
+        cfg["distance"] = int(round(max(1, min(8, value))))  # API rejects > 8 (HTTP 400)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "intrusionDetectionConfig", cfg
         )

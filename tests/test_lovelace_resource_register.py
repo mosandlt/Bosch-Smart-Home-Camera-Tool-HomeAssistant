@@ -87,8 +87,13 @@ class TestRegisterLovelaceResources:
         resources = _make_resources(items)
         hass = _make_hass(resources)
         await async_setup(hass, {})
+        # Card resource is already current → no update/create. The autoplay-fix
+        # resource is deprecated (v13.3.0) → removed, not kept.
         resources.async_update_item.assert_not_awaited()
         resources.async_create_item.assert_not_awaited()
+        deleted = [c.args[0] for c in resources.async_delete_item.call_args_list]
+        assert "c2" in deleted      # autoplay-fix removed
+        assert "c1" not in deleted  # card kept
 
     @pytest.mark.asyncio
     async def test_stale_versioned_entry_updated(self):
@@ -102,28 +107,55 @@ class TestRegisterLovelaceResources:
         resources = _make_resources(items)
         hass = _make_hass(resources)
         await async_setup(hass, {})
-        assert resources.async_update_item.await_count == 2
-        # No fresh create (existing entry was found)
+        # Only the card is updated now; the autoplay-fix resource is deprecated
+        # (v13.3.0) → removed, not updated.
+        assert resources.async_update_item.await_count == 1
         resources.async_create_item.assert_not_awaited()
-        # Updates carry the current CARD_VERSION
-        for call in resources.async_update_item.await_args_list:
-            assert f"?v={CARD_VERSION}" in call.args[1]["url"]
-            assert call.args[1]["res_type"] == "module"
+        deleted = [c.args[0] for c in resources.async_delete_item.call_args_list]
+        assert "s2" in deleted  # stale autoplay-fix removed
+        upd = resources.async_update_item.await_args_list[0]
+        assert f"?v={CARD_VERSION}" in upd.args[1]["url"]
+        assert "bosch-camera-card.js" in upd.args[1]["url"]
+        assert "autoplay-fix" not in upd.args[1]["url"]
+        assert upd.args[1]["res_type"] == "module"
 
     @pytest.mark.asyncio
     async def test_missing_entries_created(self):
         """Fresh install (no /bosch_shc_camera entries) → async_create_item
-        for both card + autoplay-fix."""
+        for the card ONLY. autoplay-fix is no longer registered (deprecated
+        v13.3.0 — the watchdog is a no-op, the card self-heals)."""
         from custom_components.bosch_shc_camera import async_setup
         from custom_components.bosch_shc_camera.const import CARD_VERSION
         resources = _make_resources([])
         hass = _make_hass(resources)
         await async_setup(hass, {})
-        assert resources.async_create_item.await_count == 2
+        assert resources.async_create_item.await_count == 1
+        payload = resources.async_create_item.await_args_list[0].args[0]
+        assert payload["res_type"] == "module"
+        assert payload["url"].endswith(f"?v={CARD_VERSION}")
+        assert "bosch-camera-card.js" in payload["url"]
+        assert "autoplay-fix" not in payload["url"]
+
+    @pytest.mark.asyncio
+    async def test_deprecated_autoplay_fix_resource_removed(self):
+        """Regression (v13.3.0): a previously auto-registered autoplay-fix
+        resource at /bosch_shc_camera/... is removed on setup, and never
+        re-created. The static path still serves the no-op stub (no 404)."""
+        from custom_components.bosch_shc_camera import async_setup
+        from custom_components.bosch_shc_camera.const import CARD_VERSION
+        items = [
+            {"id": "card", "url": f"/bosch_shc_camera/bosch-camera-card.js?v={CARD_VERSION}"},
+            {"id": "wd", "url": f"/bosch_shc_camera/bosch-camera-autoplay-fix.js?v={CARD_VERSION}"},
+        ]
+        resources = _make_resources(items)
+        hass = _make_hass(resources)
+        await async_setup(hass, {})
+        deleted = [c.args[0] for c in resources.async_delete_item.call_args_list]
+        assert "wd" in deleted       # autoplay-fix removed
+        assert "card" not in deleted  # card kept
+        # autoplay-fix never (re-)created
         for call in resources.async_create_item.await_args_list:
-            payload = call.args[0]
-            assert payload["res_type"] == "module"
-            assert payload["url"].endswith(f"?v={CARD_VERSION}")
+            assert "autoplay-fix" not in call.args[0]["url"]
 
     @pytest.mark.asyncio
     async def test_lovelace_missing_warns_no_crash(self):

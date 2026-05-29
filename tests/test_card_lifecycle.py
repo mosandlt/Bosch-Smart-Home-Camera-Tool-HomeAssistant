@@ -147,7 +147,10 @@ def test_pull_fresh_states_includes_camera_entity(card_source: str) -> None:
     # firstHass body that follows.
     first_hass_idx = card_source.find("if (firstHass)")
     assert first_hass_idx > 0
-    first_hass_body = card_source[first_hass_idx : first_hass_idx + 1500]
+    # Window widened to 2500: v13.3.1 added a set-hass diff-guard whose own
+    # `if (firstHass) {` is now the FIRST match, sitting ~1.7 kB before the
+    # bootstrap firstHass block that calls _pullFreshSwitchStates.
+    first_hass_body = card_source[first_hass_idx : first_hass_idx + 2500]
     assert "_pullFreshSwitchStates" in first_hass_body, (
         "firstHass branch in `set hass()` must call _pullFreshSwitchStates "
         "so the initial mount has authoritative state — otherwise the "

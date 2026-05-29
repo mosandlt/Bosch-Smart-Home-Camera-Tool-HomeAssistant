@@ -1,0 +1,55 @@
+# Version History — Bosch Smart Home Camera HA Integration
+
+Recent releases. For the full changelog see [`CHANGELOG.md`](../CHANGELOG.md) at the repo root or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
+
+## v13.3.1 — 2026-05-29
+
+Patch release — two card-rendering fixes, two interaction improvements, a deprecated watchdog resource, and internal test and API-limit cleanup.
+
+- Privacy/light toggle on one camera no longer causes a brief reconnecting/HLS overlay flash on other cameras on the same dashboard. Each card now skips the re-render path when the changed entity belongs to a different camera.
+- Loading spinner is now correctly centered in the HA mobile app. The `inset` CSS shorthand is unsupported on older iOS WebViews; replaced with explicit `top`/`right`/`bottom`/`left` declarations.
+- Tap reliability for the tap-to-play and fullscreen overlays improved on mobile (touch handling).
+- `bosch-camera-autoplay-fix.js` deprecated — the card self-heals on its own; the watchdog resource is now a no-op and is auto-removed on next HA restart. No action needed.
+- Internal: intrusion-detection `distance` number entity maximum aligned to the API limit (8 m). Test coverage expanded for switch on/off modes.
+
+## v13.3.0 — 2026-05-28
+
+Minor release — five fixes verified against live hardware (Eyes Außenkamera II, Eyes Innenkamera II, Gen1 Outdoor, Gen1 360° Indoor).
+
+- `light.bosch_<cam>_frontlicht` turn-on now reliably updates HA state. `_put_lighting_switch` returns HTTP 204 No Content; the previous code tried `resp.json()` on the empty body, raised silently, left `brightness=0` in the cache, and caused HA's verify timeout to fire every time. On JSON-parse failure of a 2xx response the sent body (already the merged post-write state) is now written into the cache instead.
+- Four service handlers guarded against privacy-mode rejection. The Bosch cloud returns HTTP 443 `sh:camera.in.privacy.mode` for writes while the shutter is closed; `BoschFrontLight.async_turn_on`, `_BoschRgbLedLight.async_turn_on`, `BoschPanicAlarmSwitch._set`, and `_BoschAlarmDelayBase.async_set_native_value` now early-return with a persistent notification instead of issuing a PUT that is rejected silently.
+- Internal: 3 new test modules + updates to 3 existing modules covering the new branches.
+
+## v13.2.5 — 2026-05-27
+
+Patch release — six Lovelace card state-rendering bugs and one integration race, surfaced via osascript-driven Chrome testing against a live install.
+
+- `BoschCamera.is_streaming` now mirrors `stream_source`'s gate (entry present AND `rtspsUrl`/`rtspUrl` populated). Previously it returned True the moment `try_live_connection` wrote to `_live_connections`, causing the card to fire `camera/webrtc/offer` before the pre-warm wrote `rtspsUrl` — go2rtc rejected with `Camera has no stream source` and the card fell back to HLS. WebRTC now succeeds on first stream-start.
+- Privacy on→off loading-overlay leaks closed: five layered fixes ensure the "Aktualisiere…" / "Bild wird geladen…" / "Stream wird gestartet…" overlays are suppressed while the shutter is closed and during the 12 s post-off re-snapshot grace window.
+- Stuck "Verbinde" badge on card mount with an active stream self-heals: `!paused && currentTime > 0 && readyState >= 2` force-clears `_startingLiveVideo` + dismisses the overlay.
+- Loading overlay stacked on top of the OFFLINE state (15 s of HTTP retries) — snapshot-fetch and overlay-show now gated on `!_isOffline`.
+- `_pullFreshSwitchStates` filters by `id in hass.states` before the REST call — eliminates 404 noise from the Gen2 LED-ring `light.*` entity fallback.
+- `getattr(..., {})` guard on `_hw_version` prevents `AttributeError` in `SimpleNamespace` test stubs (Gen2-gate for RCP 0x099e).
+
+## v13.2.4 — 2026-05-27
+
+Patch release — four bugs surfaced in a live debugging session (HA 2026.5, Indoor Gen2 FW 9.40.102, Lovelace HLS).
+
+- Live-stream stutter fixed. Card was re-asserting `video.muted = false` on every HA state tick; Chrome's autoplay policy pauses the element on each assignment without a user gesture — causing 1-2 s stutters ~11×/cycle. Now sets `muted` only on actual state transitions and gates unmute on a user-gesture flag set at card mount.
+- Stream-worker 401 rescue lowered from 5 errors to 1. HA's stream component coalesces identical worker errors so the counter could plateau at 4 indefinitely; auth errors now bypass the threshold and trigger the rescue immediately.
+- FCM diagnostic line no longer suppressed by `_FCMNoiseFilter` — marker substrings are masked before logging so the cause is visible without reopening the log-flood vulnerability.
+- `_pullFreshSwitchStates` 404 noise eliminated — entities not present in `hass.states` are silently skipped.
+
+## v13.2.3 — 2026-05-26
+
+Patch release — production bugs from a thorough code scan plus logging, options-flow, and async hygiene improvements.
+
+- `bosch_shc_camera_intrusion` webhook event now fires on rising edge of `alarmStatus.alarmType` (was registered but never triggered). Payload: `{camera_id, camera_name, alarm_type, intrusion_system, timestamp}`.
+- Stale go2rtc + Stream state on integration reload fixed. `_async_cancel_coordinator_tasks` now tears down per-cam streams (`_tear_down_live_stream`) before stopping proxies.
+- RCP-LAN HTTP 401 throttle: per-`(cam_id, opcode_hex)` denied cache (24 h TTL) eliminates repeated 401s for opcodes the account lacks permission for.
+- Exception logs with empty `str(err)` now fall back to `repr(err)`.
+- `use_mjpeg_snapshot` option description corrected (off by default; FFmpeg-TLS incompatibility explained).
+- `enable_intercom` option now actually gates entity registration (was always registered regardless).
+- Blocking `threading.Event.wait(timeout=2)` removed from the asyncio event loop in `tls_proxy.start_tls_proxy`.
+- Dead-code cleanup: 7 unused imports, `BoschAcousticAlarmButton` class, 11 dead OAuth translation keys, `device_automation.trigger_type.*` section removed.
+- Test suite: +47 tests, 4514 passed / 17 skipped.

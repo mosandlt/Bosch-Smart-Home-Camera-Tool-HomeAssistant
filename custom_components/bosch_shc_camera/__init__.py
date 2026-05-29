@@ -415,6 +415,13 @@ from .const import (  # noqa: E402
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+# hass.data key holding the per-entry options snapshot used by
+# _async_options_updated to tell a real options edit apart from the frequent
+# data-only writes (token refresh, FCM token/credential persistence). Kept in
+# hass.data (not only on the coordinator) so the comparison survives the brief
+# `entry.runtime_data is None` window during a reload — see _async_options_updated.
+OPTIONS_SNAPSHOT_KEY = f"{DOMAIN}_options_snapshot"
+
 
 def get_options(entry: ConfigEntry) -> dict[str, Any]:
     """Return entry options merged with defaults."""
@@ -3901,7 +3908,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             self._replace_renewal_task(
                                 cam_id, self._remote_session_terminator(cam_id, gen)
                             )
-                        self.hass.async_create_task(self.async_request_refresh())
+                        # Full coordinator refresh re-evaluates ALL cameras (and
+                        # re-touches their go2rtc registration). On a transparent
+                        # session RENEWAL nothing user-visible changes — the stream
+                        # stays up, this cam was already re-registered per-cam above
+                        # with its rotated creds — so skip the cross-camera refresh
+                        # on renewal (the regular ≤60 s tick confirms state). A fresh
+                        # toggle still refreshes so provider/state propagate now.
+                        # NOTE: the per-cam _register_go2rtc_stream above is NOT
+                        # skipped on renewal — LOCAL creds rotate, so go2rtc needs
+                        # the new rtsps_url or the renewed stream breaks. 2026-05-29.
+                        if not is_renewal:
+                            self.hass.async_create_task(self.async_request_refresh())
                         self.hass.async_create_task(self._check_and_recover_webrtc(cam_id))
                         # Opportunistic RCP+ state pull: refresh privacy + LED-dimmer
                         # via lokales / Cloud-Proxy RCP+ on the freshly opened session.
@@ -5630,15 +5648,25 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         # Having both old and new entries causes the card to load twice, which
         # triggers a "custom element already defined" error and the older cached
         # version wins.
-        _legacy_prefixes = ("/local/bosch-camera-card", "/local/bosch-camera-autoplay-fix")
+        # Also remove the bosch-camera-autoplay-fix.js resource (ANY path):
+        # deprecated as of v13.3.0 — the watchdog it contained is a no-op now
+        # (the card self-heals per-instance), and its old index-paired HLS
+        # injection could disrupt the wrong camera. We stop registering it
+        # (loop below) and delete any previously auto-registered entry here. The
+        # static path still serves the no-op stub, so cached/manual references
+        # resolve harmlessly instead of 404-ing.
+        _remove_prefixes = (
+            "/local/bosch-camera-card",
+            "/local/bosch-camera-autoplay-fix",
+            f"/{DOMAIN}/bosch-camera-autoplay-fix",
+        )
         for item in list(resources.async_items()):
-            if item.get("url", "").startswith(_legacy_prefixes):
+            if item.get("url", "").startswith(_remove_prefixes):
                 await resources.async_delete_item(item["id"])
-                _LOGGER.debug("%s: Removed legacy Lovelace resource: %s", DOMAIN, item["url"])
+                _LOGGER.debug("%s: Removed deprecated Lovelace resource: %s", DOMAIN, item["url"])
 
         for card_path in (
             f"/{DOMAIN}/bosch-camera-card.js",
-            f"/{DOMAIN}/bosch-camera-autoplay-fix.js",
         ):
             versioned = f"{card_path}?v={CARD_VERSION}"
             existing_id = None
@@ -6167,6 +6195,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # HA clears runtime_data automatically on unload — no manual cleanup needed.
     entry.runtime_data = coordinator
 
+    # Coord-independent options snapshot for _async_options_updated. Stored in
+    # hass.data so the "did options change?" comparison survives the brief
+    # runtime_data=None window during a reload — a data-only write (token / FCM)
+    # landing in that window must not trigger a full reload. NOT cleared on
+    # unload (would empty it inside the very window we protect); it is simply
+    # overwritten by the next setup.
+    hass.data.setdefault(OPTIONS_SNAPSHOT_KEY, {})[entry.entry_id] = get_options(entry)
+
     opts = get_options(entry)
     platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
     if opts.get("enable_binary_sensors", True):
@@ -6480,19 +6516,48 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when user changes options in the UI.
+    """Reload the config entry only when the *options* actually change.
 
-    This listener fires on any config entry update (data OR options).
-    We only reload if options actually changed — data-only updates
-    (e.g. persisting a refreshed token) should NOT trigger a reload.
+    This listener fires on ANY config-entry update — including the frequent
+    data-only writes (token refresh at L1560, plus five FCM `data=` writes in
+    fcm.py). A data-only write must NEVER reload: a reload tears down every
+    camera's live stream (go2rtc unregister + TLS-proxy stop). Incident
+    2026-05-29: toggling privacy on one camera persisted a refreshed token, this
+    listener fired while `entry.runtime_data` was briefly None, the old
+    `if coord:` guard fell through straight to async_reload, and an unrelated
+    camera's WebRTC source vanished from go2rtc (DESCRIBE 404 → 30 s-delayed HLS).
+
+    The reload decision must depend ONLY on whether options changed — never on
+    whether the coordinator happens to be present. The previous-options snapshot
+    therefore lives in hass.data (keyed by entry_id) so it survives the
+    `runtime_data is None` reload/startup window; the coordinator snapshot is a
+    fallback for the first push before hass.data is populated. See
+    OPTIONS_SNAPSHOT_KEY + the snapshot write in async_setup_entry.
     """
-    coord = getattr(entry, "runtime_data", None)
-    if coord:
-        prev_opts = coord._options_snapshot
-        new_opts = get_options(entry)
-        if prev_opts == new_opts:
-            _LOGGER.debug("Config entry updated (data only) — skipping reload")
-            return
+    new_opts = get_options(entry)
+    prev_opts: dict[str, Any] | None = None
+    snapshots = hass.data.get(OPTIONS_SNAPSHOT_KEY)
+    if isinstance(snapshots, dict):
+        stored = snapshots.get(entry.entry_id)
+        if isinstance(stored, dict):
+            prev_opts = stored
+    if prev_opts is None:
+        # Fallback for the first update before async_setup_entry stored the
+        # hass.data snapshot (and for tests that only populate runtime_data).
+        coord = getattr(entry, "runtime_data", None)
+        coord_snap = getattr(coord, "_options_snapshot", None) if coord is not None else None
+        if isinstance(coord_snap, dict):
+            prev_opts = coord_snap
+    if prev_opts is not None and prev_opts == new_opts:
+        _LOGGER.debug(
+            "Config entry updated (options unchanged — data-only write) — skipping reload"
+        )
+        return
+    # Real options change (or previous options unknown → safest to reload).
+    # Record the new options before reloading so the fresh setup compares
+    # against them rather than re-reloading in a loop.
+    if isinstance(snapshots, dict):
+        snapshots[entry.entry_id] = new_opts
     await hass.config_entries.async_reload(entry.entry_id)
 
 

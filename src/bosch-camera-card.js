@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.3.0.1";
+const CARD_VERSION = "13.3.1";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -569,6 +569,26 @@ class BoschCameraCard extends HTMLElement {
   }
 
   // ── HA state updates ──────────────────────────────────────────────────────
+  // Fingerprint of every entity this card tracks (all id strings in
+  // this._entities + the maintenance entity). `state + last_updated` captures
+  // both state and attribute changes (last_updated bumps on any state-object
+  // rewrite). Used by the set-hass diff-guard to skip redundant _update()s.
+  _hassFingerprint(hass) {
+    if (!hass || !hass.states) return "";
+    let fp = "";
+    const ents = this._entities || {};
+    for (const k in ents) {
+      const v = ents[k];
+      if (typeof v === "string" && v.indexOf(".") > 0) {
+        const s = hass.states[v];
+        fp += v + "=" + (s ? s.state + "@" + s.last_updated : "_") + ";";
+      }
+    }
+    const me = this._config && this._config.maintenance_entity;
+    if (me) { const s = hass.states[me]; fp += me + "=" + (s ? s.state + "@" + s.last_updated : "_") + ";"; }
+    return fp;
+  }
+
   set hass(hass) {
     const firstHass = !this._hass;
     this._hass = hass;
@@ -577,6 +597,22 @@ class BoschCameraCard extends HTMLElement {
         this._autoDiscoveryDone = true;
         this._discoverAutomationsViaWs(hass);
       }
+    }
+    // Diff-guard: HA pushes the whole `hass` object to EVERY card on ANY entity
+    // change anywhere in the system. With several cameras, an unrelated event
+    // (a motion tick, a light elsewhere) would otherwise run a full _update()
+    // pass on every card. Skip _update() when none of THIS card's tracked
+    // entities (everything in this._entities + the maintenance entity) changed
+    // since the last push. Always run on the first push. Correctness is
+    // unaffected — the card still updates whenever one of its own entities
+    // changes; this only drops redundant work. CSS theme vars + first-push
+    // bootstrap (below) are unaffected.
+    if (firstHass) {
+      this._lastHassFp = this._hassFingerprint(hass);
+    } else {
+      const fp = this._hassFingerprint(hass);
+      if (fp === this._lastHassFp) return;
+      this._lastHassFp = fp;
     }
     this._applyImageRotation180();
     // Auto-play gate decision MUST run synchronously BEFORE _update() —
@@ -772,7 +808,7 @@ class BoschCameraCard extends HTMLElement {
     }
     // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
     // these document-level listeners would leak via `this`-closure.
-    if (this._fsClickOut) { document.removeEventListener("click", this._fsClickOut); this._fsClickOut = null; }
+    if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
     if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
@@ -853,7 +889,13 @@ class BoschCameraCard extends HTMLElement {
       this._entities.privacy,
       this._entities.audio,
       this._entities.light,
-    ].filter(Boolean);
+    ].filter((id) => id && this._hass.states[id]);
+    // .filter on hass.states[id]: only pull entities HA actually has. The
+    // light entity id is derived for every camera, but cameras without a light
+    // (e.g. Indoor II, the 360 indoor) have no switch.<cam>_camera_light — a
+    // REST GET on it 404s and logs a console/network error on every mount.
+    // A laggy-but-present entity (the CARD_STALE_APP case this method targets)
+    // is still in hass.states, so it is NOT filtered out. 2026-05-29.
     let changed = false;
     for (const id of ids) {
       try {
@@ -980,7 +1022,7 @@ class BoschCameraCard extends HTMLElement {
            below loading-overlay (10). */
         .tap-to-play-overlay {
           display: none;
-          position: absolute; inset: 0; z-index: 9;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 9;
           flex-direction: column; align-items: center; justify-content: center;
           gap: 10px;
           background: rgba(0,0,0,.55);
@@ -1009,7 +1051,7 @@ class BoschCameraCard extends HTMLElement {
            through a translucent backdrop so the user sees which camera. */
         .auto-play-gate {
           display: none;
-          position: absolute; inset: 0; z-index: 11;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 11;
           flex-direction: column; align-items: center; justify-content: center;
           gap: 8px;
           /* No backdrop-filter — Thomas wants to see the sharp snapshot
@@ -1078,7 +1120,7 @@ class BoschCameraCard extends HTMLElement {
            without layout shift. Image stays visible underneath until video
            fires "playing" event, avoiding the black gap. */
         .cam-video {
-          position: absolute; inset: 0;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0;
           width: 100%; height: 100%; display: block; object-fit: cover;
           min-height: 160px; background: transparent;
         }
@@ -1110,7 +1152,7 @@ class BoschCameraCard extends HTMLElement {
         }
         /* Fullscreen — CSS fallback for iOS Safari (position:fixed overlay) */
         :host(.fs-active) {
-          position: fixed !important; inset: 0 !important;
+          position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
           z-index: 9999 !important; background: #000 !important;
           display: flex !important; align-items: center !important; justify-content: center !important;
         }
@@ -1141,7 +1183,7 @@ class BoschCameraCard extends HTMLElement {
 
         /* Motion zones SVG overlay */
         .motion-zones-overlay {
-          position: absolute; inset: 0; z-index: 5;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5;
           width: 100%; height: 100%;
           pointer-events: none; opacity: 0;
           transition: opacity 0.3s;
@@ -1171,7 +1213,7 @@ class BoschCameraCard extends HTMLElement {
 
         /* Loading overlay — must be above both cam-img and cam-video */
         .loading-overlay {
-          position: absolute; inset: 0; z-index: 10;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: rgba(0,0,0,.85);
           gap: 12px;
@@ -1201,7 +1243,7 @@ class BoschCameraCard extends HTMLElement {
 
         /* Offline overlay — shown when status sensor is OFFLINE */
         .offline-overlay {
-          position: absolute; inset: 0; z-index: 8;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 8;
           display: none;
           flex-direction: column; align-items: center; justify-content: center;
           background: rgba(20, 20, 20, 0.82);
@@ -1234,7 +1276,7 @@ class BoschCameraCard extends HTMLElement {
         /* Auth/integration overlay — shown when camera entity is unavailable
            (coordinator failed, e.g. Bosch Cloud refresh token rejected) */
         .auth-overlay {
-          position: absolute; inset: 0; z-index: 9;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 9;
           display: none;
           flex-direction: column; align-items: center; justify-content: center;
           background: rgba(20, 20, 20, 0.88);
@@ -1403,7 +1445,7 @@ class BoschCameraCard extends HTMLElement {
            dimmed camera image show through, signalling "privacy on but the
            camera is fine" rather than "this view is dead". */
         .privacy-placeholder {
-          position: absolute; inset: 0;
+          position: absolute; top: 0; right: 0; bottom: 0; left: 0;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: rgba(20,20,22,.55);
           backdrop-filter: blur(8px);
@@ -2828,7 +2870,11 @@ class BoschCameraCard extends HTMLElement {
     // Auto-play gate (tap-to-reveal) — visible only when auto_play_default
     // resolves to overlay-required (mode=never, or mode=lan + remote).
     const apg = this.shadowRoot.getElementById("auto-play-gate");
-    if (apg) apg.addEventListener("click", () => this._onPlayGateTap());
+    // pointerup (not click): the gate is a plain <div>, and in the HA Companion
+    // App's mobile WebView (iOS WKWebView / Android WebView) a synthesized
+    // `click` on a non-button div is unreliable — taps didn't reveal the
+    // stream. pointerup fires for mouse, touch and pen alike. 2026-05-29.
+    if (apg) apg.addEventListener("pointerup", () => this._onPlayGateTap());
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
     );
@@ -3652,11 +3698,13 @@ class BoschCameraCard extends HTMLElement {
                 overlay.classList.add("visible");
                 const resume = () => {
                   overlay.classList.remove("visible");
-                  overlay.removeEventListener("click", resume);
+                  overlay.removeEventListener("pointerup", resume);
                   video.muted = true;
                   video.play().catch(() => {});
                 };
-                overlay.addEventListener("click", resume);
+                // pointerup, not click — reliable on mobile-WebView touch (the
+                // tap-to-play overlay is a <div>; click can be dropped). 2026-05-29.
+                overlay.addEventListener("pointerup", resume);
               }
               return;
             }
@@ -3702,6 +3750,24 @@ class BoschCameraCard extends HTMLElement {
         // Reset stall counter on successful fragment delivery
         this._stallCount = 0;
         hls.on(Hls.Events.FRAG_LOADED, () => { this._stallCount = 0; });
+        // One-shot seek to the live edge once the first fragment is buffered.
+        // After a backend stream-worker restart (e.g. an integration reload),
+        // the HLS playlist can carry a multi-segment backlog and hls.js starts
+        // playback at the buffer start — leaving the user 20-40 s behind real
+        // time (the >30 s glitch reported 2026-05-29 on the HLS fallback).
+        // Seek forward ONCE, and only when we're meaningfully behind (>6 s), so
+        // normal low-latency starts are untouched and we never seek into an
+        // unbuffered gap (which would itself stall).
+        let _didLiveSeek = false;
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (_didLiveSeek) return;
+          const lsp = hls.liveSyncPosition;
+          if (lsp != null && video && (lsp - video.currentTime) > 6) {
+            _didLiveSeek = true;
+            console.debug("bosch-camera-card: seeking HLS to live edge", lsp, "from", video.currentTime);
+            video.currentTime = lsp;
+          }
+        });
 
         // Auto-recovery on buffer stall: seek to live edge, then reconnect
         hls.on(Hls.Events.ERROR, (_ev, data) => {
@@ -3843,10 +3909,20 @@ class BoschCameraCard extends HTMLElement {
     // Subscribe to answer/candidates via HA WS
     const unsub = await this._hass.connection.subscribeMessage(
       (event) => {
+        // Guard the reload/teardown race: _stopLiveVideo() (called from
+        // disconnectedCallback / pagehide / stream-stop) may close `pc` while
+        // answer/candidate messages are still in flight on the HA WS. Applying
+        // them to a closed connection throws InvalidStateError — this flooded
+        // the console (~12 uncaught rejections) during the 2026-05-29
+        // privacy-toggle reload. Drop late messages, and `.catch()` the
+        // micro-race where signalingState flips between this check and the call.
+        if (!pc || pc.signalingState === "closed" || pc.signalingState === "failed") return;
         if (event.type === "answer") {
-          pc.setRemoteDescription({ type: "answer", sdp: event.answer });
+          pc.setRemoteDescription({ type: "answer", sdp: event.answer })
+            .catch((e) => console.debug("bosch-camera-card: setRemoteDescription skipped (pc closing):", e?.message));
         } else if (event.type === "candidate") {
-          pc.addIceCandidate(event.candidate);
+          pc.addIceCandidate(event.candidate)
+            .catch((e) => console.debug("bosch-camera-card: addIceCandidate skipped (pc closing):", e?.message));
         } else if (event.type === "error") {
           // 2026-05-25 fix: previously this branch only logged and let the
           // 5s setTimeout fall through — visible to the user as a 5-second
@@ -3926,7 +4002,11 @@ class BoschCameraCard extends HTMLElement {
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
     if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
-    if (this._webrtcUnsub) { this._webrtcUnsub(); this._webrtcUnsub = null; }
+    // try/catch: on page reload / WS close the subscription may already be
+    // gone, so the unsubscribe rejects with "Subscription not found" — an
+    // unhandled promise rejection in the console on every reload with an active
+    // WebRTC stream. Swallow it (matches the guarded call at the offer site).
+    if (this._webrtcUnsub) { try { this._webrtcUnsub(); } catch {}; this._webrtcUnsub = null; }
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
@@ -5493,7 +5573,9 @@ class BoschCameraCard extends HTMLElement {
     // Press Escape to exit
     this._fsKeyDown = (e) => { if (e.key === "Escape") this._exitCssFullscreen(); };
     setTimeout(() => {
-      document.addEventListener("click", this._fsClickOut);
+      // pointerup, not click: in the mobile WebView a tap outside the card
+      // (to exit CSS-fullscreen) may not reach `document` as a click. 2026-05-29.
+      document.addEventListener("pointerup", this._fsClickOut);
       document.addEventListener("keydown", this._fsKeyDown);
     }, 100);
   }
@@ -5502,7 +5584,7 @@ class BoschCameraCard extends HTMLElement {
     this.classList.remove("fs-active");
     this._updateFullscreenButtonState();
     document.body.style.overflow = "";
-    if (this._fsClickOut) { document.removeEventListener("click", this._fsClickOut); this._fsClickOut = null; }
+    if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
   }
 
@@ -5746,6 +5828,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     this._config    = null;
     this._hass      = null;
     this._rendered  = false;
+    this._emptyNode = null;        // the empty-state <div>, tracked so re-sort removes it without touching cells
   }
 
   setConfig(config) {
@@ -6316,7 +6399,15 @@ class BoschCameraOverviewCard extends HTMLElement {
 
     // re-sort / insert
     if (needsReorder) {
-      this._grid.innerHTML = "";
+      // Do NOT wipe the grid (innerHTML="") and re-append cells. Detaching an
+      // inner <bosch-camera-card> fires its disconnectedCallback → _stopLiveVideo,
+      // which tears down the WebRTC/HLS session of a camera whose OWN state never
+      // changed. That was the privacy-toggle blip (2026-05-29): toggling one
+      // camera's privacy flips its tier → `sig` changes → the grid re-sorted →
+      // every other card's live stream dropped for ~1-2 s ("HLS wird geladen…").
+      // Cells now stay in stable DOM order and are re-sorted via CSS `order`
+      // below; only the (detached) empty-state node is removed here.
+      if (this._emptyNode) { this._emptyNode.remove(); this._emptyNode = null; }
       if (cams.length === 0) {
         const empty = document.createElement("div");
         // Distinguish "no Bosch entities at all" vs. "all Bosch cameras are
@@ -6387,11 +6478,13 @@ class BoschCameraOverviewCard extends HTMLElement {
           empty.textContent = "Keine Bosch-Kameras gefunden.";
         }
         this._grid.appendChild(empty);
+        this._emptyNode = empty;
       } else {
         // Cameras are already sorted by tier (0=live → 1=privat → 2=offline).
         // No full-width section dividers: they'd collapse the grid to 1 column
         // whenever a tier has an odd count. The per-card tier badge makes the
         // group visually obvious without breaking density.
+        let _ord = 0;
         for (const c of cams) {
 
           let cell = this._cards.get(c.entity_id);
@@ -6417,7 +6510,13 @@ class BoschCameraOverviewCard extends HTMLElement {
             this._cards.set(c.entity_id, cell);
           }
           cell.dataset.tier = String(c.tier);
-          this._grid.appendChild(cell);
+          // Re-sort via CSS `order` only — NEVER re-append an existing cell.
+          // A DOM move (remove+insert) fires the inner card's
+          // disconnectedCallback → _stopLiveVideo, dropping the live stream of
+          // a camera whose own state never changed (privacy-toggle blip,
+          // 2026-05-29). Append a cell to the grid exactly once, on creation.
+          cell.style.order = String(_ord++);
+          if (cell.parentNode !== this._grid) this._grid.appendChild(cell);
         }
       }
     }

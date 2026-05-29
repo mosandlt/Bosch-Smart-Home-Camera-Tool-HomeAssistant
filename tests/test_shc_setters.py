@@ -473,8 +473,8 @@ class TestSchedulePrivacyOffSnapshot:
         coro.close()
         # We can also verify via the call_args of _async_trigger_image_refresh
         # if it was called directly (depends on implementation)
-        # Primary assertion: task was created at all
-        assert True  # structural — task was scheduled (delay verified below)
+        # Primary assertion: task was created (the snapshot refresh was scheduled)
+        assert coord.hass.async_create_task.called, "async_create_task must be called to schedule snapshot refresh"
 
     def test_outdoor_delay_not_indoor_delay(self):
         """Outdoor delay must be strictly less than indoor delay."""

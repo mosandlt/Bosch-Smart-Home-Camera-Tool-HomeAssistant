@@ -531,9 +531,9 @@ class TestBoschIntrusionDistanceNumber:
     @pytest.mark.asyncio
     async def test_set_max_distance(self):
         ent, coord = self._make()
-        await ent.async_set_native_value(10.0)
+        await ent.async_set_native_value(8.0)
         _, _, body = coord.async_put_camera.call_args[0]
-        assert body["distance"] == 10
+        assert body["distance"] == 8  # max 8 — API rejects > 8 (HTTP 400, FW 9.40.102)
 
     @pytest.mark.asyncio
     async def test_set_default_distance(self):
@@ -547,7 +547,7 @@ class TestBoschIntrusionDistanceNumber:
         ent, coord = self._make()
         await ent.async_set_native_value(999.0)
         _, _, body = coord.async_put_camera.call_args[0]
-        assert body["distance"] == 10
+        assert body["distance"] == 8  # clamp to 8 — API rejects > 8 (HTTP 400)
 
     @pytest.mark.asyncio
     async def test_set_garbage_clamps_below_min(self):
@@ -615,12 +615,12 @@ class TestBoschIntrusionDistanceNumber:
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_unique_id == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_intrusion_distance"
 
-    def test_range_is_1_to_10(self):
+    def test_range_is_1_to_8(self):
         from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.native_min_value == 1
-        assert ent.native_max_value == 10
+        assert ent.native_max_value == 8  # API rejects > 8 (HTTP 400, FW 9.40.102)
 
     def test_unit_is_meters(self):
         from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber

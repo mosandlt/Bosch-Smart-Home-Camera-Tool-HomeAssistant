@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.3.1] - 2026-05-29
+
+Patch release — two card-rendering fixes, two interaction improvements, a deprecated watchdog resource, and an internal test and API-limit cleanup.
+
+- **Privacy/light toggle no longer interrupts streams on other cameras.** Toggling the privacy mode switch or the camera light on one camera triggered a coordinator-wide state broadcast that caused the Lovelace card to briefly show a reconnecting/HLS overlay on every other camera visible on the same dashboard. Each card now skips the re-render path when the changed entity is unrelated to its own camera, eliminating the cross-camera blip.
+- **Loading spinner now centered in the HA mobile app.** The spinner was anchored to the bottom-right corner instead of the center of the card in older iOS WebViews (the `inset` CSS shorthand is unsupported there). Replaced with explicit `top`/`right`/`bottom`/`left` properties — centered on all platforms.
+- **Tap-to-play and fullscreen overlay touch handling improved.** Tap reliability on mobile for both the tap-to-play overlay and the fullscreen toggle is improved; intermittent misses on touch-only devices are resolved.
+- **`bosch-camera-autoplay-fix.js` watchdog is now a no-op (deprecated).** The separate autoplay-watchdog resource is no longer needed — the card self-heals on its own. Existing installations have the resource auto-removed on next HA restart; no manual action is required.
+- **Internal:** intrusion-detection `distance` number entity maximum aligned to the API limit of 8 m (was uncapped). Test suite expanded with switch on/off mode coverage.
+
 ## [v13.3.0] - 2026-05-28
 
 Minor release — five fixes in the same live-camera debugging session that produced the matching MCP v1.6.0 and Python CLI v10.10.0 releases. All five were reproduced against the user's prod hardware (Eyes Außenkamera II "Terrasse" + Eyes Innenkamera II "Innenbereich" + Gen1 Outdoor + Gen1 360° Indoor) and verified by HA-integration reload + live re-test.

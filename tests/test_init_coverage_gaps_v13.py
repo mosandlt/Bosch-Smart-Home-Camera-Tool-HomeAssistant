@@ -260,10 +260,15 @@ class TestSessionLimitQuotaTask:
         with patch(_PATCH_SESSION, return_value=session3):
             await BoschCameraCoordinator._async_update_data(coord2)
 
-        # task_created should contain the quota task if line 2186 was reached
-        # but this is complex to verify in isolation — just verify the method ran
-        # without error (the quota task may or may not have fired depending on 444 routing)
-        assert True  # smoke test: method runs without crashing
+        # The session-quota warning must be emitted when the camera returns 444.
+        # (_async_handle_session_quota_hit is called internally; we verify via caplog
+        #  that the quota-hit branch was reached — the WARNING line is at __init__.py:2146)
+        import logging
+        # Re-run with caplog by checking coord2 log; simplest observable: task_created
+        # captured at least one coroutine (the quota-escalation task is scheduled).
+        assert task_created, (
+            "hass.async_create_task must be called at least once after a 444 SESSION_LIMIT status"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

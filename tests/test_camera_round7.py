@@ -422,8 +422,8 @@ class TestProxy401RetryClientError:
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result is not None, "ClientError on 401-retry must not raise"
-        # The renewal path may clear _live_connections or leave cached; just ensure no crash
-        assert True, "no exception raised from 401+ClientError retry path"
+        # The 401-retry path calls try_live_connection once to renew the session.
+        coord.try_live_connection.assert_awaited_once_with(CAM_ID)
 
 
 # ── 6. LOCAL outage snap fallback (lines 819-851) ────────────────────────────
