@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.3.0";
+const CARD_VERSION = "13.3.0.1";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
@@ -116,17 +116,6 @@ class BoschCameraCard extends HTMLElement {
     document.addEventListener("visibilitychange", this._visibilityHandler);
     this._pagehideHandler = () => this._stopLiveVideo();
     window.addEventListener("pagehide", this._pagehideHandler);
-    // Global user-gesture flag for Chrome autoplay policy: any pointer or
-    // key event after card mount counts as user interaction → unmute can
-    // proceed without the browser pausing the video element. Captured at
-    // window level + capture phase so we observe gestures even on first
-    // page paint (before Shadow DOM event listeners are bound).
-    if (!this._userGestureHandler) {
-      this._userGestureHandler = () => { this._userInteracted = true; };
-      window.addEventListener("pointerdown", this._userGestureHandler, { capture: true, once: true });
-      window.addEventListener("keydown", this._userGestureHandler, { capture: true, once: true });
-      window.addEventListener("touchstart", this._userGestureHandler, { capture: true, once: true, passive: true });
-    }
     window.addEventListener("bosch-card-theme-change", this._onThemeBroadcast);
     window.addEventListener("bosch-card-mode-change", this._onModeBroadcast);
     this._onFullscreenChange = () => this._updateFullscreenButtonState();
@@ -339,22 +328,11 @@ class BoschCameraCard extends HTMLElement {
     if (firstHass) this._maybeAutoPlay();
     this._update();
     if (firstHass) {
-      // Privacy-mode short-circuit: when the shutter is closed the camera
-      // cannot deliver a fresh frame — neither snap.jpg nor a live RTSP
-      // session — so showing "Aktualisiere…" produces a permanent overlay
-      // until the user toggles privacy off (bug 2026-05-27 Innenbereich).
-      // The privacy-placeholder ("Privat-Modus aktiv") in _update() is the
-      // correct UI for that state; skip both the overlay and the fresh-
-      // snapshot request when privacy is on.
-      const privacyEnt = this._entities.privacy && this._hass.states[this._entities.privacy];
-      const privacyOn = privacyEnt && privacyEnt.state === "on";
-      if (!privacyOn) {
-        this._awaitingFresh = true;
-        if (this._imageLoaded) {
-          this._setLoadingOverlay(true, "Aktualisiere…");
-        }
-        this._triggerFreshSnapshot();
+      this._awaitingFresh = true;
+      if (this._imageLoaded) {
+        this._setLoadingOverlay(true, "Aktualisiere…");
       }
+      this._triggerFreshSnapshot();
       this._pullFreshSwitchStates();
       setTimeout(() => this._maybeAutoPlay(), 800);
     }
@@ -511,15 +489,7 @@ class BoschCameraCard extends HTMLElement {
   }
   async _pullFreshSwitchStates() {
     if (!this._hass) return;
-    // Skip entities that aren't tracked in hass.states. Without this filter,
-    // a config that points the card at e.g. `switch.X_camera_light` when the
-    // integration only exposes `light.X_camera_light` (Gen2 LED-ring → light
-    // domain, not switch) hits the REST endpoint and gets HTTP 404 per cycle,
-    // spamming the browser console even though the catch swallows the throw.
-    const ids = [
-      this._entities.camera, this._entities.switch, this._entities.privacy,
-      this._entities.audio, this._entities.light,
-    ].filter(id => id && this._hass.states && id in this._hass.states);
+    const ids = [ this._entities.camera, this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(Boolean);
     let changed = false;
     for (const id of ids) {
       try {
@@ -957,14 +927,7 @@ class BoschCameraCard extends HTMLElement {
         this._connectSteps = null;
       }
     }
-    // Privacy short-circuit (see _setLoadingOverlay docstring): bypass any
-    // overlay show when shutter is closed OR within the post-privacy-off
-    // re-snapshot grace window — fresh-snapshot can never arrive in privacy,
-    // and during the grace window the user explicitly asked for no overlay.
-    const _privEnt = this._entities && this._entities.privacy && this._hass?.states?.[this._entities.privacy];
-    const _privacyOn = !!(_privEnt && _privEnt.state === "on");
-    const _suppress = !!(this._privacyOffSuppressUntil && Date.now() < this._privacyOffSuppressUntil);
-    if (isCache && this._awaitingFresh && !_privacyOn && !_suppress) {
+    if (isCache && this._awaitingFresh) {
       const overlay = this.shadowRoot.getElementById("loading-overlay");
       if (overlay) {
         overlay.classList.add("visible");
@@ -1002,26 +965,6 @@ class BoschCameraCard extends HTMLElement {
     this._setLoadingOverlay(false);
   }
   _setLoadingOverlay(visible, text = "Bild wird geladen…") {
-    // Privacy-mode guard: when the shutter is closed nothing can refresh —
-    // no snap.jpg, no live RTSP, no event snapshot. Showing an overlay
-    // ("Aktualisiere…", "Stream wird gestartet…", etc.) sticks until the
-    // user toggles privacy off, because the underlying request that would
-    // clear the overlay never gets a response. The privacy-placeholder
-    // ("Privat-Modus aktiv", visibility toggled in _update) is the correct
-    // UI for that state, so suppress all overlay shows while privacy is on.
-    // Bug 2026-05-27 Innenbereich.
-    if (visible && this._hass && this._entities && this._entities.privacy) {
-      const privacyEnt = this._hass.states[this._entities.privacy];
-      if (privacyEnt && privacyEnt.state === "on") {
-        return;
-      }
-    }
-    // Privacy-off suppression window (set in _update on on→off transition):
-    // the card schedules image-loads at 6/9 s post-off and we do NOT want an
-    // "Aktualisiere…" overlay during that re-snapshot grace. User 2026-05-27.
-    if (visible && this._privacyOffSuppressUntil && Date.now() < this._privacyOffSuppressUntil) {
-      return;
-    }
     const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
     if (!visible && streamStarting) return;
     if (visible && streamStarting && this._streamConnecting && text === "Bild wird geladen…") return;
@@ -1067,25 +1010,14 @@ class BoschCameraCard extends HTMLElement {
         img.classList.remove("hidden");
       }
       this._imageLoaded = true;
-      // Privacy short-circuit: cached image is fine, but the "Aktualisiere…"
-      // overlay would stick because no fresh snapshot can arrive while the
-      // shutter is closed. Skip the overlay AND don't flag awaitingFresh so
-      // the next load-handler tick doesn't re-show it via the cache path.
-      // Also honor the post-privacy-off suppress window — bypassing
-      // _setLoadingOverlay means we must duplicate its entry-guards here.
-      const _privEnt = this._entities && this._entities.privacy && this._hass?.states?.[this._entities.privacy];
-      const _privacyOn = !!(_privEnt && _privEnt.state === "on");
-      const _suppress = !!(this._privacyOffSuppressUntil && Date.now() < this._privacyOffSuppressUntil);
-      if (!_privacyOn && !_suppress) {
-        this._awaitingFresh = true;
-        const overlay = this.shadowRoot.getElementById("loading-overlay");
-        if (overlay) {
-          overlay.classList.add("visible");
-          overlay.classList.add("refreshing");
-        }
-        const loadText = this.shadowRoot.getElementById("loading-text");
-        if (loadText) loadText.textContent = "Aktualisiere…";
+      this._awaitingFresh = true;
+      const overlay = this.shadowRoot.getElementById("loading-overlay");
+      if (overlay) {
+        overlay.classList.add("visible");
+        overlay.classList.add("refreshing");
       }
+      const loadText = this.shadowRoot.getElementById("loading-text");
+      if (loadText) loadText.textContent = "Aktualisiere…";
     } catch (_) {}
   }
   _cacheImage(proxyUrl) {
@@ -1593,22 +1525,6 @@ class BoschCameraCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     const hass = this._hass;
     const ents = this._entities;
-    // Privacy on→off pre-pass: set the suppress-window IMMEDIATELY at the
-    // top of _update so any subsequent overlay-show within this same
-    // synchronous tick (stream-stopped at L1799, backend-waiting at L1820)
-    // is caught by the _setLoadingOverlay entry-guard. Previously the
-    // suppress window was set ~400 lines later (after most overlay-shows
-    // had already fired), making it useless for the very tick that needed
-    // it most — bug 2026-05-27 reported as "Privacy-off kommt noch nicht".
-    {
-      const _privOptPre = this._optimistic[ents.privacy];
-      const _privPreOn = _privOptPre !== undefined
-        ? _privOptPre === "on"
-        : ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on";
-      if (this._lastPrivacy === true && !_privPreOn) {
-        this._privacyOffSuppressUntil = Date.now() + 12000;
-      }
-    }
     if (this._remoteSkipWebRTC) {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
@@ -1697,35 +1613,6 @@ class BoschCameraCard extends HTMLElement {
     const streamLabel = this.shadowRoot.getElementById("stream-label");
     const btnStream = this.shadowRoot.getElementById("btn-stream");
     const btnStreamLbl = this.shadowRoot.getElementById("btn-stream-label");
-    // Self-heal stuck "connecting" state: when the card mounts while HA's
-    // stream is already active (e.g. tab navigation back to the dashboard,
-    // HA restart while a session was alive), `_startLiveVideo()` sets
-    // `_startingLiveVideo=true` and the `playing` event may have fired
-    // BEFORE the listener was wired — so `activateVideo()` never runs and
-    // the flag never gets cleared, leaving the badge stuck on "Verbinde"
-    // forever even though video frames are flowing (bug 2026-05-27,
-    // Innenbereich). If HA says streaming AND the <video> element is
-    // actually playing (not paused, currentTime advancing), force the
-    // "streaming" badge and proactively clear the stale flag so downstream
-    // logic (audio unmute gate, overlay teardown, refresh-timer state)
-    // observes the correct lifecycle.
-    const videoEl = this.shadowRoot.getElementById("cam-video");
-    const videoPlaying = !!(videoEl && !videoEl.paused && videoEl.currentTime > 0 && videoEl.readyState >= 2);
-    if (this._startingLiveVideo && isStreaming && videoPlaying) {
-      this._startingLiveVideo = false;
-      this._liveVideoActive = true;
-      // The "playing" event listener that normally calls clearOverlay()
-      // was attached AFTER the event already fired (that's the race that
-      // produced the stuck-badge bug in the first place), so the loading
-      // overlay would otherwise persist until the 120 s safety timer.
-      // Clear it directly here — video is confirmed playing.
-      this._setLoadingOverlay(false);
-      const _ov = this.shadowRoot.getElementById("loading-overlay");
-      if (_ov) {
-        _ov.classList.remove("visible");
-        _ov.classList.remove("refreshing");
-      }
-    }
     const streamBadgeState = isOffline ? "offline" : this._startingLiveVideo ? "connecting" : isStreaming ? "streaming" : "idle";
     if (badge) badge.className = "stream-badge " + streamBadgeState;
     if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
@@ -1811,17 +1698,9 @@ class BoschCameraCard extends HTMLElement {
     const shouldVideo = isStreaming;
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
-      // Skip the "Aktualisiere Bild…" overlay + trigger_snapshot service
-      // when the camera is offline — the refresh cannot succeed (proxy
-      // returns 404 / connect-error), so the overlay stacks on top of the
-      // OFFLINE state for the full retry duration (~15 s of HTTP retries
-      // before _onImageError dismisses it). The offline badge + grey-out
-      // is already the correct UI for this state.
-      if (!this._isOffline) {
-        this._setLoadingOverlay(true, "Aktualisiere Bild…");
-        if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot) this._callService("bosch_shc_camera", "trigger_snapshot", {});
-        this._scheduleImageLoad(3500);
-      }
+      this._setLoadingOverlay(true, "Aktualisiere Bild…");
+      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot) this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
     this._lastStreaming = isStreaming;
@@ -2157,19 +2036,8 @@ class BoschCameraCard extends HTMLElement {
       const video = this.shadowRoot.getElementById("cam-video");
       const audioOn = this._getEffectiveState(ents.audio) === "on";
       if (video) {
-        const wantMuted = !audioOn || this._androidAudioMuted;
-        // Only mutate video.muted when the desired state DIFFERS from the
-        // current state. Chrome's autoplay policy treats every assignment
-        // of `video.muted = false` as an unmute attempt: when no user
-        // gesture is in scope it rejects + pauses the element, producing
-        // "Unmuting failed and the element was paused" + visible stutter
-        // every hass-state-update tick (bug 2026-05-27, ~11×/refresh).
-        // Additionally gate the unmute on a user-gesture flag so the first
-        // page-load (with audio=on by config) doesn't auto-pause.
-        if (wantMuted && !video.muted) {
+        if (!audioOn || this._androidAudioMuted) {
           video.muted = true;
-        } else if (!wantMuted && video.muted && !video.paused && this._userInteracted) {
-          video.muted = false;
         }
       }
     }
@@ -2177,31 +2045,8 @@ class BoschCameraCard extends HTMLElement {
     const privacyOn = privacyOptimistic !== undefined ? privacyOptimistic === "on" : ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on";
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
-    if (privacyOn) {
-      // Force-clear the overlay DOM directly: _setLoadingOverlay returns
-      // early when stream-starting flags are set, so a "visible=false" call
-      // alone may not actually remove the classes. Bypass that guard here
-      // because privacy ON unambiguously means "no overlay should show".
-      this._setLoadingOverlay(false);
-      const _ov = this.shadowRoot.getElementById("loading-overlay");
-      if (_ov) {
-        _ov.classList.remove("visible");
-        _ov.classList.remove("refreshing");
-      }
-      this._awaitingFresh = false;
-      this._loadingOverlay = false;
-      if (this._loadingTimeout) {
-        clearTimeout(this._loadingTimeout);
-        this._loadingTimeout = null;
-      }
-    }
+    if (privacyOn) this._setLoadingOverlay(false);
     if (this._lastPrivacy === true && !privacyOn) {
-      // Privacy off → fresh snapshot incoming. Suppress overlays for the
-      // re-snapshot window (matches the scheduled 6/9s image-loads + grace)
-      // so the user does not see "Aktualisiere…" while we re-grab a frame
-      // immediately after the shutter opens — the placeholder transition
-      // is itself sufficient feedback. (User request 2026-05-27.)
-      this._privacyOffSuppressUntil = Date.now() + 12000;
       this._scheduleImageLoad(6e3);
       this._scheduleImageLoad(9e3);
     }
@@ -2720,6 +2565,13 @@ class BoschCameraCard extends HTMLElement {
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
     this._androidAudioMuted = false;
+    if (this._liveVideoActive) {
+      const video = this.shadowRoot.getElementById("cam-video");
+      if (video) {
+        video.muted = !turningOn;
+        if (turningOn && video.paused) video.play().catch(() => {});
+      }
+    }
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", {
       entity_id: entityId

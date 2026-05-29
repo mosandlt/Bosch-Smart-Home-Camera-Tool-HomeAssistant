@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.3.0";
+const CARD_VERSION = "13.3.0.1";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -4770,10 +4770,15 @@ class BoschCameraCard extends HTMLElement {
       const video   = this.shadowRoot.getElementById("cam-video");
       const audioOn = this._getEffectiveState(ents.audio) === "on";
       if (video) {
+        // Only ever MUTE here. Unmuting requires a genuine user gesture
+        // (Chrome autoplay policy) — doing it in this programmatic, hass-driven
+        // update makes Chrome pause the element ("Unmuting failed and the
+        // element was paused instead"). The unmute lives in _toggleAudio(), the
+        // Ton-tap handler, which runs inside a real gesture. "!video.paused" is
+        // NOT a sufficient gate — a muted autoplaying video still needs a
+        // gesture to unmute. See docs/card-architecture.md.
         if (!audioOn || this._androidAudioMuted) {
           video.muted = true;
-        } else if (!video.paused) {
-          video.muted = false;          // unmute only if already playing
         }
       }
     }
@@ -5378,10 +5383,20 @@ class BoschCameraCard extends HTMLElement {
     const state = this._hass.states[entityId]?.state;
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
-    // First explicit tap on Android clears the startup mute override so the
-    // entity state takes over from here on (video.muted syncs normally).
+    // First explicit tap on Android clears the startup mute override.
     this._androidAudioMuted = false;
-    // Optimistic update → calls _update() which syncs video.muted state.
+    // Apply mute/unmute to the live <video> HERE — synchronously, inside the
+    // click's user-gesture context. This is the ONLY place Chrome permits
+    // video.muted=false without pausing the element. _update() must not unmute
+    // (it runs on every hass push, with no gesture → "Unmuting failed").
+    if (this._liveVideoActive) {
+      const video = this.shadowRoot.getElementById("cam-video");
+      if (video) {
+        video.muted = !turningOn;
+        if (turningOn && video.paused) video.play().catch(() => {});
+      }
+    }
+    // Optimistic update drives the Ton icon; _update() only ever re-mutes.
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     // Persist to HA (affects rtsps URL for next stream open)
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });

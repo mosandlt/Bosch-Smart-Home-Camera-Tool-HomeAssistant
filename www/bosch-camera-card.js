@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.3.0";
+const CARD_VERSION = "13.3.0.1";
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
@@ -489,17 +489,7 @@ class BoschCameraCard extends HTMLElement {
   }
   async _pullFreshSwitchStates() {
     if (!this._hass) return;
-    // mosandlt 2026-05-28: filter by existence in hass.states too — `filter(Boolean)`
-    // alone keeps fabricated entity_ids like `switch.bosch_kamera_camera_light`
-    // that the card constructs by convention but that don't exist for Indoor
-    // models (Indoor II has no camera_light). Without this guard each refresh
-    // emits an HTTP 404 in the console — first surfaced 2026-05-28 against the
-    // user's Innenbereich + Kamera cards. The v13.2.5 fix covered a different
-    // path (live-snapshot refresh); this is the missing twin.
-    const hassStates = this._hass.states || {};
-    const ids = [ this._entities.camera, this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ]
-      .filter(Boolean)
-      .filter(id => id in hassStates);
+    const ids = [ this._entities.camera, this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(Boolean);
     let changed = false;
     for (const id of ids) {
       try {
@@ -2048,8 +2038,6 @@ class BoschCameraCard extends HTMLElement {
       if (video) {
         if (!audioOn || this._androidAudioMuted) {
           video.muted = true;
-        } else if (!video.paused) {
-          video.muted = false;
         }
       }
     }
@@ -2577,6 +2565,13 @@ class BoschCameraCard extends HTMLElement {
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
     this._androidAudioMuted = false;
+    if (this._liveVideoActive) {
+      const video = this.shadowRoot.getElementById("cam-video");
+      if (video) {
+        video.muted = !turningOn;
+        if (turningOn && video.paused) video.play().catch(() => {});
+      }
+    }
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", {
       entity_id: entityId
@@ -3127,19 +3122,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       }
     }
     if (needsReorder) {
-      // mosandlt 2026-05-28: do NOT wipe the grid via innerHTML="" when cams are
-      // present — that tears every <video> child out of the DOM, killing the
-      // live stream playback on every sig-change (e.g. one camera transitions
-      // streaming→idle). Existing cells are re-appended below; appendChild on
-      // an in-document node *moves* it without tearing down its video element.
-      // Only wipe when transitioning to the empty/maintenance placeholder.
-      if (cams.length === 0) {
-        this._grid.innerHTML = "";
-      } else {
-        // Clear any empty/maintenance placeholder so it doesn't linger above the cells.
-        const placeholder = this._grid.querySelector(".bco-empty");
-        if (placeholder) placeholder.remove();
-      }
+      this._grid.innerHTML = "";
       if (cams.length === 0) {
         const empty = document.createElement("div");
         const states = this._hass?.states || {};
@@ -3187,27 +3170,9 @@ class BoschCameraOverviewCard extends HTMLElement {
         }
         this._grid.appendChild(empty);
       } else {
-        // mosandlt 2026-05-28: CRITICAL FIX. Previously every _update() loop ran
-        // `this._grid.appendChild(cell)` for every cam — even for cells already
-        // children of the grid. Per the WC spec appendChild on an in-document
-        // node *moves* it, which fires `disconnectedCallback` then `connectedCallback`
-        // on the inner `bosch-camera-card`. Its disconnectedCallback at line 454
-        // calls `_stopLiveVideo()` → closes the WebRTC peer connection → tears
-        // down all 3 other cameras' streams when ANY camera changes tier.
-        // Live-test against Terrasse stop showed all other cams' currentTime
-        // reset from 60-80s to 14-15s, confirming the tear-down/rebuild cycle.
-        //
-        // Fix: append cells ONLY when newly created (initial mount). For
-        // existing cells, only update `style.order` — CSS Grid reorders items
-        // visually without any DOM mutation, so the inner cards never receive
-        // disconnect/connect and their WebRTC sessions stay alive across
-        // stream-state changes on sibling cameras.
-        for (let i = 0; i < cams.length; i++) {
-          const c = cams[i];
+        for (const c of cams) {
           let cell = this._cards.get(c.entity_id);
-          let isNew = false;
           if (!cell) {
-            isNew = true;
             cell = document.createElement("div");
             cell.className = "bco-cell";
             const card = document.createElement("bosch-camera-card");
@@ -3229,10 +3194,7 @@ class BoschCameraOverviewCard extends HTMLElement {
             this._cards.set(c.entity_id, cell);
           }
           cell.dataset.tier = String(c.tier);
-          cell.style.order = String(i);  // CSS-grid reorder — no DOM mutation
-          if (isNew) {
-            this._grid.appendChild(cell);  // initial mount only
-          }
+          this._grid.appendChild(cell);
         }
       }
     }
