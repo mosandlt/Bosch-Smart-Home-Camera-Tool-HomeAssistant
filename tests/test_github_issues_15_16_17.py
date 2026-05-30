@@ -259,6 +259,51 @@ class TestDebugLineRemoved:
         )
 
 
+class TestThemeModeSwitcherReflectsConfig:
+    """issue #15 (2026-05-30): with `theme: ios` set in YAML (and no in-card
+    localStorage override) the in-card switcher wrongly showed "Auto" selected.
+    The switcher chips must mirror _resolveTheme/_resolveMode precedence
+    (localStorage → config → auto), i.e. fall back to the configured value."""
+
+    def test_theme_switcher_falls_back_to_config(self, card_src: str) -> None:
+        assert "const cfgTheme = this._config?.theme;" in card_src, (
+            "theme switcher must consider the configured theme, not only localStorage"
+        )
+        assert 'cfgTheme === "ios"' in card_src
+
+    def test_mode_switcher_falls_back_to_config(self, card_src: str) -> None:
+        assert "const cfgMode = this._config?.mode;" in card_src, (
+            "mode switcher must consider the configured mode, not only localStorage"
+        )
+        assert 'cfgMode === "day"' in card_src
+
+
+class TestOsChecks:
+    """Cross-OS robustness (2026-05-30, issue #15 reporter on Edge/Win11; the
+    card is developed/tested on macOS only). The card stamps an os-<name> host
+    class for OS-targeted CSS and uses a cross-platform system-font fallback."""
+
+    @pytest.mark.parametrize("os_name", ["windows", "macos", "ios", "android", "linux"])
+    def test_os_host_classes_present(self, card_src: str, os_name: str) -> None:
+        assert f'"os-" + c' in card_src, "OS host class must be applied"
+        assert f'"{os_name}"' in card_src, f"OS detection must cover {os_name}"
+
+    def test_os_detection_uses_ua_not_deprecated_platform(self, card_src: str) -> None:
+        assert "_applyOsClass" in card_src
+        idx = card_src.find("_applyOsClass() {")
+        body = card_src[idx : idx + 800]
+        assert "navigator.userAgent" in body
+        assert "navigator.platform" not in body, (
+            "navigator.platform is deprecated — use the UA string"
+        )
+
+    def test_font_stack_has_cross_platform_fallback(self, card_src: str) -> None:
+        # system-ui + Segoe UI cover Windows/Linux where -apple-system is ignored.
+        assert "system-ui" in card_src and '"Segoe UI"' in card_src, (
+            "font stack must fall back to system-ui / Segoe UI for non-Apple OSes"
+        )
+
+
 # ── shared: src and bundled mirror stay in sync ────────────────────────────
 
 

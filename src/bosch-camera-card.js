@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.3.3";
+const CARD_VERSION = "13.4.0";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -442,6 +442,11 @@ class BoschCameraCard extends HTMLElement {
     // Element-hiding flags (issue #15): :host(.no-title)/:host(.no-last-event).
     this.classList.toggle("no-title", !this._config.show_title);
     this.classList.toggle("no-last-event", !this._config.show_last_event);
+    // OS host class (:host(.os-windows) etc.) for OS-targeted CSS. Development
+    // happens on macOS only, so this gives a hook to correct platform-specific
+    // rendering (Segoe-UI metrics, ClearType weight, scrollbar width) reported
+    // from Windows/Linux without guessing. 2026-05-30 (issue #15, Edge/Win11).
+    this._applyOsClass();
     // Resolve effective theme: localStorage override > config > UA auto-detect.
     this._applyTheme(this._resolveTheme());
     // Resolve effective day/night mode the same way.
@@ -511,6 +516,25 @@ class BoschCameraCard extends HTMLElement {
     window.dispatchEvent(new CustomEvent("bosch-card-theme-change", { detail: { theme } }));
   }
 
+  // Detect the OS and stamp a `os-<name>` class on the host so CSS can target
+  // platform-specific rendering quirks. UA-string based (works in every browser
+  // incl. the HA Companion WKWebView/Android-WebView, unlike navigator.userAgentData
+  // which is Chromium-only and async). navigator.platform is deprecated. iOS is
+  // detected incl. iPadOS (reports as Macintosh + touch). 2026-05-30.
+  _applyOsClass() {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    let os = "other";
+    if (/Windows|Win32|Win64/i.test(ua)) os = "windows";
+    else if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && touch)) os = "ios";
+    else if (/Macintosh|Mac OS X/i.test(ua)) os = "macos";
+    else if (/Android/i.test(ua)) os = "android";
+    else if (/Linux|X11|CrOS/i.test(ua)) os = "linux";
+    for (const c of ["windows", "macos", "ios", "android", "linux", "other"]) {
+      this.classList.toggle("os-" + c, c === os);
+    }
+  }
+
   _onThemeBroadcast(_ev) {
     // Bound in constructor (see this._onThemeBroadcast = ...) so the same
     // reference is used for addEventListener + removeEventListener.
@@ -522,7 +546,15 @@ class BoschCameraCard extends HTMLElement {
     if (!sw) return;
     let stored = null;
     try { stored = window.localStorage?.getItem("bosch-card-theme"); } catch { /* ignore */ }
-    const selected = stored === "ios" || stored === "android" ? stored : "auto";
+    // Highlight the chip that matches the EFFECTIVE choice, mirroring
+    // _resolveTheme's precedence: localStorage override → YAML config → "auto".
+    // Previously this only looked at localStorage, so a card configured with
+    // `theme: ios` (and no in-card override) wrongly showed "Auto" selected
+    // even though it rendered iOS. (issue #15, 2026-05-30)
+    const cfgTheme = this._config?.theme;
+    const selected = (stored === "ios" || stored === "android") ? stored
+                   : (cfgTheme === "ios" || cfgTheme === "android") ? cfgTheme
+                   : "auto";
     sw.querySelectorAll("[data-theme]").forEach((b) => {
       b.classList.toggle("on", b.getAttribute("data-theme") === selected);
       b.setAttribute("aria-pressed", b.getAttribute("data-theme") === selected ? "true" : "false");
@@ -578,7 +610,13 @@ class BoschCameraCard extends HTMLElement {
     if (!sw) return;
     let stored = null;
     try { stored = window.localStorage?.getItem("bosch-card-mode"); } catch { /* ignore */ }
-    const selected = stored === "day" || stored === "night" ? stored : "auto";
+    // Mirror _resolveMode precedence: localStorage override → YAML config →
+    // "auto", so a card configured with `mode: day|night` shows that chip
+    // selected instead of always "Auto". (issue #15, 2026-05-30)
+    const cfgMode = this._config?.mode;
+    const selected = (stored === "day" || stored === "night") ? stored
+                   : (cfgMode === "day" || cfgMode === "night") ? cfgMode
+                   : "auto";
     sw.querySelectorAll("[data-mode]").forEach((b) => {
       b.classList.toggle("on", b.getAttribute("data-mode") === selected);
       b.setAttribute("aria-pressed", b.getAttribute("data-mode") === selected ? "true" : "false");
@@ -970,7 +1008,7 @@ class BoschCameraCard extends HTMLElement {
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; font-family: var(--primary-font-family, Roboto, sans-serif); }
+        :host { display: block; font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif); }
         ha-card {
           overflow: hidden;
           border-radius: var(--ha-card-border-radius, 12px);
@@ -1803,7 +1841,7 @@ class BoschCameraCard extends HTMLElement {
         }
         :host(.apple-style.theme-android) .ap-title-pill {
           border-radius: 8px;                   /* M3 chip shape */
-          font-family: var(--primary-font-family, Roboto, sans-serif);
+          font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
           font-weight: 500;
         }
         :host(.apple-style.theme-android) .ap-title-pill .ap-title-text {
@@ -1811,7 +1849,7 @@ class BoschCameraCard extends HTMLElement {
         }
         :host(.apple-style.theme-android) .ap-badge {
           border-radius: 8px;
-          font-family: var(--primary-font-family, Roboto, sans-serif);
+          font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
           letter-spacing: 0;
           font-weight: 500;
         }
@@ -4349,13 +4387,49 @@ class BoschCameraCard extends HTMLElement {
     const btnStream    = this.shadowRoot.getElementById("btn-stream");
     const btnStreamLbl = this.shadowRoot.getElementById("btn-stream-label");
 
-    // "connecting" while HLS is negotiating (startingLiveVideo), "streaming" once live,
-    // "idle" when off. Badge label shows uptime counter once streaming (updated per frame).
+    // Shared stream lifecycle — single source of truth for ALL browser
+    // sessions (2026-05-30). The backend coordinator publishes the live
+    // phase on the stream_status sensor (idle / connecting / warming_up /
+    // streaming / streaming_remote), pushed by HA to every client. We derive
+    // the badge / button / overlay from this shared value (plus the shared
+    // switch for on/off intent) instead of the per-session local
+    // `_startingLiveVideo` flag — so a second browser opened mid-connect shows
+    // the SAME "connecting / waking up" state as the first, never a false
+    // "idle". The false-idle was the root of the cross-session bug: it made the
+    // user tap again, which re-fired turn_on and tore down the other session.
+    const switchOn = hass.states[ents.switch]?.state === "on";
+    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    const sharedConnecting = switchOn
+      && (backendStreamStatus === "connecting" || backendStreamStatus === "warming_up");
+
+    // Badge = video reality, not switch intent:
+    //   • "Live" (green) ONLY when THIS session's video is actually playing
+    //     (_liveVideoActive). Never show Live just because the switch is on.
+    //   • "connecting" (orange "Verbinde") whenever the stream is wanted/being
+    //     established but no live frame yet — switch on, or local HLS negotiating,
+    //     or the shared backend warming_up/connecting.
+    //   • "idle" (hidden) when off.
+    // `_liveVideoActive` wins so the badge flips to Live the moment the video
+    // plays even if the backend stream_status sensor still lags; and there is no
+    // premature "Live" from switch-on-without-video. 2026-05-30.
     const streamBadgeState = isOffline ? "offline"
-                           : (this._startingLiveVideo ? "connecting"
-                           : (isStreaming ? "streaming" : "idle"));
+                           : (this._liveVideoActive ? "streaming"
+                           : ((isStreaming || this._startingLiveVideo || sharedConnecting) ? "connecting"
+                           : "idle"));
     if (badge)        badge.className = "stream-badge " + streamBadgeState;
     if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
+
+    // Video is playing → the connecting phase is over. Force-tear-down any
+    // lingering connecting overlay + keepalive timers that a lagging backend
+    // stream_status (it can trail the first frame by seconds) would otherwise
+    // keep re-asserting — the "Kamera wird aufgeweckt…" overlay was sticking
+    // while the stream already ran in the background. 2026-05-30.
+    if (this._liveVideoActive && (this._streamConnecting || this._waitingForStream)) {
+      this._streamConnecting = false;
+      this._waitingForStream = false;
+      if (this._connectSteps) { this._connectSteps.forEach((t) => clearTimeout(t)); this._connectSteps = null; }
+      this._setLoadingOverlay(false);
+    }
 
     // Apple-style status badge (top-right glass pill) + stream pill-button state.
     // Privacy state is intentionally NOT shown in the badge — it lives in the
@@ -4476,21 +4550,17 @@ class BoschCameraCard extends HTMLElement {
     // to avoid "does not support play stream" errors from premature WS calls.
     // Show loading overlay during the wait (outdoor pre-warm takes ~35s).
     // Also re-triggers if card got stuck (e.g. WS failed during page load).
-    // "Cold open": if stream_status is warming_up/connecting (read from the
-    // dedicated sensor — persistent across sessions, no toggle-click needed).
-    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    // "Cold open": stream_status is warming_up/connecting (read above from the
+    // shared sensor — persistent across sessions, no toggle-click needed).
     // `backendWaiting` reflects warming_up/connecting on the backend, but
     // those states can fire WITHOUT user intent — the snapshot-refresh path
     // opens a live session, which HA's stream component then prepares,
     // which sets stream_status=connecting. The card must NOT enter the
     // visual connecting/loading state for that "phantom" backend warmup:
     // it would show a CONNECTING badge + 25-35 s loading overlay on every
-    // dashboard open even though the user never asked for video. Gate
-    // backendWaiting on user intent — only meaningful if the switch is on.
-    const userWantsVideo = (hass.states[ents.switch]?.state === "on");
-    const backendWaiting =
-      userWantsVideo &&
-      (backendStreamStatus === "warming_up" || backendStreamStatus === "connecting");
+    // dashboard open even though the user never asked for video. Gated on the
+    // switch (switchOn) — same condition as `sharedConnecting` above.
+    const backendWaiting = sharedConnecting;
     // Auto-play gate transitions: track switch.state changes on every
     // _update() pass. OFF→ON in overlay-required modes shows the gate;
     // ON→OFF hides it. Runs synchronously here so the early-return below
@@ -4505,9 +4575,6 @@ class BoschCameraCard extends HTMLElement {
     }
     if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
       this._waitingForStream = true;
-      const overlayText = backendStreamStatus === "warming_up" ? "Kamera wird aufgeweckt…"
-                        : backendStreamStatus === "connecting"  ? "Verbindung wird aufgebaut…"
-                        : "Stream wird gestartet…";
       // snapshot_during_warmup: fetch current snapshot so the last known image
       // shows as background under the semi-transparent overlay instead of black.
       // Guard with _awaitingFresh to avoid a double fetch when firstHass already
@@ -4515,7 +4582,8 @@ class BoschCameraCard extends HTMLElement {
       if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
         this._triggerFreshSnapshot();
       }
-      this._setLoadingOverlay(true, overlayText);
+      // Overlay text from the SHARED stream_status (synced across sessions).
+      this._setLoadingOverlay(true, this._streamPhaseText());
       this._waitForStreamReady();
     }
     if (!shouldVideo && !backendWaiting) {
@@ -5290,6 +5358,20 @@ class BoschCameraCard extends HTMLElement {
     return this._hass?.states[entityId]?.state;
   }
 
+  // Connecting-overlay text derived PURELY from the shared backend stream_status
+  // (sensor, pushed to every client) — so every browser session shows the SAME
+  // message at the same time during connect/warm-up, instead of each running its
+  // own local time-based progression (which desynced the text). 2026-05-30.
+  _streamPhaseText() {
+    const st = this._hass?.states[this._entities.streamStatus]?.state
+            || this._hass?.states[this._entities.camera]?.attributes?.stream_status
+            || "";
+    if (st === "warming_up") return "Kamera wird aufgeweckt…";
+    if (st === "connecting")  return "Verbindung wird aufgebaut…";
+    if (st === "streaming" || st === "streaming_remote") return "HLS wird geladen…";
+    return "Stream wird gestartet…";
+  }
+
   _waitForStreamReady(attempt = 0) {
     // Poll until camera entity reports "streaming" (stream_source is set).
     // Backend needs 25-35s for PUT /connection + TLS proxy + pre-warm
@@ -5300,12 +5382,11 @@ class BoschCameraCard extends HTMLElement {
     const cam = this._hass.states[this._entities.camera];
     const camReady = cam?.state === "streaming";
 
-    // Update loading overlay with progress text
-    if (attempt > 0 && attempt % 10 === 0) {
-      const sec = attempt;
-      if (sec < 20) this._setLoadingOverlay(true, "Encoder wird aufgewärmt…");
-      else if (sec < 40) this._setLoadingOverlay(true, "Stream wird vorbereitet…");
-      else this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
+    // Re-assert the loading overlay every 5s to keep the spinner alive — text
+    // comes from the SHARED stream_status so it stays in sync across sessions
+    // (no local time-based progression). 2026-05-30.
+    if (attempt > 0 && attempt % 5 === 0) {
+      this._setLoadingOverlay(true, this._streamPhaseText());
     }
 
     if (camReady) {
@@ -5464,21 +5545,17 @@ class BoschCameraCard extends HTMLElement {
       // Timeline: PUT /connection ~2s, TLS proxy ~0.5s, pre-warm ~3s,
       // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s, first frame ~25-35s total.
       this._streamConnecting = true;
-      this._setLoadingOverlay(true, "Verbindung wird aufgebaut…");
-      // Progressive status messages — each _setLoadingOverlay resets the 15s
-      // safety timeout, so messages must be spaced <15s apart to keep the
-      // spinner alive. LOCAL streams can take up to 60s on first connect.
-      this._connectSteps = [
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera wird aufgeweckt…"); }, 3000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Stream wird vorbereitet…"); }, 7000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "HLS wird gestartet…"); }, 12000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Warte auf erstes Bild…"); }, 20000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Gleich geschafft…"); }, 28000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Kamera braucht etwas…"); }, 40000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Verbindung wird aufgebaut…"); }, 52000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Fast fertig…"); }, 65000),
-        setTimeout(() => { if (this._streamConnecting) this._setLoadingOverlay(true, "Noch einen Moment…"); }, 78000),
-      ];
+      this._setLoadingOverlay(true, this._streamPhaseText());
+      // Keepalive ticks — each _setLoadingOverlay resets the 15s safety timeout,
+      // so ticks must be <15s apart to keep the spinner alive (LOCAL streams can
+      // take up to 60s on first connect). Text comes from the SHARED stream_status
+      // (_streamPhaseText) so the clicking browser shows the SAME message as every
+      // other session, instead of its own local progression. 2026-05-30.
+      this._connectSteps = [3000, 7000, 12000, 20000, 28000, 40000, 52000, 65000, 78000].map(
+        (ms) => setTimeout(() => {
+          if (this._streamConnecting) this._setLoadingOverlay(true, this._streamPhaseText());
+        }, ms),
+      );
     }
     // Stream toggle: keep instant optimistic flip (don't use "pending" state —
     // would confuse _isStreaming() and break the snapshot/video-polling decision).
