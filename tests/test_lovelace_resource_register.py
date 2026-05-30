@@ -18,13 +18,13 @@ Pins:
   - `lovelace` not in hass.data (frontend disabled / early boot) → bail
     silently with a warning, no AttributeError.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 MODULE = "custom_components.bosch_shc_camera"
 
@@ -60,6 +60,7 @@ class TestRegisterLovelaceResources:
         Lovelace storage. Must be deleted on every setup to avoid double
         customElements.define."""
         from custom_components.bosch_shc_camera import async_setup
+
         items = [
             {"id": "leg1", "url": "/local/bosch-camera-card.js"},
             {"id": "leg2", "url": "/local/bosch-camera-autoplay-fix.js"},
@@ -80,9 +81,16 @@ class TestRegisterLovelaceResources:
         on every HA restart."""
         from custom_components.bosch_shc_camera import async_setup
         from custom_components.bosch_shc_camera.const import CARD_VERSION
+
         items = [
-            {"id": "c1", "url": f"/bosch_shc_camera/bosch-camera-card.js?v={CARD_VERSION}"},
-            {"id": "c2", "url": f"/bosch_shc_camera/bosch-camera-autoplay-fix.js?v={CARD_VERSION}"},
+            {
+                "id": "c1",
+                "url": f"/bosch_shc_camera/bosch-camera-card.js?v={CARD_VERSION}",
+            },
+            {
+                "id": "c2",
+                "url": f"/bosch_shc_camera/bosch-camera-autoplay-fix.js?v={CARD_VERSION}",
+            },
         ]
         resources = _make_resources(items)
         hass = _make_hass(resources)
@@ -92,7 +100,7 @@ class TestRegisterLovelaceResources:
         resources.async_update_item.assert_not_awaited()
         resources.async_create_item.assert_not_awaited()
         deleted = [c.args[0] for c in resources.async_delete_item.call_args_list]
-        assert "c2" in deleted      # autoplay-fix removed
+        assert "c2" in deleted  # autoplay-fix removed
         assert "c1" not in deleted  # card kept
 
     @pytest.mark.asyncio
@@ -100,9 +108,13 @@ class TestRegisterLovelaceResources:
         """Resource with old `?v=...` → `async_update_item` (not create)."""
         from custom_components.bosch_shc_camera import async_setup
         from custom_components.bosch_shc_camera.const import CARD_VERSION
+
         items = [
             {"id": "s1", "url": "/bosch_shc_camera/bosch-camera-card.js?v=0.0.0-old"},
-            {"id": "s2", "url": "/bosch_shc_camera/bosch-camera-autoplay-fix.js?v=0.0.0-old"},
+            {
+                "id": "s2",
+                "url": "/bosch_shc_camera/bosch-camera-autoplay-fix.js?v=0.0.0-old",
+            },
         ]
         resources = _make_resources(items)
         hass = _make_hass(resources)
@@ -126,6 +138,7 @@ class TestRegisterLovelaceResources:
         v13.3.0 — the watchdog is a no-op, the card self-heals)."""
         from custom_components.bosch_shc_camera import async_setup
         from custom_components.bosch_shc_camera.const import CARD_VERSION
+
         resources = _make_resources([])
         hass = _make_hass(resources)
         await async_setup(hass, {})
@@ -143,15 +156,22 @@ class TestRegisterLovelaceResources:
         re-created. The static path still serves the no-op stub (no 404)."""
         from custom_components.bosch_shc_camera import async_setup
         from custom_components.bosch_shc_camera.const import CARD_VERSION
+
         items = [
-            {"id": "card", "url": f"/bosch_shc_camera/bosch-camera-card.js?v={CARD_VERSION}"},
-            {"id": "wd", "url": f"/bosch_shc_camera/bosch-camera-autoplay-fix.js?v={CARD_VERSION}"},
+            {
+                "id": "card",
+                "url": f"/bosch_shc_camera/bosch-camera-card.js?v={CARD_VERSION}",
+            },
+            {
+                "id": "wd",
+                "url": f"/bosch_shc_camera/bosch-camera-autoplay-fix.js?v={CARD_VERSION}",
+            },
         ]
         resources = _make_resources(items)
         hass = _make_hass(resources)
         await async_setup(hass, {})
         deleted = [c.args[0] for c in resources.async_delete_item.call_args_list]
-        assert "wd" in deleted       # autoplay-fix removed
+        assert "wd" in deleted  # autoplay-fix removed
         assert "card" not in deleted  # card kept
         # autoplay-fix never (re-)created
         for call in resources.async_create_item.await_args_list:
@@ -162,6 +182,7 @@ class TestRegisterLovelaceResources:
         """`hass.data['lovelace']` absent (e.g. frontend not loaded) → log
         warning and return; no AttributeError."""
         from custom_components.bosch_shc_camera import async_setup
+
         hass = _make_hass(resources=None)
         result = await async_setup(hass, {})
         assert result is True  # setup must still succeed
@@ -171,6 +192,7 @@ class TestRegisterLovelaceResources:
         """Cold boot: `hass.is_running` False → registration deferred via
         `bus.async_listen_once`; the resources store is NOT touched yet."""
         from custom_components.bosch_shc_camera import async_setup
+
         resources = _make_resources([])
         hass = _make_hass(resources)
         hass.is_running = False

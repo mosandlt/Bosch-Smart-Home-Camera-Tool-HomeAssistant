@@ -1,0 +1,17 @@
+{
+  "//": "Static cross-OS/browser CSS-compat gate for the Lovelace card. CSS is extracted from the JS template strings (scripts/extract-card-css.mjs) and checked against the package.json browserslist. allow.features lists the few features we knowingly use that degrade gracefully — keep this list tight so any genuinely-unsupported CSS a future change introduces fails CI.",
+  "plugins": ["stylelint-browser-compat"],
+  "rules": {
+    "plugin/browser-compat": [true, {
+      "allow": {
+        "partialImplementation": true,
+        "prefix": true,
+        "features": [
+          "selectors.fullscreen",
+          "properties.-webkit-tap-highlight-color",
+          "properties.accent-color"
+        ]
+      }
+    }]
+  }
+}

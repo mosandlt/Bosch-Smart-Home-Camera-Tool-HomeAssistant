@@ -31,6 +31,7 @@ translation files. Prevents both regressions:
 - An over-eager future "fix" that re-introduces ``'{camera}'`` → Hassfest
   fails CI.
 """
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 
 _INTEGRATION = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 _FILES = [
@@ -108,7 +108,14 @@ def test_pattern_descriptions_still_mention_each_variable_name_in_prose() -> Non
     """
     expected_in_folder = ["camera", "year", "month", "day", "type"]
     expected_in_file = [
-        "camera", "date", "time", "type", "id", "year", "month", "day",
+        "camera",
+        "date",
+        "time",
+        "type",
+        "id",
+        "year",
+        "month",
+        "day",
     ]
 
     for path in _FILES:

@@ -19,13 +19,12 @@ import logging
 import re
 import select as _select
 import socket
-import time
 import ssl
 import threading
+import time
+from collections.abc import Callable
 
 from .const import TIMEOUT_TLS_PROXY_CONNECT, TIMEOUT_TLS_PROXY_RTSP_READ
-from typing import Callable
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,11 +81,13 @@ def start_tls_proxy(
             except OSError:
                 break
             try:
-                raw = socket.create_connection((cam_host, cam_port), timeout=TIMEOUT_TLS_PROXY_CONNECT)
+                raw = socket.create_connection(
+                    (cam_host, cam_port), timeout=TIMEOUT_TLS_PROXY_CONNECT
+                )
                 # TCP keep-alive: prevent OS from dropping idle connections.
                 raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 try:
-                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)  # type: ignore[attr-defined]
+                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 except (AttributeError, OSError):
@@ -98,8 +99,11 @@ def start_tls_proxy(
                     raise
                 _LOGGER.debug(
                     "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
-                    cam_id[:8], cam_host, cam_port,
-                    tls.version(), (tls.cipher() or ("?",))[0],
+                    cam_id[:8],
+                    cam_host,
+                    cam_port,
+                    tls.version(),
+                    (tls.cipher() or ("?",))[0],
                 )
                 # Reset failure burst — a successful connect proves the
                 # camera is reachable again.
@@ -112,7 +116,10 @@ def start_tls_proxy(
                 fail_count[0] += 1
                 _LOGGER.warning(
                     "TLS proxy %s: failed to connect to %s:%d — %s",
-                    cam_id[:8], cam_host, cam_port, exc,
+                    cam_id[:8],
+                    cam_host,
+                    cam_port,
+                    exc,
                 )
                 client.close()
                 if (
@@ -123,11 +130,13 @@ def start_tls_proxy(
                         "TLS proxy %s: %d consecutive connect failures in %.0fs — "
                         "closing server socket (camera unreachable). "
                         "Coordinator will rebuild the session when the camera is back.",
-                        cam_id[:8], fail_count[0], now - first_fail_at[0],
+                        cam_id[:8],
+                        fail_count[0],
+                        now - first_fail_at[0],
                     )
                     try:
                         srv.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race, tracer drops the record
+                    except Exception:  # pragma: no cover — daemon-thread close-race, tracer drops the record  # noqa: S110 # best-effort server socket close on unreachable-cam teardown
                         pass
                     # Signal the coordinator so it can rebuild the session
                     # once the camera is reachable again — without this,
@@ -139,7 +148,8 @@ def start_tls_proxy(
                         except Exception as cb_exc:
                             _LOGGER.debug(
                                 "TLS proxy %s: on_proxy_died callback raised — %s",
-                                cam_id[:8], cb_exc,
+                                cam_id[:8],
+                                cb_exc,
                             )
                     break
                 continue
@@ -147,7 +157,7 @@ def start_tls_proxy(
             # TCP keep-alive on client socket too (FFmpeg side)
             client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             try:
-                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)  # type: ignore[attr-defined]
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
             except (AttributeError, OSError):
@@ -179,10 +189,17 @@ def start_tls_proxy(
                         # Debug: log first RTSP exchanges (text only, skip binary RTP)
                         if _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":
                             _dbg_count[0] += 1
-                            preview = data[:500].decode("utf-8", errors="replace").replace("\r\n", "\\r\\n")
+                            preview = (
+                                data[:500]
+                                .decode("utf-8", errors="replace")
+                                .replace("\r\n", "\\r\\n")
+                            )
                             _LOGGER.debug(
                                 "TLS proxy %s [%s] %d bytes: %.500s",
-                                cam_id[:8], direction, len(data), preview,
+                                cam_id[:8],
+                                direction,
+                                len(data),
+                                preview,
                             )
                         if rewrite_transport and b"SETUP " in data:
                             # Replace UDP transport with TCP interleaved
@@ -205,15 +222,20 @@ def start_tls_proxy(
                     # rotation) — not a real error, so don't log it.
                     is_ebadf = isinstance(exc, OSError) and exc.errno == errno.EBADF
                     if str(exc) and not is_ebadf:
-                        _LOGGER.debug("TLS proxy %s [%s] pipe error: %s", cam_id[:8], direction, exc)
+                        _LOGGER.debug(
+                            "TLS proxy %s [%s] pipe error: %s",
+                            cam_id[:8],
+                            direction,
+                            exc,
+                        )
                 finally:
                     try:
                         src.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race
+                    except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
                         pass
                     try:
                         dst.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race
+                    except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
                         pass
 
             # client→camera: rewrite SETUP Transport to force TCP interleaved
@@ -253,13 +275,15 @@ def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
     srv = _proxy_servers.pop(cam_id, None)
     if srv is not None:
         try:
-            srv.shutdown(socket.SHUT_RDWR)  # interrupt any blocking accept() before close
+            srv.shutdown(
+                socket.SHUT_RDWR
+            )  # interrupt any blocking accept() before close
         except OSError:
             pass
         try:
             srv.close()
             _LOGGER.debug("TLS proxy for %s: server socket closed", cam_id[:8])
-        except Exception:
+        except Exception:  # noqa: S110 # best-effort server socket close during stop, failure non-actionable
             pass
 
 
@@ -288,13 +312,11 @@ async def rtsp_keepalive(
         uri = f"rtsp://127.0.0.1:{proxy_port}/rtsp_tunnel"
 
         # Step 1: OPTIONS without auth → 401 + realm/nonce
-        writer.write(
-            f"OPTIONS {uri} RTSP/1.0\r\n"
-            f"CSeq: 1\r\n"
-            f"\r\n".encode()
-        )
+        writer.write(f"OPTIONS {uri} RTSP/1.0\r\nCSeq: 1\r\n\r\n".encode())
         await writer.drain()
-        resp1 = await asyncio.wait_for(reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ)
+        resp1 = await asyncio.wait_for(
+            reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ
+        )
         resp1_str = resp1.decode("utf-8", errors="replace")
 
         nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
@@ -302,11 +324,13 @@ async def rtsp_keepalive(
         if not (nonce_m and realm_m):
             # Camera may respond 200 without auth challenge — that's fine too
             if "200 OK" in resp1_str:
-                _LOGGER.debug("Keepalive OPTIONS 200 OK (no auth needed) on port %d", proxy_port)
+                _LOGGER.debug(
+                    "Keepalive OPTIONS 200 OK (no auth needed) on port %d", proxy_port
+                )
                 writer.close()
                 try:
                     await writer.wait_closed()
-                except Exception:
+                except Exception:  # noqa: S110 # best-effort writer close after keepalive, failure non-actionable
                     pass
                 return True
             _LOGGER.debug(
@@ -315,7 +339,7 @@ async def rtsp_keepalive(
             writer.close()
             try:
                 await writer.wait_closed()
-            except Exception:
+            except Exception:  # noqa: S110 # best-effort writer close after keepalive, failure non-actionable
                 pass
             return False
 
@@ -330,12 +354,14 @@ async def rtsp_keepalive(
             f"\r\n".encode()
         )
         await writer.drain()
-        resp2 = await asyncio.wait_for(reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ)
+        resp2 = await asyncio.wait_for(
+            reader.read(4096), timeout=TIMEOUT_TLS_PROXY_RTSP_READ
+        )
         resp2_str = resp2.decode("utf-8", errors="replace")
         writer.close()
         try:
             await writer.wait_closed()
-        except Exception:
+        except Exception:  # noqa: S110 # best-effort writer close after keepalive, failure non-actionable
             pass
 
         if "200 OK" in resp2_str:
@@ -351,13 +377,21 @@ async def rtsp_keepalive(
 
 
 def _digest_auth(
-    user: str, password: str, method: str, uri: str,
-    realm: str, nonce: str,
+    user: str,
+    password: str,
+    method: str,
+    uri: str,
+    realm: str,
+    nonce: str,
 ) -> str:
     """Compute Digest auth header value."""
-    ha1 = hashlib.md5(f"{user}:{realm}:{password}".encode(), usedforsecurity=False).hexdigest()
+    ha1 = hashlib.md5(
+        f"{user}:{realm}:{password}".encode(), usedforsecurity=False
+    ).hexdigest()
     ha2 = hashlib.md5(f"{method}:{uri}".encode(), usedforsecurity=False).hexdigest()
-    resp = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode(), usedforsecurity=False).hexdigest()
+    resp = hashlib.md5(
+        f"{ha1}:{nonce}:{ha2}".encode(), usedforsecurity=False
+    ).hexdigest()
     return (
         f'Digest username="{user}",realm="{realm}",'
         f'nonce="{nonce}",uri="{uri}",response="{resp}"'
@@ -365,8 +399,13 @@ def _digest_auth(
 
 
 async def pre_warm_rtsp(
-    proxy_port: int, user: str, password: str, cam_host: str,
-    max_attempts: int = 5, retry_wait: int = 3, post_success_wait: int = 3,
+    proxy_port: int,
+    user: str,
+    password: str,
+    cam_host: str,
+    max_attempts: int = 5,
+    retry_wait: int = 3,
+    post_success_wait: int = 3,
     describe_timeout: int = 5,
 ) -> bool:
     """Pre-warm camera's H.264 encoder via authenticated RTSP DESCRIBE.
@@ -390,7 +429,9 @@ async def pre_warm_rtsp(
     times out and we should not pin the user on a dead LOCAL URL.
     """
     for attempt in range(1, max_attempts + 1):
-        writer = None  # track so exception path can close it if open_connection succeeded
+        writer = (
+            None  # track so exception path can close it if open_connection succeeded
+        )
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
             uri = (
@@ -415,12 +456,15 @@ async def pre_warm_rtsp(
             if not (nonce_m and realm_m):
                 _LOGGER.debug(
                     "Pre-warm RTSP: no nonce/realm in response (port %d, attempt %d/%d): %.200s",
-                    proxy_port, attempt, max_attempts, resp1_str,
+                    proxy_port,
+                    attempt,
+                    max_attempts,
+                    resp1_str,
                 )
                 writer.close()
                 try:
                     await writer.wait_closed()
-                except Exception:
+                except Exception:  # noqa: S110 # best-effort writer close on pre-warm abort, failure non-actionable
                     pass
                 if attempt < max_attempts:
                     await asyncio.sleep(retry_wait)
@@ -442,17 +486,20 @@ async def pre_warm_rtsp(
 
             got_ok = "200 OK" in resp2_str
             if got_ok:
-                _LOGGER.debug("Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port)
+                _LOGGER.debug(
+                    "Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port
+                )
             else:
                 _LOGGER.warning(
                     "Pre-warm RTSP: unexpected response on port %d: %.200s",
-                    proxy_port, resp2_str,
+                    proxy_port,
+                    resp2_str,
                 )
 
             writer.close()
             try:
                 await writer.wait_closed()
-            except Exception:
+            except Exception:  # noqa: S110 # best-effort writer close after pre-warm DESCRIBE, failure non-actionable
                 pass
             # Wait for the camera to fully release the TLS connection.
             # The camera only allows ~2 concurrent RTSP sessions per
@@ -463,13 +510,16 @@ async def pre_warm_rtsp(
         except Exception as exc:
             _LOGGER.debug(
                 "Pre-warm RTSP failed on port %d (attempt %d/%d): %s",
-                proxy_port, attempt, max_attempts, exc,
+                proxy_port,
+                attempt,
+                max_attempts,
+                exc,
             )
             if writer is not None:
                 try:
                     writer.close()
                     await writer.wait_closed()
-                except Exception:
+                except Exception:  # noqa: S110 # best-effort writer close in pre-warm exception handler, failure non-actionable
                     pass
             if attempt < max_attempts:
                 await asyncio.sleep(retry_wait)

@@ -18,7 +18,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_shc_camera.const import DOMAIN
 
-
 # Each test case is: (service_name, bad_data, expected_translation_key)
 INVALID_INPUT_CASES = [
     # camera_id required
@@ -40,8 +39,16 @@ INVALID_INPUT_CASES = [
     # remove_friend: friend_id
     ("remove_friend", {}, "argument_required"),
     # set_motion_zones: zones must be list
-    ("set_motion_zones", {"camera_id": "abc", "zones": "not-a-list"}, "argument_must_be_list"),
-    ("set_privacy_masks", {"camera_id": "abc", "masks": "not-a-list"}, "argument_must_be_list"),
+    (
+        "set_motion_zones",
+        {"camera_id": "abc", "zones": "not-a-list"},
+        "argument_must_be_list",
+    ),
+    (
+        "set_privacy_masks",
+        {"camera_id": "abc", "masks": "not-a-list"},
+        "argument_must_be_list",
+    ),
 ]
 
 
@@ -54,6 +61,7 @@ async def setup_services(hass: HomeAssistant):
     tests.
     """
     from custom_components.bosch_shc_camera import _register_services
+
     _register_services(hass)
     yield
     # Cleanup — services are domain-level, leave them registered for the
@@ -70,9 +78,7 @@ async def test_service_rejects_missing_argument(
 ) -> None:
     """Bad input must raise ServiceValidationError with the expected translation_key."""
     with pytest.raises(ServiceValidationError) as exc_info:
-        await hass.services.async_call(
-            DOMAIN, service_name, bad_data, blocking=True
-        )
+        await hass.services.async_call(DOMAIN, service_name, bad_data, blocking=True)
     err = exc_info.value
     assert err.translation_domain == DOMAIN, (
         f"{service_name}: expected translation_domain={DOMAIN!r}, "
@@ -90,7 +96,8 @@ async def test_set_motion_zones_rejects_missing_field(
     """Zone missing 'x' must raise the missing_field translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
-            DOMAIN, "set_motion_zones",
+            DOMAIN,
+            "set_motion_zones",
             {"camera_id": "abc", "zones": [{"y": 0.5, "w": 0.1, "h": 0.1}]},
             blocking=True,
         )
@@ -106,7 +113,8 @@ async def test_set_motion_zones_rejects_out_of_range(
     """Zone coord >1.0 must raise the value_out_of_range translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
-            DOMAIN, "set_motion_zones",
+            DOMAIN,
+            "set_motion_zones",
             {"camera_id": "abc", "zones": [{"x": 1.5, "y": 0.5, "w": 0.1, "h": 0.1}]},
             blocking=True,
         )
@@ -122,7 +130,8 @@ async def test_set_privacy_masks_rejects_missing_field(
     """Mask missing 'h' must raise missing_field with kind=mask."""
     with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
-            DOMAIN, "set_privacy_masks",
+            DOMAIN,
+            "set_privacy_masks",
             {"camera_id": "abc", "masks": [{"x": 0.1, "y": 0.1, "w": 0.1}]},
             blocking=True,
         )
@@ -138,7 +147,8 @@ async def test_delete_motion_zone_rejects_negative_index(
     """Negative zone_index is treated as missing — argument_required."""
     with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.async_call(
-            DOMAIN, "delete_motion_zone",
+            DOMAIN,
+            "delete_motion_zone",
             {"camera_id": "abc", "zone_index": -1},
             blocking=True,
         )

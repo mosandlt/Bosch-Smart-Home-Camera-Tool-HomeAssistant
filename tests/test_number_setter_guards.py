@@ -25,6 +25,7 @@ Pins the missing number.py lines that no other test currently exercises:
 Approach: bypass __init__ via `klass.__new__()`. Async aiohttp PUTs are
 patched at the module level.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -32,7 +33,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -50,7 +50,9 @@ def _stub_coord(**overrides):
                 },
             },
         },
-        _shc_state_cache={CAM_ID: {"front_light_intensity": 0.5, "privacy_mode": False}},
+        _shc_state_cache={
+            CAM_ID: {"front_light_intensity": 0.5, "privacy_mode": False}
+        },
         _pan_cache={},
         _lens_elevation_cache={},
         _audio_cache={},
@@ -72,7 +74,9 @@ def _stub_coord(**overrides):
     return SimpleNamespace(**base)
 
 
-def _make_entity(klass, coord=None, *, led_key=None, field=None, mac="aa:bb:cc:dd:ee:01"):
+def _make_entity(
+    klass, coord=None, *, led_key=None, field=None, mac="aa:bb:cc:dd:ee:01"
+):
     """Bypass __init__ for number entities."""
     coord = coord or _stub_coord()
     e = klass.__new__(klass)
@@ -97,8 +101,12 @@ def _make_entity(klass, coord=None, *, led_key=None, field=None, mac="aa:bb:cc:d
     return e
 
 
-def _make_put_session(status: int = 200, json_payload=None, json_raises: Exception | None = None,
-                     put_raises: Exception | None = None):
+def _make_put_session(
+    status: int = 200,
+    json_payload=None,
+    json_raises: Exception | None = None,
+    put_raises: Exception | None = None,
+):
     """Stub async-context session.put()."""
     resp = MagicMock()
     resp.status = status
@@ -129,6 +137,7 @@ class TestDeviceInfoReturns:
 
     def test_pan_number_device_info(self):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         e = _make_entity(BoschPanNumber)
         info = e.device_info
         assert isinstance(info, dict)
@@ -137,12 +146,16 @@ class TestDeviceInfoReturns:
 
     def test_speaker_level_device_info(self):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         e = _make_entity(BoschSpeakerLevelNumber)
         info = e.device_info
         assert info["manufacturer"] == "Bosch"
 
     def test_front_light_intensity_device_info(self):
-        from custom_components.bosch_shc_camera.number import BoschFrontLightIntensityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschFrontLightIntensityNumber,
+        )
+
         e = _make_entity(BoschFrontLightIntensityNumber)
         info = e.device_info
         assert info["model"] == "Eyes Outdoor"
@@ -150,6 +163,7 @@ class TestDeviceInfoReturns:
     def test_gen2_base_device_info(self):
         """`_BoschGen2NumberBase.device_info` covered via any Gen2 subclass."""
         from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+
         e = _make_entity(BoschLensElevationNumber)
         info = e.device_info
         assert info["manufacturer"] == "Bosch"
@@ -164,12 +178,14 @@ class TestWhiteBalanceAvailable:
 
     def test_available_true_when_coord_ok(self):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
         coord = _stub_coord()
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is True
 
     def test_available_false_when_coord_failed(self):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
         coord = _stub_coord(last_update_success=False)
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is False
@@ -190,7 +206,9 @@ class TestWhiteBalanceJsonParseError:
         coord._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
 
-        session, resp = _make_put_session(status=200, json_raises=ValueError("not JSON"))
+        session, resp = _make_put_session(
+            status=200, json_raises=ValueError("not JSON")
+        )
 
         with patch(
             "homeassistant.helpers.aiohttp_client.async_get_clientsession",
@@ -212,9 +230,14 @@ class TestLedBrightnessAvailable:
     can be empty and the slider still shows."""
 
     def test_available_follows_coord(self):
-        from custom_components.bosch_shc_camera.number import BoschTopLedBrightnessNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschTopLedBrightnessNumber,
+        )
+
         coord = _stub_coord()
-        e = _make_entity(BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings")
+        e = _make_entity(
+            BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
+        )
         e._brightness = None
         assert e.available is True
         coord.last_update_success = False
@@ -230,14 +253,20 @@ class TestLedBrightnessJsonParseError:
 
     @pytest.mark.asyncio
     async def test_json_error_after_200_swallowed(self):
-        from custom_components.bosch_shc_camera.number import BoschTopLedBrightnessNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschTopLedBrightnessNumber,
+        )
 
         coord = _stub_coord()
         coord._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
-        e = _make_entity(BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings")
+        e = _make_entity(
+            BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
+        )
         e._brightness = None
 
-        session, resp = _make_put_session(status=200, json_raises=ValueError("bad body"))
+        session, resp = _make_put_session(
+            status=200, json_raises=ValueError("bad body")
+        )
 
         with patch(
             "homeassistant.helpers.aiohttp_client.async_get_clientsession",
@@ -258,10 +287,16 @@ class TestLedBrightnessRequestException:
 
     @pytest.mark.asyncio
     async def test_session_put_exception_swallowed(self):
-        from custom_components.bosch_shc_camera.number import BoschBottomLedBrightnessNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschBottomLedBrightnessNumber,
+        )
 
         coord = _stub_coord()
-        e = _make_entity(BoschBottomLedBrightnessNumber, coord=coord, led_key="bottomLedLightSettings")
+        e = _make_entity(
+            BoschBottomLedBrightnessNumber,
+            coord=coord,
+            led_key="bottomLedLightSettings",
+        )
         e._brightness = 33.0
 
         session, _ = _make_put_session(put_raises=TimeoutError("read timeout"))
@@ -285,17 +320,21 @@ class TestDarknessThresholdAvailable:
     `_global_lighting_cache` for this cam_id."""
 
     def test_available_true_when_cache_populated(self):
-        from custom_components.bosch_shc_camera.number import BoschDarknessThresholdNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschDarknessThresholdNumber,
+        )
+
         coord = _stub_coord()
         coord._global_lighting_cache[CAM_ID] = {"darknessThreshold": 0.5}
         e = _make_entity(BoschDarknessThresholdNumber, coord=coord)
         assert e.available is True
 
     def test_available_false_when_cache_empty(self):
-        from custom_components.bosch_shc_camera.number import BoschDarknessThresholdNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschDarknessThresholdNumber,
+        )
+
         coord = _stub_coord()
         # Empty cache → bool({}) is False
         e = _make_entity(BoschDarknessThresholdNumber, coord=coord)
         assert e.available is False
-
-

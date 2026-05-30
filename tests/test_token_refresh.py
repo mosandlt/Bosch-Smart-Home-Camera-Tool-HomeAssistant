@@ -26,16 +26,24 @@ def _make_jwt(exp_offset_sec: int = 3600) -> str:
     Positive offset = valid for X seconds.
     Negative offset = expired X seconds ago.
     """
-    header = base64.urlsafe_b64encode(
-        json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
-    ).rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({
-            "exp": int(_time.time()) + exp_offset_sec,
-            "iat": int(_time.time()),
-            "sub": "user-1",
-        }).encode()
-    ).rstrip(b"=").decode()
+    header = (
+        base64.urlsafe_b64encode(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "exp": int(_time.time()) + exp_offset_sec,
+                    "iat": int(_time.time()),
+                    "sub": "user-1",
+                }
+            ).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{payload}.fake-signature"
 
 
@@ -45,6 +53,7 @@ def _make_jwt(exp_offset_sec: int = 3600) -> str:
 class TestTokenStillValid:
     def _make_coord(self, token: str):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(
             _entry=SimpleNamespace(data={"bearer_token": token}),
             _refreshed_token=None,

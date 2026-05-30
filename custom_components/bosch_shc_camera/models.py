@@ -23,28 +23,36 @@ class CameraModelConfig:
     """Timing and behavior configuration for a specific camera model."""
 
     # ── Display ──────────────────────────────────────────────────────────
-    display_name: str           # Official Bosch product name
-    generation: int = 1         # Hardware generation (1 or 2)
+    display_name: str  # Official Bosch product name
+    generation: int = 1  # Hardware generation (1 or 2)
 
     # ── Pre-warm (RTSP DESCRIBE to wake H.264 encoder) ───────────────────
-    pre_warm_delay: int = 2     # Seconds to wait after PUT /connection before first DESCRIBE
-    pre_warm_retries: int = 5   # Max DESCRIBE attempts before giving up
+    pre_warm_delay: int = (
+        2  # Seconds to wait after PUT /connection before first DESCRIBE
+    )
+    pre_warm_retries: int = 5  # Max DESCRIBE attempts before giving up
     pre_warm_retry_wait: int = 3  # Seconds between failed DESCRIBE attempts
-    post_warm_buffer: int = 3   # Seconds to wait after successful DESCRIBE (TLS cleanup)
-    describe_timeout: int = 5   # Timeout per DESCRIBE read (seconds)
+    post_warm_buffer: int = 3  # Seconds to wait after successful DESCRIBE (TLS cleanup)
+    describe_timeout: int = 5  # Timeout per DESCRIBE read (seconds)
 
     # ── Stream startup ───────────────────────────────────────────────────
-    min_total_wait: int = 30    # Minimum seconds from PUT /connection until RTSP URL exposed
-                                # Ensures encoder produces valid H.264 frames.
-                                # For renewals: 2/3 of this value is used (camera already warm).
+    min_total_wait: int = (
+        30  # Minimum seconds from PUT /connection until RTSP URL exposed
+    )
+    # Ensures encoder produces valid H.264 frames.
+    # For renewals: 2/3 of this value is used (camera already warm).
 
     # ── Session management ───────────────────────────────────────────────
     renewal_interval: int = 500  # Seconds between auto-renewal cycles.
-                                 # Camera accepts maxSessionDuration=3600 in RTSP URL,
-                                 # but some models reset the connection earlier.
-    max_session_duration: int = 3600  # Value sent in RTSP URL maxSessionDuration parameter.
-    heartbeat_interval: int = 30  # Seconds between PUT /connection heartbeats during LOCAL stream.
-                                  # Bosch app uses ~1s. Outdoor needs more aggressive keepalive.
+    # Camera accepts maxSessionDuration=3600 in RTSP URL,
+    # but some models reset the connection earlier.
+    max_session_duration: int = (
+        3600  # Value sent in RTSP URL maxSessionDuration parameter.
+    )
+    heartbeat_interval: int = (
+        30  # Seconds between PUT /connection heartbeats during LOCAL stream.
+    )
+    # Bosch app uses ~1s. Outdoor needs more aggressive keepalive.
 
     # ── Fallback / error recovery ────────────────────────────────────────
     # Consecutive FFmpeg errors before AUTO mode falls back to REMOTE.
@@ -57,16 +65,18 @@ class CameraModelConfig:
     # The watchdog's hard 120 s "no healthy HLS output" path is unaffected
     # — it still forces fallback regardless of this counter.
     max_stream_errors: int = 5
-    min_wifi_for_local: int = 40  # Minimum WiFi signal % to attempt LOCAL (below → use REMOTE)
+    min_wifi_for_local: int = (
+        40  # Minimum WiFi signal % to attempt LOCAL (below → use REMOTE)
+    )
 
     # ── Snapshots ────────────────────────────────────────────────────────
-    snapshot_warmup: int = 4    # Seconds to wait before LOCAL snap.jpg fetch
-                                # (encoder must be running for fresh frame)
+    snapshot_warmup: int = 4  # Seconds to wait before LOCAL snap.jpg fetch
+    # (encoder must be running for fresh frame)
     event_refresh_delay: float = 1.5  # Seconds to wait before fetching a fresh snap
-                                      # in response to an FCM motion/person event.
-                                      # Gen2 cams capture immediately → set to 0;
-                                      # Gen1 needs ~1.5 s to settle the encoder so
-                                      # the snap reflects the post-trigger frame.
+    # in response to an FCM motion/person event.
+    # Gen2 cams capture immediately → set to 0;
+    # Gen1 needs ~1.5 s to settle the encoder so
+    # the snap reflects the post-trigger frame.
 
 
 # ── Model registry ───────────────────────────────────────────────────────
@@ -90,7 +100,6 @@ MODELS: dict[str, CameraModelConfig] = {
         heartbeat_interval=30,
         snapshot_warmup=3,
     ),
-
     # ── Gen1 Outdoor: Eyes Außenkamera ────────────────────────────────────
     # Slower encoder init (~25s), pre-warm needs 3-4 DESCRIBE attempts.
     # Previously dropped connections after 2-10 min without heartbeat.

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.0";
+const CARD_VERSION = "13.4.1";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -332,18 +332,23 @@ class BoschCameraCard extends HTMLElement {
       // Theme inside the Apple-style redesign (v2.18.0): "ios" (default,
       // glass blur + iOS systemColors), "android" (Material You: M3 surface
       // tones, solid backgrounds, tonal buttons), or "auto" (resolve from
-      // user-agent — Android UA → android, anything else → ios). A
-      // localStorage override (set by the in-card theme switcher) wins over
-      // this config value so user choice is sticky across reloads.
+      // user-agent — Android UA → android, anything else → ios). Config-only
+      // since 2026-05-30 (the in-card theme switcher was removed, issue #15).
       theme:                      ["ios", "android", "auto"].includes(config.theme) ? config.theme : "ios",
       // Day/Night card-chrome mode (v13.0.1): "auto" follows the system
       // prefers-color-scheme, "day" forces a light card (white ha-card,
       // dark text, light M3 surface on Android), "night" forces dark. The
       // glass overlays on the video stay constant — they need to be
-      // legible regardless of background. Same broadcast pattern as theme:
-      // an in-card switcher writes a localStorage override that wins over
-      // this config, and the choice syncs to every Bosch card on the page.
+      // legible regardless of background. Config-only since 2026-05-30 (the
+      // in-card day/night switcher was removed, issue #15).
       mode:                       ["auto", "day", "night"].includes(config.mode) ? config.mode : "auto",
+      // Per-card geometry overrides (issue #21): optional CSS strings applied
+      // via the card-specific --bosch-card-radius / --bosch-card-shadow vars
+      // (see the setConfig tail). null = apple/legacy default. Deliberately
+      // NOT the global --ha-card-* theme tokens, so a dashboard theme that
+      // zeroes those never strips the card's own rounding/shadow.
+      border_radius:              typeof config.border_radius === "string" ? config.border_radius : null,
+      box_shadow:                 typeof config.box_shadow === "string" ? config.box_shadow : null,
       // Compact tile mode (v13 follow-up): hide the pill-bar + status badge
       // so the card is just video + title-pill. Used by the overview card's
       // `compact: true` for Apple-Home-style grid tiles. Click the video to
@@ -460,6 +465,14 @@ class BoschCameraCard extends HTMLElement {
       "overflow-open",
       this._config.apple_style && !this._config.minimal && !this._config.compact,
     );
+    // Optional per-card geometry overrides (issue #21) via card-specific CSS
+    // vars — applied here so they take effect WITHOUT the card inheriting the
+    // global --ha-card-* theme tokens (a theme that zeroes those must not strip
+    // the apple-style rounding; opt-in only).
+    if (this._config.border_radius) this.style.setProperty("--bosch-card-radius", this._config.border_radius);
+    else this.style.removeProperty("--bosch-card-radius");
+    if (this._config.box_shadow) this.style.setProperty("--bosch-card-shadow", this._config.box_shadow);
+    else this.style.removeProperty("--bosch-card-shadow");
     this._render();
     this._restoreCachedImage();
     this._startRefreshTimer();
@@ -479,9 +492,9 @@ class BoschCameraCard extends HTMLElement {
   // reloads for all Bosch cards on the page until the user picks Auto.
 
   _resolveTheme() {
-    let stored = null;
-    try { stored = window.localStorage?.getItem("bosch-card-theme"); } catch { /* SSR / quota */ }
-    if (stored === "ios" || stored === "android") return stored;
+    // Config-only since 2026-05-30 (in-card switcher removed, issue #15): YAML
+    // `theme:` → UA auto-detect when "auto" → "ios" default. No localStorage
+    // override (a stale value would otherwise outlive the now-removed button).
     const cfg = this._config?.theme || "ios";
     if (cfg === "ios" || cfg === "android") return cfg;
     return this._detectTheme();
@@ -571,9 +584,9 @@ class BoschCameraCard extends HTMLElement {
   // rows) responds. Glass overlays on the video stay dark for legibility.
 
   _resolveMode() {
-    let stored = null;
-    try { stored = window.localStorage?.getItem("bosch-card-mode"); } catch { /* SSR / quota */ }
-    if (stored === "day" || stored === "night") return stored;
+    // Config-only since 2026-05-30 (in-card switcher removed, issue #15): YAML
+    // `mode:` → prefers-color-scheme when "auto" (default). No localStorage
+    // override (a stale value would otherwise outlive the now-removed button).
     const cfg = this._config?.mode || "auto";
     if (cfg === "day" || cfg === "night") return cfg;
     return this._detectMode();
@@ -603,6 +616,20 @@ class BoschCameraCard extends HTMLElement {
 
   _onModeBroadcast(_ev) {
     this._applyMode(this._resolveMode());
+  }
+
+  // Force the stream badge to "Live" the instant the <video> actually plays,
+  // without waiting for the next hass push. The shared stream_status sensor can
+  // trail the first frame by 10s+, which left the top-right badge stuck on
+  // "Verbinde" while the stream already ran (Thomas, Innenbereich, 2026-05-30).
+  // The hass-driven badge update keeps it Live afterwards (_liveVideoActive wins).
+  _markLiveBadge() {
+    const badge = this.shadowRoot?.getElementById("stream-badge");
+    if (badge) badge.className = "stream-badge streaming";
+    const apBadge = this.shadowRoot?.getElementById("ap-badge");
+    if (apBadge) { apBadge.className = "ap-badge live"; apBadge.textContent = "Live"; }
+    const apBtnStream = this.shadowRoot?.getElementById("ap-btn-stream");
+    if (apBtnStream) apBtnStream.classList.remove("connecting");
   }
 
   _refreshModeSwitcher() {
@@ -1011,9 +1038,12 @@ class BoschCameraCard extends HTMLElement {
         :host { display: block; font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif); }
         ha-card {
           overflow: hidden;
-          border-radius: var(--ha-card-border-radius, 12px);
+          /* Own --bosch-card-* vars (issue #21), not the global --ha-card-*
+             radius/shadow tokens — a dashboard theme that zeroes those must not
+             strip our card geometry. Background DOES follow the theme (intended). */
+          border-radius: var(--bosch-card-radius, 12px);
           background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
-          box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.3));
+          box-shadow: var(--bosch-card-shadow, 0 2px 8px rgba(0,0,0,.3));
         }
 
         /* Header */
@@ -1614,12 +1644,27 @@ class BoschCameraCard extends HTMLElement {
          *   - hides legacy .header / .info-row / .btn-row
          * ====================================================== */
         :host(.apple-style) ha-card {
-          border-radius: 22px;
-          box-shadow: 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.06);
+          /* Card-specific vars (issue #21) — NOT the global --ha-card-* theme
+             tokens. A user whose dashboard theme zeroes --ha-card-border-radius
+             must still get the apple-style rounding by default; the optional
+             border_radius / box_shadow card config sets --bosch-card-* to
+             opt into a custom look without us inheriting the global theme value. */
+          border-radius: var(--bosch-card-radius, 22px);
+          box-shadow: var(--bosch-card-shadow, 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.06));
         }
         @media (prefers-color-scheme: dark) {
           :host(.apple-style) ha-card {
-            box-shadow: 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4);
+            box-shadow: var(--bosch-card-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4));
+          }
+        }
+        /* Hover affordance parity with the overview tiles (issue #15.1): a
+           subtle box-shadow lift on pointer devices only. No transform, so the
+           full-width single card never shifts position; the resting state still
+           honors the user's --ha-card-box-shadow theme var (issue #21). */
+        :host(.apple-style) ha-card { transition: box-shadow .18s ease; }
+        @media (hover: hover) and (pointer: fine) {
+          :host(.apple-style) ha-card:hover {
+            box-shadow: 0 8px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.10);
           }
         }
         :host(.apple-style) .header,
@@ -1825,11 +1870,10 @@ class BoschCameraCard extends HTMLElement {
          * Default theme (.theme-ios) keeps the iOS look above untouched.
          * ====================================================== */
         :host(.apple-style.theme-android) ha-card {
-          /* !important: ha-card's base rule reads --ha-card-border-radius
-             from HA's theme system which sometimes wins through the variable
-             cascade even though our direct selector has higher specificity.
-             Forcing the value is the safe path. */
-          border-radius: 28px !important;
+          /* M3 large radius (28px) as the Android default; the optional
+             border_radius card config (--bosch-card-radius) overrides it
+             (issue #21). !important still beats ha-card's base rule. */
+          border-radius: var(--bosch-card-radius, 28px) !important;
         }
         :host(.apple-style.theme-android) .ap-glass {
           background: rgba(73, 69, 79, .92);   /* M3 surface-variant dark */
@@ -2539,23 +2583,9 @@ class BoschCameraCard extends HTMLElement {
             </button>
           </div>
 
-          <!-- Theme + Mode switchers (Apple-style only; visible when Mehr is open) -->
-          <div class="ap-theme-switcher" id="ap-theme-switcher">
-            <span>Design</span>
-            <div class="ap-theme-toggle" role="radiogroup" aria-label="Design">
-              <button type="button" data-theme="auto" role="radio" aria-pressed="false" title="Automatisch nach Gerät">Auto</button>
-              <button type="button" data-theme="ios" role="radio" aria-pressed="false" title="iOS / Apple Home">iOS</button>
-              <button type="button" data-theme="android" role="radio" aria-pressed="false" title="Material You / Android">Android</button>
-            </div>
-          </div>
-          <div class="ap-mode-switcher" id="ap-mode-switcher">
-            <span>Modus</span>
-            <div class="ap-mode-toggle" role="radiogroup" aria-label="Tag- oder Nacht-Modus">
-              <button type="button" data-mode="auto" role="radio" aria-pressed="false" title="System folgen">Auto</button>
-              <button type="button" data-mode="day" role="radio" aria-pressed="false" title="Tag-Modus (hell)">Tag</button>
-              <button type="button" data-mode="night" role="radio" aria-pressed="false" title="Nacht-Modus (dunkel)">Nacht</button>
-            </div>
-          </div>
+          <!-- Theme (iOS/Android) + day/night Mode are config-only (YAML theme: / mode:);
+               the in-card switcher buttons were removed 2026-05-30 (Thomas / issue #15).
+               Defaults: theme=ios, mode=auto. -->
 
           <div class="switch-rows">
             <div class="sw-row" id="btn-audio">
@@ -3652,6 +3682,9 @@ class BoschCameraCard extends HTMLElement {
           this._streamConnecting = false;
           if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
         }
+        // Flip the badge to Live now — the first frame is on screen. Don't wait
+        // for the next hass push (stream_status sensor can lag 10s+). 2026-05-30.
+        this._markLiveBadge();
         video.removeEventListener("playing", clearOverlay);
       };
       video.addEventListener("playing", clearOverlay);
@@ -6118,7 +6151,7 @@ class BoschCameraOverviewCard extends HTMLElement {
           gap: ${this._config.gap};
           grid-template-columns: ${
             this._config.columns === "auto" || !this._config.columns
-              ? `repeat(auto-fill, minmax(${this._config.min_width}, 1fr))`
+              ? `repeat(auto-fill, minmax(min(${this._config.min_width}, 100%), 1fr))`
               : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`
           };
         }
@@ -6159,7 +6192,7 @@ class BoschCameraOverviewCard extends HTMLElement {
         :host(.apple-style) .bco-cell[data-tier="1"],
         :host(.apple-style) .bco-cell[data-tier="2"] {
           border: 0;
-          border-radius: 22px;
+          border-radius: var(--bosch-card-radius, 22px);
           opacity: 1;
           /* Smooth scale + shadow on hover so desktop users get a clear
              "this tile is tappable" affordance. Touch devices ignore :hover
@@ -6168,7 +6201,11 @@ class BoschCameraOverviewCard extends HTMLElement {
         }
         @media (hover: hover) and (pointer: fine) {
           :host(.apple-style) .bco-cell:hover {
-            transform: translateY(-2px) scale(1.012);
+            /* translateY only — no scale(). Scaling a variable-height tile
+               shifts its top edge when the inner card expands via ⋮, which
+               reads as the tile "jumping" (issue #15.3). translateY is
+               height-independent, so the lift affordance stays jump-free. */
+            transform: translateY(-2px);
             box-shadow: 0 12px 32px rgba(0,0,0,.18);
             z-index: 1;
           }
@@ -6695,9 +6732,10 @@ class BoschCameraOverviewCard extends HTMLElement {
             try {
               card.setConfig({
                 ...this._config.card_defaults,
-                camera_entity: c.entity_id,
                 title:         c.name.replace(/^Bosch\s+/i, ""),
                 ...override,
+                // camera_entity set AFTER ...override so a per-camera override
+                // can never repoint the tile to a different camera.
                 camera_entity: c.entity_id,
               });
             } catch (e) {
@@ -7040,7 +7078,7 @@ class BoschNvrTimelineCard extends HTMLElement {
   _segmentTimeOffset(seg) {
     // seg.title is expected to be "HH-MM.mp4" or similar; derive fractional day offset
     if (!seg.title) return null;
-    const m = seg.title.match(/(\d{2})[:\-](\d{2})/);
+    const m = seg.title.match(/(\d{2})[:-](\d{2})/);
     if (!m) return null;
     const start = (parseInt(m[1]) * 60 + parseInt(m[2])) * 60 / 86400;
     const duration = 300 / 86400; // 5-min segments
@@ -7062,7 +7100,6 @@ class BoschNvrTimelineCard extends HTMLElement {
       const segEnd = segStart + pos.duration * 86400;
       if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
         best = seg;
-        bestDelta = 0;
         break;
       }
       const delta = Math.abs(segStart - offsetSeconds);
@@ -7217,7 +7254,7 @@ class BoschNvrMultiCamCard extends HTMLElement {
         const segStart = pos.start * 86400;
         const segEnd = segStart + pos.duration * 86400;
         if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
-          best = seg; bestDelta = 0; break;
+          best = seg; break;
         }
         const delta = Math.abs(segStart - offsetSeconds);
         if (delta < bestDelta) { bestDelta = delta; best = seg; }

@@ -11,14 +11,14 @@ import pytest
 
 from custom_components.bosch_shc_camera import switch as switch_mod
 from custom_components.bosch_shc_camera.switch import (
-    _BoschSwitchBase,
-    BoschCameraLightSwitch,
-    BoschWallwasherSwitch,
-    BoschPrivacyModeSwitch,
-    BoschNotificationsSwitch,
     BoschAmbientLightSwitch,
-    BoschSoftLightFadingSwitch,
+    BoschCameraLightSwitch,
     BoschIntrusionDetectionSwitch,
+    BoschNotificationsSwitch,
+    BoschPrivacyModeSwitch,
+    BoschSoftLightFadingSwitch,
+    BoschWallwasherSwitch,
+    _BoschSwitchBase,
 )
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
@@ -43,7 +43,9 @@ def _make_coord(**overrides):
         last_update_success=True,
         is_camera_online=lambda cid: True,
         _shc_state_cache={CAM_ID: {}},
-        _global_lighting_cache={CAM_ID: {"darknessThreshold": 0.5, "softLightFading": False}},
+        _global_lighting_cache={
+            CAM_ID: {"darknessThreshold": 0.5, "softLightFading": False}
+        },
         _privacy_set_at={},
         _light_set_at={},
         _live_connections={},
@@ -92,6 +94,7 @@ def _make_entry():
 
 # ── Line 150: DeviceInfo property (mac path) ─────────────────────────────────
 
+
 def test_device_info_with_mac():
     """Line 150-156: DeviceInfo populated with mac connection."""
     coord = _make_coord()
@@ -114,6 +117,7 @@ def test_device_info_without_mac():
 
 # ── Line 511: BoschCameraLightSwitch.is_on cache read ────────────────────────
 
+
 def test_camera_light_is_on_true():
     coord = _make_coord()
     coord._shc_state_cache[CAM_ID] = {"camera_light": True}
@@ -130,15 +134,19 @@ def test_camera_light_is_on_missing():
 
 # ── Line 588: BoschWallwasherSwitch.async_turn_off ───────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_wallwasher_turn_off():
     coord = _make_coord()
     sw = BoschWallwasherSwitch(coord, CAM_ID, _make_entry())
     await sw.async_turn_off()
-    coord.async_cloud_set_light_component.assert_called_once_with(CAM_ID, "wallwasher", False)
+    coord.async_cloud_set_light_component.assert_called_once_with(
+        CAM_ID, "wallwasher", False
+    )
 
 
 # ── Line 690: BoschPrivacyModeSwitch.async_turn_off cooldown rejection ───────
+
 
 @pytest.mark.asyncio
 async def test_privacy_turn_off_cooldown_rejects():
@@ -151,6 +159,7 @@ async def test_privacy_turn_off_cooldown_rejects():
 
 
 # ── Line 721: BoschNotificationsSwitch.is_on returns None when status missing ─
+
 
 def test_notifications_is_on_none_when_status_none():
     coord = _make_coord()
@@ -167,6 +176,7 @@ def test_notifications_is_on_true_for_follow():
 
 
 # ── Lines 1216, 1223-1224: BoschAmbientLightSwitch error paths ───────────────
+
 
 def _make_response_cm(status, json_data=None):
     """Build an async context-manager that returns a mock response."""
@@ -213,6 +223,7 @@ async def test_ambient_light_exception_caught():
 
 # ── Lines 1287-1288: SoftLightFading json() exception → fall back to body ────
 
+
 @pytest.mark.asyncio
 async def test_softlight_fading_json_exception_falls_back_to_body():
     coord = _make_coord()
@@ -240,6 +251,7 @@ async def test_softlight_fading_json_exception_falls_back_to_body():
 
 # ── Line 1350: BoschIntrusionDetectionSwitch empty config early return ───────
 
+
 @pytest.mark.asyncio
 async def test_intrusion_detection_empty_config_returns():
     """Line 1350: empty _config dict → early return without async_put_camera."""
@@ -248,12 +260,15 @@ async def test_intrusion_detection_empty_config_returns():
     coord._intrusion_config_cache[CAM_ID] = {}
     sw = BoschIntrusionDetectionSwitch(coord, CAM_ID, _make_entry())
     sw.async_write_ha_state = MagicMock()
-    with patch(f"{switch_mod.__name__}._warn_if_privacy_on", new=AsyncMock(return_value=False)):
+    with patch(
+        f"{switch_mod.__name__}._warn_if_privacy_on", new=AsyncMock(return_value=False)
+    ):
         await sw._set_intrusion(True)
     coord.async_put_camera.assert_not_called()
 
 
 # ── Lines 195, 219, 222-225: async_setup_entry entity creation gates ─────────
+
 
 @pytest.mark.asyncio
 async def test_setup_entry_auto_follow_for_pan_camera():
@@ -261,7 +276,9 @@ async def test_setup_entry_auto_follow_for_pan_camera():
     coord = _make_coord()
     coord.data[CAM_ID]["info"]["hardwareVersion"] = "CAMERA_360"
     coord.data[CAM_ID]["info"]["featureSupport"] = {
-        "light": False, "panLimit": 360, "sound": False,
+        "light": False,
+        "panLimit": 360,
+        "sound": False,
     }
     entry = _make_entry()
     entry.runtime_data = coord
@@ -288,7 +305,9 @@ async def test_setup_entry_audio_notification_when_sound_supported():
     await switch_mod.async_setup_entry(hass, entry, async_add)
     # The audio NotificationType switch has _ntype="audio"
     audio_switches = [
-        e for e in added if type(e).__name__ == "BoschNotificationTypeSwitch"
+        e
+        for e in added
+        if type(e).__name__ == "BoschNotificationTypeSwitch"
         and getattr(e, "_ntype", None) == "audio"
     ]
     assert len(audio_switches) == 1

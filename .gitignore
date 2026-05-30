@@ -4,10 +4,13 @@ __pycache__/
 .DS_Store
 original-screenshot.png
 node_modules/
-package.json
-package-lock.json
 .venv-tests/
 .coverage
 .pytest_cache/
 htmlcov/
 backups/
+build/
+test-results/
+playwright-report/
+/playwright/.cache/
+blob-report/

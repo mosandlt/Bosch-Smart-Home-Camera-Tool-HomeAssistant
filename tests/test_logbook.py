@@ -17,7 +17,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
 from homeassistant.components.logbook import LOGBOOK_ENTRY_MESSAGE, LOGBOOK_ENTRY_NAME
 from homeassistant.core import Event
 
@@ -28,10 +27,10 @@ from custom_components.bosch_shc_camera.logbook import (
     async_describe_events,
 )
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_event(event_type: str, data: dict[str, Any]) -> Event[dict[str, Any]]:
     """Create a minimal HA Event with the given data dict."""
@@ -57,6 +56,7 @@ def _collect_registrations(
 # ---------------------------------------------------------------------------
 # Registration tests
 # ---------------------------------------------------------------------------
+
 
 class TestRegistration:
     """Verify that all three event types are registered under the correct domain."""
@@ -86,6 +86,7 @@ class TestRegistration:
 # ---------------------------------------------------------------------------
 # Motion event tests
 # ---------------------------------------------------------------------------
+
 
 class TestMotionDescribe:
     """Tests for the bosch_shc_camera_motion describe callback."""
@@ -147,6 +148,7 @@ class TestMotionDescribe:
 # Audio alarm event tests
 # ---------------------------------------------------------------------------
 
+
 class TestAudioAlarmDescribe:
     """Tests for the bosch_shc_camera_audio_alarm describe callback."""
 
@@ -179,6 +181,7 @@ class TestAudioAlarmDescribe:
 # ---------------------------------------------------------------------------
 # Person detection event tests
 # ---------------------------------------------------------------------------
+
 
 class TestPersonDescribe:
     """Tests for the bosch_shc_camera_person describe callback."""
@@ -219,6 +222,7 @@ class TestPersonDescribe:
 # ---------------------------------------------------------------------------
 # Event constant tests
 # ---------------------------------------------------------------------------
+
 
 class TestEventConstants:
     """Verify the exported event-type string constants match what integration fires."""

@@ -5,6 +5,7 @@ Migration logic preserves the legacy 'auto' default for existing entries
 that never explicitly set the option, so users don't silently lose
 REMOTE-fallback on upgrade.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ import pytest
 async def test_default_options_stream_connection_type_is_local():
     """New installs (no explicit stream_connection_type set) get local-only."""
     from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
     assert DEFAULT_OPTIONS["stream_connection_type"] == "local"
 
 
@@ -24,6 +26,7 @@ async def test_default_options_stream_connection_type_is_local():
 async def test_get_options_returns_local_for_empty_entry():
     """Entries with empty options dict resolve to local-only via DEFAULT_OPTIONS."""
     from custom_components.bosch_shc_camera import get_options
+
     entry = SimpleNamespace(options={})
     opts = get_options(entry)
     assert opts["stream_connection_type"] == "local"
@@ -35,6 +38,7 @@ async def test_get_options_preserves_explicit_auto():
     new local default. Pins the AUTO mode: existing users on AUTO keep their
     REMOTE-fallback safety net even after the v12.4.2 default flip."""
     from custom_components.bosch_shc_camera import get_options
+
     entry = SimpleNamespace(options={"stream_connection_type": "auto"})
     opts = get_options(entry)
     assert opts["stream_connection_type"] == "auto"
@@ -46,6 +50,7 @@ async def test_get_options_preserves_explicit_local():
     a user who explicitly picked LOCAL keeps pure-LAN behaviour, no cloud
     round-trip on the stream path."""
     from custom_components.bosch_shc_camera import get_options
+
     entry = SimpleNamespace(options={"stream_connection_type": "local"})
     opts = get_options(entry)
     assert opts["stream_connection_type"] == "local"
@@ -57,6 +62,7 @@ async def test_get_options_preserves_explicit_remote():
     a user who explicitly picked REMOTE (cloud-only, e.g. LAN never works
     for their network setup) keeps that behaviour."""
     from custom_components.bosch_shc_camera import get_options
+
     entry = SimpleNamespace(options={"stream_connection_type": "remote"})
     opts = get_options(entry)
     assert opts["stream_connection_type"] == "remote"
@@ -176,4 +182,5 @@ async def test_migration_already_v3_is_noop():
 async def test_config_flow_version_is_3():
     """ConfigFlow.VERSION must be 3 so HA invokes async_migrate_entry on v1/v2 entries."""
     from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
+
     assert BoschCameraConfigFlow.VERSION == 3

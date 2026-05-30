@@ -28,7 +28,6 @@ from custom_components.bosch_shc_camera.const import (
     DEFAULT_OPTIONS,
 )
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -46,8 +45,9 @@ def _make_entry(*, options: dict | None = None) -> SimpleNamespace:
 async def _submit(flow: BoschCameraOptionsFlow, user_input: dict) -> dict:
     saved: dict = {}
     flow.async_create_entry = MagicMock(
-        side_effect=lambda **kw: saved.update({"data": kw.get("data", {})})
-        or {"type": "create_entry"},
+        side_effect=lambda **kw: (
+            saved.update({"data": kw.get("data", {})}) or {"type": "create_entry"}
+        ),
     )
     result = await flow.async_step_init(user_input=user_input)
     assert result["type"] == "create_entry", f"Expected create_entry, got {result}"
@@ -96,10 +96,11 @@ class TestConstants:
         camera.py would collapse), no less (mode users can't reach via UI).
         Reads the dropdown by triggering the form schema render.
         """
+        from homeassistant.data_entry_flow import section as _section
+
         from custom_components.bosch_shc_camera.config_flow import (
             BoschCameraOptionsFlow,
         )
-        from homeassistant.data_entry_flow import section as _section  # noqa: F401
 
         flow = BoschCameraOptionsFlow(_make_entry())
         # Build the form synchronously without submitting — async_step_init
@@ -109,6 +110,7 @@ class TestConstants:
         # SelectSelector options directly from the source-of-truth dict.
         # The dropdown literal must enumerate the canonical set verbatim.
         import inspect
+
         src = inspect.getsource(BoschCameraOptionsFlow.async_step_init)
         for mode in AUTO_PLAY_DEFAULT_VALUES:
             assert f'value="{mode}"' in src, (
@@ -209,6 +211,7 @@ class TestCameraAttribute:
         """PIN_EVERY_MODE: each canonical mode shows up verbatim on the
         camera entity attribute the card reads."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with(mode))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == mode
@@ -219,6 +222,7 @@ class TestCameraAttribute:
         stored "confirm" value must collapse to "lan" so existing users
         keep working without manual intervention."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with("confirm"))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
@@ -228,6 +232,7 @@ class TestCameraAttribute:
         gets a usable signal without falling back to its own client-side
         default (which would drift from the integration default)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with(None))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
@@ -237,6 +242,7 @@ class TestCameraAttribute:
         collapses to "lan" at the read site. Never disables stream start
         silently — sane fallback ensures the card stays functional."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with("not-a-real-mode"))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
@@ -246,6 +252,7 @@ class TestCameraAttribute:
         select selectors can serialize a no-selection state as ``""`` in
         some HA versions."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with(""))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"

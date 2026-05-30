@@ -7,24 +7,30 @@ Covers bugs reported by Andreas74 (simon42 forum 2026-05-07, topic 81743):
 
 These tests pin the correct behaviour so future refactors cannot regress it.
 """
+
 from __future__ import annotations
 
+import calendar
 import sys
 import time
-import calendar
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_event_file(cam_dir: Path, cam_name: str, date: str, t: str = "10-00-00",
-                     etype: str = "MOVEMENT", ev_id: str = "37AE5347",
-                     ext: str = "jpg") -> Path:
+def _make_event_file(
+    cam_dir: Path,
+    cam_name: str,
+    date: str,
+    t: str = "10-00-00",
+    etype: str = "MOVEMENT",
+    ev_id: str = "37AE5347",
+    ext: str = "jpg",
+) -> Path:
     """Write a zero-byte event file with the standard naming convention."""
     filename = f"{cam_name}_{date}_{t}_{etype}_{ev_id}.{ext}"
     p = cam_dir / filename
@@ -67,6 +73,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_list_cameras_returns_name_with_space(self, tmp_path):
         """Directories whose name contains a space are returned correctly."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Meine Kamera"
         (tmp_path / cam).mkdir()
         b = _LocalBackend(str(tmp_path))
@@ -75,6 +82,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_list_dates_with_space_in_name(self, tmp_path):
         """list_dates must find dates when camera name has a space."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Bosch Terrasse"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -85,6 +93,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_list_dates_multiple_days(self, tmp_path):
         """Multiple dates returned sorted newest-first, spaces handled."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Kamera 01"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -96,6 +105,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_list_events_returns_files_with_space_in_name(self, tmp_path):
         """list_events must yield events when camera name has a space."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Garten Kamera"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -107,6 +117,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_list_events_multiple_spaces(self, tmp_path):
         """Camera name with multiple spaces must work end-to-end."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Vorne Rechts Aussen"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -119,6 +130,7 @@ class TestLocalBackendCameraNameWithSpace:
     def test_resolve_file_with_space_in_name(self, tmp_path):
         """resolve() must return the Path for a file under a camera with a space."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Test Kamera"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -136,6 +148,7 @@ class TestLocalBackendUmlautNames:
 
     def test_list_dates_umlaut_name(self, tmp_path):
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Küche"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -145,6 +158,7 @@ class TestLocalBackendUmlautNames:
 
     def test_list_dates_umlaut_with_space(self, tmp_path):
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         cam = "Haustür Eingang"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -162,6 +176,7 @@ class TestFileRegexEdgeCases:
     @pytest.fixture(autouse=True)
     def _import(self):
         from custom_components.bosch_shc_camera.media_source import _FILE_RE
+
         self.re = _FILE_RE
 
     def _parse(self, name: str):
@@ -297,7 +312,10 @@ class TestSyncLocalSaveOldEventGuard:
         fake_resp.__enter__ = MagicMock(return_value=fake_resp)
         fake_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=fake_resp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb.urllib.request.urlopen",
+            return_value=fake_resp,
+        ):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         written = list(tmp_path.rglob("*.jpg"))
@@ -324,13 +342,14 @@ class TestSyncLocalSaveOldEventGuard:
         fake_resp.__enter__ = MagicMock(return_value=fake_resp)
         fake_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=fake_resp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb.urllib.request.urlopen",
+            return_value=fake_resp,
+        ):
             sync_local_save(coord, ev, "tok", "Terrasse")
 
         written = list(tmp_path.rglob("*.jpg"))
-        assert len(written) == 1, (
-            "Event within 60 s slack window must not be blocked"
-        )
+        assert len(written) == 1, "Event within 60 s slack window must not be blocked"
 
     def test_no_started_at_attribute_falls_through(self, tmp_path):
         """Coordinator without _download_started_at (e.g. old pickled state) must not crash."""
@@ -357,8 +376,9 @@ class TestSyncLocalSaveOldEventGuard:
 # ── _browse path auto-detection (single_source vs multi_source) ───────────────
 
 
-def _hass_for_browse(tmp_path: Path, entry_id: str = "01ENT",
-                     extra_opts: dict | None = None):
+def _hass_for_browse(
+    tmp_path: Path, entry_id: str = "01ENT", extra_opts: dict | None = None
+):
     """Minimal fake hass for _browse tests with one local backend."""
     opts = {"download_path": str(tmp_path), "media_browser_source": "auto"}
     if extra_opts:
@@ -375,8 +395,7 @@ def _hass_for_browse(tmp_path: Path, entry_id: str = "01ENT",
     return hass
 
 
-def _seed_event(base: Path, camera: str, date: str,
-                t: str = "10-00-00") -> None:
+def _seed_event(base: Path, camera: str, date: str, t: str = "10-00-00") -> None:
     """Seed a single event jpg in the camera-first nested structure: camera/year/month/day/."""
     year, month, day = date.split("-")
     cam_dir = base / camera / year / month / day
@@ -402,6 +421,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Meine Kamera", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -431,6 +451,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "L", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -447,6 +468,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "S", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -459,6 +481,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "N", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -477,6 +500,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Terrasse", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -489,6 +513,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Küche", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -500,6 +525,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Bosch Terrasse", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -512,6 +538,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Vorne Rechts", "2026-05-07")
         _seed_event(tmp_path, "Hinten Links", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
@@ -526,6 +553,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Lounge", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -538,6 +566,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_event(tmp_path, "Zweite Kamera", "2026-05-07")
         _seed_event(tmp_path, "erste Kamera", "2026-05-07")
         _seed_event(tmp_path, "Mittlere Kamera", "2026-05-07")
@@ -549,8 +578,10 @@ class TestBrowsePathAutoDetection:
 
     def test_unknown_entry_raises_unresolvable(self, tmp_path):
         from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, Unresolvable,
+            BoschCameraMediaSource,
+            Unresolvable,
         )
+
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises((Exception,)):
@@ -561,6 +592,7 @@ class TestBrowsePathAutoDetection:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         cam = "My Cam"
         cam_dir = tmp_path / cam / "2026" / "05" / "07"
         cam_dir.mkdir(parents=True)
@@ -591,6 +623,7 @@ class TestSafeNameSanitization:
     @pytest.fixture(autouse=True)
     def _import(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         self.fn = _safe_name
 
     def test_plain_name_unchanged(self):
@@ -622,13 +655,18 @@ class TestSafeNameSanitization:
     def test_result_matches_file_re_roundtrip(self):
         """Sanitized name, used as camera in a filename, must match _FILE_RE."""
         import re
+
         _FILE_RE = re.compile(
             r"^(?P<camera>.+?)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})"
             r"_(?P<etype>[A-Z_]+)_[0-9A-F]+\.(?P<ext>jpg|jpeg|mp4)$",
             re.IGNORECASE,
         )
         test_names = [
-            "Meine Kamera", "Küche", "Cam/Eingang", "Test 01", "Vorne Rechts Aussen",
+            "Meine Kamera",
+            "Küche",
+            "Cam/Eingang",
+            "Test 01",
+            "Vorne Rechts Aussen",
         ]
         for name in test_names:
             safe = self.fn(name)

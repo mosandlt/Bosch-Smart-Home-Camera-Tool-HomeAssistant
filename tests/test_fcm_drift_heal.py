@@ -24,6 +24,7 @@ Cases:
   (e) Server returns 500 (sh:internal.error) → success (already registered), marker written
   (f) Server returns 401 → False, no marker written, no token written
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -121,6 +122,7 @@ async def test_drift_heal_a_fresh_install_posts_and_writes_both_markers() -> Non
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True, "Fresh install must return True on HTTP 204"
@@ -157,10 +159,12 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
     HA restart must skip the POST. This keeps the Bosch CBS call count at 1 per
     token lifetime, not 1 per restart.
     """
-    coord = _make_coord(data={
-        "fcm_registered_token": "fcm-tok-new",   # same as _fcm_token
-        "fcm_registered_device_type": "ANDROID",
-    })
+    coord = _make_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-new",  # same as _fcm_token
+            "fcm_registered_device_type": "ANDROID",
+        }
+    )
 
     session = MagicMock()
     session.post = MagicMock()
@@ -170,12 +174,16 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True, "Already-healed entry must return True without POST"
-    session.post.assert_not_called(), (
-        "token unchanged + ANDROID marker present → POST must NOT fire. "
-        "Firing it would cause unnecessary Bosch CBS round-trips on every restart."
+    (
+        session.post.assert_not_called(),
+        (
+            "token unchanged + ANDROID marker present → POST must NOT fire. "
+            "Firing it would cause unnecessary Bosch CBS round-trips on every restart."
+        ),
     )
     assert not coord._update_calls, (
         "No async_update_entry call expected when fast-path skips."
@@ -199,10 +207,12 @@ async def test_drift_heal_c_token_matches_but_marker_missing_forces_post() -> No
 
     The fix must detect this drift and force a POST regardless of token equality.
     """
-    coord = _make_coord(data={
-        "fcm_registered_token": "fcm-tok-new",  # token unchanged — old skip would fire
-        # fcm_registered_device_type intentionally absent
-    })
+    coord = _make_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-new",  # token unchanged — old skip would fire
+            # fcm_registered_device_type intentionally absent
+        }
+    )
 
     resp_cm = _make_mock_response(204)
     session = _make_session_post(resp_cm)
@@ -222,6 +232,7 @@ async def test_drift_heal_c_token_matches_but_marker_missing_forces_post() -> No
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True, "Drift-heal POST on HTTP 204 must return True"
@@ -248,10 +259,12 @@ async def test_drift_heal_c2_token_matches_but_marker_is_ios_forces_post() -> No
     The marker could theoretically be IOS if written by old code. This variant
     ensures the drift-heal guard catches any non-ANDROID marker, not just None.
     """
-    coord = _make_coord(data={
-        "fcm_registered_token": "fcm-tok-new",
-        "fcm_registered_device_type": "IOS",  # explicit wrong marker
-    })
+    coord = _make_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-new",
+            "fcm_registered_device_type": "IOS",  # explicit wrong marker
+        }
+    )
 
     resp_cm = _make_mock_response(204)
     session = _make_session_post(resp_cm)
@@ -271,6 +284,7 @@ async def test_drift_heal_c2_token_matches_but_marker_is_ios_forces_post() -> No
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True
@@ -291,10 +305,12 @@ async def test_drift_heal_d_token_changed_posts_and_writes_marker() -> None:
     deviceType marker. This is the existing stable behavior — ensure Fix C++
     does not accidentally gate on the marker when the token also changed.
     """
-    coord = _make_coord(data={
-        "fcm_registered_token": "fcm-tok-OLD",  # differs from _fcm_token
-        "fcm_registered_device_type": "ANDROID",
-    })
+    coord = _make_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-OLD",  # differs from _fcm_token
+            "fcm_registered_device_type": "ANDROID",
+        }
+    )
 
     resp_cm = _make_mock_response(204)
     session = _make_session_post(resp_cm)
@@ -314,6 +330,7 @@ async def test_drift_heal_d_token_changed_posts_and_writes_marker() -> None:
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True
@@ -337,7 +354,9 @@ async def test_drift_heal_e_server_500_internal_error_writes_marker() -> None:
     """
     coord = _make_coord(data={})  # no stored token
 
-    resp_cm = _make_mock_response(500, body='{"code":"sh:internal.error","message":"Already exists"}')
+    resp_cm = _make_mock_response(
+        500, body='{"code":"sh:internal.error","message":"Already exists"}'
+    )
     session = _make_session_post(resp_cm)
 
     with (
@@ -345,10 +364,13 @@ async def test_drift_heal_e_server_500_internal_error_writes_marker() -> None:
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is True, "HTTP 500 sh:internal.error must be treated as success"
-    assert coord._update_calls, "async_update_entry must have been called on 500 success path"
+    assert coord._update_calls, (
+        "async_update_entry must have been called on 500 success path"
+    )
     written_data = coord._update_calls[-1]["data"]
     assert written_data.get("fcm_registered_token") == "fcm-tok-new", (
         "fcm_registered_token must be written on 500 success path to avoid "
@@ -373,7 +395,9 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
     """
     coord = _make_coord(data={})  # no stored token
 
-    resp_cm = _make_mock_response(401, body='{"code":"sh:no.permission","message":"Unauthorized"}')
+    resp_cm = _make_mock_response(
+        401, body='{"code":"sh:no.permission","message":"Unauthorized"}'
+    )
     session = _make_session_post(resp_cm)
 
     with (
@@ -381,6 +405,7 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         result = await register_fcm_with_bosch(coord)
 
     assert result is False, "HTTP 401 must return False"

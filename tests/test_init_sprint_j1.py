@@ -17,6 +17,7 @@ AsyncMock / MagicMock stub collaborators. Unbound method calls use the pattern
     BoschCameraCoordinator.method_name(coord, *args)
 so the real code path executes on our lightweight stub.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -130,21 +130,27 @@ def _make_coord(**overrides):
         ns._token_refresh_lock = asyncio.Lock()
     # _get_stream_lock: bind the real lookup against _stream_locks dict
     if ns._get_stream_lock is None:
+
         def _default_get_stream_lock(cam_id: str) -> asyncio.Lock:
             lock = ns._stream_locks.get(cam_id)
             if lock is None:
                 lock = asyncio.Lock()
                 ns._stream_locks[cam_id] = lock
             return lock
+
         ns._get_stream_lock = _default_get_stream_lock
     return ns
 
 
 def _make_jwt(exp_offset: int) -> str:
     header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"exp": int(time.time() + exp_offset)}).encode()
-    ).rstrip(b"=").decode()
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps({"exp": int(time.time() + exp_offset)}).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{payload}.sig"
 
 
@@ -173,8 +179,8 @@ class TestIntegrationVersionFallback:
         We can't re-import a cached module easily, so we replicate the exact
         try/except logic that lines 84-90 implement and verify the branch.
         """
-        import pathlib
         import json as _json
+        import pathlib
 
         # Simulate what lines 84-90 do, with read_text raising
         try:
@@ -236,7 +242,9 @@ class TestRefreshLocalCredsDebugLog:
 
         resp_text = json.dumps({"user": "new_user", "password": "new_pass"})
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
                 coord, CAM_A, resp_text, generation=2, elapsed=45.0
             )
@@ -272,7 +280,9 @@ class TestRecordStreamError:
             _live_connections={CAM_A: {"_connection_type": "LOCAL"}},
         )
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator.record_stream_error(coord, CAM_A)
 
         warn_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
@@ -294,7 +304,9 @@ class TestRecordStreamError:
             _live_connections={CAM_A: {"_connection_type": "LOCAL"}},
         )
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator.record_stream_error(coord, CAM_A)
 
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
@@ -388,7 +400,9 @@ class TestTearDownLiveStream:
             _camera_entities={CAM_A: cam_entity},
         )
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             # Must not raise
             await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_A)
 
@@ -422,10 +436,12 @@ class TestTearDownLiveStream:
                 coro.close()
             except Exception:
                 pass
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
         with (
-            caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"),
+            caplog.at_level(
+                logging.WARNING, logger="custom_components.bosch_shc_camera"
+            ),
             patch(
                 "custom_components.bosch_shc_camera.asyncio.wait_for",
                 side_effect=_fake_wait_for,
@@ -515,13 +531,15 @@ class TestScheduleTokenRefresh:
             _token_refresh_handle=bad_handle,
         )
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator._schedule_token_refresh(coord)
 
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("Could not cancel prior token-refresh handle" in m for m in debug_msgs), (
-            f"Expected debug about cancel failure, got: {debug_msgs}"
-        )
+        assert any(
+            "Could not cancel prior token-refresh handle" in m for m in debug_msgs
+        ), f"Expected debug about cancel failure, got: {debug_msgs}"
 
     def test_runtime_error_cancel_logs_debug(self, caplog):
         """When prev.cancel() raises RuntimeError, a DEBUG log is emitted."""
@@ -537,11 +555,15 @@ class TestScheduleTokenRefresh:
             _token_refresh_handle=bad_handle,
         )
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator._schedule_token_refresh(coord)
 
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("Could not cancel prior token-refresh handle" in m for m in debug_msgs)
+        assert any(
+            "Could not cancel prior token-refresh handle" in m for m in debug_msgs
+        )
 
     def test_outer_except_on_bad_token(self, caplog):
         """When the token cannot be base64-decoded, the outer except logs DEBUG."""
@@ -552,7 +574,9 @@ class TestScheduleTokenRefresh:
         # A token with only one part (no dots) fails `parts[1]` lookup
         coord = _make_coord(token="NOTAVALIDJWT")
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator._schedule_token_refresh(coord)
 
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
@@ -574,7 +598,9 @@ class TestScheduleTokenRefresh:
 
         coord = _make_coord(token=bad_token)
 
-        with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
+        ):
             BoschCameraCoordinator._schedule_token_refresh(coord)
 
         # Method must not raise. The outer except fires and logs.
@@ -678,7 +704,9 @@ class TestTryLiveConnection:
             _stream_locks={CAM_A: busy_lock},
         )
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"):
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.bosch_shc_camera"
+        ):
             result = await BoschCameraCoordinator.try_live_connection(
                 coord, CAM_A, is_renewal=False
             )

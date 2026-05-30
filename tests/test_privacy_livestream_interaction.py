@@ -37,7 +37,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 

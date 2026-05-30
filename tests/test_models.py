@@ -9,19 +9,22 @@ from __future__ import annotations
 import pytest
 
 from custom_components.bosch_shc_camera.models import (
-    CameraModelConfig,
-    MODELS,
     DEFAULT_MODEL,
-    get_model_config,
+    MODELS,
+    CameraModelConfig,
     get_display_name,
+    get_model_config,
 )
 
-
 KNOWN_HW_VERSIONS = [
-    "INDOOR", "OUTDOOR",
-    "CAMERA_360", "CAMERA_EYES",
-    "HOME_Eyes_Outdoor", "HOME_Eyes_Indoor",
-    "CAMERA_OUTDOOR_GEN2", "CAMERA_INDOOR_GEN2",
+    "INDOOR",
+    "OUTDOOR",
+    "CAMERA_360",
+    "CAMERA_EYES",
+    "HOME_Eyes_Outdoor",
+    "HOME_Eyes_Indoor",
+    "CAMERA_OUTDOOR_GEN2",
+    "CAMERA_INDOOR_GEN2",
 ]
 
 
@@ -78,8 +81,12 @@ def test_legacy_hw_aliases_resolve_to_same_config() -> None:
     """Legacy + canonical hardwareVersion strings must point to the same config."""
     assert get_model_config("INDOOR") is get_model_config("CAMERA_360")
     assert get_model_config("OUTDOOR") is get_model_config("CAMERA_EYES")
-    assert get_model_config("HOME_Eyes_Outdoor") is get_model_config("CAMERA_OUTDOOR_GEN2")
-    assert get_model_config("HOME_Eyes_Indoor") is get_model_config("CAMERA_INDOOR_GEN2")
+    assert get_model_config("HOME_Eyes_Outdoor") is get_model_config(
+        "CAMERA_OUTDOOR_GEN2"
+    )
+    assert get_model_config("HOME_Eyes_Indoor") is get_model_config(
+        "CAMERA_INDOOR_GEN2"
+    )
 
 
 def test_camera_model_config_is_frozen() -> None:
@@ -89,24 +96,30 @@ def test_camera_model_config_is_frozen() -> None:
         cfg.heartbeat_interval = 1  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("hw,expected_substr", [
-    ("INDOOR", "Innenkamera"),
-    ("OUTDOOR", "Außenkamera"),
-    ("HOME_Eyes_Outdoor", "Außenkamera"),
-    ("HOME_Eyes_Indoor", "Innenkamera"),
-])
+@pytest.mark.parametrize(
+    "hw,expected_substr",
+    [
+        ("INDOOR", "Innenkamera"),
+        ("OUTDOOR", "Außenkamera"),
+        ("HOME_Eyes_Outdoor", "Außenkamera"),
+        ("HOME_Eyes_Indoor", "Innenkamera"),
+    ],
+)
 def test_get_display_name_known(hw: str, expected_substr: str) -> None:
     """Known hardwareVersion gives the official Bosch name."""
     name = get_display_name(hw)
     assert expected_substr in name
 
 
-@pytest.mark.parametrize("hw,expected_kind", [
-    ("future_indoor_v9", "Innenkamera"),
-    ("MY_CUSTOM_outdoor_HW", "Außenkamera"),
-    ("HOME_Eyes_indoor_v3", "Innenkamera"),
-    ("CAMERA_360_v2", "Innenkamera"),
-])
+@pytest.mark.parametrize(
+    "hw,expected_kind",
+    [
+        ("future_indoor_v9", "Innenkamera"),
+        ("MY_CUSTOM_outdoor_HW", "Außenkamera"),
+        ("HOME_Eyes_indoor_v3", "Innenkamera"),
+        ("CAMERA_360_v2", "Innenkamera"),
+    ],
+)
 def test_get_display_name_unknown_indoor_outdoor_inference(
     hw: str, expected_kind: str
 ) -> None:

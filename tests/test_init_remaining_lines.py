@@ -22,8 +22,10 @@ def _make_hass():
     hass.services.async_register = MagicMock()
     hass.services.async_call = AsyncMock()
     hass.config_entries.async_loaded_entries.return_value = []
+
     async def _exec(func, *args, **kwargs):
         return func(*args, **kwargs)
+
     hass.async_add_executor_job = _exec
     return hass
 
@@ -38,6 +40,7 @@ def _make_entry(download_path):
 
 
 # ── Line 5154: handle_migrate_flat_events skips entry without runtime_data ───
+
 
 class TestMigrateEdgeCases:
     @pytest.mark.asyncio
@@ -94,6 +97,7 @@ class TestMigrateEdgeCases:
 
 # ── Lines 5206, 5210, 5237-5240, 5246, 5256-5257: handle_delete_event edges ──
 
+
 class TestDeleteEdgeCases:
     @pytest.mark.asyncio
     async def test_entry_without_runtime_data_skipped(self, tmp_path):
@@ -142,7 +146,9 @@ class TestDeleteEdgeCases:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         _register_services(hass)
-        call = MagicMock(data={"camera": "Bosch_Nonexistent", "date": "", "file_path": ""})
+        call = MagicMock(
+            data={"camera": "Bosch_Nonexistent", "date": "", "file_path": ""}
+        )
         await _get_handlers(hass)["delete_event"](call)
 
     @pytest.mark.asyncio
@@ -154,18 +160,24 @@ class TestDeleteEdgeCases:
         cam_dir.mkdir()
         (cam_dir / "garbage.txt").write_text("nope")
         # One matching file to ensure the loop runs through both branches
-        (cam_dir / "Bosch_Terrasse_2026-05-12_18-30-22_MOTION_AABBCCDD.jpg").write_text("yes")
+        (cam_dir / "Bosch_Terrasse_2026-05-12_18-30-22_MOTION_AABBCCDD.jpg").write_text(
+            "yes"
+        )
 
         entry = _make_entry(str(tmp_path))
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         _register_services(hass)
-        call = MagicMock(data={"camera": "Bosch_Terrasse", "date": "2026-05-12", "file_path": ""})
+        call = MagicMock(
+            data={"camera": "Bosch_Terrasse", "date": "2026-05-12", "file_path": ""}
+        )
         await _get_handlers(hass)["delete_event"](call)
         # The matching file is deleted, the garbage stays
         assert (cam_dir / "garbage.txt").exists()
-        assert not (cam_dir / "Bosch_Terrasse_2026-05-12_18-30-22_MOTION_AABBCCDD.jpg").exists()
+        assert not (
+            cam_dir / "Bosch_Terrasse_2026-05-12_18-30-22_MOTION_AABBCCDD.jpg"
+        ).exists()
 
     @pytest.mark.asyncio
     async def test_rmdir_oserror_on_non_empty_subdir_swallowed(self, tmp_path):
@@ -187,7 +199,9 @@ class TestDeleteEdgeCases:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         _register_services(hass)
-        call = MagicMock(data={"camera": "Bosch_Terrasse", "date": "2026-05-12", "file_path": ""})
+        call = MagicMock(
+            data={"camera": "Bosch_Terrasse", "date": "2026-05-12", "file_path": ""}
+        )
         await _get_handlers(hass)["delete_event"](call)
         # Subdir still exists because it had a leftover file → rmdir raised OSError → swallowed
         assert sub.exists()
@@ -195,6 +209,7 @@ class TestDeleteEdgeCases:
 
 
 # ── Lines 4325, 4435, 4443, 4449: async_setup_entry inline callbacks/branches ─
+
 
 class TestSetupEntryBranches:
     """These four lines live inside `async_setup_entry`. Three are kwargs-
@@ -274,12 +289,14 @@ class TestSetupEntryBranches:
 
 # ── Line 4957: delete_motion_zone POST non-2xx raises HomeAssistantError ─────
 
+
 @pytest.mark.asyncio
 async def test_delete_motion_zone_post_non_2xx_raises(tmp_path):
     """Line 4957: when POST motion_sensitive_areas returns non-2xx,
     raise HomeAssistantError(http_error)."""
-    from custom_components.bosch_shc_camera import _register_services
     from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.bosch_shc_camera import _register_services
 
     # Build a coordinator stub with the methods delete_motion_zone needs
     coord = MagicMock()
@@ -300,10 +317,12 @@ async def test_delete_motion_zone_post_non_2xx_raises(tmp_path):
     # GET returns the zones list
     get_resp = MagicMock()
     get_resp.status = 200
-    get_resp.json = AsyncMock(return_value=[
-        {"id": 1, "name": "Zone 1", "points": [[0, 0]]},
-        {"id": 2, "name": "Zone 2", "points": [[20, 20]]},
-    ])
+    get_resp.json = AsyncMock(
+        return_value=[
+            {"id": 1, "name": "Zone 1", "points": [[0, 0]]},
+            {"id": 2, "name": "Zone 2", "points": [[20, 20]]},
+        ]
+    )
     get_cm = MagicMock()
     get_cm.__aenter__ = AsyncMock(return_value=get_resp)
     get_cm.__aexit__ = AsyncMock(return_value=False)

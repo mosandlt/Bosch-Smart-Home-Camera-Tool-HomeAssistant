@@ -16,18 +16,18 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.helpers.entity import EntityCategory
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 # ── Stub builders ──────────────────────────────────────────────────────────────
+
 
 def _make_coord(
     *,
@@ -45,22 +45,24 @@ def _make_coord(
         "macAddress": "aa:bb:cc:33:14:ae",
         "title": "Terrasse",
     }
-    _local_creds: dict[str, Any] = local_creds if local_creds is not None else {
-        "user": "cbs-A1B2C3D4",
-        "password": "secret123",
-        "host": "192.0.2.149",
-        "port": 443,
-        "ts": 1000.0,
-    }
+    _local_creds: dict[str, Any] = (
+        local_creds
+        if local_creds is not None
+        else {
+            "user": "cbs-A1B2C3D4",
+            "password": "secret123",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 1000.0,
+        }
+    )
     coord = SimpleNamespace(
         data={CAM_ID: {"info": info, "status": "ONLINE", "events": []}},
         last_update_success=last_update_success,
         _rcp_onvif_scopes_cache=(
             {CAM_ID: onvif_scopes} if onvif_scopes is not None else {}
         ),
-        _rcp_version_cache=(
-            {CAM_ID: rcp_version} if rcp_version is not None else {}
-        ),
+        _rcp_version_cache=({CAM_ID: rcp_version} if rcp_version is not None else {}),
         _feature_flags=feature_flags if feature_flags is not None else {},
         _local_creds_cache={CAM_ID: _local_creds} if _local_creds else {},
         _rcp_lan_ip_cache={CAM_ID: lan_ip} if lan_ip else {},
@@ -90,6 +92,7 @@ class TestBoschOnvifScopesSensor:
 
     def _make(self, coord: Any | None = None) -> Any:
         from custom_components.bosch_shc_camera.sensor import BoschOnvifScopesSensor
+
         c = coord if coord is not None else _make_coord()
         return BoschOnvifScopesSensor(c, CAM_ID, _make_entry())
 
@@ -107,7 +110,13 @@ class TestBoschOnvifScopesSensor:
         assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_onvif_scopes"
 
     def test_native_value_returns_supported_when_scopes_present(self) -> None:
-        scopes = {"supported": True, "name": "Terrasse", "hardware": "HOME_Eyes_Outdoor", "profiles": ["Streaming"], "raw_scopes": []}
+        scopes = {
+            "supported": True,
+            "name": "Terrasse",
+            "hardware": "HOME_Eyes_Outdoor",
+            "profiles": ["Streaming"],
+            "raw_scopes": [],
+        }
         s = self._make(_make_coord(onvif_scopes=scopes))
         assert s.native_value == "ONVIF supported"
 
@@ -123,7 +132,13 @@ class TestBoschOnvifScopesSensor:
         assert s.native_value is None
 
     def test_available_true_when_scopes_present(self) -> None:
-        scopes = {"supported": True, "name": "Terrasse", "hardware": "", "profiles": [], "raw_scopes": []}
+        scopes = {
+            "supported": True,
+            "name": "Terrasse",
+            "hardware": "",
+            "profiles": [],
+            "raw_scopes": [],
+        }
         s = self._make(_make_coord(onvif_scopes=scopes))
         assert s.available is True
 
@@ -131,12 +146,24 @@ class TestBoschOnvifScopesSensor:
         assert self._make(_make_coord(onvif_scopes=None)).available is False
 
     def test_available_false_when_update_failed(self) -> None:
-        scopes = {"supported": True, "name": "X", "hardware": "", "profiles": [], "raw_scopes": []}
+        scopes = {
+            "supported": True,
+            "name": "X",
+            "hardware": "",
+            "profiles": [],
+            "raw_scopes": [],
+        }
         s = self._make(_make_coord(onvif_scopes=scopes, last_update_success=False))
         assert s.available is False
 
     def test_extra_attrs_keys_present(self) -> None:
-        scopes = {"supported": True, "name": "Terrasse", "hardware": "HOME_Eyes_Outdoor", "profiles": ["Streaming"], "raw_scopes": ["onvif://x"]}
+        scopes = {
+            "supported": True,
+            "name": "Terrasse",
+            "hardware": "HOME_Eyes_Outdoor",
+            "profiles": ["Streaming"],
+            "raw_scopes": ["onvif://x"],
+        }
         s = self._make(_make_coord(onvif_scopes=scopes))
         attrs = s.extra_state_attributes
         assert attrs["name"] == "Terrasse"
@@ -161,6 +188,7 @@ class TestBoschRcpVersionSensor:
 
     def _make(self, coord: Any | None = None) -> Any:
         from custom_components.bosch_shc_camera.sensor import BoschRcpVersionSensor
+
         c = coord if coord is not None else _make_coord()
         return BoschRcpVersionSensor(c, CAM_ID, _make_entry())
 
@@ -230,7 +258,10 @@ class TestBoschCloudFeatureFlagsSensor:
     """Tests for BoschCloudFeatureFlagsSensor (F13)."""
 
     def _make(self, coord: Any | None = None) -> Any:
-        from custom_components.bosch_shc_camera.sensor import BoschCloudFeatureFlagsSensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschCloudFeatureFlagsSensor,
+        )
+
         c = coord if coord is not None else _make_coord()
         return BoschCloudFeatureFlagsSensor(c, CAM_ID, _make_entry())
 
@@ -300,6 +331,7 @@ class TestParseOnvifScopes:
 
     def _parse(self, raw: bytes) -> dict[str, Any]:
         from custom_components.bosch_shc_camera import _parse_onvif_scopes
+
         return _parse_onvif_scopes(raw)
 
     def test_supported_true(self) -> None:
@@ -411,14 +443,26 @@ class TestFetchRcpLan:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_creds_missing_user(self) -> None:
-        creds: dict[str, Any] = {"user": "", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
         result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_when_http_401(self) -> None:
-        creds: dict[str, Any] = {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "cbs-XYZ",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
 
         mock_resp = AsyncMock()
@@ -426,19 +470,28 @@ class TestFetchRcpLan:
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            return_value=mock_resp,
-        ), patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                return_value=mock_resp,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_rcp_error_in_body(self) -> None:
-        creds: dict[str, Any] = {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "cbs-XYZ",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
 
         mock_resp = AsyncMock()
@@ -447,19 +500,28 @@ class TestFetchRcpLan:
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            return_value=mock_resp,
-        ), patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                return_value=mock_resp,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_parses_str_hex_payload(self) -> None:
-        creds: dict[str, Any] = {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "cbs-XYZ",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
 
         # Version bytes 1.2.38.150 = 01 02 26 96
@@ -472,27 +534,39 @@ class TestFetchRcpLan:
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            return_value=mock_resp,
-        ), patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                return_value=mock_resp,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result == bytes.fromhex(payload_hex)
 
     @pytest.mark.asyncio
     async def test_returns_none_on_timeout(self) -> None:
-        creds: dict[str, Any] = {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "cbs-XYZ",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            side_effect=asyncio.TimeoutError(),
-        ), patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                side_effect=TimeoutError(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result is None
@@ -500,7 +574,13 @@ class TestFetchRcpLan:
     @pytest.mark.asyncio
     async def test_fallback_raw_bytes_when_no_str_tag(self) -> None:
         """Non-XML binary payload falls through to raw bytes return."""
-        creds: dict[str, Any] = {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}
+        creds: dict[str, Any] = {
+            "user": "cbs-XYZ",
+            "password": "pw",
+            "host": "192.0.2.149",
+            "port": 443,
+            "ts": 0.0,
+        }
         coord = self._make_coordinator(local_creds=creds)
 
         raw_bytes = b"\x01\x02\x26\x96"  # pure binary, no XML envelope
@@ -511,12 +591,15 @@ class TestFetchRcpLan:
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            return_value=mock_resp,
-        ), patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                return_value=mock_resp,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
         assert result == raw_bytes
@@ -530,11 +613,20 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
     def _make_coordinator_with_caches(self) -> Any:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = object.__new__(BoschCameraCoordinator)
         coord._rcp_onvif_scopes_cache = {}
         coord._rcp_version_cache = {}
         coord._rcp_lan_ip_cache = {CAM_ID: "192.0.2.149"}
-        coord._local_creds_cache = {CAM_ID: {"user": "cbs-XYZ", "password": "pw", "host": "192.0.2.149", "port": 443, "ts": 0.0}}
+        coord._local_creds_cache = {
+            CAM_ID: {
+                "user": "cbs-XYZ",
+                "password": "pw",
+                "host": "192.0.2.149",
+                "port": 443,
+                "ts": 0.0,
+            }
+        }
         coord.hass = MagicMock()
 
         def _get_cam_lan_ip(cam_id: str) -> str | None:

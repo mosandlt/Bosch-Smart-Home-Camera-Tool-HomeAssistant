@@ -8,6 +8,7 @@ concurrency = ["thread"]
 
 [tool.mypy]
 python_version = "3.12"
+platform = "linux"  # HA runs on Linux; analyze platform-specific stdlib (socket.TCP_KEEPIDLE etc.) as Linux regardless of host OS (macOS dev vs Linux CI)
 files = ["custom_components/bosch_shc_camera"]
 strict = true
 warn_unused_configs = true
@@ -32,6 +33,8 @@ module = [
     "yarl.*",
     "firebase_messaging.*",
     "smbprotocol.*",
+    "smbclient",
+    "smbclient.*",
     "google.*",
     "cryptography.*",
     "OpenSSL.*",
@@ -44,3 +47,44 @@ module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["build", "captures", "credentials", "snapshots", "events", "research"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "C90", "RUF"]
+ignore = [
+    "E501",    # line length is enforced by the formatter, not the linter
+    "B008",    # function call in argument defaults — common HA/voluptuous pattern
+    "S311",    # stdlib PRNG is used for non-crypto jitter/labels only
+    "C901",    # complexity is reported via mccabe below, not hard-failed inline
+    "UP038",   # isinstance tuple form kept for readability
+    "E402",    # imports after module-level constants — common HA integration layout
+    "E741",    # short loop/lambda names kept where locally unambiguous
+    "E731",    # small lambda assignments kept for readability
+    "RUF001",  # ambiguous unicode in strings — intentional typography (×, –, …) + German
+    "RUF002",  # ambiguous unicode in docstrings — same
+    "RUF003",  # ambiguous unicode in comments — same
+    "RUF012",  # mutable class defaults are HA entity-description / dataclass idiom here
+    "RUF046",  # int() casts kept explicit for readability
+    "RUF059",  # unpacked-but-unused tuple members kept to document the shape
+    "B007",    # loop control var unused but kept for readability of the iterable
+    "B023",    # loop-var closures here are all awaited within the same iteration
+    # S104/S108/S110/S112/S310 are NOT globally ignored — each known-safe site
+    # carries a per-line `# noqa: S### # reason` so NEW occurrences still fail CI.
+    "S321",    # FTP usage flag — false positive (no FTP in this path)
+    "S101",    # asserts are deliberate mypy type-narrowing invariants (see "narrowed by" comments) — required for mypy --strict
+    "B904",    # exception chaining (`raise ... from`) not enforced — HA does not require it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "F401", "F811", "F841", "E402", "B011", "B017"]
+"scripts/**" = ["S", "T201"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 40
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components"]

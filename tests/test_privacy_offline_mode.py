@@ -18,7 +18,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -31,9 +30,18 @@ def _make_coord(
 ) -> SimpleNamespace:
     coord = SimpleNamespace()
     coord.last_update_success = last_update_success
-    coord._shc_state_cache = {CAM_ID: {"privacy_mode": False}} if has_cached_state else {CAM_ID: {}}
+    coord._shc_state_cache = (
+        {CAM_ID: {"privacy_mode": False}} if has_cached_state else {CAM_ID: {}}
+    )
     coord._rcp_privacy_cache = {}
-    coord.data = {CAM_ID: {"info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"}}}
+    coord.data = {
+        CAM_ID: {
+            "info": {
+                "title": "Terrasse",
+                "hardwareVersion": "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR",
+            }
+        }
+    }
     coord._hw_version = {CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"}
     if is_lan_reachable_value is None:
         # No helper attached at all — simulates pre-v12.4.10 stub.
@@ -45,6 +53,7 @@ def _make_coord(
 
 def _make_switch(coord) -> object:
     from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
     entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
     return BoschPrivacyModeSwitch(coord, CAM_ID, entry)
 
@@ -64,8 +73,10 @@ class TestPrivacySwitchOfflineMode:
     def test_cloud_down_cached_state_gen2_lan_reachable_is_available(self):
         """The pre-v12.4.10 fallback path — still must keep working."""
         coord = _make_coord(
-            last_update_success=False, has_cached_state=True,
-            is_lan_reachable_value=True, gen2=True,
+            last_update_success=False,
+            has_cached_state=True,
+            is_lan_reachable_value=True,
+            gen2=True,
         )
         s = _make_switch(coord)
         assert s.available is True
@@ -75,8 +86,10 @@ class TestPrivacySwitchOfflineMode:
         but a reachable LAN must keep the switch toggleable. is_on returns
         None (HA renders 'unknown'), but the user can still flip it."""
         coord = _make_coord(
-            last_update_success=False, has_cached_state=False,
-            is_lan_reachable_value=True, gen2=True,
+            last_update_success=False,
+            has_cached_state=False,
+            is_lan_reachable_value=True,
+            gen2=True,
         )
         s = _make_switch(coord)
         assert s.available is True
@@ -86,16 +99,20 @@ class TestPrivacySwitchOfflineMode:
     def test_cloud_down_gen1_is_unavailable(self):
         """Gen1 cameras have no RCP-write path → fallback is N/A."""
         coord = _make_coord(
-            last_update_success=False, has_cached_state=False,
-            is_lan_reachable_value=True, gen2=False,
+            last_update_success=False,
+            has_cached_state=False,
+            is_lan_reachable_value=True,
+            gen2=False,
         )
         s = _make_switch(coord)
         assert s.available is False
 
     def test_cloud_down_lan_unreachable_is_unavailable(self):
         coord = _make_coord(
-            last_update_success=False, has_cached_state=True,
-            is_lan_reachable_value=False, gen2=True,
+            last_update_success=False,
+            has_cached_state=True,
+            is_lan_reachable_value=False,
+            gen2=True,
         )
         s = _make_switch(coord)
         assert s.available is False
@@ -103,8 +120,10 @@ class TestPrivacySwitchOfflineMode:
     def test_cloud_down_lan_unknown_is_unavailable(self):
         """is_lan_reachable returning None (no ping yet) — treat as unavailable."""
         coord = _make_coord(
-            last_update_success=False, has_cached_state=True,
-            is_lan_reachable_value=None, gen2=True,
+            last_update_success=False,
+            has_cached_state=True,
+            is_lan_reachable_value=None,
+            gen2=True,
         )
         # Force the helper to be present but return None.
         coord.is_lan_reachable = lambda _cid: None
@@ -115,7 +134,9 @@ class TestPrivacySwitchOfflineMode:
         """Stub coordinators in older tests have no is_lan_reachable method.
         Must not crash — return False instead."""
         coord = _make_coord(
-            last_update_success=False, has_cached_state=True, gen2=True,
+            last_update_success=False,
+            has_cached_state=True,
+            gen2=True,
         )
         # No is_lan_reachable attached at all.
         s = _make_switch(coord)

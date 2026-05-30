@@ -1,0 +1,38 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    name: ruff · mypy · codespell · pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - name: Install system dependencies
+        run: sudo apt-get install -y libturbojpeg0-dev
+      - name: Install test + tooling dependencies
+        run: pip install -r requirements_test.txt
+      - name: ruff format --check
+        run: ruff format --check custom_components/ tests/ scripts/
+      - name: ruff check
+        run: ruff check custom_components/ tests/ scripts/
+      - name: mypy --strict
+        run: mypy
+      - name: codespell
+        run: codespell custom_components/ scripts/ src/ tests/
+      - name: pip-audit (our manifest deps)
+        run: |
+          python3 -c "import json;print(chr(10).join(json.load(open('custom_components/bosch_shc_camera/manifest.json'))['requirements']))" > /tmp/our_reqs.txt
+          pip-audit -r /tmp/our_reqs.txt

@@ -18,12 +18,7 @@ from pathlib import Path
 
 import pytest
 
-
-COMPONENT_DIR = (
-    Path(__file__).parent.parent
-    / "custom_components"
-    / "bosch_shc_camera"
-)
+COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 STRINGS_PATH = COMPONENT_DIR / "strings.json"
 DE_PATH = COMPONENT_DIR / "translations" / "de.json"
 EN_PATH = COMPONENT_DIR / "translations" / "en.json"
@@ -151,11 +146,18 @@ def test_icon_translation_keys_present(icons) -> None:
     sw = icons["entity"].get("switch", {})
     se = icons["entity"].get("sensor", {})
     must_have_switch = {
-        "live_stream", "privacy_mode", "audio", "camera_light",
-        "notifications", "intercom", "intrusion_detection",
+        "live_stream",
+        "privacy_mode",
+        "audio",
+        "camera_light",
+        "notifications",
+        "intercom",
+        "intrusion_detection",
         "alarm_system_arm",
-        "notification_type_movement", "notification_type_person",
-        "notification_type_camera_alarm", "notification_type_trouble_email",
+        "notification_type_movement",
+        "notification_type_person",
+        "notification_type_camera_alarm",
+        "notification_type_trouble_email",
     }
     must_have_sensor = {"status", "fcm_push_status", "stream_status"}
     missing_sw = must_have_switch - set(sw.keys())
@@ -191,17 +193,15 @@ def _walk_string_values(node, path):
     """Yield (path, string_value) for every JSON string leaf."""
     if isinstance(node, dict):
         for k, v in node.items():
-            yield from _walk_string_values(v, path + [str(k)])
+            yield from _walk_string_values(v, [*path, str(k)])
     elif isinstance(node, list):
         for i, v in enumerate(node):
-            yield from _walk_string_values(v, path + [str(i)])
+            yield from _walk_string_values(v, [*path, str(i)])
     elif isinstance(node, str):
         yield ".".join(path), node
 
 
-@pytest.mark.parametrize(
-    "fixture_name", ["strings", "de", "en"]
-)
+@pytest.mark.parametrize("fixture_name", ["strings", "de", "en"])
 def test_no_invalid_placeholders_in_translations(fixture_name, request):
     """Every `{...}` placeholder in translation strings must be a valid
     Python identifier (`[a-zA-Z_][a-zA-Z0-9_]*`). Hassfest enforces
@@ -229,8 +229,7 @@ def test_no_invalid_placeholders_in_translations(fixture_name, request):
     assert not bad_placeholders, (
         f"\n{fixture_name}.json has {len(bad_placeholders)} invalid Hassfest placeholder(s):\n"
         + "\n".join(
-            f"  {p}: {{{ph}}}\n    in: {snippet}"
-            for p, ph, snippet in bad_placeholders
+            f"  {p}: {{{ph}}}\n    in: {snippet}" for p, ph, snippet in bad_placeholders
         )
         + "\n\nFix: rephrase in plain prose — DO NOT use `<...>` either, "
         "Hassfest also rejects HTML-looking tokens."
@@ -238,9 +237,6 @@ def test_no_invalid_placeholders_in_translations(fixture_name, request):
     assert not bad_html, (
         f"\n{fixture_name}.json has {len(bad_html)} HTML-looking token(s) — "
         f"Hassfest rejects these as 'string should not contain HTML':\n"
-        + "\n".join(
-            f"  {p}: {tag}\n    in: {snippet}"
-            for p, tag, snippet in bad_html
-        )
+        + "\n".join(f"  {p}: {tag}\n    in: {snippet}" for p, tag, snippet in bad_html)
         + "\n\nFix: rephrase in plain prose, avoid `<word>` / `</word>` shapes."
     )

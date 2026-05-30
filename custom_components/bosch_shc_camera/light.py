@@ -32,7 +32,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API  # type: ignore[attr-defined]
+from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ async def async_setup_entry(
         _hw_cache = getattr(coordinator, "_hw_version", {}) or {}
         hw = cam_info.get("hardwareVersion") or _hw_cache.get(cam_id, "CAMERA")
         from .models import get_model_config
+
         if get_model_config(hw).generation >= 2:
             has_light = cam_info.get("featureSupport", {}).get("light", False)
             # ONLY Outdoor II has controllable lights (RGB top + bottom + color-
@@ -81,7 +82,9 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
     the card's color circles fall back to warm-white default.
     """
 
-    _led_key: str = ""  # "frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"
+    _led_key: str = (
+        ""  # "frontLightSettings", "topLedLightSettings", "bottomLedLightSettings"
+    )
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
@@ -92,13 +95,16 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         self._cam_title = info.get("title", cam_id)
         self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
+
         self._model_name = get_display_name(self._model)
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
         # Local state cache
         self._brightness: int = 0
-        self._last_brightness: int = 100  # remember last non-zero brightness for restore on turn_on
+        self._last_brightness: int = (
+            100  # remember last non-zero brightness for restore on turn_on
+        )
         self._color_hex: str | None = None
         self._last_color_hex: str | None = None  # None = user has never picked a color
         self._white_balance: float | None = None
@@ -140,7 +146,11 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         if color_hex:
             h = color_hex.lstrip("#")
             try:
-                attrs["last_rgb_color"] = [int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)]
+                attrs["last_rgb_color"] = [
+                    int(h[0:2], 16),
+                    int(h[2:4], 16),
+                    int(h[4:6], 16),
+                ]
             except ValueError:
                 pass
         else:
@@ -210,6 +220,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         # if hw_version isn't yet known (cold-start during cloud outage),
         # allow the toggle. The write fails cleanly for Gen1.
         from .shc import _is_gen2
+
         if _is_gen2(self.coordinator, self._cam_id):
             return True
         hw = self.coordinator._hw_version.get(self._cam_id)
@@ -247,9 +258,18 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         # Default fallback if cache is empty
         return {
-            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
-            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
-            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": -1.0}),
+            "frontLightSettings": cached.get(
+                "frontLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            ),
+            "topLedLightSettings": cached.get(
+                "topLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            ),
+            "bottomLedLightSettings": cached.get(
+                "bottomLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            ),
         }
 
     async def _put_lighting_switch(self, updates: dict[str, Any]) -> bool:
@@ -277,7 +297,8 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
             async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers, json=body,
+                    headers=headers,
+                    json=body,
                 ) as resp:
                     if resp.status in (200, 201, 204):
                         # Update cache with response body (200/201) OR fall back to
@@ -291,15 +312,21 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
                         try:
                             rsp = await resp.json(content_type=None)
                             if rsp and isinstance(rsp, dict):
-                                self.coordinator._lighting_switch_cache[self._cam_id] = rsp
+                                self.coordinator._lighting_switch_cache[
+                                    self._cam_id
+                                ] = rsp
                             else:
                                 # Empty JSON or non-dict → treat as no-content, use body
-                                self.coordinator._lighting_switch_cache[self._cam_id] = body
+                                self.coordinator._lighting_switch_cache[
+                                    self._cam_id
+                                ] = body
                         except Exception:
                             # 204 No Content or unparseable → update cache from sent body
                             self.coordinator._lighting_switch_cache[self._cam_id] = body
                         return True
-                    _LOGGER.warning("lighting/switch HTTP %d for %s", resp.status, self._cam_id[:8])
+                    _LOGGER.warning(
+                        "lighting/switch HTTP %d for %s", resp.status, self._cam_id[:8]
+                    )
         except Exception as err:
             _LOGGER.warning("lighting/switch error for %s: %s", self._cam_id[:8], err)
         return False
@@ -318,7 +345,8 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
             async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch/{endpoint}",
-                    headers=headers, json={"enabled": enabled},
+                    headers=headers,
+                    json={"enabled": enabled},
                 ) as resp:
                     return resp.status in (200, 201, 204)
         except Exception as err:
@@ -366,6 +394,7 @@ class _BoschRgbLedLight(_BoschLightBase):
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
         from .switch import _warn_if_privacy_on  # local import: avoid module cycle
+
         if await _warn_if_privacy_on(self, "RGB-Licht"):
             return
         self._load_state_from_cache()
@@ -396,12 +425,28 @@ class _BoschRgbLedLight(_BoschLightBase):
             return
 
         # Restore last brightness if not specified
-        api_brightness = max(1, round(brightness * 100 / 255)) if brightness else (self._last_brightness or 100)
+        api_brightness = (
+            max(1, round(brightness * 100 / 255))
+            if brightness
+            else (self._last_brightness or 100)
+        )
 
         if color_hex:
-            body = {self._led_key: {"brightness": api_brightness, "color": color_hex, "whiteBalance": None}}
+            body = {
+                self._led_key: {
+                    "brightness": api_brightness,
+                    "color": color_hex,
+                    "whiteBalance": None,
+                }
+            }
         else:
-            body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": -1.0}}
+            body = {
+                self._led_key: {
+                    "brightness": api_brightness,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                }
+            }
 
         self._brightness = api_brightness
         self._last_brightness = api_brightness
@@ -439,9 +484,9 @@ class BoschTopLedLight(_BoschRgbLedLight):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Oberes Licht"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_top_led_light"
-        self._attr_icon            = "mdi:arrow-up-bold-circle"
+        self._attr_name = "Oberes Licht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_light"
+        self._attr_icon = "mdi:arrow-up-bold-circle"
         self._attr_translation_key = "top_led_light"
 
 
@@ -453,9 +498,9 @@ class BoschBottomLedLight(_BoschRgbLedLight):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Unteres Licht"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_bottom_led_light"
-        self._attr_icon            = "mdi:arrow-down-bold-circle"
+        self._attr_name = "Unteres Licht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_light"
+        self._attr_icon = "mdi:arrow-down-bold-circle"
         self._attr_translation_key = "bottom_led_light"
 
 
@@ -476,9 +521,9 @@ class BoschFrontLight(_BoschLightBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Frontlicht"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_front_light_entity"
-        self._attr_icon            = "mdi:spotlight-beam"
+        self._attr_name = "Frontlicht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_front_light_entity"
+        self._attr_icon = "mdi:spotlight-beam"
         self._attr_translation_key = "front_light_entity"
         self._white_balance = -1.0
 
@@ -491,13 +536,18 @@ class BoschFrontLight(_BoschLightBase):
         self._load_state_from_cache()
         wb = self._white_balance
         if wb is None:
-            wb = self._last_white_balance if self._last_white_balance is not None else -1.0
+            wb = (
+                self._last_white_balance
+                if self._last_white_balance is not None
+                else -1.0
+            )
         # -1.0 (cool) = 6500K, 1.0 (warm) = 2000K
         return int(4250 - wb * 2250)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
         from .switch import _warn_if_privacy_on  # local import: avoid module cycle
+
         if await _warn_if_privacy_on(self, "Frontlicht"):
             return
         self._load_state_from_cache()
@@ -523,9 +573,19 @@ class BoschFrontLight(_BoschLightBase):
             self.async_write_ha_state()
             return
 
-        api_brightness = max(1, round(brightness * 100 / 255)) if brightness else (self._last_brightness or 100)
+        api_brightness = (
+            max(1, round(brightness * 100 / 255))
+            if brightness
+            else (self._last_brightness or 100)
+        )
 
-        body = {self._led_key: {"brightness": api_brightness, "color": None, "whiteBalance": wb}}
+        body = {
+            self._led_key: {
+                "brightness": api_brightness,
+                "color": None,
+                "whiteBalance": wb,
+            }
+        }
         self._brightness = api_brightness
         self._last_brightness = api_brightness
         self._is_on = True
@@ -541,6 +601,8 @@ class BoschFrontLight(_BoschLightBase):
         # then disable via switch endpoint. Without the PUT, the cache retains the old
         # brightness, and any subsequent top/bottom LED PUT would re-enable the front light.
         wb = self._white_balance if self._white_balance is not None else -1.0
-        await self._put_lighting_switch({self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}})
+        await self._put_lighting_switch(
+            {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}}
+        )
         await self._put_switch_endpoint("front", False)
         self.async_write_ha_state()

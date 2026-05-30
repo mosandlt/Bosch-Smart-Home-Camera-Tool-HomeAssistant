@@ -40,10 +40,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_STREAMING = "11111111-1111-1111-1111-111111111111"
-CAM_IDLE_1    = "22222222-2222-2222-2222-222222222222"
-CAM_IDLE_2    = "44444444-4444-4444-4444-444444444444"
+CAM_IDLE_1 = "22222222-2222-2222-2222-222222222222"
+CAM_IDLE_2 = "44444444-4444-4444-4444-444444444444"
 
 
 def _make_cam_entity(cam_id: str, *, with_stream_feature: bool = True):
@@ -93,7 +92,8 @@ class TestEnsureGo2rtcSchemesFresh:
 
         with patch(
             "homeassistant.components.camera.webrtc.DATA_WEBRTC_PROVIDERS",
-            create=True, new="webrtc_providers_key",
+            create=True,
+            new="webrtc_providers_key",
         ):
             coord.hass.data = {"webrtc_providers_key": {provider}}
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
@@ -116,7 +116,8 @@ class TestEnsureGo2rtcSchemesFresh:
 
         with patch(
             "homeassistant.components.camera.webrtc.DATA_WEBRTC_PROVIDERS",
-            create=True, new="webrtc_providers_key",
+            create=True,
+            new="webrtc_providers_key",
         ):
             coord.hass.data = {"webrtc_providers_key": {provider}}
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
@@ -137,7 +138,8 @@ class TestEnsureGo2rtcSchemesFresh:
 
         with patch(
             "homeassistant.components.camera.webrtc.DATA_WEBRTC_PROVIDERS",
-            create=True, new="webrtc_providers_key",
+            create=True,
+            new="webrtc_providers_key",
         ):
             coord.hass.data = {"webrtc_providers_key": {provider}}
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
@@ -161,6 +163,7 @@ class TestWebRTCRecoveryWatchdog:
         unambiguous regression guard — if the filter is removed, this fails.
         """
         import inspect
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         src = inspect.getsource(BoschCameraCoordinator._check_and_recover_webrtc)
@@ -175,6 +178,7 @@ class TestWebRTCRecoveryWatchdog:
         """Companion to the above: same source-grep guard for
         `_ensure_go2rtc_schemes_fresh`."""
         import inspect
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         src = inspect.getsource(BoschCameraCoordinator._ensure_go2rtc_schemes_fresh)

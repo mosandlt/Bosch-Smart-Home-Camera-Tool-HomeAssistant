@@ -39,7 +39,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -92,21 +91,27 @@ class TestHealthWatchdogIntentCheck:
     @pytest.mark.asyncio
     async def test_watchdog_skips_reconnect_when_intent_gone(self, monkeypatch):
         """Pin: if user toggled OFF during sleep, watchdog bails without re-opening."""
-        from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
-
         # Mock sleep so the test runs instantly
         import asyncio as _asyncio
+
+        from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         async def _no_sleep(*_a, **_kw):
             pass
+
         monkeypatch.setattr(_asyncio, "sleep", _no_sleep)
 
         cam_entity = SimpleNamespace(
-            stream=SimpleNamespace(available=False),  # unhealthy → would normally trigger reconnect
+            stream=SimpleNamespace(
+                available=False
+            ),  # unhealthy → would normally trigger reconnect
         )
 
         try_live = AsyncMock()
         coord = SimpleNamespace(
-            _live_connections={CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": "rtsps://x"}},
+            _live_connections={
+                CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": "rtsps://x"}
+            },
             _user_intent_streams={CAM_ID},  # user initially toggled on
             _camera_entities={CAM_ID: cam_entity},
             _stream_error_count={},
@@ -114,7 +119,9 @@ class TestHealthWatchdogIntentCheck:
             try_live_connection=try_live,
             record_stream_error=MagicMock(),
             record_stream_success=MagicMock(),
-            get_model_config=MagicMock(return_value=SimpleNamespace(max_stream_errors=3)),
+            get_model_config=MagicMock(
+                return_value=SimpleNamespace(max_stream_errors=3)
+            ),
         )
 
         # Simulate that the user toggled OFF between schedule and fire: the
@@ -133,27 +140,34 @@ class TestHealthWatchdogIntentCheck:
 
         await BoschLiveStreamSwitch._stream_health_watchdog(switch_stub, CAM_ID)
 
-        try_live.assert_not_called(), (
-            "REGRESSION: Watchdog called try_live_connection after the user "
-            "toggled OFF. The intent check between _stop_tls_proxy and "
-            "try_live_connection is broken."
+        (
+            try_live.assert_not_called(),
+            (
+                "REGRESSION: Watchdog called try_live_connection after the user "
+                "toggled OFF. The intent check between _stop_tls_proxy and "
+                "try_live_connection is broken."
+            ),
         )
 
     @pytest.mark.asyncio
     async def test_watchdog_reconnects_when_intent_still_present(self, monkeypatch):
         """Sanity: if intent is still True, watchdog DOES reconnect."""
+        import asyncio as _asyncio
+
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
-        import asyncio as _asyncio
         async def _no_sleep(*_a, **_kw):
             pass
+
         monkeypatch.setattr(_asyncio, "sleep", _no_sleep)
 
         cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
 
         try_live = AsyncMock(return_value={"_connection_type": "REMOTE"})
         coord = SimpleNamespace(
-            _live_connections={CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": "rtsps://x"}},
+            _live_connections={
+                CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": "rtsps://x"}
+            },
             _user_intent_streams={CAM_ID},
             _camera_entities={CAM_ID: cam_entity},
             _stream_error_count={},
@@ -161,7 +175,9 @@ class TestHealthWatchdogIntentCheck:
             try_live_connection=try_live,
             record_stream_error=MagicMock(),
             record_stream_success=MagicMock(),
-            get_model_config=MagicMock(return_value=SimpleNamespace(max_stream_errors=3)),
+            get_model_config=MagicMock(
+                return_value=SimpleNamespace(max_stream_errors=3)
+            ),
         )
 
         switch_stub = SimpleNamespace(

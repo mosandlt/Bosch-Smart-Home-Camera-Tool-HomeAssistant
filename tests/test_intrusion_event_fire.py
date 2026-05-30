@@ -19,7 +19,6 @@ import pytest
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +43,6 @@ def _make_coordinator() -> BoschCameraCoordinator:
 
 
 class TestIntrusionEventFire:
-
     def test_rising_edge_none_to_alarm_fires_event(self) -> None:
         """alarmType "NONE" → "INTRUSION_DETECTED" must fire the event once."""
         coord = _make_coordinator()
@@ -123,17 +121,20 @@ class TestIntrusionEventFire:
 
         # First intrusion
         coord._maybe_fire_intrusion_event(
-            CAM_A, "Terrasse",
+            CAM_A,
+            "Terrasse",
             {"alarmType": "INTRUSION_DETECTED", "intrusionSystem": "ACTIVE"},
         )
         # Cleared
         coord._maybe_fire_intrusion_event(
-            CAM_A, "Terrasse",
+            CAM_A,
+            "Terrasse",
             {"alarmType": "NONE", "intrusionSystem": "INACTIVE"},
         )
         # Second intrusion
         coord._maybe_fire_intrusion_event(
-            CAM_A, "Terrasse",
+            CAM_A,
+            "Terrasse",
             {"alarmType": "AUDIO_INTRUSION", "intrusionSystem": "ACTIVE"},
         )
 
@@ -164,7 +165,8 @@ class TestIntrusionEventFire:
         coord._last_alarm_type[CAM_B] = "NONE"
 
         coord._maybe_fire_intrusion_event(
-            CAM_A, "Terrasse",
+            CAM_A,
+            "Terrasse",
             {"alarmType": "INTRUSION_DETECTED", "intrusionSystem": "ACTIVE"},
         )
 

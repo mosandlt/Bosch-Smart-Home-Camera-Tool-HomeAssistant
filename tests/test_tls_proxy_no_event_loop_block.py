@@ -19,7 +19,6 @@ from custom_components.bosch_shc_camera import tls_proxy
 
 
 class TestStartTlsProxyNoBlocking:
-
     def test_no_threading_event_wait_in_source(self) -> None:
         """The source of `start_tls_proxy` must not contain a
         `threading.Event` allocation or `ready.wait(` call. Comments are
@@ -27,9 +26,7 @@ class TestStartTlsProxyNoBlocking:
         raw = textwrap.dedent(inspect.getsource(tls_proxy.start_tls_proxy))
         # Strip line comments so the test doesn't trip on prose like
         # "we removed the ready.wait() call".
-        code_only = "\n".join(
-            line.split("#", 1)[0] for line in raw.splitlines()
-        )
+        code_only = "\n".join(line.split("#", 1)[0] for line in raw.splitlines())
         assert "threading.Event(" not in code_only, (
             "start_tls_proxy must not allocate a threading.Event — the port "
             "is already listening before the worker thread starts."

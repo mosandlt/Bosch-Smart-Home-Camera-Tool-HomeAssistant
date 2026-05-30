@@ -13,19 +13,20 @@ defaults change.
 Migration tests (v2→v3) pin the async_migrate_entry rewrites. Pattern copied
 from tests/test_local_first_default.py (v1→v2 migration tests).
 """
+
 from __future__ import annotations
 
-from types import SimpleNamespace
 from threading import RLock
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 MODULE = "custom_components.bosch_shc_camera.fcm"
 
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
+
 
 def _make_coord(**overrides: object) -> SimpleNamespace:
     """Minimal coordinator stub for FCM mode tests."""
@@ -71,9 +72,7 @@ def _make_migrate_harness(version: int, options: dict) -> tuple:
     return hass, entry, captured
 
 
-def _make_migrate_harness_with_data(
-    version: int, options: dict, data: dict
-) -> tuple:
+def _make_migrate_harness_with_data(version: int, options: dict, data: dict) -> tuple:
     """Return (hass, entry, captured) for async_migrate_entry tests that touch entry.data.
 
     Unlike _make_migrate_harness, the entry carries a data dict and the captured
@@ -136,12 +135,16 @@ async def test_auto_mode_calls_fcm_register() -> None:
         patch(f"{MODULE}.register_fcm_with_bosch", side_effect=_fake_register),
         patch(f"{MODULE}._install_fcm_noise_filter"),
         patch(f"{MODULE}._get_fcm_push_client_class", return_value=mock_client_cls),
-        patch(f"{MODULE}.fetch_firebase_config", new=AsyncMock(return_value={
-            "api_key": "key", "project_id": "proj", "app_id": "app"
-        })),
+        patch(
+            f"{MODULE}.fetch_firebase_config",
+            new=AsyncMock(
+                return_value={"api_key": "key", "project_id": "proj", "app_id": "app"}
+            ),
+        ),
         patch.dict("sys.modules", {"firebase_messaging": fake_firebase}),
     ):
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         await async_start_fcm_push(coord)
 
     assert register_called, (
@@ -175,6 +178,7 @@ async def test_polling_mode_skips_fcm_register() -> None:
         patch(f"{MODULE}._get_fcm_push_client_class", return_value=MagicMock()),
     ):
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         await async_start_fcm_push(coord)
 
     assert not register_called, (
@@ -195,6 +199,7 @@ def test_default_mode_is_auto() -> None:
     polling-only, increasing motion event latency from ~1s to the polling interval.
     """
     from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
     assert DEFAULT_OPTIONS["fcm_push_mode"] == "auto", (
         "New installs must default to fcm_push_mode='auto' so FCM push is "
         "attempted automatically. Regression to 'polling' would silently "
@@ -236,12 +241,16 @@ async def test_garbage_mode_coerced_to_auto() -> None:
         patch(f"{MODULE}.register_fcm_with_bosch", side_effect=_fake_register),
         patch(f"{MODULE}._install_fcm_noise_filter"),
         patch(f"{MODULE}._get_fcm_push_client_class", return_value=mock_client_cls),
-        patch(f"{MODULE}.fetch_firebase_config", new=AsyncMock(return_value={
-            "api_key": "key", "project_id": "proj", "app_id": "app"
-        })),
+        patch(
+            f"{MODULE}.fetch_firebase_config",
+            new=AsyncMock(
+                return_value={"api_key": "key", "project_id": "proj", "app_id": "app"}
+            ),
+        ),
         patch.dict("sys.modules", {"firebase_messaging": fake_firebase}),
     ):
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         await async_start_fcm_push(coord)
 
     assert register_called, (
@@ -466,11 +475,16 @@ async def test_migration_v3_polling_preserves_fcm_creds() -> None:
     assert result is True
     assert captured["options"]["fcm_push_mode"] == "polling"
     assert captured["version"] == 3
-    assert captured["data"]["fcm_credentials"] == _FCM_DATA_WITH_CREDS["fcm_credentials"], (
+    assert (
+        captured["data"]["fcm_credentials"] == _FCM_DATA_WITH_CREDS["fcm_credentials"]
+    ), (
         "polling mode: fcm_credentials must NOT be cleared — user opted out of FCM "
         "and we must not silently alter their stored data."
     )
-    assert captured["data"]["fcm_registered_token"] == _FCM_DATA_WITH_CREDS["fcm_registered_token"]
+    assert (
+        captured["data"]["fcm_registered_token"]
+        == _FCM_DATA_WITH_CREDS["fcm_registered_token"]
+    )
 
 
 @pytest.mark.asyncio

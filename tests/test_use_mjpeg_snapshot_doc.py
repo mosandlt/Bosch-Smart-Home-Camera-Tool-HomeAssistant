@@ -16,27 +16,30 @@ import pytest
 
 from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 
-COMPONENT = Path(__file__).resolve().parent.parent / "custom_components" / "bosch_shc_camera"
+COMPONENT = (
+    Path(__file__).resolve().parent.parent / "custom_components" / "bosch_shc_camera"
+)
 
 
 class TestUseMjpegSnapshotDoc:
-
     def test_default_is_false(self) -> None:
         """Sanity: DEFAULT_OPTIONS still says use_mjpeg_snapshot is OFF.
         If you change this, also update the doc strings."""
         assert DEFAULT_OPTIONS["use_mjpeg_snapshot"] is False
 
-    @pytest.mark.parametrize("rel_path", [
-        "strings.json",
-        "translations/en.json",
-    ])
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "strings.json",
+            "translations/en.json",
+        ],
+    )
     def test_english_doc_says_off_by_default(self, rel_path: str) -> None:
         text = (COMPONENT / rel_path).read_text(encoding="utf-8")
         data = json.loads(text)
-        desc = (
-            data["options"]["step"]["init"]["sections"]
-            ["stream"]["data_description"]["use_mjpeg_snapshot"]
-        )
+        desc = data["options"]["step"]["init"]["sections"]["stream"][
+            "data_description"
+        ]["use_mjpeg_snapshot"]
         # Must NOT claim "On by default" (the historical lie).
         assert "on by default" not in desc.lower(), (
             f"{rel_path}: still says 'On by default' — must match DEFAULT_OPTIONS=False"
@@ -49,10 +52,9 @@ class TestUseMjpegSnapshotDoc:
     def test_german_doc_says_standardmaessig_aus(self) -> None:
         text = (COMPONENT / "translations/de.json").read_text(encoding="utf-8")
         data = json.loads(text)
-        desc = (
-            data["options"]["step"]["init"]["sections"]
-            ["stream"]["data_description"]["use_mjpeg_snapshot"]
-        )
+        desc = data["options"]["step"]["init"]["sections"]["stream"][
+            "data_description"
+        ]["use_mjpeg_snapshot"]
         assert "standardmäßig aktiviert" not in desc.lower(), (
             "de.json: still says 'Standardmäßig aktiviert' — must say 'Standardmäßig aus'"
         )

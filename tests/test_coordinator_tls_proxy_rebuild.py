@@ -24,7 +24,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_A = "AAAA1111-BBBB-2222-CCCC-3333DDDD4444"
 
 
@@ -168,9 +167,12 @@ async def test_first_call_not_blocked_by_zero_sentinel(monkeypatch) -> None:
 def test_sentinel_uses_float_inf_in_source() -> None:
     """Pin source: float('-inf') sentinel for _tls_proxy_rebuild_last default."""
     from pathlib import Path
+
     src = (
         Path(__file__).parent.parent
-        / "custom_components" / "bosch_shc_camera" / "__init__.py"
+        / "custom_components"
+        / "bosch_shc_camera"
+        / "__init__.py"
     ).read_text()
     # The .get() call for _tls_proxy_rebuild_last must use float('-inf') default
     assert (
@@ -188,9 +190,12 @@ def test_sentinel_uses_float_inf_in_source() -> None:
 def test_start_tls_proxy_passes_on_proxy_died_callback() -> None:
     """_start_tls_proxy must wire on_proxy_died → _on_tls_proxy_died."""
     from pathlib import Path
+
     src = (
         Path(__file__).parent.parent
-        / "custom_components" / "bosch_shc_camera" / "__init__.py"
+        / "custom_components"
+        / "bosch_shc_camera"
+        / "__init__.py"
     ).read_text()
     assert "on_proxy_died=" in src, (
         "_start_tls_proxy must pass on_proxy_died= to start_tls_proxy() — "

@@ -28,6 +28,7 @@ Targets:
 
 No HA runtime needed — SimpleNamespace + MagicMock.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -35,7 +36,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 TODAY = "2026-05-07"
@@ -46,7 +46,18 @@ TODAY = "2026-05-07"
 
 def _coord(**overrides):
     base = dict(
-        data={CAM_ID: {"info": {"hardwareVersion": "CAMERA", "firmwareVersion": "7.91", "macAddress": "aa:bb", "title": "Kamera"}, "status": "ONLINE", "events": []}},
+        data={
+            CAM_ID: {
+                "info": {
+                    "hardwareVersion": "CAMERA",
+                    "firmwareVersion": "7.91",
+                    "macAddress": "aa:bb",
+                    "title": "Kamera",
+                },
+                "status": "ONLINE",
+                "events": [],
+            }
+        },
         last_update_success=True,
         options={"enable_fcm_push": False},
         _commissioned_cache={},
@@ -126,7 +137,9 @@ def test_status_sensor_extra_attrs_with_comm_and_fw():
     from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
 
     c = _coord(
-        _commissioned_cache={CAM_ID: {"configured": True, "connected": True, "commissioned": True}},
+        _commissioned_cache={
+            CAM_ID: {"configured": True, "connected": True, "commissioned": True}
+        },
         _firmware_cache={CAM_ID: {"updating": False, "status": "OK", "upToDate": True}},
     )
     sw = _make_sensor(BoschCameraStatusSensor, c)
@@ -158,7 +171,14 @@ def test_last_event_sensor_valid_ts():
     from custom_components.bosch_shc_camera.sensor import BoschCameraLastEventSensor
 
     c = _coord()
-    c.data[CAM_ID]["events"] = [{"timestamp": "2026-03-19T09:32:08.000Z", "eventType": "MOVEMENT", "id": "abc123def", "imageUrl": "http://x"}]
+    c.data[CAM_ID]["events"] = [
+        {
+            "timestamp": "2026-03-19T09:32:08.000Z",
+            "eventType": "MOVEMENT",
+            "id": "abc123def",
+            "imageUrl": "http://x",
+        }
+    ]
     sw = _make_sensor(BoschCameraLastEventSensor, c)
     result = sw.native_value
     assert result is not None
@@ -189,7 +209,14 @@ def test_last_event_sensor_extra_attrs():
 
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"timestamp": "2026-03-19T09:32:08", "eventType": "PERSON", "id": "abcdefgh1234", "imageUrl": "http://x", "videoClipUrl": "http://v", "videoClipUploadStatus": "DONE"}
+        {
+            "timestamp": "2026-03-19T09:32:08",
+            "eventType": "PERSON",
+            "id": "abcdefgh1234",
+            "imageUrl": "http://x",
+            "videoClipUrl": "http://v",
+            "videoClipUploadStatus": "DONE",
+        }
     ]
     sw = _make_sensor(BoschCameraLastEventSensor, c)
     attrs = sw.extra_state_attributes
@@ -242,7 +269,16 @@ def test_wifi_signal_native_value_none():
 def test_wifi_signal_native_value_int():
     from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-    c = _coord(_wifiinfo_cache={CAM_ID: {"signalStrength": 85, "ssid": "HOME", "ipAddress": "192.168.1.2", "macAddress": "aa:bb"}})
+    c = _coord(
+        _wifiinfo_cache={
+            CAM_ID: {
+                "signalStrength": 85,
+                "ssid": "HOME",
+                "ipAddress": "192.168.1.2",
+                "macAddress": "aa:bb",
+            }
+        }
+    )
     sw = _make_sensor(BoschWifiSignalSensor, c)
     assert sw.native_value == 85
 
@@ -257,7 +293,16 @@ def test_wifi_signal_available_false():
 def test_wifi_signal_extra_attrs_with_rcp():
     from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-    c = _coord(_wifiinfo_cache={CAM_ID: {"signalStrength": 70, "ssid": "X", "ipAddress": "10.0.0.1", "macAddress": "cc:dd"}})
+    c = _coord(
+        _wifiinfo_cache={
+            CAM_ID: {
+                "signalStrength": 70,
+                "ssid": "X",
+                "ipAddress": "10.0.0.1",
+                "macAddress": "cc:dd",
+            }
+        }
+    )
     c.rcp_lan_ip = lambda cid: "192.0.2.149"
     c.rcp_bitrate_ladder = lambda cid: [1000, 2000, 3000]
     sw = _make_sensor(BoschWifiSignalSensor, c)
@@ -405,7 +450,10 @@ def test_motion_sensitivity_disabled():
     from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
 
     c = _coord()
-    c.motion_settings = lambda cid: {"enabled": False, "motionAlarmConfiguration": "HIGH"}
+    c.motion_settings = lambda cid: {
+        "enabled": False,
+        "motionAlarmConfiguration": "HIGH",
+    }
     sw = _make_sensor(BoschMotionSensitivitySensor, c)
     assert sw.native_value == "disabled"
 
@@ -414,7 +462,10 @@ def test_motion_sensitivity_enabled():
     from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
 
     c = _coord()
-    c.motion_settings = lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH_SENSITIVITY"}
+    c.motion_settings = lambda cid: {
+        "enabled": True,
+        "motionAlarmConfiguration": "HIGH_SENSITIVITY",
+    }
     sw = _make_sensor(BoschMotionSensitivitySensor, c)
     assert sw.native_value == "high sensitivity"
 
@@ -423,7 +474,10 @@ def test_motion_sensitivity_extra_attrs():
     from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
 
     c = _coord()
-    c.motion_settings = lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH"}
+    c.motion_settings = lambda cid: {
+        "enabled": True,
+        "motionAlarmConfiguration": "HIGH",
+    }
     sw = _make_sensor(BoschMotionSensitivitySensor, c)
     attrs = sw.extra_state_attributes
     assert attrs["enabled"] is True
@@ -443,7 +497,9 @@ def test_last_event_type_person():
     from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
 
     c = _coord()
-    c.data[CAM_ID]["events"] = [{"eventType": "PERSON", "timestamp": f"{TODAY}T10:00:00", "id": "abc"}]
+    c.data[CAM_ID]["events"] = [
+        {"eventType": "PERSON", "timestamp": f"{TODAY}T10:00:00", "id": "abc"}
+    ]
     sw = _make_sensor(BoschLastEventTypeSensor, c)
     assert sw.native_value == "person"
 
@@ -525,8 +581,9 @@ def test_fcm_status_polling():
 
 
 def test_fcm_status_extra_attrs_last_push():
-    from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
     import time
+
+    from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
 
     c = _coord()
     c.options = {"enable_fcm_push": True, "fcm_push_mode": "auto"}
@@ -571,7 +628,11 @@ def test_commissioned_none():
 def test_commissioned_not_connected():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
-    c = _coord(_commissioned_cache={CAM_ID: {"configured": True, "connected": False, "commissioned": False}})
+    c = _coord(
+        _commissioned_cache={
+            CAM_ID: {"configured": True, "connected": False, "commissioned": False}
+        }
+    )
     sw = _make_sensor(BoschCommissionedSensor, c)
     assert sw.native_value == "Not connected"
 
@@ -579,7 +640,11 @@ def test_commissioned_not_connected():
 def test_commissioned_yes():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
-    c = _coord(_commissioned_cache={CAM_ID: {"configured": True, "connected": True, "commissioned": True}})
+    c = _coord(
+        _commissioned_cache={
+            CAM_ID: {"configured": True, "connected": True, "commissioned": True}
+        }
+    )
     sw = _make_sensor(BoschCommissionedSensor, c)
     assert sw.native_value == "Commissioned"
 
@@ -587,7 +652,11 @@ def test_commissioned_yes():
 def test_commissioned_not_commissioned():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
-    c = _coord(_commissioned_cache={CAM_ID: {"configured": True, "connected": True, "commissioned": False}})
+    c = _coord(
+        _commissioned_cache={
+            CAM_ID: {"configured": True, "connected": True, "commissioned": False}
+        }
+    )
     sw = _make_sensor(BoschCommissionedSensor, c)
     assert sw.native_value == "Not commissioned"
 
@@ -595,7 +664,11 @@ def test_commissioned_not_commissioned():
 def test_commissioned_extra_attrs():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
-    c = _coord(_commissioned_cache={CAM_ID: {"configured": True, "connected": True, "commissioned": True}})
+    c = _coord(
+        _commissioned_cache={
+            CAM_ID: {"configured": True, "connected": True, "commissioned": True}
+        }
+    )
     sw = _make_sensor(BoschCommissionedSensor, c)
     attrs = sw.extra_state_attributes
     assert attrs["commissioned"] is True
@@ -616,8 +689,22 @@ def test_rules_count_value():
     from custom_components.bosch_shc_camera.sensor import BoschRulesCountSensor
 
     rules = [
-        {"id": "r1", "name": "Night", "isActive": True, "startTime": "22:00", "endTime": "06:00", "weekdays": ["Mon"]},
-        {"id": "r2", "name": "Day", "isActive": False, "startTime": "06:00", "endTime": "22:00", "weekdays": []},
+        {
+            "id": "r1",
+            "name": "Night",
+            "isActive": True,
+            "startTime": "22:00",
+            "endTime": "06:00",
+            "weekdays": ["Mon"],
+        },
+        {
+            "id": "r2",
+            "name": "Day",
+            "isActive": False,
+            "startTime": "06:00",
+            "endTime": "22:00",
+            "weekdays": [],
+        },
     ]
     c = _coord(_rules_cache={CAM_ID: rules})
     sw = _make_sensor(BoschRulesCountSensor, c)
@@ -800,7 +887,9 @@ def test_private_areas_note_when_empty():
 
 
 def test_ambient_schedule_none_no_cache():
-    from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+    from custom_components.bosch_shc_camera.sensor import (
+        BoschAmbientLightScheduleSensor,
+    )
 
     sw = _make_sensor(BoschAmbientLightScheduleSensor)
     assert sw.native_value is None
@@ -808,33 +897,67 @@ def test_ambient_schedule_none_no_cache():
 
 
 def test_ambient_schedule_disabled():
-    from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+    from custom_components.bosch_shc_camera.sensor import (
+        BoschAmbientLightScheduleSensor,
+    )
 
-    c = _coord(_ambient_lighting_cache={CAM_ID: {"ambientLightEnabled": False, "ambientLightSchedule": "ENVIRONMENT"}})
+    c = _coord(
+        _ambient_lighting_cache={
+            CAM_ID: {
+                "ambientLightEnabled": False,
+                "ambientLightSchedule": "ENVIRONMENT",
+            }
+        }
+    )
     sw = _make_sensor(BoschAmbientLightScheduleSensor, c)
     assert sw.native_value == "disabled"
 
 
 def test_ambient_schedule_dusk_to_dawn():
-    from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+    from custom_components.bosch_shc_camera.sensor import (
+        BoschAmbientLightScheduleSensor,
+    )
 
-    c = _coord(_ambient_lighting_cache={CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "ENVIRONMENT"}})
+    c = _coord(
+        _ambient_lighting_cache={
+            CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "ENVIRONMENT"}
+        }
+    )
     sw = _make_sensor(BoschAmbientLightScheduleSensor, c)
     assert sw.native_value == "dusk_to_dawn"
 
 
 def test_ambient_schedule_manual():
-    from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+    from custom_components.bosch_shc_camera.sensor import (
+        BoschAmbientLightScheduleSensor,
+    )
 
-    c = _coord(_ambient_lighting_cache={CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "MANUAL"}})
+    c = _coord(
+        _ambient_lighting_cache={
+            CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "MANUAL"}
+        }
+    )
     sw = _make_sensor(BoschAmbientLightScheduleSensor, c)
     assert sw.native_value == "manual"
 
 
 def test_ambient_schedule_dict_schedule():
-    from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+    from custom_components.bosch_shc_camera.sensor import (
+        BoschAmbientLightScheduleSensor,
+    )
 
-    c = _coord(_ambient_lighting_cache={CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": {"type": "ENVIRONMENT", "lightOnTime": "18:00", "lightOffTime": "06:00"}}})
+    c = _coord(
+        _ambient_lighting_cache={
+            CAM_ID: {
+                "ambientLightEnabled": True,
+                "ambientLightSchedule": {
+                    "type": "ENVIRONMENT",
+                    "lightOnTime": "18:00",
+                    "lightOffTime": "06:00",
+                },
+            }
+        }
+    )
     sw = _make_sensor(BoschAmbientLightScheduleSensor, c)
     assert sw.native_value == "dusk_to_dawn"
     attrs = sw.extra_state_attributes
@@ -847,7 +970,11 @@ def test_ambient_schedule_dict_schedule():
 def test_alarm_state_from_status_cache():
     from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-    c = _coord(_alarm_status_cache={CAM_ID: {"intrusionSystem": "ACTIVE", "alarmType": "MOTION"}})
+    c = _coord(
+        _alarm_status_cache={
+            CAM_ID: {"intrusionSystem": "ACTIVE", "alarmType": "MOTION"}
+        }
+    )
     sw = _make_sensor(BoschAlarmStateSensor, c)
     assert sw.native_value == "active"
 

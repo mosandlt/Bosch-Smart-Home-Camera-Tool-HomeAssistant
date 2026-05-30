@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "22222222-0000-0000-0000-000000000000"
 
 
@@ -66,6 +65,7 @@ def stub_entry() -> SimpleNamespace:
 def camera(stub_coord: SimpleNamespace, stub_entry: SimpleNamespace) -> Any:
     """Construct a bare BoschCamera without HA lifecycle (no hass, no add_to_hass)."""
     from custom_components.bosch_shc_camera.camera import BoschCamera
+
     return BoschCamera(stub_coord, CAM_ID, stub_entry)
 
 

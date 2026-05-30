@@ -29,6 +29,7 @@ sized chunks.  Triggering them requires mutating the buffer mid-iteration,
 which we simulate with a `BytesView` subclass that returns a short slice
 on the last iteration — pins the defensive contract.
 """
+
 from __future__ import annotations
 
 import struct
@@ -94,12 +95,16 @@ class TestProductNameCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_name if command == "0x0aea" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         # Line 548 cache write
-        assert coord._rcp_product_name_cache.get(CAM_ID) == "FLEXIDOME IP starlight 8000i"
+        assert (
+            coord._rcp_product_name_cache.get(CAM_ID) == "FLEXIDOME IP starlight 8000i"
+        )
         # Line 550 _mark_ok clears the fail counter
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0aea", 0) == 0
 
@@ -115,8 +120,10 @@ class TestProductNameCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_name if command == "0x0aea" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_product_name_cache.get(CAM_ID) == "CAMERA_360"
@@ -165,8 +172,10 @@ class TestAlarmCatalogCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw if command == "0x0c38" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         # Line 591 cache write
@@ -200,8 +209,10 @@ class TestAlarmCatalogCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw if command == "0x0c38" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_alarm_catalog_cache
@@ -222,8 +233,10 @@ class TestAlarmCatalogCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw if command == "0x0c38" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_alarm_catalog_cache
@@ -256,10 +269,22 @@ class TestParseMotionCoordsHappyPath:
 
         raw = struct.pack(
             ">HHHH HHHH HHHH HHHH",
-            0, 0, 10000, 10000,         # full frame
-            2500, 2500, 7500, 7500,     # centre quadrant
-            0, 0, 5000, 5000,           # top-left
-            5000, 5000, 10000, 10000,   # bottom-right
+            0,
+            0,
+            10000,
+            10000,  # full frame
+            2500,
+            2500,
+            7500,
+            7500,  # centre quadrant
+            0,
+            0,
+            5000,
+            5000,  # top-left
+            5000,
+            5000,
+            10000,
+            10000,  # bottom-right
         )
         zones = _parse_motion_coords(raw)
         assert len(zones) == 4
@@ -305,8 +330,14 @@ class TestMotionCoordsCacheWrite:
         coord = _make_coord()
         raw_coords = struct.pack(
             ">HHHH HHHH",
-            0, 0, 10000, 10000,
-            2500, 2500, 7500, 7500,
+            0,
+            0,
+            10000,
+            10000,
+            2500,
+            2500,
+            7500,
+            7500,
         )
         # Gate on line 613: len(raw) >= 16
         assert len(raw_coords) >= 16
@@ -314,8 +345,10 @@ class TestMotionCoordsCacheWrite:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_coords if command == "0x0c0a" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         # Line 615 cache write
@@ -354,6 +387,7 @@ class TestDefensiveBreakBranches:
 
         class TruncatingBytes(bytes):
             """Returns a deliberately short slice on the 2nd __getitem__."""
+
             _calls = 0
 
             def __getitem__(self, key):
@@ -394,7 +428,9 @@ class TestDefensiveBreakBranches:
 
         TruncatingBytes._calls = 0
         # 16 bytes → n_zones = 2; second iteration short-slices
-        raw = TruncatingBytes(struct.pack(">HHHH HHHH", 0, 0, 5000, 5000, 1000, 1000, 9000, 9000))
+        raw = TruncatingBytes(
+            struct.pack(">HHHH HHHH", 0, 0, 5000, 5000, 1000, 1000, 9000, 9000)
+        )
         zones = _parse_motion_coords(raw)
         assert len(zones) == 1
         assert zones[0] == {"x1": 0.0, "y1": 0.0, "x2": 50.0, "y2": 50.0}

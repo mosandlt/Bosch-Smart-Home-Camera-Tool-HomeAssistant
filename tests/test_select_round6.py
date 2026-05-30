@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM2_ID = "22222222-OTHER"
 
@@ -36,7 +35,10 @@ def _stub_coord(gen2: bool = True):
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
         _fcm_push_mode="unknown",
-        motion_settings=lambda cam_id: {"motionAlarmConfiguration": "HIGH", "enabled": True},
+        motion_settings=lambda cam_id: {
+            "motionAlarmConfiguration": "HIGH",
+            "enabled": True,
+        },
         get_quality=lambda cam_id: "auto",
         set_quality=lambda cam_id, q: None,
         async_put_camera=AsyncMock(return_value=True),
@@ -66,42 +68,58 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_gen2_adds_detection_mode_select(self):
         from custom_components.bosch_shc_camera.select import (
-            async_setup_entry, BoschDetectionModeSelect,
+            BoschDetectionModeSelect,
+            async_setup_entry,
         )
+
         coord = _stub_coord(gen2=True)
         entry = _stub_entry()
         entry.runtime_data = coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
         types_ = {type(e).__name__ for e in captured}
         assert "BoschDetectionModeSelect" in types_
 
     @pytest.mark.asyncio
     async def test_gen1_no_detection_mode_select(self):
         from custom_components.bosch_shc_camera.select import (
-            async_setup_entry, BoschDetectionModeSelect,
+            BoschDetectionModeSelect,
+            async_setup_entry,
         )
+
         coord = _stub_coord(gen2=False)
         entry = _stub_entry()
         entry.runtime_data = coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
         types_ = {type(e).__name__ for e in captured}
         assert "BoschDetectionModeSelect" not in types_
 
     @pytest.mark.asyncio
     async def test_integration_level_selects_added(self):
         from custom_components.bosch_shc_camera.select import (
-            async_setup_entry, BoschFcmPushModeSelect, BoschStreamModeSelect,
+            BoschFcmPushModeSelect,
+            BoschStreamModeSelect,
+            async_setup_entry,
         )
+
         coord = _stub_coord()
         entry = _stub_entry()
         entry.runtime_data = coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
         types_ = {type(e).__name__ for e in captured}
         assert "BoschFcmPushModeSelect" in types_
         assert "BoschStreamModeSelect" in types_
@@ -109,13 +127,17 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_empty_data_no_entities(self):
         from custom_components.bosch_shc_camera.select import async_setup_entry
+
         coord = _stub_coord()
         coord.data = {}
         entry = _stub_entry()
         entry.runtime_data = coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
         assert captured == []
 
 
@@ -125,6 +147,7 @@ class TestSetupEntry:
 class TestVideoQualitySelect:
     def _make(self, coord=None):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         coord = coord or _stub_coord()
         entry = _stub_entry()
         sel = BoschVideoQualitySelect(coord, CAM_ID, entry)
@@ -134,6 +157,7 @@ class TestVideoQualitySelect:
 
     def test_device_info_returns_identifiers(self):
         from custom_components.bosch_shc_camera import DOMAIN
+
         sel = self._make()
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
@@ -147,9 +171,13 @@ class TestVideoQualitySelect:
         last.state = "high"
         sel.coordinator.set_quality = MagicMock()
         _noop = AsyncMock()
-        with patch("homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
-                   _noop), \
-             patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)):
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                _noop,
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
             await sel.async_added_to_hass()
         sel.coordinator.set_quality.assert_called_once_with(CAM_ID, "high")
 
@@ -160,9 +188,13 @@ class TestVideoQualitySelect:
         last = MagicMock()
         last.state = "Auto"
         sel.coordinator.set_quality = MagicMock()
-        with patch("homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
-                   AsyncMock()), \
-             patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)):
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
             await sel.async_added_to_hass()
         sel.coordinator.set_quality.assert_called_with(CAM_ID, "auto")
 
@@ -171,9 +203,13 @@ class TestVideoQualitySelect:
         """No saved state → coordinator.set_quality NOT called."""
         sel = self._make()
         sel.coordinator.set_quality = MagicMock()
-        with patch("homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
-                   AsyncMock()), \
-             patch.object(sel, "async_get_last_state", AsyncMock(return_value=None)):
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=None)),
+        ):
             await sel.async_added_to_hass()
         sel.coordinator.set_quality.assert_not_called()
 
@@ -213,7 +249,10 @@ class TestVideoQualitySelect:
 
 class TestMotionSensitivitySelect:
     def _make(self, coord=None, put_return=True):
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         coord = coord or _stub_coord()
         coord.async_put_camera = AsyncMock(return_value=put_return)
         entry = _stub_entry()
@@ -224,6 +263,7 @@ class TestMotionSensitivitySelect:
 
     def test_device_info_returns_identifiers(self):
         from custom_components.bosch_shc_camera import DOMAIN
+
         sel = self._make()
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
@@ -231,20 +271,39 @@ class TestMotionSensitivitySelect:
     @pytest.mark.asyncio
     async def test_select_option_success_updates_motion_data(self):
         sel = self._make(put_return=True)
-        sel.coordinator.data[CAM_ID]["motion"] = {"motionAlarmConfiguration": "HIGH", "enabled": True}
-        with patch("custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=False), \
-             patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=False)):
+        sel.coordinator.data[CAM_ID]["motion"] = {
+            "motionAlarmConfiguration": "HIGH",
+            "enabled": True,
+        }
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                return_value=False,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                AsyncMock(return_value=False),
+            ),
+        ):
             await sel.async_select_option("low")
-        assert sel.coordinator.data[CAM_ID]["motion"]["motionAlarmConfiguration"] == "LOW"
+        assert (
+            sel.coordinator.data[CAM_ID]["motion"]["motionAlarmConfiguration"] == "LOW"
+        )
 
     @pytest.mark.asyncio
     async def test_select_option_failure_logs_warning(self):
         """PUT fails → warning logged, state still written."""
         sel = self._make(put_return=False)
-        with patch("custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=False), \
-             patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=False)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                return_value=False,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                AsyncMock(return_value=False),
+            ),
+        ):
             await sel.async_select_option("medium_high")
         sel.async_write_ha_state.assert_called_once()
 
@@ -252,9 +311,16 @@ class TestMotionSensitivitySelect:
     async def test_select_option_skipped_when_privacy_on(self):
         """gen2 indoor + privacy ON → returns early, no PUT."""
         sel = self._make()
-        with patch("custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=True), \
-             patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=True)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                return_value=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                AsyncMock(return_value=True),
+            ),
+        ):
             await sel.async_select_option("high")
         sel.coordinator.async_put_camera.assert_not_called()
 
@@ -265,6 +331,7 @@ class TestMotionSensitivitySelect:
 class TestFcmPushModeSelect:
     def _make(self, options=None):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         coord = _stub_coord()
         entry = _stub_entry(options=options or {})
         sel = BoschFcmPushModeSelect(coord, CAM_ID, entry)
@@ -276,6 +343,7 @@ class TestFcmPushModeSelect:
 
     def test_device_info_returns_identifiers(self):
         from custom_components.bosch_shc_camera import DOMAIN
+
         sel = self._make()
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
@@ -285,8 +353,10 @@ class TestFcmPushModeSelect:
         sel = self._make(options={"enable_fcm_push": False})
         sel.coordinator.options = {"enable_fcm_push": False}
         # Patch super().available to True so we only test our guard
-        with patch("homeassistant.helpers.update_coordinator.CoordinatorEntity.available",
-                   new_callable=lambda: property(lambda s: True)):
+        with patch(
+            "homeassistant.helpers.update_coordinator.CoordinatorEntity.available",
+            new_callable=lambda: property(lambda s: True),
+        ):
             assert sel.available is False
 
     @pytest.mark.asyncio
@@ -316,6 +386,7 @@ class TestFcmPushModeSelect:
 class TestStreamModeSelect:
     def _make(self):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         coord = _stub_coord()
         entry = _stub_entry()
         sel = BoschStreamModeSelect(coord, CAM_ID, entry)
@@ -325,6 +396,7 @@ class TestStreamModeSelect:
 
     def test_device_info_returns_identifiers(self):
         from custom_components.bosch_shc_camera import DOMAIN
+
         sel = self._make()
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
@@ -336,6 +408,7 @@ class TestStreamModeSelect:
 class TestDetectionModeSelect:
     def _make(self, intrusion_cache=None, put_return=True):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+
         coord = _stub_coord(gen2=True)
         coord._intrusion_config_cache = intrusion_cache or {}
         coord.async_put_camera = AsyncMock(return_value=put_return)
@@ -352,6 +425,7 @@ class TestDetectionModeSelect:
 
     def test_device_info_returns_identifiers(self):
         from custom_components.bosch_shc_camera import DOMAIN
+
         sel = self._make()
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
@@ -383,10 +457,15 @@ class TestDetectionModeSelect:
             intrusion_cache={CAM_ID: {"detectionMode": "ALL_MOTIONS", "enabled": True}},
             put_return=True,
         )
-        with patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=False)):
+        with patch(
+            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            AsyncMock(return_value=False),
+        ):
             await sel.async_select_option("only_humans")
-        assert sel.coordinator._intrusion_config_cache[CAM_ID]["detectionMode"] == "ONLY_HUMANS"
+        assert (
+            sel.coordinator._intrusion_config_cache[CAM_ID]["detectionMode"]
+            == "ONLY_HUMANS"
+        )
 
     @pytest.mark.asyncio
     async def test_select_option_failure_logs_warning(self):
@@ -394,8 +473,10 @@ class TestDetectionModeSelect:
             intrusion_cache={CAM_ID: {"detectionMode": "ALL_MOTIONS"}},
             put_return=False,
         )
-        with patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=False)):
+        with patch(
+            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            AsyncMock(return_value=False),
+        ):
             await sel.async_select_option("only_humans")
         sel.async_write_ha_state.assert_called_once()
 
@@ -410,8 +491,10 @@ class TestDetectionModeSelect:
     async def test_select_option_empty_config_returns_early(self):
         """Empty config cache → return early without PUT."""
         sel = self._make(intrusion_cache={})
-        with patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=False)):
+        with patch(
+            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            AsyncMock(return_value=False),
+        ):
             await sel.async_select_option("only_humans")
         sel.coordinator.async_put_camera.assert_not_called()
 
@@ -419,7 +502,9 @@ class TestDetectionModeSelect:
     async def test_select_option_skipped_when_privacy_on(self):
         """Privacy mode ON → returns early, no PUT."""
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "ALL_MOTIONS"}})
-        with patch("custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-                   AsyncMock(return_value=True)):
+        with patch(
+            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            AsyncMock(return_value=True),
+        ):
             await sel.async_select_option("only_humans")
         sel.coordinator.async_put_camera.assert_not_called()

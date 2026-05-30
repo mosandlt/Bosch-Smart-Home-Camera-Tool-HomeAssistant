@@ -16,10 +16,11 @@ Device class:
   motion binary sensor  → BinarySensorDeviceClass.MOTION
   audio  binary sensor  → BinarySensorDeviceClass.SOUND
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -33,11 +34,17 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, BoschCameraCoordinator  # type: ignore[attr-defined]
-from .const import DEFAULT_MOTION_ACTIVE_WINDOW, MOTION_ACTIVE_WINDOW_MIN, MOTION_ACTIVE_WINDOW_MAX
+from .const import (
+    DEFAULT_MOTION_ACTIVE_WINDOW,
+    MOTION_ACTIVE_WINDOW_MAX,
+    MOTION_ACTIVE_WINDOW_MIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-PARALLEL_UPDATES = 0  # coordinator handles all updates; no per-entity parallelism needed
+PARALLEL_UPDATES = (
+    0  # coordinator handles all updates; no per-entity parallelism needed
+)
 
 # Module-level fallback — keeps tests and external code that reference
 # EVENT_ACTIVE_WINDOW directly working unchanged.  Production code reads
@@ -57,10 +64,16 @@ async def async_setup_entry(
         cam_info = coordinator.data[cam_id].get("info", {})
         has_sound = cam_info.get("featureSupport", {}).get("sound", False)
         entities.append(BoschMotionBinarySensor(coordinator, cam_id, config_entry))
-        entities.append(BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry))
-        entities.append(BoschLanReachableBinarySensor(coordinator, cam_id, config_entry))
+        entities.append(
+            BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry)
+        )
+        entities.append(
+            BoschLanReachableBinarySensor(coordinator, cam_id, config_entry)
+        )
         if has_sound:
-            entities.append(BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry)
+            )
     async_add_entities(entities, update_before_add=False)
 
 
@@ -80,15 +93,16 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
     ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
+
         self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
 
     @property
     def _cam_data(self) -> dict[str, Any]:
@@ -97,12 +111,12 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
         }
 
     def _get_latest_event_of_type(self, event_type: str) -> dict[str, Any] | None:
@@ -155,8 +169,8 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
         try:
             # Strip to 19 chars: "2026-03-22T14:30:00" (drop the ".000Z" suffix)
             ts_clean = ts_str[:19]
-            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=timezone.utc)
-            now_utc = datetime.now(tz=timezone.utc)
+            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=UTC)
+            now_utc = datetime.now(tz=UTC)
             return (now_utc - dt_utc) <= timedelta(seconds=self._motion_active_window)
         except (ValueError, TypeError):
             return False
@@ -167,7 +181,7 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when a MOVEMENT event occurred within the last 30 seconds."""
 
     _attr_device_class = BinarySensorDeviceClass.MOTION
-    _attr_icon         = "mdi:motion-sensor"
+    _attr_icon = "mdi:motion-sensor"
 
     def __init__(
         self,
@@ -176,8 +190,8 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Motion"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_motion_binary"
+        self._attr_name = "Motion"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_binary"
         self._attr_translation_key = "motion"
 
     @property
@@ -193,7 +207,7 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
         if not event:
             return {}
         return {
-            "event_id":  event.get("id", ""),
+            "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
             "image_url": event.get("imageUrl", ""),
         }
@@ -204,7 +218,7 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when an AUDIO_ALARM event occurred within the last 30 seconds."""
 
     _attr_device_class = BinarySensorDeviceClass.SOUND
-    _attr_icon         = "mdi:volume-high"
+    _attr_icon = "mdi:volume-high"
 
     def __init__(
         self,
@@ -213,8 +227,8 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Audio Alarm"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_audio_alarm_binary"
+        self._attr_name = "Audio Alarm"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_binary"
         self._attr_translation_key = "audio_alarm_binary"
 
     @property
@@ -230,7 +244,7 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
         if not event:
             return {}
         return {
-            "event_id":  event.get("id", ""),
+            "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
             "image_url": event.get("imageUrl", ""),
         }
@@ -241,7 +255,7 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when a PERSON event occurred within the last 30 seconds."""
 
     _attr_device_class = BinarySensorDeviceClass.MOTION
-    _attr_icon         = "mdi:account-alert"
+    _attr_icon = "mdi:account-alert"
 
     def __init__(
         self,
@@ -250,8 +264,8 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = "Person Detected"
-        self._attr_unique_id       = f"bosch_shc_cam_{cam_id}_person_detected"
+        self._attr_name = "Person Detected"
+        self._attr_unique_id = f"bosch_shc_cam_{cam_id}_person_detected"
         self._attr_translation_key = "person_detected"
 
     @property
@@ -267,7 +281,7 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
         if not event:
             return {}
         return {
-            "event_id":  event.get("id", ""),
+            "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
             "image_url": event.get("imageUrl", ""),
         }
@@ -316,6 +330,7 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         import time as _time
+
         entry = self.coordinator._lan_tcp_reachable.get(self._cam_id)
         attrs: dict[str, Any] = {"camera_id": self._cam_id}
         if entry is not None:
@@ -327,9 +342,8 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
             else float("-inf")
         )
         if last_write != float("-inf"):
-            grace_left = (
-                self.coordinator._LOCAL_WRITE_GRACE_S
-                - (_time.monotonic() - last_write)
+            grace_left = self.coordinator._LOCAL_WRITE_GRACE_S - (
+                _time.monotonic() - last_write
             )
             if grace_left > 0:
                 attrs["write_grace_seconds_left"] = round(grace_left)

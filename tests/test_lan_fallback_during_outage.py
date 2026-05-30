@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -46,23 +45,36 @@ class TestRcpLocalWriteTransport:
 
         class _FakeResp:
             status = 200
+
             async def read(self):
                 return b"<rcp><payload>00</payload></rcp>"
-            async def __aenter__(self): return self
-            async def __aexit__(self, *_): return False
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
 
         async def _fake_digest_request(session, method, url, user, password, **_):
             observed_url.append(url)
             return _FakeResp()
 
-        with patch("custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-                   side_effect=_fake_digest_request):
-            with patch("custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-                       return_value=MagicMock()):
+        with patch(
+            "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
+            side_effect=_fake_digest_request,
+        ):
+            with patch(
+                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
+                return_value=MagicMock(),
+            ):
                 ok = await rcp_local_write(
-                    MagicMock(), "192.0.2.149", "0x0d00",
-                    "00010000", "P_OCTET",
-                    user="cbs-xxx", password="secret",
+                    MagicMock(),
+                    "192.0.2.149",
+                    "0x0d00",
+                    "00010000",
+                    "P_OCTET",
+                    user="cbs-xxx",
+                    password="secret",
                 )
 
         assert ok is True
@@ -82,21 +94,31 @@ class TestRcpLocalWriteTransport:
 
         class _FakeResp:
             status = 200
+
             async def read(self):
                 return b"<rcp><payload>00</payload></rcp>"
-            async def __aenter__(self): return self
-            async def __aexit__(self, *_): return False
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
 
         class _FakeSession:
             def get(self, url, **kwargs):
                 observed_url.append(url)
                 return _FakeResp()
 
-        with patch("custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-                   return_value=_FakeSession()):
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
+            return_value=_FakeSession(),
+        ):
             await rcp_local_write(
-                MagicMock(), "192.0.2.149", "0x0d00",
-                "00010000", "P_OCTET",
+                MagicMock(),
+                "192.0.2.149",
+                "0x0d00",
+                "00010000",
+                "P_OCTET",
             )
 
         assert observed_url
@@ -126,7 +148,8 @@ class TestPrivacyAvailableWhenHwUnknown:
         # Wire the super().available chain — for the test we treat super
         # as always-true (entity not in registry-suspended state).
         with patch.object(
-            BoschPrivacyModeSwitch.__bases__[0], "available",
+            BoschPrivacyModeSwitch.__bases__[0],
+            "available",
             new_callable=lambda: property(lambda _self: True),
         ):
             result = BoschPrivacyModeSwitch.available.fget(sw)
@@ -145,7 +168,8 @@ class TestPrivacyAvailableWhenHwUnknown:
         )
         sw = SimpleNamespace(coordinator=coord, _cam_id=CAM_ID)
         with patch.object(
-            BoschPrivacyModeSwitch.__bases__[0], "available",
+            BoschPrivacyModeSwitch.__bases__[0],
+            "available",
             new_callable=lambda: property(lambda _self: True),
         ):
             result = BoschPrivacyModeSwitch.available.fget(sw)
@@ -168,6 +192,7 @@ class TestShcLanFallbackFiresForUnknownHw:
         """Source-grep: the privacy fallback gate must reference both
         `_is_gen2` and the hw-unknown sentinel set."""
         import inspect
+
         from custom_components.bosch_shc_camera import shc
 
         src = inspect.getsource(shc.async_cloud_set_privacy_mode)
@@ -180,6 +205,7 @@ class TestShcLanFallbackFiresForUnknownHw:
     @pytest.mark.asyncio
     async def test_light_lan_fallback_includes_unknown_hw(self):
         import inspect
+
         from custom_components.bosch_shc_camera import shc
 
         src = inspect.getsource(shc.async_cloud_set_light_component)

@@ -27,6 +27,7 @@ shared-cache pattern:
   * ``register_session`` is called per ``open_file()`` invocation, not
     once per process.
 """
+
 from __future__ import annotations
 
 import sys
@@ -39,6 +40,7 @@ import pytest
 def _backend(hass_data: dict | None = None):
     """Build a configured ``_SmbBackend`` with credentials for tests below."""
     from custom_components.bosch_shc_camera.media_source import _SmbBackend
+
     hass = SimpleNamespace(data=hass_data if hass_data is not None else {})
     return _SmbBackend(
         hass,
@@ -91,22 +93,28 @@ class TestSmbConnectionCachePerCall:
         stat_kwargs = fake.stat.call_args.kwargs
         open_kwargs = fake.open_file.call_args.kwargs
 
-        assert "connection_cache" in reg_kwargs, \
+        assert "connection_cache" in reg_kwargs, (
             "register_session must be called with connection_cache="
-        assert "connection_cache" in stat_kwargs, \
+        )
+        assert "connection_cache" in stat_kwargs, (
             "smbclient.stat must be called with connection_cache="
-        assert "connection_cache" in open_kwargs, \
+        )
+        assert "connection_cache" in open_kwargs, (
             "smbclient.open_file must be called with connection_cache="
+        )
 
         # Same cache for one logical operation
-        assert reg_kwargs["connection_cache"] is stat_kwargs["connection_cache"], \
+        assert reg_kwargs["connection_cache"] is stat_kwargs["connection_cache"], (
             "stat must use the same cache that register_session populated"
-        assert reg_kwargs["connection_cache"] is open_kwargs["connection_cache"], \
+        )
+        assert reg_kwargs["connection_cache"] is open_kwargs["connection_cache"], (
             "open_file must use the same cache that register_session populated"
+        )
 
         # Cache is a dict (smbclient API contract)
-        assert isinstance(reg_kwargs["connection_cache"], dict), \
+        assert isinstance(reg_kwargs["connection_cache"], dict), (
             "connection_cache must be a dict per smbclient API"
+        )
 
         # share_access="r" must be passed on open_file — without it, FRITZ.NAS
         # and other servers open the file exclusively and a second parallel
@@ -137,8 +145,9 @@ class TestSmbConnectionCachePerCall:
             backend.open_file("Innenbereich", "2026", "05", "15", valid_b)
 
         register_calls = fake.register_session.call_args_list
-        assert len(register_calls) == 2, \
+        assert len(register_calls) == 2, (
             f"expected register_session called once per open_file (2), got {len(register_calls)}"
+        )
 
         cache_a = register_calls[0].kwargs["connection_cache"]
         cache_b = register_calls[1].kwargs["connection_cache"]
@@ -162,8 +171,9 @@ class TestSmbConnectionCachePerCall:
         assert len(register_calls) == 2
         cache_a = register_calls[0].kwargs["connection_cache"]
         cache_b = register_calls[1].kwargs["connection_cache"]
-        assert cache_a is not cache_b, \
+        assert cache_a is not cache_b, (
             "open_flat_file must also isolate connection_cache per call"
+        )
 
     def test_scandir_uses_isolated_cache_per_call(self):
         """Directory listings (list_cameras, list_years, list_months, list_days,
@@ -178,16 +188,17 @@ class TestSmbConnectionCachePerCall:
             list(backend._scandir_filtered("Innenbereich", want_dirs=False))
 
         register_calls = fake.register_session.call_args_list
-        assert len(register_calls) == 2, \
+        assert len(register_calls) == 2, (
             "_scandir_filtered must register a fresh session per call"
+        )
         cache_a = register_calls[0].kwargs["connection_cache"]
         cache_b = register_calls[1].kwargs["connection_cache"]
-        assert cache_a is not cache_b, \
-            "scandir must isolate connection_cache per call"
+        assert cache_a is not cache_b, "scandir must isolate connection_cache per call"
         scandir_kwargs_list = [c.kwargs for c in fake.scandir.call_args_list]
         for kw in scandir_kwargs_list:
-            assert "connection_cache" in kw, \
+            assert "connection_cache" in kw, (
                 "smbclient.scandir must be called with connection_cache="
+            )
 
 
 # ── parallel burst simulation: pins the original failure mode ─────────────
@@ -210,8 +221,10 @@ class TestSmbParallelBurst:
         backend = _backend()
         fake = _fake_smbclient()
         cam = "Innenbereich"
-        names = [f"Innenbereich_2026-05-15_10-00-{i:02d}_MOTION_FF{i:04d}.mp4"
-                 for i in range(9)]
+        names = [
+            f"Innenbereich_2026-05-15_10-00-{i:02d}_MOTION_FF{i:04d}.mp4"
+            for i in range(9)
+        ]
 
         with patch.dict(sys.modules, {"smbclient": fake}):
             with concurrent.futures.ThreadPoolExecutor(max_workers=9) as ex:
@@ -223,8 +236,9 @@ class TestSmbParallelBurst:
                     f.result()
 
         register_calls = fake.register_session.call_args_list
-        assert len(register_calls) == 9, \
+        assert len(register_calls) == 9, (
             f"9 parallel open_file → 9 register_session calls, got {len(register_calls)}"
+        )
         caches = [c.kwargs["connection_cache"] for c in register_calls]
         cache_ids = {id(c) for c in caches}
         assert len(cache_ids) == 9, (

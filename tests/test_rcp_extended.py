@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "TEST-CAM-0001"
 PROXY_HOST = "proxy-99.live.cbs.boschsecurity.com:42090"
 PROXY_HASH = "abcdef1234567890"
@@ -64,7 +63,9 @@ class TestRcpReadHttpErrors:
             "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
             return_value=_make_session(_make_ha_resp(200, xml)),
         ):
-            result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache)
+            result = await rcp_read(
+                hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
+            )
 
         assert result == bytes.fromhex(payload_hex), (
             "rcp_read must decode hex from <payload> tag and return bytes"
@@ -134,7 +135,10 @@ class TestRcpReadHttpErrors:
             return_value=_make_session(_make_ha_resp(401, b"")),
         ):
             result = await rcp_read(
-                hass, RCP_BASE, "0x0c22", "sid1",
+                hass,
+                RCP_BASE,
+                "0x0c22",
+                "sid1",
                 session_cache=cache,
             )
 
@@ -171,7 +175,9 @@ class TestRcpReadHttpErrors:
             "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
             return_value=_make_session(_make_ha_resp(500, b"")),
         ):
-            result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache)
+            result = await rcp_read(
+                hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
+            )
 
         assert result is None
         assert PROXY_HASH in cache, "HTTP 500 must NOT evict the session cache"
@@ -189,7 +195,9 @@ class TestRcpReadHttpErrors:
             "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
             return_value=_make_session(_make_ha_resp(200, xml)),
         ):
-            result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache)
+            result = await rcp_read(
+                hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
+            )
 
         assert result is None
         assert PROXY_HASH not in cache, (
@@ -210,7 +218,9 @@ class TestRcpReadHttpErrors:
             "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
             return_value=_make_session(_make_ha_resp(200, xml)),
         ):
-            result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache)
+            result = await rcp_read(
+                hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
+            )
 
         assert result is None
         assert PROXY_HASH in cache, (
@@ -224,7 +234,7 @@ class TestRcpReadHttpErrors:
 
         hass = MagicMock()
         session = MagicMock()
-        session.get = MagicMock(side_effect=asyncio.TimeoutError())
+        session.get = MagicMock(side_effect=TimeoutError())
 
         with patch(
             "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
@@ -356,14 +366,17 @@ class TestAsyncUpdateRcpDataDimmer:
         def _side_effect(*args, **kwargs):
             return AsyncMock(return_value=None)
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
             # Return dimmer bytes for 0x0c22, None for everything else
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c22":
@@ -384,14 +397,18 @@ class TestAsyncUpdateRcpDataDimmer:
         # 2570 = 0x0A0A — what Gen2 Outdoor FW 9.40.25 returns
         out_of_range_bytes = struct.pack(">H", 2570)
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c22":
                     return out_of_range_bytes
@@ -412,14 +429,17 @@ class TestAsyncUpdateRcpDataDimmer:
 
         coord = _make_coord()
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value=None,
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         mock_read.assert_not_called()
@@ -436,14 +456,18 @@ class TestAsyncUpdateRcpDataPrivacy:
         coord = _make_coord()
         privacy_bytes = bytes([0x00, 0x01, 0x00, 0x00])  # byte[1] = 1 → ON
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0d00":
                     return privacy_bytes
@@ -463,14 +487,18 @@ class TestAsyncUpdateRcpDataPrivacy:
         coord = _make_coord()
         privacy_bytes = bytes([0x00, 0x00, 0x00, 0x00])
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0d00":
                     return privacy_bytes
@@ -492,14 +520,18 @@ class TestAsyncUpdateRcpDataLanIp:
         coord = _make_coord()
         ip_bytes = bytes([10, 0, 0, 5])  # 10.0.0.5
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0a36":
                     return ip_bytes
@@ -517,14 +549,18 @@ class TestAsyncUpdateRcpDataLanIp:
         coord = _make_coord()
         ip_bytes = b"192.0.2.100\x00"  # null-terminated ASCII
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0a36":
                     return ip_bytes
@@ -543,14 +579,18 @@ class TestAsyncUpdateRcpDataLanIp:
         coord = _make_coord()
         xml_bytes = b"<rcp><payload>00000000</payload></rcp>"  # starts with <
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0a36":
                     return xml_bytes
@@ -576,14 +616,18 @@ class TestAsyncUpdateRcpDataBitrate:
         # Two bitrate entries: 1000 kbps and 2000 kbps (within valid 100-50000 range)
         bitrate_bytes = struct.pack(">II", 1000, 2000)
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c81":
                     return bitrate_bytes
@@ -593,7 +637,9 @@ class TestAsyncUpdateRcpDataBitrate:
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         ladder = coord._rcp_bitrate_cache.get(CAM_ID)
-        assert ladder == [1000, 2000], f"Bitrate ladder should be [1000, 2000], got {ladder}"
+        assert ladder == [1000, 2000], (
+            f"Bitrate ladder should be [1000, 2000], got {ladder}"
+        )
 
     @pytest.mark.asyncio
     async def test_garbage_bitrate_from_xml_not_cached(self):
@@ -610,14 +656,18 @@ class TestAsyncUpdateRcpDataBitrate:
         # Simulate what Gen1 returns: XML-decoded payload bytes (garbage uint32s)
         garbage_bytes = struct.pack(">II", 168442994, 1668300298)  # from real log
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c81":
                     return garbage_bytes
@@ -639,14 +689,18 @@ class TestAsyncUpdateRcpDataBitrate:
         coord = _make_coord()
         xml_bytes = b"<rcp><payload>00000000</payload></rcp>"
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c81":
                     return xml_bytes
@@ -677,14 +731,18 @@ class TestAsyncUpdateRcpDataBitrate:
         coord = _make_coord()
         xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c81</command>\n</rcp>"
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 if cmd == "0x0c81":
                     return xml_bytes
@@ -711,16 +769,21 @@ class TestAsyncUpdateRcpDataBitrate:
         coord = _make_coord()
         xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c81</command>\n</rcp>"
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 return xml_bytes if cmd == "0x0c81" else None
+
             mock_read.side_effect = read_side
 
             # Run 3 times — bitrate should be probed 3x then skipped
@@ -747,31 +810,40 @@ class TestIsXmlEnvelopeHelper:
 
     def test_none_is_not_xml(self):
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         assert _is_xml_envelope(None) is False
 
     def test_empty_is_not_xml(self):
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         assert _is_xml_envelope(b"") is False
 
     def test_plain_xml_detected(self):
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         assert _is_xml_envelope(b"<rcp><command>0x0c81</command></rcp>") is True
 
     def test_whitespace_prefixed_xml_detected(self):
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
-        assert _is_xml_envelope(b"\n\n<rcp>\n\n\t<command>0x0c81</command></rcp>") is True
+
+        assert (
+            _is_xml_envelope(b"\n\n<rcp>\n\n\t<command>0x0c81</command></rcp>") is True
+        )
 
     def test_pure_whitespace_detected(self):
         """T_WORD (2 bytes) truncates the XML envelope to just '\\n\\n'."""
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         assert _is_xml_envelope(b"\n\n") is True
         assert _is_xml_envelope(b"\t ") is True
         assert _is_xml_envelope(b"\r\n") is True
 
     def test_binary_payload_not_xml(self):
-        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
         # Valid bitrate ladder uint32 big-endian: 1000, 2000 kbps
         import struct as _struct
+
+        from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         assert _is_xml_envelope(_struct.pack(">II", 1000, 2000)) is False
         # Valid LED dimmer 50% as T_WORD
         assert _is_xml_envelope(b"\x00\x32") is False
@@ -780,6 +852,7 @@ class TestIsXmlEnvelopeHelper:
 
     def test_ascii_text_not_xml(self):
         from custom_components.bosch_shc_camera.rcp import _is_xml_envelope
+
         # Product name (legitimate ASCII), not XML
         assert _is_xml_envelope(b"Bosch Smart Camera\x00") is False
 
@@ -802,16 +875,21 @@ class TestAsyncUpdateRcpDataDimmerXmlGuard:
         coord = _make_coord()
         truncated_xml = b"\n\n"  # first 2 bytes of '\n\n<rcp>...'
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 return truncated_xml if cmd == "0x0c22" else None
+
             mock_read.side_effect = read_side
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
@@ -830,16 +908,21 @@ class TestAsyncUpdateRcpDataDimmerXmlGuard:
         coord = _make_coord()
         valid_50 = b"\x00\x32"  # uint16 big-endian = 50
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 return valid_50 if cmd == "0x0c22" else None
+
             mock_read.side_effect = read_side
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
@@ -868,16 +951,21 @@ class TestAsyncUpdateRcpDataClockXmlGuard:
         coord = _make_coord()
         xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0a0f</command>\n</rcp>"
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
+
             async def read_side(hass, base, cmd, sid, **kw):
                 return xml_bytes if cmd == "0x0a0f" else None
+
             mock_read.side_effect = read_side
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
@@ -905,14 +993,17 @@ class TestSkipFailMarkLogic:
         # Pre-seed 3 failures for 0x0c22
         coord._rcp_cmd_failures[CAM_ID]["0x0c22"] = 3
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
             mock_read.return_value = None
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
             called_cmds = [call.args[2] for call in mock_read.call_args_list]
@@ -930,14 +1021,17 @@ class TestSkipFailMarkLogic:
         coord = _make_coord()
         coord._rcp_cmd_failures[CAM_ID]["0x0c22"] = 2
 
-        with patch(
-            "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
-            new_callable=AsyncMock,
-            return_value="fake-sid",
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_read",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.get_cached_rcp_session",
+                new_callable=AsyncMock,
+                return_value="fake-sid",
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_read",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
             mock_read.return_value = None
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
             called_cmds = [call.args[2] for call in mock_read.call_args_list]

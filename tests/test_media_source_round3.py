@@ -16,6 +16,7 @@ Covers previously-uncovered lines:
 
 Uses tmp_path + SimpleNamespace stubs — no real HA runtime.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,52 +26,63 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components.media_source.error import Unresolvable
 
 from custom_components.bosch_shc_camera.media_source import (
-    _LocalBackend,
-    _NvrBackend,
-    _SmbBackend,
-    _parse_filename,
-    _safe_join,
     BoschCameraMediaSource,
     BoschCameraMediaView,
     _enabled_sources,
+    _LocalBackend,
+    _NvrBackend,
+    _parse_filename,
+    _safe_join,
+    _SmbBackend,
     async_get_media_source,
 )
-from homeassistant.components.media_source.error import Unresolvable
 
 MODULE = "custom_components.bosch_shc_camera.media_source"
 
 CAM_FILE = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4"
-CAM_IMG  = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.jpg"
+CAM_IMG = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.jpg"
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-def _make_local_tree(tmp_path: Path, *, cam: str = "Terrasse",
-                     files: list[str] | None = None) -> _LocalBackend:
+
+def _make_local_tree(
+    tmp_path: Path, *, cam: str = "Terrasse", files: list[str] | None = None
+) -> _LocalBackend:
     cam_dir = tmp_path / cam
     cam_dir.mkdir(parents=True, exist_ok=True)
-    for f in (files or [CAM_FILE, CAM_IMG]):
+    for f in files or [CAM_FILE, CAM_IMG]:
         (cam_dir / f).write_bytes(b"data")
     return _LocalBackend(str(tmp_path))
 
 
-def _make_nvr_tree(tmp_path: Path, *, cam: str = "Terrasse",
-                   date: str = "2026-05-07",
-                   segments: list[str] | None = None) -> _NvrBackend:
+def _make_nvr_tree(
+    tmp_path: Path,
+    *,
+    cam: str = "Terrasse",
+    date: str = "2026-05-07",
+    segments: list[str] | None = None,
+) -> _NvrBackend:
     seg_dir = tmp_path / cam / date
     seg_dir.mkdir(parents=True, exist_ok=True)
-    for s in (segments or ["10-00.mp4"]):
+    for s in segments or ["10-00.mp4"]:
         (seg_dir / s).write_bytes(b"vid")
     return _NvrBackend(str(tmp_path))
 
 
-def _hass_stub(entry_id: str = "entry1", opts: dict | None = None, tmp_path: Path | None = None):
+def _hass_stub(
+    entry_id: str = "entry1", opts: dict | None = None, tmp_path: Path | None = None
+):
     hass = MagicMock()
     hass.data = {}
     hass.http = MagicMock()
-    opts = opts or {"download_path": str(tmp_path or "/tmp"), "media_browser_source": "local"}
+    opts = opts or {
+        "download_path": str(tmp_path or "/tmp"),
+        "media_browser_source": "local",
+    }
 
     coord = SimpleNamespace(options=opts)
     entry = MagicMock()
@@ -82,11 +94,13 @@ def _hass_stub(entry_id: str = "entry1", opts: dict | None = None, tmp_path: Pat
 
     async def _exec(fn, *args):
         return fn(*args)
+
     hass.async_add_executor_job = _exec
     return hass
 
 
 # ── _LocalBackend.list_dates ─────────────────────────────────────────────────
+
 
 class TestLocalBackendListDates:
     """Line 126: directories inside a camera folder are skipped (only files count)."""
@@ -112,6 +126,7 @@ class TestLocalBackendListDates:
 
 # ── _LocalBackend.list_events ────────────────────────────────────────────────
 
+
 class TestLocalBackendListEvents:
     """Lines 135-140: cam_dir=None (path traversal blocked) + junk file skip."""
 
@@ -125,7 +140,9 @@ class TestLocalBackendListEvents:
     def test_macos_junk_file_skipped(self, tmp_path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()
-        (cam_dir / "._Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4").write_bytes(b"x")
+        (cam_dir / "._Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4").write_bytes(
+            b"x"
+        )
         (cam_dir / CAM_FILE).write_bytes(b"x")
         backend = _LocalBackend(str(tmp_path))
         events = backend.list_events("Terrasse", "2026-05-07")
@@ -136,6 +153,7 @@ class TestLocalBackendListEvents:
 
 
 # ── _NvrBackend ───────────────────────────────────────────────────────────────
+
 
 class TestNvrBackendListCameras:
     """Line 277: base dir doesn't exist → list_cameras returns []."""
@@ -220,6 +238,7 @@ class TestNvrBackendResolve:
 
 # ── _browse dispatch — single-source implicit kind ────────────────────────────
 
+
 class TestBrowseDispatchSingleSource:
     """Lines 360-373: single-source entry implicit kind detection and unknown-source error."""
 
@@ -240,6 +259,7 @@ class TestBrowseDispatchSingleSource:
 
 
 # ── async_get_media_source — view registration ────────────────────────────────
+
 
 class TestAsyncGetMediaSource:
     """Lines 388-391: view is registered only once; second call skips re-registration."""
@@ -265,6 +285,7 @@ class TestAsyncGetMediaSource:
 
 # ── BoschCameraMediaView.get — dispatch ───────────────────────────────────────
 
+
 def _make_view_hass(entry_id: str, tmp_path: Path, kind: str = "L"):
     """Build a hass stub that exposes one source of the given kind."""
     hass = MagicMock()
@@ -279,13 +300,22 @@ def _make_view_hass(entry_id: str, tmp_path: Path, kind: str = "L"):
         seg_dir = tmp_path / "Terrasse" / "2026-05-07"
         seg_dir.mkdir(parents=True, exist_ok=True)
         (seg_dir / "10-00.mp4").write_bytes(b"nvr")
-        opts = {"enable_nvr": True, "nvr_base_path": str(tmp_path),
-                "media_browser_source": "local"}
+        opts = {
+            "enable_nvr": True,
+            "nvr_base_path": str(tmp_path),
+            "media_browser_source": "local",
+        }
     else:
-        opts = {"enable_smb_upload": True, "upload_protocol": "smb",
-                "smb_server": "nas", "smb_share": "SHARE",
-                "smb_username": "u", "smb_password": "p",
-                "smb_base_path": "", "media_browser_source": "smb"}
+        opts = {
+            "enable_smb_upload": True,
+            "upload_protocol": "smb",
+            "smb_server": "nas",
+            "smb_share": "SHARE",
+            "smb_username": "u",
+            "smb_password": "p",
+            "smb_base_path": "",
+            "media_browser_source": "smb",
+        }
 
     coord = SimpleNamespace(options=opts)
     entry = MagicMock()
@@ -297,6 +327,7 @@ def _make_view_hass(entry_id: str, tmp_path: Path, kind: str = "L"):
 
     async def _exec(fn, *args):
         return fn(*args)
+
     hass.async_add_executor_job = _exec
     return hass
 
@@ -427,6 +458,7 @@ class TestServeSmb:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
         return hass
 
@@ -451,8 +483,9 @@ class TestServeSmb:
         backend_mock = MagicMock()
         backend_mock.open_file = MagicMock(side_effect=FileNotFoundError("nope"))
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):
                 await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
@@ -467,8 +500,9 @@ class TestServeSmb:
         backend_mock = MagicMock()
         backend_mock.open_file = MagicMock(side_effect=OSError("smb down"))
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):
                 await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
@@ -481,7 +515,7 @@ class TestServeSmb:
         payload = b"A" * 2000
         fobj = MagicMock()
         fobj.seek = MagicMock()
-        fobj.read = MagicMock(side_effect=[payload[500:500+256*1024], b""])
+        fobj.read = MagicMock(side_effect=[payload[500 : 500 + 256 * 1024], b""])
         fobj.close = MagicMock()
 
         backend_mock = MagicMock()
@@ -497,10 +531,12 @@ class TestServeSmb:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
         assert resp is real_response
@@ -530,10 +566,12 @@ class TestServeSmb:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
         assert resp is real_response

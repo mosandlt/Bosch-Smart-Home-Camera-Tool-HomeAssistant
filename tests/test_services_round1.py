@@ -14,6 +14,7 @@ handle_get_motion_zones (empty/non-empty, 443, error), handle_share_camera
 Pattern identical to test_init_round8.py — mock hass, extract closures,
 patch async_get_clientsession to avoid real network calls.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -71,14 +72,25 @@ class TestHandleUpdateRuleRemaining:
     async def test_rule_not_in_cache_fetches_from_api(self):
         """When rule is not in _rules_cache, handler fetches from API via GET."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: []})
         coord.async_request_refresh = AsyncMock()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
-        rules_resp = _resp_cm(200, json_data=[{"id": "rule-1", "name": "Old",
-                                               "isActive": True, "startTime": "08:00:00",
-                                               "endTime": "20:00:00", "weekdays": [0]}])
+        rules_resp = _resp_cm(
+            200,
+            json_data=[
+                {
+                    "id": "rule-1",
+                    "name": "Old",
+                    "isActive": True,
+                    "startTime": "08:00:00",
+                    "endTime": "20:00:00",
+                    "weekdays": [0],
+                }
+            ],
+        )
         put_resp = _resp_cm(204)
         session = MagicMock()
         session.get = MagicMock(return_value=rules_resp)
@@ -88,7 +100,11 @@ class TestHandleUpdateRuleRemaining:
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
-            call_mock.data = {"camera_id": CAM_ID, "rule_id": "rule-1", "name": "New Name"}
+            call_mock.data = {
+                "camera_id": CAM_ID,
+                "rule_id": "rule-1",
+                "name": "New Name",
+            }
             await handler(call_mock)
 
         session.get.assert_called_once()
@@ -99,7 +115,9 @@ class TestHandleUpdateRuleRemaining:
     async def test_rule_not_found_in_api_raises_service_validation_error(self):
         """Rule missing in both cache and API → ServiceValidationError with 'not_found'."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: []})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -115,15 +133,23 @@ class TestHandleUpdateRuleRemaining:
             call_mock.data = {"camera_id": CAM_ID, "rule_id": "missing-rule"}
             with pytest.raises(ServiceValidationError) as exc_info:
                 await handler(call_mock)
-        assert exc_info.value.translation_key == "not_found", \
+        assert exc_info.value.translation_key == "not_found", (
             "Missing rule must raise not_found ServiceValidationError"
+        )
 
     @pytest.mark.asyncio
     async def test_field_overlay_applied_to_existing(self):
         """All overlay fields (name, is_active, start_time, end_time, weekdays) are applied."""
         from custom_components.bosch_shc_camera import _register_services
-        existing = {"id": "r1", "name": "Old", "isActive": True,
-                    "startTime": "08:00:00", "endTime": "20:00:00", "weekdays": [0, 6]}
+
+        existing = {
+            "id": "r1",
+            "name": "Old",
+            "isActive": True,
+            "startTime": "08:00:00",
+            "endTime": "20:00:00",
+            "weekdays": [0, 6],
+        }
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -135,7 +161,11 @@ class TestHandleUpdateRuleRemaining:
             return _resp_cm(200).__aenter__.return_value
 
         put_cm = MagicMock()
-        put_cm.__aenter__ = AsyncMock(side_effect=lambda: captured_put.append(True) or _resp_cm(200).__aenter__.return_value)
+        put_cm.__aenter__ = AsyncMock(
+            side_effect=lambda: (
+                captured_put.append(True) or _resp_cm(200).__aenter__.return_value
+            )
+        )
         put_cm.__aexit__ = AsyncMock(return_value=None)
 
         # Simpler: just track that put was called with new data via assert on session
@@ -147,9 +177,12 @@ class TestHandleUpdateRuleRemaining:
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
             call_mock.data = {
-                "camera_id": CAM_ID, "rule_id": "r1",
-                "name": "New Name", "is_active": False,
-                "start_time": "09:00:00", "end_time": "21:00:00",
+                "camera_id": CAM_ID,
+                "rule_id": "r1",
+                "name": "New Name",
+                "is_active": False,
+                "start_time": "09:00:00",
+                "end_time": "21:00:00",
                 "weekdays": [1, 2, 3],
             }
             await handler(call_mock)
@@ -166,9 +199,17 @@ class TestHandleUpdateRuleRemaining:
     async def test_put_error_raises_ha_error(self):
         """PUT returning non-2xx must raise HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
-        existing = {"id": "r1", "name": "X", "isActive": True,
-                    "startTime": "08:00:00", "endTime": "20:00:00", "weekdays": []}
+
+        existing = {
+            "id": "r1",
+            "name": "X",
+            "isActive": True,
+            "startTime": "08:00:00",
+            "endTime": "20:00:00",
+            "weekdays": [],
+        }
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -188,7 +229,9 @@ class TestHandleUpdateRuleRemaining:
     async def test_api_fetch_exception_raises_ha_error(self):
         """Exception during GET for rules → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: []})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -213,7 +256,9 @@ class TestHandleSetMotionZones:
     async def test_zone_missing_field_raises_validation_error(self):
         """Zone dict missing required key → ServiceValidationError with 'missing_field'."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         hass = _make_hass()
         _register_services(hass)
         handler = _get_handlers(hass)["set_motion_zones"]
@@ -224,14 +269,17 @@ class TestHandleSetMotionZones:
         }
         with pytest.raises(ServiceValidationError) as exc_info:
             await handler(call_mock)
-        assert exc_info.value.translation_key == "missing_field", \
+        assert exc_info.value.translation_key == "missing_field", (
             "Missing coordinate key must raise missing_field"
+        )
 
     @pytest.mark.asyncio
     async def test_zone_value_out_of_range_raises_validation_error(self):
         """Zone coordinate > 1.0 → ServiceValidationError with 'value_out_of_range'."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         hass = _make_hass()
         _register_services(hass)
         handler = _get_handlers(hass)["set_motion_zones"]
@@ -242,14 +290,17 @@ class TestHandleSetMotionZones:
         }
         with pytest.raises(ServiceValidationError) as exc_info:
             await handler(call_mock)
-        assert exc_info.value.translation_key == "value_out_of_range", \
+        assert exc_info.value.translation_key == "value_out_of_range", (
             "Coordinate > 1.0 must raise value_out_of_range"
+        )
 
     @pytest.mark.asyncio
     async def test_negative_zone_value_raises_validation_error(self):
         """Zone coordinate < 0.0 → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         hass = _make_hass()
         _register_services(hass)
         handler = _get_handlers(hass)["set_motion_zones"]
@@ -265,6 +316,7 @@ class TestHandleSetMotionZones:
     async def test_http_200_refreshes_coordinator(self):
         """HTTP 200 → coordinator refresh requested."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -288,7 +340,9 @@ class TestHandleSetMotionZones:
     async def test_http_443_raises_privacy_blocked(self):
         """HTTP 443 → HomeAssistantError with translation_key='privacy_blocked'."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -306,20 +360,25 @@ class TestHandleSetMotionZones:
             }
             with pytest.raises(HomeAssistantError) as exc_info:
                 await handler(call_mock)
-        assert exc_info.value.translation_key == "privacy_blocked", \
+        assert exc_info.value.translation_key == "privacy_blocked", (
             "HTTP 443 from motion zones endpoint must raise privacy_blocked"
+        )
 
     @pytest.mark.asyncio
     async def test_http_500_raises_ha_error(self):
         """HTTP 500 → HomeAssistantError with body text."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(500, text="Internal Server Error"))
+        session.post = MagicMock(
+            return_value=_resp_cm(500, text="Internal Server Error")
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             _register_services(hass)
@@ -336,7 +395,9 @@ class TestHandleSetMotionZones:
     async def test_exception_wraps_to_ha_error(self):
         """aiohttp exception → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -364,6 +425,7 @@ class TestHandleGetMotionZones:
     async def test_empty_zones_creates_notification(self):
         """Empty zone list → persistent notification with 'Keine Motion-Zonen' message."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -380,13 +442,15 @@ class TestHandleGetMotionZones:
 
         hass.services.async_call.assert_awaited_once()
         call_args = hass.services.async_call.call_args
-        assert "Keine Motion-Zonen" in call_args[0][2]["message"], \
+        assert "Keine Motion-Zonen" in call_args[0][2]["message"], (
             "Empty zone list must show 'Keine Motion-Zonen' message"
+        )
 
     @pytest.mark.asyncio
     async def test_non_empty_zones_lists_them(self):
         """Non-empty zones → notification lists each zone with coordinates."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -411,7 +475,9 @@ class TestHandleGetMotionZones:
     async def test_http_443_creates_notification_and_raises(self):
         """HTTP 443 → persistent notification + HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -433,7 +499,9 @@ class TestHandleGetMotionZones:
     async def test_http_500_raises_ha_error(self):
         """HTTP 500 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -458,6 +526,7 @@ class TestHandleShareCamera:
     async def test_string_camera_id_converted_to_list(self):
         """camera_ids given as string → converted to [string] before PUT."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -480,6 +549,7 @@ class TestHandleShareCamera:
     async def test_http_204_sends_notification(self):
         """HTTP 204 → persistent notification sent."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -491,7 +561,11 @@ class TestHandleShareCamera:
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
-            call_mock.data = {"friend_id": "friend-1", "camera_ids": [CAM_ID], "days": 30}
+            call_mock.data = {
+                "friend_id": "friend-1",
+                "camera_ids": [CAM_ID],
+                "days": 30,
+            }
             await handler(call_mock)
 
         hass.services.async_call.assert_awaited_once()
@@ -500,7 +574,9 @@ class TestHandleShareCamera:
     async def test_http_error_raises(self):
         """HTTP 403 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -512,15 +588,21 @@ class TestHandleShareCamera:
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
-            call_mock.data = {"friend_id": "friend-1", "camera_ids": [CAM_ID], "days": 30}
+            call_mock.data = {
+                "friend_id": "friend-1",
+                "camera_ids": [CAM_ID],
+                "days": 30,
+            }
             with pytest.raises(HomeAssistantError):
                 await handler(call_mock)
 
     @pytest.mark.asyncio
     async def test_share_time_uses_days_param(self):
         """Share time end must be ~`days` days from now."""
-        from custom_components.bosch_shc_camera import _register_services
         import datetime
+
+        from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -538,10 +620,11 @@ class TestHandleShareCamera:
         put_json = session.put.call_args[1]["json"]
         end_str = put_json[0]["shareTime"]["end"]
         end_dt = datetime.datetime.fromisoformat(end_str)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         diff = (end_dt - now).total_seconds()
-        assert 13 * 86400 < diff < 15 * 86400, \
+        assert 13 * 86400 < diff < 15 * 86400, (
             "Share end time must be ~14 days from now"
+        )
 
 
 # ── handle_get_privacy_masks ──────────────────────────────────────────────────
@@ -552,6 +635,7 @@ class TestHandleGetPrivacyMasks:
     async def test_empty_masks_shows_keine_message(self):
         """Empty mask list → 'Keine Privacy-Masken' in notification."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -573,6 +657,7 @@ class TestHandleGetPrivacyMasks:
     async def test_non_empty_masks_lists_them(self):
         """Non-empty mask list → coordinates appear in notification."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -595,7 +680,9 @@ class TestHandleGetPrivacyMasks:
     async def test_http_443_creates_notification_and_raises(self):
         """HTTP 443 → notification + HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -617,7 +704,9 @@ class TestHandleGetPrivacyMasks:
     async def test_http_500_raises_ha_error(self):
         """HTTP 500 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -642,7 +731,9 @@ class TestHandleSetPrivacyMasks:
     async def test_mask_missing_field_raises_validation_error(self):
         """Mask dict missing required key → ServiceValidationError with 'missing_field'."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         hass = _make_hass()
         _register_services(hass)
         handler = _get_handlers(hass)["set_privacy_masks"]
@@ -659,6 +750,7 @@ class TestHandleSetPrivacyMasks:
     async def test_http_200_refreshes_coordinator(self):
         """HTTP 200 → coordinator refresh."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -682,7 +774,9 @@ class TestHandleSetPrivacyMasks:
     async def test_http_443_raises_privacy_blocked(self):
         """HTTP 443 → privacy_blocked HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -706,7 +800,9 @@ class TestHandleSetPrivacyMasks:
     async def test_http_error_raises_ha_error(self):
         """HTTP 500 → HomeAssistantError with http_error_with_body."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -734,7 +830,9 @@ class TestHandleDeleteMotionZone:
     async def test_index_out_of_range_raises_validation_error(self):
         """zone_index >= len(zones) → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -756,6 +854,7 @@ class TestHandleDeleteMotionZone:
     async def test_valid_index_fetches_and_reposts(self):
         """Valid index → zone is removed, remaining zones are re-POSTed."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -774,15 +873,18 @@ class TestHandleDeleteMotionZone:
             await handler(call_mock)
 
         post_json = session.post.call_args[1]["json"]
-        assert post_json == [zone_b], \
+        assert post_json == [zone_b], (
             "After deleting zone 0, only zone_b must be re-POSTed"
+        )
         coord.async_request_refresh.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_fetch_error_raises_ha_error(self):
         """GET fetch returning non-200 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -807,10 +909,14 @@ class TestHandleGetLightingSchedule:
     async def test_cache_hit_skips_api_call(self):
         """Cached lighting options must be used without an API call."""
         from custom_components.bosch_shc_camera import _register_services
+
         cached = {
-            "scheduleStatus": "MANUAL", "generalLightOnTime": "18:00:00",
-            "generalLightOffTime": "06:00:00", "darknessThreshold": 5,
-            "lightOnMotion": True, "lightOnMotionFollowUpTimeSeconds": 30,
+            "scheduleStatus": "MANUAL",
+            "generalLightOnTime": "18:00:00",
+            "generalLightOffTime": "06:00:00",
+            "darknessThreshold": 5,
+            "lightOnMotion": True,
+            "lightOnMotionFollowUpTimeSeconds": 30,
             "frontIlluminatorInGeneralLightOn": True,
             "wallwasherInGeneralLightOn": False,
             "frontIlluminatorGeneralLightIntensity": 0.8,
@@ -835,15 +941,20 @@ class TestHandleGetLightingSchedule:
     async def test_cache_miss_fetches_from_api(self):
         """No cache → GET request made, notification sent."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord(_lighting_options_cache={})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         api_data = {
-            "scheduleStatus": "DUSK_TO_DAWN", "generalLightOnTime": "00:00:00",
-            "generalLightOffTime": "00:00:00", "darknessThreshold": 3,
-            "lightOnMotion": False, "lightOnMotionFollowUpTimeSeconds": 0,
-            "frontIlluminatorInGeneralLightOn": False, "wallwasherInGeneralLightOn": False,
+            "scheduleStatus": "DUSK_TO_DAWN",
+            "generalLightOnTime": "00:00:00",
+            "generalLightOffTime": "00:00:00",
+            "darknessThreshold": 3,
+            "lightOnMotion": False,
+            "lightOnMotionFollowUpTimeSeconds": 0,
+            "frontIlluminatorInGeneralLightOn": False,
+            "wallwasherInGeneralLightOn": False,
             "frontIlluminatorGeneralLightIntensity": 1.0,
         }
         session = MagicMock()
@@ -863,7 +974,9 @@ class TestHandleGetLightingSchedule:
     async def test_cache_miss_http_error_raises(self):
         """GET returns non-200 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord(_lighting_options_cache={})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -883,11 +996,16 @@ class TestHandleGetLightingSchedule:
     async def test_notification_shows_schedule_details(self):
         """Notification message must contain schedule mode and time fields."""
         from custom_components.bosch_shc_camera import _register_services
+
         cached = {
-            "scheduleStatus": "MANUAL", "generalLightOnTime": "18:30:00",
-            "generalLightOffTime": "05:30:00", "darknessThreshold": 7,
-            "lightOnMotion": True, "lightOnMotionFollowUpTimeSeconds": 60,
-            "frontIlluminatorInGeneralLightOn": True, "wallwasherInGeneralLightOn": True,
+            "scheduleStatus": "MANUAL",
+            "generalLightOnTime": "18:30:00",
+            "generalLightOffTime": "05:30:00",
+            "darknessThreshold": 7,
+            "lightOnMotion": True,
+            "lightOnMotionFollowUpTimeSeconds": 60,
+            "frontIlluminatorInGeneralLightOn": True,
+            "wallwasherInGeneralLightOn": True,
             "frontIlluminatorGeneralLightIntensity": 0.5,
         }
         entry, coord = _entry_with_coord(_lighting_options_cache={CAM_ID: cached})
@@ -914,7 +1032,9 @@ class TestHandleRenameCamera:
     async def test_missing_new_name_raises_validation_error(self):
         """empty new_name → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
+
         hass = _make_hass()
         _register_services(hass)
         handler = _get_handlers(hass)["rename_camera"]
@@ -927,6 +1047,7 @@ class TestHandleRenameCamera:
     async def test_http_204_refreshes_coordinator(self):
         """HTTP 204 → coordinator refresh requested."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -947,7 +1068,9 @@ class TestHandleRenameCamera:
     async def test_http_error_raises_ha_error(self):
         """HTTP 422 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -972,12 +1095,15 @@ class TestHandleInviteFriend:
     async def test_http_201_sends_notification_with_friend_id(self):
         """HTTP 201 → persistent notification contains friend ID."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(201, json_data={"id": "friend-xyz"}))
+        session.post = MagicMock(
+            return_value=_resp_cm(201, json_data={"id": "friend-xyz"})
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             _register_services(hass)
@@ -994,7 +1120,9 @@ class TestHandleInviteFriend:
     async def test_http_error_raises_ha_error(self):
         """HTTP 409 (already invited) → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1014,7 +1142,9 @@ class TestHandleInviteFriend:
     async def test_exception_wraps_to_ha_error(self):
         """Network error → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1039,6 +1169,7 @@ class TestHandleListFriends:
     async def test_no_friends_shows_keine_message(self):
         """Empty friends list → 'Keine Freunde' in notification."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1058,12 +1189,19 @@ class TestHandleListFriends:
     async def test_friends_listed_in_notification(self):
         """Non-empty friends → email + status + ID appear in notification."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
-        friends = [{"email": "bob@example.com", "status": "ACCEPTED",
-                    "id": "f-001", "sharedVideoInputs": [CAM_ID]}]
+        friends = [
+            {
+                "email": "bob@example.com",
+                "status": "ACCEPTED",
+                "id": "f-001",
+                "sharedVideoInputs": [CAM_ID],
+            }
+        ]
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=friends))
 
@@ -1081,7 +1219,9 @@ class TestHandleListFriends:
     async def test_http_error_raises_ha_error(self):
         """HTTP 500 → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1104,6 +1244,7 @@ class TestHandleRemoveFriend:
     async def test_http_204_succeeds(self):
         """HTTP 204 → success, no error."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1124,7 +1265,9 @@ class TestHandleRemoveFriend:
     async def test_http_404_raises_ha_error(self):
         """HTTP 404 (friend not found) → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1144,7 +1287,9 @@ class TestHandleRemoveFriend:
     async def test_exception_wraps_to_ha_error(self):
         """Network exception → HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1164,6 +1309,7 @@ class TestHandleRemoveFriend:
     async def test_http_200_also_succeeds(self):
         """HTTP 200 is also a valid success response."""
         from custom_components.bosch_shc_camera import _register_services
+
         entry, coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]

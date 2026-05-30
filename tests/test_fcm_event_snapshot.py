@@ -9,6 +9,7 @@ Path B: alert step-2 imageUrl bytes → cam._cached_image updated, save_snapshot
 
 Source: feature implementation 2026-05-15.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,11 +26,12 @@ MODULE = "custom_components.bosch_shc_camera.fcm"
 SMB_MODULE = "custom_components.bosch_shc_camera.smb"
 
 # A minimal JPEG-like byte sequence that passes save_snapshot's > 100 B size guard.
-JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400   # 404 B — real-looking snapshot
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B — real-looking snapshot
 JPEG_BYTES_ALT = b"\xff\xd8\xff\xe0" + b"\x99" * 400  # different content, same length
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
 
 def _resp_cm(
     status: int,
@@ -54,23 +56,25 @@ def _one_event(
     tags: list[str] | None = None,
     image: str = "",
 ) -> list[dict[str, Any]]:
-    return [{
-        "id": event_id,
-        "eventType": event_type,
-        "eventTags": tags or [],
-        "timestamp": "2026-05-15T10:00:00Z",
-        "imageUrl": image,
-        "videoClipUrl": "",
-        "videoClipUploadStatus": "",
-    }]
+    return [
+        {
+            "id": event_id,
+            "eventType": event_type,
+            "eventTags": tags or [],
+            "timestamp": "2026-05-15T10:00:00Z",
+            "imageUrl": image,
+            "videoClipUrl": "",
+            "videoClipUploadStatus": "",
+        }
+    ]
 
 
 def _make_push_coord(**overrides: Any) -> Any:
     hass = MagicMock()
     hass.states.get = MagicMock(return_value=None)
-    hass.async_create_task = MagicMock(return_value=MagicMock(
-        add_done_callback=MagicMock()
-    ))
+    hass.async_create_task = MagicMock(
+        return_value=MagicMock(add_done_callback=MagicMock())
+    )
     hass.bus.async_fire = MagicMock()
     coord = SimpleNamespace(
         token="tok-test",
@@ -142,22 +146,27 @@ async def _run_alert(
     session_override: Any = None,
 ) -> None:
     from custom_components.bosch_shc_camera.fcm import async_send_alert
-    session = session_override or MagicMock(
-        get=MagicMock(return_value=_resp_cm(404))
-    )
+
+    session = session_override or MagicMock(get=MagicMock(return_value=_resp_cm(404)))
     with patch(f"{MODULE}.async_get_clientsession", return_value=session):
         with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
             with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
                     await async_send_alert(
-                        coord, cam_name, event_type, timestamp,
-                        image_url, clip_url, clip_status,
+                        coord,
+                        cam_name,
+                        event_type,
+                        timestamp,
+                        image_url,
+                        clip_url,
+                        clip_status,
                     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Path A — live-snap refresh on FCM event arrival
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPathAMovement:
     """MOVEMENT event → _async_trigger_image_refresh called exactly once."""
@@ -176,14 +185,17 @@ class TestPathAMovement:
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="MOVEMENT")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="MOVEMENT")
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         # async_create_task must have been called at least once
@@ -210,14 +222,18 @@ class TestPathAPersonEvent:
 
         # PERSON via eventTags upgrade path
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="MOVEMENT", tags=["PERSON"])
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200,
+                json_data=_one_event("new-evt", event_type="MOVEMENT", tags=["PERSON"]),
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
@@ -246,14 +262,17 @@ class TestPathAGen1Delay:
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="MOVEMENT")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="MOVEMENT")
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=1.5)
@@ -276,14 +295,17 @@ class TestPathAStatusOnlyEvent:
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="TROUBLE_CONNECT")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="TROUBLE_CONNECT")
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         cam_entity._async_trigger_image_refresh.assert_not_called()
@@ -302,14 +324,17 @@ class TestPathAStatusOnlyEvent:
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="TROUBLE_DISCONNECT")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="TROUBLE_DISCONNECT")
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         cam_entity._async_trigger_image_refresh.assert_not_called()
@@ -318,6 +343,7 @@ class TestPathAStatusOnlyEvent:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Path B — Bosch cloud event image pushed into camera entity cache
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPathBValidJpeg:
     """Valid JPEG bytes from imageUrl → cache updated, save_snapshot called, notify fired."""
@@ -338,18 +364,21 @@ class TestPathBValidJpeg:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
 
-        assert cam_entity._cached_image == JPEG_BYTES, "cache must hold the event image bytes"
+        assert cam_entity._cached_image == JPEG_BYTES, (
+            "cache must hold the event image bytes"
+        )
         mock_save.assert_awaited_once_with(coord.hass, CAM_ID, JPEG_BYTES)
         image_entity.async_notify_refreshed.assert_awaited_once()
 
@@ -367,14 +396,15 @@ class TestPathBValidJpeg:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         before = time.monotonic()
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock):
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
@@ -406,18 +436,21 @@ class TestPathBPrivacyModeBlocked:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
 
-        assert cam_entity._cached_image is None, "cache must NOT be updated when privacy is ON"
+        assert cam_entity._cached_image is None, (
+            "cache must NOT be updated when privacy is ON"
+        )
         mock_save.assert_not_awaited()
         image_entity.async_notify_refreshed.assert_not_awaited()
 
@@ -428,7 +461,7 @@ class TestPathBDeduplication:
     @pytest.mark.asyncio
     async def test_path_b_skipped_on_identical_length(self) -> None:
         # Pre-fill with same-length bytes (simulates duplicate push)
-        existing = b"\xff\xd8\xff\xe0" + b"\xAA" * 400  # same length as JPEG_BYTES
+        existing = b"\xff\xd8\xff\xe0" + b"\xaa" * 400  # same length as JPEG_BYTES
         assert len(existing) == len(JPEG_BYTES)
 
         cam_entity = MagicMock()
@@ -445,13 +478,14 @@ class TestPathBDeduplication:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
@@ -462,7 +496,7 @@ class TestPathBDeduplication:
     @pytest.mark.asyncio
     async def test_path_b_fires_when_length_differs(self) -> None:
         """Different length → NOT deduplicated → update fires."""
-        short_existing = b"\xff\xd8\xff\xe0" + b"\xAA" * 100  # shorter than JPEG_BYTES
+        short_existing = b"\xff\xd8\xff\xe0" + b"\xaa" * 100  # shorter than JPEG_BYTES
         assert len(short_existing) != len(JPEG_BYTES)
 
         cam_entity = MagicMock()
@@ -479,13 +513,14 @@ class TestPathBDeduplication:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
@@ -506,14 +541,15 @@ class TestPathBNoCameraEntity:
         )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             # Must complete without raising
             await _run_alert(
-                coord, event_type="MOVEMENT",
+                coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=session,
             )
@@ -524,6 +560,7 @@ class TestPathBNoCameraEntity:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Combined A + B lifecycle ordering
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPathAandBOrdering:
     """Path A fires on FCM push; Path B fires later when alert pipeline downloads imageUrl."""
@@ -573,14 +610,17 @@ class TestPathAandBOrdering:
         coord.hass.async_create_task = _track_create_task
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="MOVEMENT")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="MOVEMENT")
+            )
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                     await async_handle_fcm_push(coord)
 
@@ -595,13 +635,14 @@ class TestPathAandBOrdering:
         )
 
         img_session = MagicMock()
-        img_session.get = MagicMock(return_value=_resp_cm(
-            200, body=JPEG_BYTES, content_type="image/jpeg"
-        ))
+        img_session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
 
         with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
             await _run_alert(
-                alert_coord, event_type="MOVEMENT",
+                alert_coord,
+                event_type="MOVEMENT",
                 image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                 session_override=img_session,
             )

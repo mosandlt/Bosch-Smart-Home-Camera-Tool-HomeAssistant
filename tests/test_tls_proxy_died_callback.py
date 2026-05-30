@@ -27,10 +27,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 SRC = (
     Path(__file__).parent.parent
-    / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+    / "custom_components"
+    / "bosch_shc_camera"
+    / "tls_proxy.py"
 ).read_text()
 
 
@@ -64,17 +65,26 @@ def _run_breaker_with_callback(callback, n_clients: int = 5):
     srv.accept = fake_accept
 
     with (
-        patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=srv),
+        patch(
+            "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+            return_value=srv,
+        ),
         patch(
             "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
             side_effect=OSError("Connection refused"),
         ),
     ):
         from custom_components.bosch_shc_camera.tls_proxy import (
-            start_tls_proxy, stop_tls_proxy,
+            start_tls_proxy,
+            stop_tls_proxy,
         )
+
         start_tls_proxy(
-            ctx, cam_id, "192.0.2.1", 443, cache,
+            ctx,
+            cam_id,
+            "192.0.2.1",
+            443,
+            cache,
             on_proxy_died=callback,
         )
         # Daemon thread needs time to chew through all failures and fire callback
@@ -153,15 +163,20 @@ def test_on_proxy_died_optional_backward_compat() -> None:
     srv.accept = fake_accept
 
     with (
-        patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=srv),
+        patch(
+            "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+            return_value=srv,
+        ),
         patch(
             "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
             side_effect=OSError("Connection refused"),
         ),
     ):
         from custom_components.bosch_shc_camera.tls_proxy import (
-            start_tls_proxy, stop_tls_proxy,
+            start_tls_proxy,
+            stop_tls_proxy,
         )
+
         # No on_proxy_died — must not crash
         start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
         time.sleep(0.4)
@@ -179,6 +194,7 @@ def test_on_proxy_died_optional_backward_compat() -> None:
 def test_on_proxy_died_parameter_in_signature() -> None:
     """Pin the public API: start_tls_proxy must accept on_proxy_died kwarg."""
     import inspect
+
     from custom_components.bosch_shc_camera.tls_proxy import start_tls_proxy
 
     sig = inspect.signature(start_tls_proxy)

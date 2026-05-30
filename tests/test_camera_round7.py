@@ -10,6 +10,7 @@ Covers:
   864, 866-867: event snapshot — unsafe imageUrl warning + skip
   881-896: event snapshot — 401 response, 403/410 (try next), timeout/ClientError
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ LOCAL_SNAP_URL = "https://192.0.2.149:443/snap.jpg"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _resp_cm(status: int, body: bytes = b"", content_type: str = "image/jpeg"):
     """Async context-manager mock for session.get()."""
@@ -71,12 +73,13 @@ def _make_coord(**overrides):
 
 def _make_camera(coord=None, **overrides):
     from custom_components.bosch_shc_camera.camera import BoschCamera
+
     coord = coord or _make_coord()
     cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
     cam._cam_id = CAM_ID
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
-    cam._attr_name    = "Bosch Terrasse"
+    cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
     cam._cached_image = None
     cam._force_image_refresh = False
@@ -97,9 +100,11 @@ def _make_camera(coord=None, **overrides):
     return cam
 
 
-def _local_live_conn(proxy_url: str = LOCAL_SNAP_URL,
-                     local_user: str = "localuser",
-                     local_pass: str = "localpass"):
+def _local_live_conn(
+    proxy_url: str = LOCAL_SNAP_URL,
+    local_user: str = "localuser",
+    local_pass: str = "localpass",
+):
     """Coordinator with an active LOCAL live connection."""
     coord = _make_coord(
         _live_connections={
@@ -118,7 +123,9 @@ def _local_live_conn(proxy_url: str = LOCAL_SNAP_URL,
 def _remote_live_conn(proxy_url: str = PROXY_URL, opened_before: float = 60.0):
     """Coordinator with an active REMOTE live connection (for 401 age check)."""
     coord = _make_coord(
-        _live_connections={CAM_ID: {"proxyUrl": proxy_url, "_connection_type": "REMOTE"}},
+        _live_connections={
+            CAM_ID: {"proxyUrl": proxy_url, "_connection_type": "REMOTE"}
+        },
         _live_opened_at={CAM_ID: time.monotonic() - opened_before},
     )
     return coord
@@ -126,12 +133,14 @@ def _remote_live_conn(proxy_url: str = PROXY_URL, opened_before: float = 60.0):
 
 # ── 1. _yuv422_to_jpeg exception path (lines 465-466) ────────────────────────
 
+
 class TestYuv422ToJpeg:
     """_yuv422_to_jpeg must return None when numpy/PIL raises."""
 
     def test_exception_returns_none_on_bad_input(self):
         """Passing a non-bytes-like object that triggers an exception → None returned."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera.__new__(BoschCamera)
         # Passing None as data — numpy frombuffer will raise TypeError
         result = cam._yuv422_to_jpeg(None)  # type: ignore[arg-type]
@@ -140,6 +149,7 @@ class TestYuv422ToJpeg:
     def test_wrong_size_returns_none(self):
         """Wrong-sized bytes (not 115200) trigger the early return None guard."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera.__new__(BoschCamera)
         result = cam._yuv422_to_jpeg(b"\x00" * 100)
         assert result is None, "_yuv422_to_jpeg must return None for wrong size"
@@ -147,6 +157,7 @@ class TestYuv422ToJpeg:
     def test_correct_size_returns_jpeg(self):
         """115200 zeros (valid YUYV frame) must produce a JPEG bytes object."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera.__new__(BoschCamera)
         data = bytes(115200)
         result = cam._yuv422_to_jpeg(data)
@@ -157,14 +168,18 @@ class TestYuv422ToJpeg:
     def test_exception_path_via_broken_numpy(self):
         """Mock numpy to raise so the except block (line 465-466) is exercised."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera.__new__(BoschCamera)
         data = bytes(115200)
-        with patch("numpy.frombuffer", side_effect=RuntimeError("simulated numpy crash")):
+        with patch(
+            "numpy.frombuffer", side_effect=RuntimeError("simulated numpy crash")
+        ):
             result = cam._yuv422_to_jpeg(data)
         assert result is None, "exception in numpy path must yield None"
 
 
 # ── 2. _async_rcp_thumbnail YUV422 branch (lines 507-514) ────────────────────
+
 
 class TestAsyncRcpThumbnailYuv422:
     """Lines 507-514: raw=115200 bytes but _yuv422_to_jpeg returns None; wrong size raw."""
@@ -177,18 +192,23 @@ class TestAsyncRcpThumbnailYuv422:
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
             _get_cached_rcp_session=AsyncMock(return_value="session-id-1"),
-            _rcp_read=AsyncMock(side_effect=[
-                b"\x00\x00bad",       # 0x099e → not JPEG (no FF D8)
-                bytes(115200),        # 0x0c98 → correct size
-            ]),
+            _rcp_read=AsyncMock(
+                side_effect=[
+                    b"\x00\x00bad",  # 0x099e → not JPEG (no FF D8)
+                    bytes(115200),  # 0x0c98 → correct size
+                ]
+            ),
         )
         cam = _make_camera(coord=coord)
 
         with patch.object(cam.__class__, "_yuv422_to_jpeg", return_value=None):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_rcp_thumbnail(cam)
 
-        assert result is None, "when YUV422 conversion fails, _async_rcp_thumbnail must return None"
+        assert result is None, (
+            "when YUV422 conversion fails, _async_rcp_thumbnail must return None"
+        )
 
     @pytest.mark.asyncio
     async def test_yuv422_wrong_size_returns_none(self):
@@ -198,14 +218,17 @@ class TestAsyncRcpThumbnailYuv422:
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
             _get_cached_rcp_session=AsyncMock(return_value="session-id-2"),
-            _rcp_read=AsyncMock(side_effect=[
-                b"\x00\x00bad",       # 0x099e → not JPEG
-                bytes(1000),          # 0x0c98 → wrong size
-            ]),
+            _rcp_read=AsyncMock(
+                side_effect=[
+                    b"\x00\x00bad",  # 0x099e → not JPEG
+                    bytes(1000),  # 0x0c98 → wrong size
+                ]
+            ),
         )
         cam = _make_camera(coord=coord)
 
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         result = await BoschCamera._async_rcp_thumbnail(cam)
 
         assert result is None, "wrong-size 0x0c98 raw must return None"
@@ -218,24 +241,32 @@ class TestAsyncRcpThumbnailYuv422:
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
             _get_cached_rcp_session=AsyncMock(return_value="session-id-3"),
-            _rcp_read=AsyncMock(side_effect=[
-                b"\x00\x00bad",       # 0x099e → not JPEG
-                bytes(115200),        # 0x0c98 → correct size
-            ]),
+            _rcp_read=AsyncMock(
+                side_effect=[
+                    b"\x00\x00bad",  # 0x099e → not JPEG
+                    bytes(115200),  # 0x0c98 → correct size
+                ]
+            ),
         )
         cam = _make_camera(coord=coord)
 
         fake_jpeg = b"\xff\xd8\xff\xe0fake"
         with patch.object(cam.__class__, "_yuv422_to_jpeg", return_value=fake_jpeg):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_rcp_thumbnail(cam)
 
-        assert result == fake_jpeg, "successful YUV422 conversion must return JPEG bytes"
+        assert result == fake_jpeg, (
+            "successful YUV422 conversion must return JPEG bytes"
+        )
 
 
 # ── 3. LOCAL snap via proxy (lines 606-618) ───────────────────────────────────
 
-def _digest_cm(status: int, body: bytes = b"", content_type: str = "image/jpeg") -> MagicMock:
+
+def _digest_cm(
+    status: int, body: bytes = b"", content_type: str = "image/jpeg"
+) -> MagicMock:
     """Async context-manager mock for async_digest_request."""
     resp = MagicMock()
     resp.status = status
@@ -254,20 +285,25 @@ class TestLocalSnapViaProxy:
     async def test_local_snap_success_returns_image(self):
         """Digest auth returns 200 + image → cached and returned."""
         import aiohttp
+
         coord = _local_live_conn()
         cam = _make_camera(coord=coord)
         img_bytes = b"\xff\xd8local"
 
         cm = _digest_cm(200, img_bytes, "image/jpeg")
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(return_value=cm),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == img_bytes, "LOCAL snap 200 must return image bytes"
@@ -281,14 +317,18 @@ class TestLocalSnapViaProxy:
 
         cm = _digest_cm(403, b"Forbidden", "text/plain")
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(return_value=cm),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result is not None, "LOCAL snap non-200 must fall back to placeholder"
@@ -297,21 +337,28 @@ class TestLocalSnapViaProxy:
     async def test_local_snap_client_error_falls_to_placeholder(self):
         """aiohttp.ClientError → falls through to cached/placeholder."""
         import aiohttp as _aiohttp
+
         coord = _local_live_conn()
         cam = _make_camera(coord=coord)
 
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=_aiohttp.ClientError("network error")),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=_aiohttp.ClientError("network error")),
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result is not None, "LOCAL snap ClientError must fall back to placeholder/cached"
+        assert result is not None, (
+            "LOCAL snap ClientError must fall back to placeholder/cached"
+        )
 
     @pytest.mark.asyncio
     async def test_local_snap_no_creds_skips_digest(self):
@@ -326,7 +373,7 @@ class TestLocalSnapViaProxy:
                 CAM_ID: {
                     "proxyUrl": LOCAL_SNAP_URL,
                     "_connection_type": "LOCAL",
-                    "_local_user": "",      # empty = no creds
+                    "_local_user": "",  # empty = no creds
                     "_local_password": "",
                 }
             },
@@ -336,22 +383,32 @@ class TestLocalSnapViaProxy:
 
         # The code falls to the REMOTE aiohttp path — provide a proper response mock
         session = MagicMock()
-        session.get.return_value = _resp_cm(200, body=b"\xff\xd8remote", content_type="image/jpeg")
+        session.get.return_value = _resp_cm(
+            200, body=b"\xff\xd8remote", content_type="image/jpeg"
+        )
         digest_mock = AsyncMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=digest_mock,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             await BoschCamera._async_camera_image_impl(cam)
 
-        digest_mock.assert_not_called(), "async_digest_request must not be called when no LOCAL creds"
+        (
+            digest_mock.assert_not_called(),
+            "async_digest_request must not be called when no LOCAL creds",
+        )
 
 
 # ── 4. aiohttp.ClientError on retry after 404 (lines 684-685) ────────────────
+
 
 class TestProxy404RetryClientError:
     """Line 684-685: ClientError during the retry GET after a 404 refresh."""
@@ -360,9 +417,12 @@ class TestProxy404RetryClientError:
     async def test_404_retry_client_error_falls_to_cached(self):
         """404 → new proxy URL → ClientError on retry → return cached image."""
         import aiohttp
+
         new_url = "https://proxy-02.live.cbs.boschsecurity.com/new/snap.jpg"
         coord = _make_coord(
-            _live_connections={CAM_ID: {"proxyUrl": PROXY_URL, "_connection_type": "REMOTE"}},
+            _live_connections={
+                CAM_ID: {"proxyUrl": PROXY_URL, "_connection_type": "REMOTE"}
+            },
             _live_opened_at={CAM_ID: time.monotonic() - 5.0},
         )
         coord.try_live_connection = AsyncMock(
@@ -383,13 +443,17 @@ class TestProxy404RetryClientError:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result is not None, "ClientError on 404-retry must not raise"
-        assert cam._cached_image == b"\xff\xd8cached", "cached image must survive 404+ClientError"
+        assert cam._cached_image == b"\xff\xd8cached", (
+            "cached image must survive 404+ClientError"
+        )
 
 
 # ── 5. aiohttp.ClientError on retry after 401 expiry (lines 711-712) ─────────
+
 
 class TestProxy401RetryClientError:
     """Lines 711-712: ClientError during the retry GET after 401 session renewal."""
@@ -398,6 +462,7 @@ class TestProxy401RetryClientError:
     async def test_401_retry_client_error_falls_to_cached(self):
         """401 old session → renewal → new proxy URL → ClientError on retry → cached."""
         import aiohttp
+
         new_url = "https://proxy-03.live.cbs.boschsecurity.com/fresh/snap.jpg"
         # Use opened_before > LIVE_SESSION_TTL (55s) so renewal is triggered
         coord = _remote_live_conn(opened_before=60.0)
@@ -408,7 +473,9 @@ class TestProxy401RetryClientError:
 
         first_cm = _resp_cm(401, body=b"Unauthorized", content_type="text/html")
         retry_cm = MagicMock()
-        retry_cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("retry 401 error"))
+        retry_cm.__aenter__ = AsyncMock(
+            side_effect=aiohttp.ClientError("retry 401 error")
+        )
         retry_cm.__aexit__ = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -419,6 +486,7 @@ class TestProxy401RetryClientError:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result is not None, "ClientError on 401-retry must not raise"
@@ -428,13 +496,14 @@ class TestProxy401RetryClientError:
 
 # ── 6. LOCAL outage snap fallback (lines 819-851) ────────────────────────────
 
+
 class TestLocalOutageSnapFallback:
     """Lines 819-851: camera NOT streaming, has cached LOCAL Digest creds, outage_count > 0."""
 
     def _outage_coord(self):
         """Coordinator that looks like an auth outage with cached LOCAL creds."""
         return _make_coord(
-            _live_connections={},          # NOT streaming
+            _live_connections={},  # NOT streaming
             _local_creds_cache={
                 CAM_ID: {
                     "user": "digestuser",
@@ -443,7 +512,7 @@ class TestLocalOutageSnapFallback:
                     "port": 443,
                 }
             },
-            _auth_outage_count=1,          # > 0 → outage path active
+            _auth_outage_count=1,  # > 0 → outage path active
             # async_fetch_live_snapshot returns None so we reach outage path
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
@@ -458,14 +527,18 @@ class TestLocalOutageSnapFallback:
 
         cm = _digest_cm(200, img_bytes, "image/jpeg")
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(return_value=cm),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == img_bytes, "outage snap success must return image bytes"
@@ -478,17 +551,23 @@ class TestLocalOutageSnapFallback:
         cam = _make_camera(coord=coord)
 
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=asyncio.TimeoutError()),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=TimeoutError()),
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result is not None, "outage snap timeout must not return None (placeholder)"
+        assert result is not None, (
+            "outage snap timeout must not return None (placeholder)"
+        )
 
     @pytest.mark.asyncio
     async def test_outage_snap_zero_outage_count_skips_path(self):
@@ -496,33 +575,45 @@ class TestLocalOutageSnapFallback:
         coord = _make_coord(
             _live_connections={},
             _local_creds_cache={
-                CAM_ID: {"user": "u", "password": "p", "host": "192.0.2.149", "port": 443}
+                CAM_ID: {
+                    "user": "u",
+                    "password": "p",
+                    "host": "192.0.2.149",
+                    "port": 443,
+                }
             },
-            _auth_outage_count=0,     # no outage — must skip
+            _auth_outage_count=0,  # no outage — must skip
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
         cam = _make_camera(coord=coord)
         digest_mock = AsyncMock()
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=digest_mock,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             await BoschCamera._async_camera_image_impl(cam)
 
-        digest_mock.assert_not_called(), "outage path must be skipped when outage_count == 0"
+        (
+            digest_mock.assert_not_called(),
+            "outage path must be skipped when outage_count == 0",
+        )
 
     @pytest.mark.asyncio
     async def test_outage_snap_no_creds_skips_path(self):
         """Empty _local_creds_cache → outage snap path skipped."""
         coord = _make_coord(
             _live_connections={},
-            _local_creds_cache={},       # no creds
+            _local_creds_cache={},  # no creds
             _auth_outage_count=1,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
@@ -530,20 +621,28 @@ class TestLocalOutageSnapFallback:
         cam = _make_camera(coord=coord)
         digest_mock = AsyncMock()
         session = MagicMock()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=digest_mock,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             await BoschCamera._async_camera_image_impl(cam)
 
-        digest_mock.assert_not_called(), "outage path must be skipped when no creds cached"
+        (
+            digest_mock.assert_not_called(),
+            "outage path must be skipped when no creds cached",
+        )
 
 
 # ── 7. Event snapshot — unsafe imageUrl (lines 864, 866-867) ─────────────────
+
 
 class TestEventSnapshotUnsafeUrl:
     """Lines 864, 866-867: imageUrl fails _is_safe_bosch_url → warning + skip.
@@ -559,8 +658,10 @@ class TestEventSnapshotUnsafeUrl:
         return _make_coord(
             data={CAM_ID: {"info": {}, "events": events}},
             # CAM_ID present in _live_connections → is_streaming=True
-            _live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}},  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
-            _local_creds_cache={},           # no cached creds → outage path skipped
+            _live_connections={
+                CAM_ID: {"rtspsUrl": "rtsp://test/x"}
+            },  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
+            _local_creds_cache={},  # no cached creds → outage path skipped
             _auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
@@ -573,26 +674,41 @@ class TestEventSnapshotUnsafeUrl:
         _cached_image=None so the code doesn't short-circuit at 'if self._cached_image:'
         and reaches the event snapshot section (path 4).
         """
-        coord = self._streaming_no_proxy_coord([
-            {"imageUrl": "https://evil.example.com/snap.jpg", "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": "https://media.boschsecurity.com/snap.jpg", "timestamp": "2026-01-01T00:00:01Z"},
-        ])
-        cam = _make_camera(coord=coord, _cached_image=None)  # no cache → reach section 4
+        coord = self._streaming_no_proxy_coord(
+            [
+                {
+                    "imageUrl": "https://evil.example.com/snap.jpg",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "imageUrl": "https://media.boschsecurity.com/snap.jpg",
+                    "timestamp": "2026-01-01T00:00:01Z",
+                },
+            ]
+        )
+        cam = _make_camera(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
 
         session = MagicMock()
         # The safe Bosch URL returns 200
-        session.get.return_value = _resp_cm(200, body=b"\xff\xd8new", content_type="image/jpeg")
+        session.get.return_value = _resp_cm(
+            200, body=b"\xff\xd8new", content_type="image/jpeg"
+        )
 
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_clientsession",
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         # The evil.example.com URL is skipped; only the boschsecurity.com URL is fetched
         assert session.get.call_count == 1, "only the safe Bosch URL must be fetched"
-        assert result == b"\xff\xd8new", "unsafe URL skipped → safe URL fetched successfully"
+        assert result == b"\xff\xd8new", (
+            "unsafe URL skipped → safe URL fetched successfully"
+        )
 
     @pytest.mark.asyncio
     async def test_missing_image_url_key_skipped(self):
@@ -607,12 +723,17 @@ class TestEventSnapshotUnsafeUrl:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        session.get.assert_not_called(), "session.get must not be called for events without imageUrl"
+        (
+            session.get.assert_not_called(),
+            "session.get must not be called for events without imageUrl",
+        )
 
 
 # ── 8. Event snapshot — 401, 403/410, timeout/ClientError (lines 881-896) ────
+
 
 class TestEventSnapshot4xx:
     """Lines 881-896: various HTTP errors and network failures in event snapshot loop.
@@ -626,7 +747,9 @@ class TestEventSnapshot4xx:
         """Coordinator: is_streaming=True, no proxyUrl, no outage → event snapshot path."""
         return _make_coord(
             data={CAM_ID: {"info": {}, "events": events}},
-            _live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}},  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
+            _live_connections={
+                CAM_ID: {"rtspsUrl": "rtsp://test/x"}
+            },  # is_streaming=True (rtspsUrl gate, v13.2.5); no proxyUrl → proxy_url = ""
             _local_creds_cache={},
             _auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
@@ -643,27 +766,40 @@ class TestEventSnapshot4xx:
         (one URL fetched → 401 → immediate return without trying next event).
         """
         safe_url = "https://media.boschsecurity.com/ev1.jpg"
-        coord = self._event_coord([
-            {"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": "https://media.boschsecurity.com/ev2.jpg", "timestamp": "2026-01-01T00:00:01Z"},
-        ])
-        cam = _make_camera(coord=coord, _cached_image=None)  # no cache → reach section 4
+        coord = self._event_coord(
+            [
+                {"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"},
+                {
+                    "imageUrl": "https://media.boschsecurity.com/ev2.jpg",
+                    "timestamp": "2026-01-01T00:00:01Z",
+                },
+            ]
+        )
+        cam = _make_camera(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
 
         session = MagicMock()
-        session.get.return_value = _resp_cm(401, body=b"Unauthorized", content_type="text/html")
+        session.get.return_value = _resp_cm(
+            401, body=b"Unauthorized", content_type="text/html"
+        )
 
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_clientsession",
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert session.get.call_count == 1, "401 must stop the event loop immediately (no retry)"
+        assert session.get.call_count == 1, (
+            "401 must stop the event loop immediately (no retry)"
+        )
         # result is None (no cached) → public async_camera_image serves placeholder;
         # _async_camera_image_impl itself returns None on 401 with no cache
-        assert result is None or result == BoschCamera._PLACEHOLDER_JPEG, \
+        assert result is None or result == BoschCamera._PLACEHOLDER_JPEG, (
             "401 with no cached image must return None or placeholder"
+        )
 
     @pytest.mark.asyncio
     async def test_403_tries_next_event_then_returns_placeholder(self):
@@ -673,11 +809,15 @@ class TestEventSnapshot4xx:
         """
         safe_url1 = "https://media.boschsecurity.com/ev1.jpg"
         safe_url2 = "https://media.boschsecurity.com/ev2.jpg"
-        coord = self._event_coord([
-            {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
-        ])
-        cam = _make_camera(coord=coord, _cached_image=None)  # no cache → reach section 4
+        coord = self._event_coord(
+            [
+                {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
+                {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
+            ]
+        )
+        cam = _make_camera(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
 
         session = MagicMock()
         session.get.side_effect = [
@@ -690,21 +830,27 @@ class TestEventSnapshot4xx:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert session.get.call_count == 2, "must attempt both event URLs on 403"
         from custom_components.bosch_shc_camera.camera import BoschCamera
-        assert result == BoschCamera._PLACEHOLDER_JPEG, "both 403 + no cached → placeholder"
+
+        assert result == BoschCamera._PLACEHOLDER_JPEG, (
+            "both 403 + no cached → placeholder"
+        )
 
     @pytest.mark.asyncio
     async def test_410_tries_next_event(self):
         """410 (expired URL) on first event → try next event (200 → success)."""
         safe_url1 = "https://media.boschsecurity.com/ev1_old.jpg"
         safe_url2 = "https://media.boschsecurity.com/ev2_new.jpg"
-        coord = self._event_coord([
-            {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
-        ])
+        coord = self._event_coord(
+            [
+                {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
+                {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
+            ]
+        )
         cam = _make_camera(coord=coord)
 
         session = MagicMock()
@@ -718,24 +864,31 @@ class TestEventSnapshot4xx:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result == b"\xff\xd8fresh", "410 on first → 200 on second must return fresh image"
+        assert result == b"\xff\xd8fresh", (
+            "410 on first → 200 on second must return fresh image"
+        )
 
     @pytest.mark.asyncio
     async def test_timeout_on_event_snap_continues_loop(self):
         """TimeoutError on first event → loop continues to next event."""
         safe_url1 = "https://media.boschsecurity.com/ev1.jpg"
         safe_url2 = "https://media.boschsecurity.com/ev2.jpg"
-        coord = self._event_coord([
-            {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
-        ])
-        cam = _make_camera(coord=coord, _cached_image=None)  # no cache → reach section 4
+        coord = self._event_coord(
+            [
+                {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
+                {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
+            ]
+        )
+        cam = _make_camera(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
 
         # First CM raises TimeoutError when __aenter__ is called
         timeout_cm = MagicMock()
-        timeout_cm.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        timeout_cm.__aenter__ = AsyncMock(side_effect=TimeoutError())
         timeout_cm.__aexit__ = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -749,21 +902,29 @@ class TestEventSnapshot4xx:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result == b"\xff\xd8ev2", "timeout on first event → second event must succeed"
+        assert result == b"\xff\xd8ev2", (
+            "timeout on first event → second event must succeed"
+        )
 
     @pytest.mark.asyncio
     async def test_client_error_on_event_snap_continues_loop(self):
         """aiohttp.ClientError on first event → loop continues to second event."""
         import aiohttp
+
         safe_url1 = "https://media.boschsecurity.com/ev1.jpg"
         safe_url2 = "https://media.boschsecurity.com/ev2.jpg"
-        coord = self._event_coord([
-            {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
-            {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
-        ])
-        cam = _make_camera(coord=coord, _cached_image=None)  # no cache → reach section 4
+        coord = self._event_coord(
+            [
+                {"imageUrl": safe_url1, "timestamp": "2026-01-01T00:00:00Z"},
+                {"imageUrl": safe_url2, "timestamp": "2026-01-01T00:00:01Z"},
+            ]
+        )
+        cam = _make_camera(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
 
         err_cm = MagicMock()
         err_cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("network"))
@@ -780,17 +941,23 @@ class TestEventSnapshot4xx:
             return_value=session,
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
+
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result == b"\xff\xd8ev2ok", "ClientError on first event → second event must succeed"
+        assert result == b"\xff\xd8ev2ok", (
+            "ClientError on first event → second event must succeed"
+        )
 
     @pytest.mark.asyncio
     async def test_all_events_fail_returns_placeholder(self):
         """All events fail → _PLACEHOLDER_JPEG returned."""
         safe_url = "https://media.boschsecurity.com/ev1.jpg"
-        coord = self._event_coord([{"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"}])
+        coord = self._event_coord(
+            [{"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"}]
+        )
         cam = _make_camera(coord=coord, _cached_image=None)
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         placeholder = BoschCamera._PLACEHOLDER_JPEG
 
         session = MagicMock()
@@ -802,4 +969,6 @@ class TestEventSnapshot4xx:
         ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
-        assert result == placeholder, "all events fail + no cached → placeholder returned"
+        assert result == placeholder, (
+            "all events fail + no cached → placeholder returned"
+        )

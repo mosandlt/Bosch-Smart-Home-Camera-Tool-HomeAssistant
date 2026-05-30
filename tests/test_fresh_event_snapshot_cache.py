@@ -31,7 +31,9 @@ class TestFreshSnapshotCacheFastPath:
         # Expiry far in the future relative to current monotonic clock.
         cache = {"C": (b"JPEG_DATA", float("inf"))}
         coord = _coord(cache)
-        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(coord, "C")
+        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(
+            coord, "C"
+        )
         assert result == b"JPEG_DATA"
 
     async def test_returns_none_on_expired_cache_without_token(self):
@@ -40,7 +42,9 @@ class TestFreshSnapshotCacheFastPath:
         cache = {"C": (b"JPEG_DATA", float("-inf"))}
         coord = _coord(cache)
         coord.token = None  # forces the early-return after the fast path
-        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(coord, "C")
+        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(
+            coord, "C"
+        )
         assert result is None
 
     async def test_lock_path_recheck_hit(self):
@@ -69,5 +73,7 @@ class TestFreshSnapshotCacheFastPath:
                 return await self._inner.__aexit__(*a)
 
         coord._fresh_snap_locks["C"] = _PopulatingLock(cache)
-        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(coord, "C")
+        result = await BoschCameraCoordinator.async_fetch_fresh_event_snapshot(
+            coord, "C"
+        )
         assert result == b"CONCURRENT_DATA"

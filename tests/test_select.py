@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -43,17 +42,22 @@ def stub_entry():
 class TestVideoQualitySelect:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "video_quality"
         assert sel._attr_unique_id.endswith("_video_quality")
 
     def test_current_option_reads_coordinator(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
 
-    def test_current_option_falls_back_to_auto_for_unknown(self, stub_coord, stub_entry):
+    def test_current_option_falls_back_to_auto_for_unknown(
+        self, stub_coord, stub_entry
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         stub_coord.get_quality = lambda cid: "weird-not-an-option"
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
@@ -61,6 +65,7 @@ class TestVideoQualitySelect:
     def test_options_list_present(self, stub_coord, stub_entry):
         """A select entity must have a non-empty _attr_options."""
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
         assert len(sel._attr_options) >= 2
         assert "auto" in sel._attr_options
@@ -72,6 +77,7 @@ class TestVideoQualitySelect:
 class TestFcmPushModeSelect:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         # FCM mode select binds to the integration, not per-camera
         assert sel._attr_options
@@ -83,6 +89,7 @@ class TestFcmPushModeSelect:
 class TestStreamModeSelect:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel._attr_options
 
@@ -93,6 +100,9 @@ class TestStreamModeSelect:
 class TestMotionSensitivitySelect:
     def test_disabled_by_default(self, stub_coord, stub_entry):
         """Motion-sensitivity select is hidden by default — disabled_by_default."""
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel._attr_entity_registry_enabled_default is False

@@ -12,6 +12,7 @@ Strategy: mock firebase_messaging in sys.modules for tests that need it.
 The _Patched class body is a class definition — it counts as executed code
 once the class is created via _patch_class().
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,20 +23,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fake firebase_messaging module for tests that need it
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _FakeRunState(Enum):
-    STARTED   = "STARTED"
+    STARTED = "STARTED"
     RESETTING = "RESETTING"
-    STOPPING  = "STOPPING"
-    STOPPED   = "STOPPED"
+    STOPPING = "STOPPING"
+    STOPPED = "STOPPED"
 
 
 class _FakeFcmPushClient:
     """Minimal fake that mimics the structural contract expected by _patch_class."""
+
     do_listen = True
     run_state = _FakeRunState.STARTED
 
@@ -46,14 +48,17 @@ class _FakeFcmPushClient:
         return True
 
     async def _login(self) -> None: ...
-    async def _receive_msg(self): return None
+    async def _receive_msg(self):
+        return None
+
     async def _handle_message(self, msg) -> None: ...
     async def _do_writer_close(self) -> None: ...
     async def _reset(self) -> None: ...
     def _terminate(self) -> None: ...
     def _log_verbose(self, *a, **kw) -> None: ...
     def _log_warn_with_limit(self, *a, **kw) -> None: ...
-    def _try_increment_error_count(self, err_type) -> bool: return True
+    def _try_increment_error_count(self, err_type) -> bool:
+        return True
 
 
 def _make_firebase_module() -> ModuleType:
@@ -93,6 +98,7 @@ def _uninstall_firebase_module():
     # Reset the class cache so the next import doesn't reuse our fake
     try:
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = False
     except Exception:
         pass
@@ -102,6 +108,7 @@ def _uninstall_firebase_module():
 # 1. _Patched class creation (lines 268-361)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPatchedClassCreation:
     """When firebase_messaging is available, _patch_class() creates the
     _Patched subclass. The class body (lines 268-361) executes at definition
@@ -110,11 +117,13 @@ class TestPatchedClassCreation:
     def setup_method(self):
         # Reset the cached patch so _patch_class() runs fresh
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
@@ -123,13 +132,16 @@ class TestPatchedClassCreation:
         FcmPushClient when the library is available."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         # Ensure the module cache is flushed so the import inside _patch_class
         # picks up our fake module (not a cached real one).
         fcm_mod._QuietFcmPushClient._patched_class = False
 
         patched = fcm_mod._QuietFcmPushClient._patch_class()
 
-        assert patched is not None, "_patch_class() must return a class when library available"
+        assert patched is not None, (
+            "_patch_class() must return a class when library available"
+        )
         assert issubclass(patched, _FakeFcmPushClient), (
             "_Patched must be a subclass of FcmPushClient"
         )
@@ -138,6 +150,7 @@ class TestPatchedClassCreation:
         """The _Patched subclass must define its own `_listen` method."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = False
 
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -154,10 +167,13 @@ class TestPatchedClassCreation:
         _install_firebase_module()
         # Monkey-patch the fake to have a different _listen signature
         original_listen = _FakeFcmPushClient._listen
+
         async def _listen_with_extra(self, extra_arg) -> None: ...
+
         _FakeFcmPushClient._listen = _listen_with_extra
 
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
             result = fcm_mod._QuietFcmPushClient._patch_class()
@@ -173,6 +189,7 @@ class TestPatchedClassCreation:
 # 2. _get_fcm_push_client_class cached path (line 383)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestGetFcmPushClientClassCachedPath:
     """Line 383: `return result` when _patched_class is already computed (not False).
 
@@ -182,11 +199,13 @@ class TestGetFcmPushClientClassCachedPath:
 
     def setup_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
@@ -195,6 +214,7 @@ class TestGetFcmPushClientClassCachedPath:
         must return the same object (line 383 `return result`)."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = False
 
         first = fcm_mod._get_fcm_push_client_class()
@@ -223,6 +243,7 @@ class TestGetFcmPushClientClassCachedPath:
 # 3. Lines 463-464: warning when _get_fcm_push_client_class() returns None
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAsyncStartFcmPushNullClientWarning:
     """Lines 463-464: When FcmRegisterConfig IS importable (firebase_messaging
     installed) but _get_fcm_push_client_class() returns None, the locked
@@ -230,11 +251,13 @@ class TestAsyncStartFcmPushNullClientWarning:
 
     def setup_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
@@ -255,8 +278,12 @@ class TestAsyncStartFcmPushNullClientWarning:
 
         logged = []
 
-        with patch.object(fcm_mod, "_get_fcm_push_client_class", return_value=None), \
-             patch.object(fcm_mod._LOGGER, "warning", side_effect=lambda *a, **k: logged.append(a)):
+        with (
+            patch.object(fcm_mod, "_get_fcm_push_client_class", return_value=None),
+            patch.object(
+                fcm_mod._LOGGER, "warning", side_effect=lambda *a, **k: logged.append(a)
+            ),
+        ):
             # Should return early after warning at line 463-464
             await fcm_mod._async_start_fcm_push_locked(coord)
 
@@ -270,17 +297,20 @@ class TestAsyncStartFcmPushNullClientWarning:
 # 4. Lines 784-785: lazy-init asyncio.Lock
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestFcmStartLockLazyInit:
     """Lines 784-785: When coordinator._fcm_start_lock is None/missing,
     async_start_fcm_push must create a new asyncio.Lock and store it."""
 
     def setup_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
@@ -306,9 +336,17 @@ class TestFcmStartLockLazyInit:
             call_log.append("entered_lock")
             return 0.0  # will cause early return after mode check
 
-        with patch.object(fcm_mod, "_get_fcm_push_client_class", return_value=MagicMock()), \
-             patch.object(fcm_mod, "get_recent_fcm_creds_staleness_count", return_value=0.0), \
-             patch.object(fcm_mod, "async_start_fcm_push", wraps=fcm_mod.async_start_fcm_push) as spy:
+        with (
+            patch.object(
+                fcm_mod, "_get_fcm_push_client_class", return_value=MagicMock()
+            ),
+            patch.object(
+                fcm_mod, "get_recent_fcm_creds_staleness_count", return_value=0.0
+            ),
+            patch.object(
+                fcm_mod, "async_start_fcm_push", wraps=fcm_mod.async_start_fcm_push
+            ) as spy,
+        ):
             # Patch the inner body to return early once lock is acquired
             orig_fn = fcm_mod.async_start_fcm_push
 
@@ -347,7 +385,9 @@ class TestFcmStartLockLazyInit:
         assert not hasattr(coord, "_fcm_start_lock")
 
         # Make the locked function return immediately (avoids complex coordinator setup)
-        with patch.object(fcm_mod, "_async_start_fcm_push_locked", new=AsyncMock(return_value=None)):
+        with patch.object(
+            fcm_mod, "_async_start_fcm_push_locked", new=AsyncMock(return_value=None)
+        ):
             await fcm_mod.async_start_fcm_push(coord)
 
         # After the call, coordinator must have _fcm_start_lock (was lazy-initted)
@@ -380,12 +420,18 @@ class TestFcmStartLockLazyInit:
         )
         assert not hasattr(coord, "_fcm_start_lock")
 
-        with patch.object(fcm_mod, "get_recent_fcm_creds_staleness_count", return_value=0), \
-             patch.object(fcm_mod, "async_stop_fcm_push", new=AsyncMock()), \
-             patch.object(fcm_mod, "reset_fcm_error_counter"), \
-             patch.object(fcm_mod, "async_start_fcm_push", new=AsyncMock()):
+        with (
+            patch.object(
+                fcm_mod, "get_recent_fcm_creds_staleness_count", return_value=0
+            ),
+            patch.object(fcm_mod, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm_mod, "reset_fcm_error_counter"),
+            patch.object(fcm_mod, "async_start_fcm_push", new=AsyncMock()),
+        ):
             # Provide enough for the inner body to short-circuit (no creds → hard heal)
-            with patch.object(fcm_mod, "_async_hard_heal_locked", new=AsyncMock(return_value=None)):
+            with patch.object(
+                fcm_mod, "_async_hard_heal_locked", new=AsyncMock(return_value=None)
+            ):
                 await fcm_mod.async_self_heal_fcm_push(coord)
 
         # Lines 784-785: lazy-init must have run
@@ -399,6 +445,7 @@ class TestFcmStartLockLazyInit:
 # 5. Lines 280-359: _Patched._listen() body
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPatchedListenBody:
     """Execute the actual _listen() method of the _Patched subclass.
 
@@ -408,11 +455,13 @@ class TestPatchedListenBody:
 
     def setup_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
@@ -420,16 +469,20 @@ class TestPatchedListenBody:
         """Create a _Patched instance with all async hooks stubbed."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         fcm_mod._QuietFcmPushClient._patched_class = False
 
         cls = fcm_mod._QuietFcmPushClient._patch_class()
-        assert cls is not None, "_patch_class() must succeed with fake firebase_messaging"
+        assert cls is not None, (
+            "_patch_class() must succeed with fake firebase_messaging"
+        )
         instance = object.__new__(cls)
         instance.run_state = _FakeRunState.STARTED
         instance.do_listen = True
 
         async def _noop() -> None: ...
-        async def _noop_recv(): return None
+        async def _noop_recv():
+            return None
 
         instance._login = _noop
         instance._handle_message = _noop
@@ -441,10 +494,12 @@ class TestPatchedListenBody:
 
         async def _reset():
             instance.do_listen = False
+
         instance._reset = _reset
 
         async def _ok_connect():
             return True
+
         instance._connect_with_retry = _ok_connect
 
         return instance
@@ -456,14 +511,19 @@ class TestPatchedListenBody:
 
         async def _fail():
             return False
+
         instance._connect_with_retry = _fail
 
         login_called = []
+
         async def _login():
             login_called.append(1)
+
         instance._login = _login
 
-        async def _recv(): return None
+        async def _recv():
+            return None
+
         instance._receive_msg = _recv
 
         await instance._listen()
@@ -476,15 +536,19 @@ class TestPatchedListenBody:
         instance.run_state = _FakeRunState.STARTED
 
         verbose_calls = []
-        instance._log_verbose = lambda *a, **k: verbose_calls.append(a) or setattr(instance, "do_listen", False)
+        instance._log_verbose = lambda *a, **k: (
+            verbose_calls.append(a) or setattr(instance, "do_listen", False)
+        )
 
         call_count = [0]
+
         async def _recv():
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ConnectionResetError("WAN drop")
             instance.do_listen = False
             return None
+
         instance._receive_msg = _recv
 
         await instance._listen()
@@ -502,12 +566,15 @@ class TestPatchedListenBody:
         instance._terminate = lambda: terminate_calls.append(1)
 
         writer_close_calls = []
+
         async def _writer_close():
             writer_close_calls.append(1)
+
         instance._do_writer_close = _writer_close
 
         async def _bad_login():
             raise RuntimeError("login crash")
+
         instance._login = _bad_login
 
         await instance._listen()
@@ -521,12 +588,14 @@ class TestPatchedListenBody:
         instance.run_state = _FakeRunState.RESETTING
 
         slept = []
+
         async def _fast_sleep(secs):
             slept.append(secs)
             instance.do_listen = False
 
         async def _bad_recv():
             raise AssertionError("RESETTING must not call _receive_msg")
+
         instance._receive_msg = _bad_recv
 
         with patch("asyncio.sleep", new=_fast_sleep):

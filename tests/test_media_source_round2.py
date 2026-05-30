@@ -7,17 +7,16 @@ Targets uncovered lines from the coverage report:
   - media_source.py 336-372 → _enabled_sources filter paths
   - media_source.py 499-512 → _browse_entry_root NVR/SMB single-source dispatch
 """
+
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-import sys
-
 import pytest
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -32,11 +31,15 @@ def _iso_now(offset_s: float = 0) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", t)
 
 
-def _coord(tmp_path: Path, *, started_offset_s: float = -3600, extra_opts: dict | None = None):
+def _coord(
+    tmp_path: Path, *, started_offset_s: float = -3600, extra_opts: dict | None = None
+):
     opts = {"enable_local_save": True, "download_path": str(tmp_path)}
     if extra_opts:
         opts.update(extra_opts)
-    return SimpleNamespace(options=opts, _download_started_at=time.time() + started_offset_s)
+    return SimpleNamespace(
+        options=opts, _download_started_at=time.time() + started_offset_s
+    )
 
 
 def _ev(**kwargs) -> dict:
@@ -55,8 +58,9 @@ def _ev(**kwargs) -> dict:
 _URLOPEN = "custom_components.bosch_shc_camera.smb.urllib.request.urlopen"
 
 
-def _urlopen_resp(status: int = 200, content: bytes = b"FAKEDATA",
-                  raises: Exception | None = None) -> MagicMock:
+def _urlopen_resp(
+    status: int = 200, content: bytes = b"FAKEDATA", raises: Exception | None = None
+) -> MagicMock:
     """Build a MagicMock that behaves like urllib.request.urlopen()'s context manager."""
     resp = MagicMock()
     resp.status = status
@@ -70,11 +74,13 @@ def _urlopen_resp(status: int = 200, content: bytes = b"FAKEDATA",
 # sync_local_save — download flow
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestSyncLocalSaveDownload:
     """Cover the actual HTTP download logic (lines 79-111)."""
 
     def _call(self, coord, ev, mock_urlopen_resp, cam_name="Terrasse"):
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         if mock_urlopen_resp is None:
             sync_local_save(coord, ev, "TOKEN", cam_name)
         elif isinstance(mock_urlopen_resp, Exception):
@@ -125,7 +131,13 @@ class TestSyncLocalSaveDownload:
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
             from custom_components.bosch_shc_camera.smb import sync_local_save
-            sync_local_save(coord, _ev(imageUrl="https://evil.example.com/x.jpg", videoClipUrl=None), "TOKEN", "Terrasse")
+
+            sync_local_save(
+                coord,
+                _ev(imageUrl="https://evil.example.com/x.jpg", videoClipUrl=None),
+                "TOKEN",
+                "Terrasse",
+            )
             mock_urlopen.assert_not_called()
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
@@ -161,6 +173,7 @@ class TestSyncLocalSaveDownload:
         (nested_dir / f"{stem}.jpg").write_bytes(b"OLD")
         with patch(_URLOPEN) as mock_urlopen:
             from custom_components.bosch_shc_camera.smb import sync_local_save
+
             sync_local_save(coord, ev, "TOKEN", "Terrasse")
             mock_urlopen.assert_not_called()
 
@@ -178,14 +191,18 @@ class TestSyncLocalSaveDownload:
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
             from custom_components.bosch_shc_camera.smb import sync_local_save
+
             sync_local_save(coord, _ev(timestamp="2026-05"), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
 
     def test_no_download_path_returns_early(self, tmp_path):
         """Empty download_path must be a no-op."""
-        coord = SimpleNamespace(options={"download_path": ""}, _download_started_at=time.time() - 3600)
+        coord = SimpleNamespace(
+            options={"download_path": ""}, _download_started_at=time.time() - 3600
+        )
         with patch(_URLOPEN) as mock_urlopen:
             from custom_components.bosch_shc_camera.smb import sync_local_save
+
             sync_local_save(coord, _ev(), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
 
@@ -201,10 +218,11 @@ class TestSyncLocalSaveDownload:
 # _SmbBackend unit tests
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestSmbBackendProperties:
 
+class TestSmbBackendProperties:
     def _make(self, **opts):
         from custom_components.bosch_shc_camera.media_source import _SmbBackend
+
         hass = MagicMock()
         hass.data = {}
         base = {
@@ -283,12 +301,19 @@ class TestSmbBackendScandir:
 
     def _make(self):
         from custom_components.bosch_shc_camera.media_source import _SmbBackend
+
         hass = MagicMock()
         hass.data = {}
-        return _SmbBackend(hass, {
-            "smb_server": "nas", "smb_share": "M", "smb_username": "u",
-            "smb_password": "p", "smb_base_path": "",
-        })
+        return _SmbBackend(
+            hass,
+            {
+                "smb_server": "nas",
+                "smb_share": "M",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "",
+            },
+        )
 
     def test_list_cameras_returns_dirs(self):
         b = self._make()
@@ -369,14 +394,21 @@ class TestSmbBackendScandir:
 
 
 class TestSmbBackendOpenFile:
-
     def _make(self):
         from custom_components.bosch_shc_camera.media_source import _SmbBackend
+
         hass = MagicMock()
         hass.data = {}
-        return _SmbBackend(hass, {"smb_server": "nas", "smb_share": "M",
-                                  "smb_username": "u", "smb_password": "p",
-                                  "smb_base_path": ""})
+        return _SmbBackend(
+            hass,
+            {
+                "smb_server": "nas",
+                "smb_share": "M",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "",
+            },
+        )
 
     def test_traversal_in_filename_raises(self):
         b = self._make()
@@ -414,7 +446,14 @@ class TestSmbBackendOpenFile:
 # _browse_smb — tree navigation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _hass_smb(list_cameras=None, list_years=None, list_months=None, list_days=None, list_events=None):
+
+def _hass_smb(
+    list_cameras=None,
+    list_years=None,
+    list_months=None,
+    list_days=None,
+    list_events=None,
+):
     """Build a mock hass that returns a single SMB-backed source."""
     from custom_components.bosch_shc_camera.media_source import _SmbBackend, _Source
 
@@ -429,18 +468,21 @@ def _hass_smb(list_cameras=None, list_years=None, list_months=None, list_days=No
 
     entry = MagicMock()
     entry.entry_id = "01ENT"
-    entry.runtime_data = SimpleNamespace(options={
-        "enable_smb_upload": True,
-        "upload_protocol": "smb",
-        "smb_server": "nas",
-        "smb_share": "M",
-    })
+    entry.runtime_data = SimpleNamespace(
+        options={
+            "enable_smb_upload": True,
+            "upload_protocol": "smb",
+            "smb_server": "nas",
+            "smb_share": "M",
+        }
+    )
 
     hass = MagicMock()
     hass.data = {}
     hass.config_entries.async_loaded_entries.return_value = [entry]
 
     from custom_components.bosch_shc_camera import media_source as ms
+
     with patch.object(ms, "_enabled_sources", return_value=[(src, backend)]):
         hass._smb_src = src
         hass._smb_backend = backend
@@ -449,12 +491,15 @@ def _hass_smb(list_cameras=None, list_years=None, list_months=None, list_days=No
 
 
 class TestBrowseSmb:
-
-    def _browse(self, identifier, cameras=None, years=None, months=None, days=None, events=None):
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
+    def _browse(
+        self, identifier, cameras=None, years=None, months=None, days=None, events=None
+    ):
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.list_cameras.return_value = cameras or []
@@ -494,31 +539,59 @@ class TestBrowseSmb:
 
     def test_camera_year_month_day_lists_events(self):
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
-        evs = [(f"{stem}.mp4", f"{stem}.jpg",
-                {"camera": "Terrasse", "date": "2026-05-07", "time": "10-00-00",
-                 "etype": "MOVEMENT"})]
+        evs = [
+            (
+                f"{stem}.mp4",
+                f"{stem}.jpg",
+                {
+                    "camera": "Terrasse",
+                    "date": "2026-05-07",
+                    "time": "10-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
         out = self._browse("01ENT/Terrasse/2026/05/07", events=evs)
         assert len(out.children) == 1
         assert out.children[0].can_play is True
 
     def test_event_thumbnail_set_when_image_present(self):
         stem = "Cam_2026-05-07_08-00-00_MOVEMENT_DEADBEEF"
-        evs = [(f"{stem}.mp4", f"{stem}.jpg",
-                {"camera": "Cam", "date": "2026-05-07", "time": "08-00-00",
-                 "etype": "MOVEMENT"})]
+        evs = [
+            (
+                f"{stem}.mp4",
+                f"{stem}.jpg",
+                {
+                    "camera": "Cam",
+                    "date": "2026-05-07",
+                    "time": "08-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
         out = self._browse("01ENT/Cam/2026/05/07", events=evs)
         assert out.children[0].thumbnail is not None
 
     def test_event_no_thumbnail_when_image_none(self):
         stem = "Cam_2026-05-07_08-00-00_MOVEMENT_DEADBEEF"
-        evs = [(f"{stem}.mp4", None,
-                {"camera": "Cam", "date": "2026-05-07", "time": "08-00-00",
-                 "etype": "MOVEMENT"})]
+        evs = [
+            (
+                f"{stem}.mp4",
+                None,
+                {
+                    "camera": "Cam",
+                    "date": "2026-05-07",
+                    "time": "08-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
         out = self._browse("01ENT/Cam/2026/05/07", events=evs)
         assert out.children[0].thumbnail is None
 
     def test_too_deep_raises_unresolvable(self):
         from homeassistant.components.media_source.error import Unresolvable
+
         with pytest.raises(Unresolvable):
             self._browse("01ENT/Cam/2026/05/07/file.mp4/extra")
 
@@ -529,10 +602,12 @@ class TestBrowseSmb:
 
     def test_date_first_root_lists_years(self):
         """When folder_pattern is date-first, root browse shows years."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False  # date-first mode
@@ -548,10 +623,12 @@ class TestBrowseSmb:
 
     def test_date_first_year_lists_months(self):
         """Date-first: '01ENT/2026' → months."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -570,8 +647,8 @@ class TestBrowseSmb:
 # _enabled_sources — filter paths
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestEnabledSourcesFilters:
 
+class TestEnabledSourcesFilters:
     def _entry(self, opts: dict):
         entry = MagicMock()
         entry.entry_id = "01ENT"
@@ -580,6 +657,7 @@ class TestEnabledSourcesFilters:
 
     def _call(self, entry):
         from custom_components.bosch_shc_camera import media_source as ms
+
         hass = MagicMock()
         hass.config_entries.async_loaded_entries.return_value = [entry]
         hass.data = {}
@@ -594,30 +672,34 @@ class TestEnabledSourcesFilters:
 
     def test_smb_shown_when_upload_enabled(self, tmp_path):
         """SMB backend always appears when enable_smb_upload=True + credentials."""
-        entry = self._entry({
-            "download_path": str(tmp_path),
-            "enable_smb_upload": True,
-            "upload_protocol": "smb",
-            "smb_server": "nas",
-            "smb_share": "M",
-            "smb_username": "u",
-            "smb_password": "p",
-        })
+        entry = self._entry(
+            {
+                "download_path": str(tmp_path),
+                "enable_smb_upload": True,
+                "upload_protocol": "smb",
+                "smb_server": "nas",
+                "smb_share": "M",
+                "smb_username": "u",
+                "smb_password": "p",
+            }
+        )
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
         assert "S" in kinds
 
     def test_smb_shown_when_ftp_protocol(self, tmp_path):
         """SMB browser backend shown even when upload_protocol=ftp (v11.0.12 fix)."""
-        entry = self._entry({
-            "download_path": str(tmp_path),
-            "enable_smb_upload": True,
-            "upload_protocol": "ftp",
-            "smb_server": "nas",
-            "smb_share": "M",
-            "smb_username": "u",
-            "smb_password": "p",
-        })
+        entry = self._entry(
+            {
+                "download_path": str(tmp_path),
+                "enable_smb_upload": True,
+                "upload_protocol": "ftp",
+                "smb_server": "nas",
+                "smb_share": "M",
+                "smb_username": "u",
+                "smb_password": "p",
+            }
+        )
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
         assert "S" in kinds
@@ -626,21 +708,25 @@ class TestEnabledSourcesFilters:
         """enable_nvr=True with an existing dir must produce an NVR source."""
         nvr_base = tmp_path / "nvr"
         nvr_base.mkdir()
-        entry = self._entry({
-            "enable_nvr": True,
-            "nvr_base_path": str(nvr_base),
-            "download_path": "",
-        })
+        entry = self._entry(
+            {
+                "enable_nvr": True,
+                "nvr_base_path": str(nvr_base),
+                "download_path": "",
+            }
+        )
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
         assert "N" in kinds
 
     def test_nvr_skipped_when_dir_missing(self, tmp_path):
-        entry = self._entry({
-            "enable_nvr": True,
-            "nvr_base_path": str(tmp_path / "no-such-dir"),
-            "download_path": "",
-        })
+        entry = self._entry(
+            {
+                "enable_nvr": True,
+                "nvr_base_path": str(tmp_path / "no-such-dir"),
+                "download_path": "",
+            }
+        )
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
         assert "N" not in kinds
@@ -658,14 +744,16 @@ class TestEnabledSourcesFilters:
 # _browse_entry_root — NVR / SMB single-source dispatch
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestBrowseEntryRootDispatch:
 
+class TestBrowseEntryRootDispatch:
     def test_nvr_single_source_lists_cameras(self, tmp_path):
         """Single NVR source: root browse goes straight to camera list."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _NvrBackend, _Source,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _NvrBackend,
+            _Source,
+        )
 
         nvr_base = tmp_path / "nvr"
         (nvr_base / "Terrasse").mkdir(parents=True)
@@ -682,10 +770,12 @@ class TestBrowseEntryRootDispatch:
 
     def test_smb_single_source_root_shows_cameras(self):
         """Single SMB source: root browse shows camera folders (camera-first)."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _SmbBackend, _Source,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.list_cameras.return_value = ["Terrasse"]
@@ -700,10 +790,13 @@ class TestBrowseEntryRootDispatch:
 
     def test_multi_source_entry_root_shows_chooser(self, tmp_path):
         """Two backends on same entry: root shows source chooser."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _LocalBackend, _NvrBackend, _Source,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _LocalBackend,
+            _NvrBackend,
+            _Source,
+        )
 
         local = _LocalBackend(str(tmp_path))
         nvr_base = tmp_path / "nvr"
@@ -716,7 +809,9 @@ class TestBrowseEntryRootDispatch:
         hass = MagicMock()
         hass.data = {}
         obj = BoschCameraMediaSource(hass)
-        with patch.object(ms, "_enabled_sources", return_value=[(src_l, local), (src_n, nvr)]):
+        with patch.object(
+            ms, "_enabled_sources", return_value=[(src_l, local), (src_n, nvr)]
+        ):
             out = obj._browse("01ENT")
         kinds = {c.identifier.split("/")[-1] for c in out.children}
         assert "L" in kinds

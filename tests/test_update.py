@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -39,66 +38,83 @@ def stub_entry():
 class TestFirmwareUpdate:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_translation_key == "firmware_update"
         assert u._attr_unique_id.endswith("_firmware_update")
 
     def test_diagnostic_category(self, stub_coord, stub_entry):
         from homeassistant.helpers.entity import EntityCategory
+
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_entity_category == EntityCategory.DIAGNOSTIC
 
     def test_installed_version_falls_back_to_info_fw(self, stub_coord, stub_entry):
         """No firmware_cache → fallback to info.firmwareVersion."""
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.installed_version == "9.40.25"
 
-    def test_installed_version_uses_cache_current_if_present(self, stub_coord, stub_entry):
+    def test_installed_version_uses_cache_current_if_present(
+        self, stub_coord, stub_entry
+    ):
         stub_coord._firmware_cache[CAM_ID] = {"current": "9.41.00"}
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.installed_version == "9.41.00"
 
     def test_latest_version_when_up_to_date(self, stub_coord, stub_entry):
         stub_coord._firmware_cache[CAM_ID] = {
-            "current": "9.40.25", "upToDate": True,
+            "current": "9.40.25",
+            "upToDate": True,
         }
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "9.40.25"
 
     def test_latest_version_when_update_available(self, stub_coord, stub_entry):
         stub_coord._firmware_cache[CAM_ID] = {
-            "current": "9.40.25", "upToDate": False, "update": "9.41.00",
+            "current": "9.40.25",
+            "upToDate": False,
+            "update": "9.41.00",
         }
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "9.41.00"
 
     def test_latest_version_fallback_when_no_update_field(self, stub_coord, stub_entry):
         """Not up to date but no `update` key → 'update available' placeholder."""
         stub_coord._firmware_cache[CAM_ID] = {
-            "current": "9.40.25", "upToDate": False,
+            "current": "9.40.25",
+            "upToDate": False,
         }
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "update available"
 
     def test_in_progress_reflects_cache(self, stub_coord, stub_entry):
         stub_coord._firmware_cache[CAM_ID] = {"updating": True}
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.in_progress is True
 
     def test_in_progress_default_false(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.in_progress is False
 
     def test_available_follows_coordinator(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.available is True
         stub_coord.last_update_success = False
@@ -106,9 +122,12 @@ class TestFirmwareUpdate:
 
     def test_extra_attrs(self, stub_coord, stub_entry):
         stub_coord._firmware_cache[CAM_ID] = {
-            "upToDate": False, "updating": True, "status": "downloading",
+            "upToDate": False,
+            "updating": True,
+            "status": "downloading",
         }
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         attrs = u.extra_state_attributes
         assert attrs["up_to_date"] is False
@@ -117,14 +136,18 @@ class TestFirmwareUpdate:
 
     def test_device_info(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         info = u.device_info
         assert info["manufacturer"] == "Bosch"
         assert "Außenkamera" in info["model"]
 
-    def test_latest_version_falls_back_when_fw_cache_empty(self, stub_coord, stub_entry):
+    def test_latest_version_falls_back_when_fw_cache_empty(
+        self, stub_coord, stub_entry
+    ):
         """Empty fw cache → latest_version delegates to installed_version (line 80)."""
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert stub_coord._firmware_cache == {}
         assert u.latest_version == "9.40.25"
@@ -135,31 +158,52 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_setup_entry_creates_one_entity_per_cam(self):
-        from custom_components.bosch_shc_camera.update import async_setup_entry, BoschFirmwareUpdate
+        from custom_components.bosch_shc_camera.update import (
+            BoschFirmwareUpdate,
+            async_setup_entry,
+        )
+
         coord = SimpleNamespace(
             data={
-                CAM_ID: {"info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}},
-                "22222222-OTHER": {"info": {"title": "Innen", "hardwareVersion": "CAMERA_360"}},
+                CAM_ID: {
+                    "info": {
+                        "title": "Terrasse",
+                        "hardwareVersion": "HOME_Eyes_Outdoor",
+                    }
+                },
+                "22222222-OTHER": {
+                    "info": {"title": "Innen", "hardwareVersion": "CAMERA_360"}
+                },
             },
             _firmware_cache={},
             last_update_success=True,
         )
-        entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={}, runtime_data=coord)
+        entry = SimpleNamespace(
+            entry_id="01ENTRY", data={}, options={}, runtime_data=coord
+        )
         captured: list = []
 
         def add_entities(entities, update_before_add=False):
             captured.extend(entities)
 
-        await async_setup_entry(hass=None, config_entry=entry, async_add_entities=add_entities)
+        await async_setup_entry(
+            hass=None, config_entry=entry, async_add_entities=add_entities
+        )
         assert len(captured) == 2
         assert all(isinstance(e, BoschFirmwareUpdate) for e in captured)
 
     @pytest.mark.asyncio
     async def test_setup_entry_empty_data_yields_no_entities(self):
         from custom_components.bosch_shc_camera.update import async_setup_entry
+
         coord = SimpleNamespace(data={}, _firmware_cache={}, last_update_success=True)
-        entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={}, runtime_data=coord)
+        entry = SimpleNamespace(
+            entry_id="01ENTRY", data={}, options={}, runtime_data=coord
+        )
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         assert captured == []

@@ -29,16 +29,19 @@ import pytest
 
 from custom_components.bosch_shc_camera import recorder
 
-
 CAM = "Terrasse"
 
 
-def _make_coord(tmp_path: Path, *, target: str = "local",
-                smb_subpath: str = "NVR",
-                smb_server: str = "fritz.box",
-                smb_share: str = "FRITZ.NAS",
-                smb_base_path: str = "Bosch-Kameras",
-                retention_days: int = 3):
+def _make_coord(
+    tmp_path: Path,
+    *,
+    target: str = "local",
+    smb_subpath: str = "NVR",
+    smb_server: str = "fritz.box",
+    smb_share: str = "FRITZ.NAS",
+    smb_base_path: str = "Bosch-Kameras",
+    retention_days: int = 3,
+):
     """Coordinator stub with everything the drain helpers read."""
     return SimpleNamespace(
         options={
@@ -62,8 +65,15 @@ def _make_coord(tmp_path: Path, *, target: str = "local",
     )
 
 
-def _make_segment(tmp_path: Path, cam: str, date: str, name: str,
-                  *, age_seconds: float = 120, size_kb: int = 100) -> Path:
+def _make_segment(
+    tmp_path: Path,
+    cam: str,
+    date: str,
+    name: str,
+    *,
+    age_seconds: float = 120,
+    size_kb: int = 100,
+) -> Path:
     """Create a fake staging segment with a known mtime + size."""
     cam_dir = tmp_path / "_staging" / cam / date
     cam_dir.mkdir(parents=True, exist_ok=True)
@@ -79,29 +89,51 @@ def _make_segment(tmp_path: Path, cam: str, date: str, name: str,
 
 class TestIsSegmentFinalized:
     def test_too_young_returns_false(self):
-        assert recorder._is_segment_finalized(
-            mtime=time.time() - 10, size=100_000,
-        ) is False
+        assert (
+            recorder._is_segment_finalized(
+                mtime=time.time() - 10,
+                size=100_000,
+            )
+            is False
+        )
 
     def test_too_small_returns_false(self):
-        assert recorder._is_segment_finalized(
-            mtime=time.time() - 120, size=100,
-        ) is False
+        assert (
+            recorder._is_segment_finalized(
+                mtime=time.time() - 120,
+                size=100,
+            )
+            is False
+        )
 
     def test_old_enough_and_big_enough_returns_true(self):
-        assert recorder._is_segment_finalized(
-            mtime=time.time() - 120, size=100_000,
-        ) is True
+        assert (
+            recorder._is_segment_finalized(
+                mtime=time.time() - 120,
+                size=100_000,
+            )
+            is True
+        )
 
     def test_explicit_now_arg(self):
         """`now` lets tests pin the current time without monkeypatching ``time.time``."""
         ref_now = 1_000_000.0
-        assert recorder._is_segment_finalized(
-            mtime=ref_now - 120, size=100_000, now=ref_now,
-        ) is True
-        assert recorder._is_segment_finalized(
-            mtime=ref_now - 5, size=100_000, now=ref_now,
-        ) is False
+        assert (
+            recorder._is_segment_finalized(
+                mtime=ref_now - 120,
+                size=100_000,
+                now=ref_now,
+            )
+            is True
+        )
+        assert (
+            recorder._is_segment_finalized(
+                mtime=ref_now - 5,
+                size=100_000,
+                now=ref_now,
+            )
+            is False
+        )
 
 
 # ── 2. _list_staging_candidates ──────────────────────────────────────────────
@@ -109,9 +141,12 @@ class TestIsSegmentFinalized:
 
 class TestListStagingCandidates:
     def test_missing_root_returns_empty(self, tmp_path):
-        assert recorder._list_staging_candidates(
-            str(tmp_path / "does-not-exist"),
-        ) == []
+        assert (
+            recorder._list_staging_candidates(
+                str(tmp_path / "does-not-exist"),
+            )
+            == []
+        )
 
     def test_walks_cam_date_files(self, tmp_path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
@@ -164,8 +199,7 @@ class TestSyncDrainTickLocal:
         assert result["pending"] == 0
 
     def test_too_young_segment_left_in_staging(self, tmp_path):
-        _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4",
-                      age_seconds=5)
+        _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4", age_seconds=5)
         coord = _make_coord(tmp_path, target="local")
         result = recorder.sync_drain_tick(coord)
         assert result["pending"] == 1
@@ -184,8 +218,7 @@ class TestSyncDrainTickSmb:
     def test_smb_target_invokes_upload(self, tmp_path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
-        with patch.object(recorder, "_upload_smb",
-                          return_value=True) as up:
+        with patch.object(recorder, "_upload_smb", return_value=True) as up:
             result = recorder.sync_drain_tick(coord)
         up.assert_called_once()
         cam_arg = up.call_args.args[2]
@@ -210,8 +243,7 @@ class TestSyncDrainTickFtp:
     def test_ftp_target_invokes_upload(self, tmp_path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
-        with patch.object(recorder, "_upload_ftp",
-                          return_value=True) as up:
+        with patch.object(recorder, "_upload_ftp", return_value=True) as up:
             result = recorder.sync_drain_tick(coord)
         up.assert_called_once()
         assert result["uploaded"] == 1
@@ -264,8 +296,9 @@ class TestNvrCleanupSmbSubpath:
     def test_smb_root_uses_nvr_subpath(self, tmp_path):
         """``_sync_nvr_cleanup_smb`` must walk ONLY the NVR subtree, not the
         entire share — otherwise it would delete cloud-event uploads too."""
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         seen: list[str] = []
 
         def fake_scandir(path):
@@ -273,14 +306,17 @@ class TestNvrCleanupSmbSubpath:
             return iter([])  # empty → walk terminates
 
         # smbclient is imported lazily inside the helper — patch its API.
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(
-                register_session=MagicMock(),
-                scandir=fake_scandir,
-                remove=MagicMock(),
-                stat=MagicMock(),
-            ),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=fake_scandir,
+                    remove=MagicMock(),
+                    stat=MagicMock(),
+                ),
+            },
+        ):
             recorder._sync_nvr_cleanup_smb(coord)
 
         # Walked path must end with the NVR subtree, not the bare share.
@@ -289,20 +325,26 @@ class TestNvrCleanupSmbSubpath:
 
     def test_smb_skip_without_server(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb", smb_server="")
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(register_session=MagicMock(),
-                                   scandir=MagicMock(),
-                                   remove=MagicMock(),
-                                   stat=MagicMock()),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=MagicMock(),
+                    remove=MagicMock(),
+                    stat=MagicMock(),
+                ),
+            },
+        ):
             # Should be a no-op — no scandir call.
             recorder._sync_nvr_cleanup_smb(coord)
 
 
 class TestNvrCleanupFtpSubpath:
     def test_ftp_root_uses_nvr_subpath(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         cwd_calls: list[str] = []
         ftp = MagicMock()
 
@@ -313,9 +355,12 @@ class TestNvrCleanupFtpSubpath:
         ftp.retrlines.side_effect = lambda cmd, cb: None  # empty listing
         ftp.quit.return_value = None
 
-        with patch.object(recorder, "_ftp_connect", create=True), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with (
+            patch.object(recorder, "_ftp_connect", create=True),
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
         assert cwd_calls
         # First cwd targets the NVR subtree.
@@ -335,9 +380,11 @@ class TestNvrCleanupDispatch:
 
     def test_local_only_calls_local_helper(self, tmp_path):
         coord = _make_coord(tmp_path, target="local")
-        with patch.object(recorder, "_sync_nvr_cleanup_local") as loc, \
-             patch.object(recorder, "_sync_nvr_cleanup_smb") as smb, \
-             patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp:
+        with (
+            patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
+            patch.object(recorder, "_sync_nvr_cleanup_smb") as smb,
+            patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp,
+        ):
             recorder.sync_nvr_cleanup(coord)
         loc.assert_called_once_with(coord)
         smb.assert_not_called()
@@ -345,9 +392,11 @@ class TestNvrCleanupDispatch:
 
     def test_smb_target_calls_smb_and_local(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb")
-        with patch.object(recorder, "_sync_nvr_cleanup_local") as loc, \
-             patch.object(recorder, "_sync_nvr_cleanup_smb") as smb, \
-             patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp:
+        with (
+            patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
+            patch.object(recorder, "_sync_nvr_cleanup_smb") as smb,
+            patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp,
+        ):
             recorder.sync_nvr_cleanup(coord)
         loc.assert_called_once_with(coord)
         smb.assert_called_once_with(coord)
@@ -355,9 +404,11 @@ class TestNvrCleanupDispatch:
 
     def test_ftp_target_calls_ftp_and_local(self, tmp_path):
         coord = _make_coord(tmp_path, target="ftp")
-        with patch.object(recorder, "_sync_nvr_cleanup_local") as loc, \
-             patch.object(recorder, "_sync_nvr_cleanup_smb") as smb, \
-             patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp:
+        with (
+            patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
+            patch.object(recorder, "_sync_nvr_cleanup_smb") as smb,
+            patch.object(recorder, "_sync_nvr_cleanup_ftp") as ftp,
+        ):
             recorder.sync_nvr_cleanup(coord)
         loc.assert_called_once_with(coord)
         smb.assert_not_called()
@@ -378,9 +429,11 @@ class TestDrainStagingWatcher:
     async def test_watcher_runs_tick_then_sleeps(self, tmp_path):
         """One tick on enable_nvr=True; sleep is what gets cancelled."""
         coord = _make_coord(tmp_path, target="local")
+
         # Provide an awaitable executor stub.
         async def _exec(fn, c):
             return fn(c)
+
         coord.hass.async_add_executor_job = _exec
 
         ticks: list[int] = []
@@ -390,8 +443,10 @@ class TestDrainStagingWatcher:
             ticks.append(1)
             return original_tick(coordinator, **kwargs)
 
-        with patch.object(recorder, "sync_drain_tick", counting_tick), \
-             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05):
+        with (
+            patch.object(recorder, "sync_drain_tick", counting_tick),
+            patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
+        ):
             task = asyncio.create_task(
                 recorder._drain_staging_to_remote(coord),
             )
@@ -410,10 +465,13 @@ class TestDrainStagingWatcher:
 
         async def _exec(fn, c):
             return fn(c)
+
         coord.hass.async_add_executor_job = _exec
 
-        with patch.object(recorder, "sync_drain_tick") as tick, \
-             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05):
+        with (
+            patch.object(recorder, "sync_drain_tick") as tick,
+            patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
+        ):
             task = asyncio.create_task(
                 recorder._drain_staging_to_remote(coord),
             )
@@ -432,6 +490,7 @@ class TestDrainStagingWatcher:
 
         async def _exec(fn, c):
             return fn(c)
+
         coord.hass.async_add_executor_job = _exec
 
         calls = []
@@ -440,8 +499,11 @@ class TestDrainStagingWatcher:
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("simulated")
-        with patch.object(recorder, "sync_drain_tick", boom), \
-             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05):
+
+        with (
+            patch.object(recorder, "sync_drain_tick", boom),
+            patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
+        ):
             task = asyncio.create_task(
                 recorder._drain_staging_to_remote(coord),
             )
@@ -459,18 +521,26 @@ class TestDrainStagingWatcher:
 
 class TestRemotePathHelpers:
     def test_smb_path_includes_subpath(self, tmp_path):
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         path = recorder._remote_smb_path(
-            coord.options, CAM, "2026-05-06", "10-00.mp4",
+            coord.options,
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert path == r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse\2026-05-06\10-00.mp4"
 
     def test_smb_path_sanitizes_camera_name(self, tmp_path):
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         path = recorder._remote_smb_path(
-            coord.options, "../../etc", "2026-05-06", "10-00.mp4",
+            coord.options,
+            "../../etc",
+            "2026-05-06",
+            "10-00.mp4",
         )
         # ``..`` collapsed by _safe_name → no traversal in the rendered path.
         head_after_root = path.split("\\NVR\\", 1)[1]
@@ -478,10 +548,14 @@ class TestRemotePathHelpers:
         assert ".." not in cam_component
 
     def test_ftp_path_starts_with_slash(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         path = recorder._remote_ftp_path(
-            coord.options, CAM, "2026-05-06", "10-00.mp4",
+            coord.options,
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert path == "/Bosch/NVR/Terrasse/2026-05-06/10-00.mp4"
 
@@ -494,7 +568,12 @@ class TestMoveLocal:
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="local")
         ok = recorder._move_local(
-            coord, str(src), str(tmp_path), CAM, "2026-05-06", "10-00.mp4",
+            coord,
+            str(src),
+            str(tmp_path),
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert ok is True
         assert (tmp_path / CAM / "2026-05-06" / "10-00.mp4").exists()
@@ -502,11 +581,14 @@ class TestMoveLocal:
 
     def test_oserror_returns_false(self, tmp_path):
         coord = _make_coord(tmp_path, target="local")
-        with patch.object(recorder.shutil, "move",
-                          side_effect=OSError("nope")):
+        with patch.object(recorder.shutil, "move", side_effect=OSError("nope")):
             ok = recorder._move_local(
-                coord, "/missing/x.mp4", str(tmp_path), CAM,
-                "2026-05-06", "10-00.mp4",
+                coord,
+                "/missing/x.mp4",
+                str(tmp_path),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -518,9 +600,14 @@ class TestUploadSmb:
         coord = _make_coord(tmp_path, target="smb")
         # Make ``import smbclient`` raise ImportError inside the function.
         import sys
+
         with patch.dict(sys.modules, {"smbclient": None}):
             ok = recorder._upload_smb(
-                coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/fake.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -529,31 +616,50 @@ class TestUploadSmb:
         # smbclient is a real module; we only need to short-circuit before it
         # gets used.
         ok = recorder._upload_smb(
-            coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+            coord,
+            "/fake.mp4",
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert ok is False
 
     def test_returns_false_on_session_failure(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb")
         import sys
-        smb_mock = MagicMock(register_session=MagicMock(side_effect=OSError("boom")),
-                             open_file=MagicMock())
+
+        smb_mock = MagicMock(
+            register_session=MagicMock(side_effect=OSError("boom")),
+            open_file=MagicMock(),
+        )
         with patch.dict(sys.modules, {"smbclient": smb_mock}):
             ok = recorder._upload_smb(
-                coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/fake.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
     def test_returns_false_on_mkdirs_failure(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb")
         import sys
-        smb_mock = MagicMock(register_session=MagicMock(),
-                             open_file=MagicMock())
-        with patch.dict(sys.modules, {"smbclient": smb_mock}), \
-             patch("custom_components.bosch_shc_camera.smb.smb_makedirs",
-                   side_effect=OSError("mkdir failed")):
+
+        smb_mock = MagicMock(register_session=MagicMock(), open_file=MagicMock())
+        with (
+            patch.dict(sys.modules, {"smbclient": smb_mock}),
+            patch(
+                "custom_components.bosch_shc_camera.smb.smb_makedirs",
+                side_effect=OSError("mkdir failed"),
+            ),
+        ):
             ok = recorder._upload_smb(
-                coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/fake.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -561,12 +667,21 @@ class TestUploadSmb:
         """File-open or upload itself raising → caught and returns False."""
         coord = _make_coord(tmp_path, target="smb")
         import sys
-        smb_mock = MagicMock(register_session=MagicMock(),
-                             open_file=MagicMock(side_effect=OSError("write failed")))
-        with patch.dict(sys.modules, {"smbclient": smb_mock}), \
-             patch("custom_components.bosch_shc_camera.smb.smb_makedirs"):
+
+        smb_mock = MagicMock(
+            register_session=MagicMock(),
+            open_file=MagicMock(side_effect=OSError("write failed")),
+        )
+        with (
+            patch.dict(sys.modules, {"smbclient": smb_mock}),
+            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
+        ):
             ok = recorder._upload_smb(
-                coord, "/missing-file.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/missing-file.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -583,15 +698,24 @@ class TestUploadSmb:
         class _OpenFileCtx:
             def __enter__(self_inner):
                 return smb_dst
+
             def __exit__(self_inner, *exc):
                 return False
 
-        smb_mock = MagicMock(register_session=MagicMock(),
-                             open_file=MagicMock(return_value=_OpenFileCtx()))
-        with patch.dict(sys.modules, {"smbclient": smb_mock}), \
-             patch("custom_components.bosch_shc_camera.smb.smb_makedirs"):
+        smb_mock = MagicMock(
+            register_session=MagicMock(),
+            open_file=MagicMock(return_value=_OpenFileCtx()),
+        )
+        with (
+            patch.dict(sys.modules, {"smbclient": smb_mock}),
+            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
+        ):
             ok = recorder._upload_smb(
-                coord, str(src), CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                str(src),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is True
         assert smb_dst.getvalue()  # got bytes
@@ -601,28 +725,47 @@ class TestUploadFtp:
     def test_returns_false_when_server_empty(self, tmp_path):
         coord = _make_coord(tmp_path, target="ftp", smb_server="")
         ok = recorder._upload_ftp(
-            coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+            coord,
+            "/fake.mp4",
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert ok is False
 
     def test_returns_false_on_login_failure(self, tmp_path):
         coord = _make_coord(tmp_path, target="ftp")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   side_effect=OSError("login refused")):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect",
+            side_effect=OSError("login refused"),
+        ):
             ok = recorder._upload_ftp(
-                coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/fake.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
     def test_returns_false_on_mkdirs_failure(self, tmp_path):
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_makedirs",
-                   side_effect=OSError("mkdir refused")):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_makedirs",
+                side_effect=OSError("mkdir refused"),
+            ),
+        ):
             ok = recorder._upload_ftp(
-                coord, "/fake.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/fake.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -631,11 +774,18 @@ class TestUploadFtp:
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
         ftp.storbinary.side_effect = OSError("transfer aborted")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+        ):
             ok = recorder._upload_ftp(
-                coord, str(src), CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                str(src),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
 
@@ -643,11 +793,18 @@ class TestUploadFtp:
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+        ):
             ok = recorder._upload_ftp(
-                coord, str(src), CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                str(src),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is True
         ftp.storbinary.assert_called_once()
@@ -660,11 +817,18 @@ class TestUploadFtp:
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
         ftp.quit.side_effect = OSError("connection broken")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+        ):
             recorder._upload_ftp(
-                coord, str(src), CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                str(src),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         ftp.close.assert_called_once()
 
@@ -676,18 +840,26 @@ class TestQuarantineFailed:
     def test_moves_file_into_failed_tree(self, tmp_path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         recorder._quarantine_failed(
-            str(tmp_path), str(src), CAM, "2026-05-06", "10-00.mp4",
+            str(tmp_path),
+            str(src),
+            CAM,
+            "2026-05-06",
+            "10-00.mp4",
         )
         assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()
         assert not src.exists()
 
     def test_oserror_swallowed(self, tmp_path):
         """A move-failure must not raise — the watcher is best-effort."""
-        with patch.object(recorder.shutil, "move",
-                          side_effect=OSError("permission denied")):
+        with patch.object(
+            recorder.shutil, "move", side_effect=OSError("permission denied")
+        ):
             recorder._quarantine_failed(
-                str(tmp_path), "/missing.mp4", CAM,
-                "2026-05-06", "10-00.mp4",
+                str(tmp_path),
+                "/missing.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
 
 
@@ -796,10 +968,12 @@ class TestListStagingExtra:
         cam.mkdir(parents=True)
         # Real listdir on root works (returns ["Terrasse"]); fail only on cam.
         real_listdir = os.listdir
+
         def selective(p):
             if str(p) == str(cam):
                 raise OSError("perm")
             return real_listdir(p)
+
         with patch("os.listdir", side_effect=selective):
             out = recorder._list_staging_candidates(str(staging))
         assert out == []
@@ -857,8 +1031,10 @@ class TestSyncDrainTickUnlinkFailure:
         """A successful upload + failed unlink must NOT bump ``failed``."""
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
-        with patch.object(recorder, "_upload_smb", return_value=True), \
-             patch("os.unlink", side_effect=OSError("readonly")):
+        with (
+            patch.object(recorder, "_upload_smb", return_value=True),
+            patch("os.unlink", side_effect=OSError("readonly")),
+        ):
             result = recorder.sync_drain_tick(coord)
         assert result["uploaded"] == 1
         assert result["failed"] == 0
@@ -866,8 +1042,10 @@ class TestSyncDrainTickUnlinkFailure:
     def test_ftp_unlink_failure_only_logs(self, tmp_path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
-        with patch.object(recorder, "_upload_ftp", return_value=True), \
-             patch("os.unlink", side_effect=OSError("readonly")):
+        with (
+            patch.object(recorder, "_upload_ftp", return_value=True),
+            patch("os.unlink", side_effect=OSError("readonly")),
+        ):
             result = recorder.sync_drain_tick(coord)
         assert result["uploaded"] == 1
         assert result["failed"] == 0
@@ -893,35 +1071,45 @@ class TestSyncDrainTickUnlinkFailure:
 class TestSyncNvrCleanupSmbDeepWalk:
     def test_smb_skipped_when_no_share(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb", smb_share="")
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(register_session=MagicMock(),
-                                   scandir=MagicMock(),
-                                   remove=MagicMock(),
-                                   stat=MagicMock()),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=MagicMock(),
+                    remove=MagicMock(),
+                    stat=MagicMock(),
+                ),
+            },
+        ):
             recorder._sync_nvr_cleanup_smb(coord)
 
     def test_smb_session_failure_returns(self, tmp_path):
         coord = _make_coord(tmp_path, target="smb")
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(
-                register_session=MagicMock(side_effect=OSError("auth")),
-                scandir=MagicMock(),
-                remove=MagicMock(),
-                stat=MagicMock(),
-            ),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(side_effect=OSError("auth")),
+                    scandir=MagicMock(),
+                    remove=MagicMock(),
+                    stat=MagicMock(),
+                ),
+            },
+        ):
             recorder._sync_nvr_cleanup_smb(coord)
 
     def test_smb_walk_recurses_and_deletes(self, tmp_path):
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
 
         # Build a fake tree with one old file and one fresh file.
         class Entry:
             def __init__(self, name, is_dir):
                 self.name = name
                 self._is_dir = is_dir
+
             def is_dir(self):
                 return self._is_dir
 
@@ -931,7 +1119,8 @@ class TestSyncNvrCleanupSmbDeepWalk:
         layout = {
             r"\\fritz.box\FRITZ.NAS\Bosch\NVR": [Entry("Terrasse", True)],
             r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse": [
-                Entry("old.mp4", False), Entry("new.mp4", False),
+                Entry("old.mp4", False),
+                Entry("new.mp4", False),
             ],
         }
         stats = {
@@ -947,39 +1136,48 @@ class TestSyncNvrCleanupSmbDeepWalk:
 
         removed: list[str] = []
 
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(
-                register_session=MagicMock(),
-                scandir=fake_scandir,
-                remove=removed.append,
-                stat=fake_stat,
-            ),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=fake_scandir,
+                    remove=removed.append,
+                    stat=fake_stat,
+                ),
+            },
+        ):
             recorder._sync_nvr_cleanup_smb(coord)
         assert removed == [r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse\old.mp4"]
 
     def test_smb_scandir_exception_swallowed(self, tmp_path):
         """A scandir failure deep in the tree must not propagate."""
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(
-                register_session=MagicMock(),
-                scandir=MagicMock(side_effect=OSError("scandir failed")),
-                remove=MagicMock(),
-                stat=MagicMock(),
-            ),
-        }):
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=MagicMock(side_effect=OSError("scandir failed")),
+                    remove=MagicMock(),
+                    stat=MagicMock(),
+                ),
+            },
+        ):
             # Should not raise.
             recorder._sync_nvr_cleanup_smb(coord)
 
     def test_smb_stat_exception_swallowed(self, tmp_path):
         """smb_stat raising on a leaf file must not bubble up."""
-        coord = _make_coord(tmp_path, target="smb",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
 
         class Entry:
             name = "boom.mp4"
+
             def is_dir(self):
                 return False
 
@@ -988,22 +1186,26 @@ class TestSyncNvrCleanupSmbDeepWalk:
                 return iter([Entry()])
             return iter([])
 
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(
-                register_session=MagicMock(),
-                scandir=fake_scandir,
-                remove=MagicMock(),
-                stat=MagicMock(side_effect=OSError("stat failed")),
-            ),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=MagicMock(),
+                    scandir=fake_scandir,
+                    remove=MagicMock(),
+                    stat=MagicMock(side_effect=OSError("stat failed")),
+                ),
+            },
+        ):
             recorder._sync_nvr_cleanup_smb(coord)
 
 
 class TestSyncNvrCleanupFtpDeepWalk:
     def test_ftp_walk_lists_and_deletes(self, tmp_path):
         """End-to-end walk: cwd → LIST → MDTM → DELE for old files only."""
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         # Build a LIST output: one subdir, one old file, one fresh file.
         listings = {
@@ -1027,6 +1229,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         # past the retention boundary as calendar days advance.
         def sendcmd(cmd):
             import datetime
+
             if cmd == "MDTM old.mp4":
                 return "213 20260101010000"
             return datetime.datetime.utcnow().strftime("213 %Y%m%d%H%M%S")
@@ -1035,35 +1238,42 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.cwd.return_value = None
         ftp.delete.return_value = None
 
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_called_once_with("old.mp4")
 
     def test_ftp_cwd_failure_returns_cleanly(self, tmp_path):
         """ftp.cwd raising error_perm — entire walk returns early w/o delete."""
         import ftplib
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         ftp.cwd.side_effect = ftplib.error_perm("550 not found")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
 
     def test_ftp_listing_exception_swallowed(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         ftp.retrlines.side_effect = OSError("listing failed")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
     def test_ftp_mdtm_failure_skips_file(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         listings = {
             "/Bosch/NVR": [
@@ -1075,16 +1285,19 @@ class TestSyncNvrCleanupFtpDeepWalk:
             current = ftp.cwd.call_args.args[0]
             for line in listings.get(current, []):
                 cb(line)
+
         ftp.retrlines.side_effect = fake_retrlines
         ftp.sendcmd.side_effect = OSError("MDTM unsupported")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
 
     def test_ftp_delete_failure_swallowed(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         listings = {
             "/Bosch/NVR": [
@@ -1096,17 +1309,20 @@ class TestSyncNvrCleanupFtpDeepWalk:
             current = ftp.cwd.call_args.args[0]
             for line in listings.get(current, []):
                 cb(line)
+
         ftp.retrlines.side_effect = fake_retrlines
         ftp.sendcmd.return_value = "213 20260101010000"
         ftp.delete.side_effect = OSError("permission denied")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
     def test_ftp_cwd_in_recursion_swallowed(self, tmp_path):
         """``cwd`` failure when popping back up the tree must not raise."""
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         listings = {
             "/Bosch/NVR": [
@@ -1135,18 +1351,21 @@ class TestSyncNvrCleanupFtpDeepWalk:
                 cb(line)
 
         ftp.retrlines.side_effect = fake_retrlines
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
     def test_ftp_quit_failure_swallowed(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         ftp.retrlines.side_effect = lambda cmd, cb: None  # empty
         ftp.quit.side_effect = OSError("connection lost")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
 
@@ -1160,12 +1379,19 @@ class TestUploadFtpCloseFallback:
         ftp = MagicMock()
         ftp.quit.side_effect = OSError("a")
         ftp.close.side_effect = OSError("b")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp), \
-             patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            ),
+            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+        ):
             # Exception from close() in the inner finally must not propagate.
             recorder._upload_ftp(
-                coord, str(src), CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                str(src),
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
 
 
@@ -1179,12 +1405,20 @@ class TestUploadSmbServerEmptyWarning:
         # Provide a real-ish smbclient that would crash if invoked — proves
         # the helper short-circuits before importing it.
         register = MagicMock()
-        with patch.dict("sys.modules", {
-            "smbclient": MagicMock(register_session=register,
-                                   open_file=MagicMock()),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "smbclient": MagicMock(
+                    register_session=register, open_file=MagicMock()
+                ),
+            },
+        ):
             ok = recorder._upload_smb(
-                coord, "/x.mp4", CAM, "2026-05-06", "10-00.mp4",
+                coord,
+                "/x.mp4",
+                CAM,
+                "2026-05-06",
+                "10-00.mp4",
             )
         assert ok is False
         register.assert_not_called()
@@ -1193,8 +1427,9 @@ class TestUploadSmbServerEmptyWarning:
 class TestSmbCleanupImportErrorBranch:
     def test_smbclient_missing_returns_silently(self, tmp_path):
         """Production environments without smbprotocol must not raise."""
-        import sys
         import builtins
+        import sys
+
         coord = _make_coord(tmp_path, target="smb")
         real_import = builtins.__import__
 
@@ -1212,19 +1447,22 @@ class TestSmbCleanupImportErrorBranch:
 class TestFtpCleanupConnectFailure:
     def test_connect_failure_returns_silently(self, tmp_path):
         coord = _make_coord(tmp_path, target="ftp")
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   side_effect=OSError("login refused")):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect",
+            side_effect=OSError("login refused"),
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
 
 class TestFtpCleanupShortAndDotDotLines:
     def test_short_line_skipped(self, tmp_path):
-        coord = _make_coord(tmp_path, target="ftp",
-                            smb_base_path="Bosch", smb_subpath="NVR")
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
         ftp = MagicMock()
         listings = {
             "/Bosch/NVR": [
-                "short line",   # too few fields → skipped (line 896-897)
+                "short line",  # too few fields → skipped (line 896-897)
                 "drwxr-xr-x  2 user grp 4096 May 06 10:00 .",  # dot → skipped (line 899-900)
                 "drwxr-xr-x  2 user grp 4096 May 06 10:00 ..",
             ],
@@ -1236,7 +1474,8 @@ class TestFtpCleanupShortAndDotDotLines:
                 cb(line)
 
         ftp.retrlines.side_effect = fake_retrlines
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect",
-                   return_value=ftp):
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()

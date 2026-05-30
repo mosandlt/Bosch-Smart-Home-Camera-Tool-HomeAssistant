@@ -19,29 +19,36 @@ from types import SimpleNamespace
 
 import pytest
 
-
 # ── _is_safe_bosch_url (fcm copy) ───────────────────────────────────────
 
 
 class TestFcmSafeBoschUrl:
-    @pytest.mark.parametrize("url", [
-        "https://residential.cbs.boschsecurity.com/v11/devices",
-        "https://api.bosch.com/x",
-        "https://something.boschsecurity.com/y",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://residential.cbs.boschsecurity.com/v11/devices",
+            "https://api.bosch.com/x",
+            "https://something.boschsecurity.com/y",
+        ],
+    )
     def test_legit_urls_allowed(self, url):
         from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
+
         assert _is_safe_bosch_url(url) is True
 
-    @pytest.mark.parametrize("url", [
-        "http://residential.cbs.boschsecurity.com/x",  # not HTTPS
-        "https://attacker.com/x",
-        "https://127.0.0.1/x",
-        "https://10.0.0.1/x",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://residential.cbs.boschsecurity.com/x",  # not HTTPS
+            "https://attacker.com/x",
+            "https://127.0.0.1/x",
+            "https://10.0.0.1/x",
+            "",
+        ],
+    )
     def test_unsafe_urls_rejected(self, url):
         from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
+
         assert _is_safe_bosch_url(url) is False
 
 
@@ -67,6 +74,7 @@ def _make_record(msg: str, *, with_exc: bool = False) -> logging.LogRecord:
 class TestFCMNoiseFilter:
     def test_unrelated_messages_pass_through(self):
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         record = _make_record("FCM token registered successfully")
         assert f.filter(record) is True
@@ -75,6 +83,7 @@ class TestFCMNoiseFilter:
         """First 'Unexpected exception during read' lets through, but
         without the recursive stack trace."""
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         record = _make_record("Unexpected exception during read", with_exc=True)
         assert f.filter(record) is True
@@ -85,6 +94,7 @@ class TestFCMNoiseFilter:
     def test_second_record_within_60s_dropped(self):
         """De-dupe within 60 s window — second message gets filtered out."""
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         # First passes
         f.filter(_make_record("Unexpected exception during read"))
@@ -95,10 +105,13 @@ class TestFCMNoiseFilter:
     def test_record_after_dedup_window_passes(self):
         """After the dedup window (v12.4.1: 300 s), another message gets through."""
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         f.filter(_make_record("Unexpected exception during read"))
         # Backdate past the dedup window so the next record passes
-        f._last_passed = time.monotonic() - (_FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0)
+        f._last_passed = time.monotonic() - (
+            _FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0
+        )
         rec = _make_record("Unexpected exception during read")
         assert f.filter(rec) is True
 
@@ -111,6 +124,7 @@ class TestFCMNoiseFilter:
         always passes regardless of VM uptime.
         """
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         assert f._last_passed == float("-inf"), (
             "SENTINEL_RULE violation: _last_passed=0.0 silently drops the first "
@@ -124,62 +138,85 @@ class TestFCMNoiseFilter:
 class TestGetAlertServices:
     def test_specific_slot_used_when_set(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_information": "notify.foo",
-            "alert_notify_service": "notify.fallback",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_information": "notify.foo",
+                "alert_notify_service": "notify.fallback",
+            }
+        )
         assert get_alert_services(coord, "information") == ["notify.foo"]
 
     def test_information_falls_back_to_default(self):
         """When the per-step slot is empty, fall back to alert_notify_service."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_information": "",
-            "alert_notify_service": "notify.signalkamera",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_information": "",
+                "alert_notify_service": "notify.signalkamera",
+            }
+        )
         assert get_alert_services(coord, "information") == ["notify.signalkamera"]
 
     def test_system_falls_back_to_default(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_system": "",
-            "alert_notify_service": "notify.test_user",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_system": "",
+                "alert_notify_service": "notify.test_user",
+            }
+        )
         assert get_alert_services(coord, "system") == ["notify.test_user"]
 
     def test_screenshot_does_not_fall_back(self):
         """Empty `alert_notify_screenshot` must NOT fall back — empty means skip step."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_screenshot": "",
-            "alert_notify_service": "notify.test_user",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_screenshot": "",
+                "alert_notify_service": "notify.test_user",
+            }
+        )
         assert get_alert_services(coord, "screenshot") == []
 
     def test_video_does_not_fall_back(self):
         """Same skip-on-empty rule for video."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_video": "",
-            "alert_notify_service": "notify.test_user",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_video": "",
+                "alert_notify_service": "notify.test_user",
+            }
+        )
         assert get_alert_services(coord, "video") == []
 
     def test_comma_separated_services_split(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_information": "notify.a, notify.b , notify.c",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_information": "notify.a, notify.b , notify.c",
+            }
+        )
         assert get_alert_services(coord, "information") == [
-            "notify.a", "notify.b", "notify.c",
+            "notify.a",
+            "notify.b",
+            "notify.c",
         ]
 
     def test_empty_strings_filtered_out(self):
         """Trailing comma or double comma → no empty entry in the result."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = SimpleNamespace(options={
-            "alert_notify_information": "notify.a,, notify.b,",
-        })
+
+        coord = SimpleNamespace(
+            options={
+                "alert_notify_information": "notify.a,, notify.b,",
+            }
+        )
         assert get_alert_services(coord, "information") == ["notify.a", "notify.b"]
 
 
@@ -189,6 +226,7 @@ class TestGetAlertServices:
 class TestBuildNotifyData:
     def test_text_only_no_attachment(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         data = build_notify_data("notify.foo", "Hello", title="Subject")
         assert data["message"] == "Hello"
         assert data["title"] == "Subject"
@@ -197,6 +235,7 @@ class TestBuildNotifyData:
     def test_mobile_app_uses_local_image_url(self):
         """HA Companion App reads images from /local/bosch_alerts/ (auth-free)."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         data = build_notify_data(
             "notify.mobile_app_test_phone",
             "msg",
@@ -207,8 +246,11 @@ class TestBuildNotifyData:
 
     def test_telegram_uses_photo_field(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         data = build_notify_data(
-            "notify.telegram_chat", "msg", file_path="/config/x.jpg",
+            "notify.telegram_chat",
+            "msg",
+            file_path="/config/x.jpg",
         )
         assert data["data"]["photo"] == "/config/x.jpg"
         assert data["data"]["caption"] == "msg"
@@ -216,12 +258,16 @@ class TestBuildNotifyData:
     def test_signal_uses_attachments(self):
         """Signal / email / generic services use data.attachments list."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         data = build_notify_data(
-            "notify.signal_messenger", "msg", file_path="/config/x.mp4",
+            "notify.signal_messenger",
+            "msg",
+            file_path="/config/x.mp4",
         )
         assert data["data"]["attachments"] == ["/config/x.mp4"]
 
     def test_no_title_field_when_empty(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         data = build_notify_data("notify.x", "msg", title=None)
         assert "title" not in data

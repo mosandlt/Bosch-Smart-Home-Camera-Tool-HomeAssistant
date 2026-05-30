@@ -19,6 +19,7 @@ Coverage targets:
     - Line  3846: _fetch_firebase_config delegation wrapper
     - Line  4143: CancelledError re-raised inside async_put_camera
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,10 @@ import pytest
 # Helper — build a minimal aiohttp-style async context-manager response
 # ---------------------------------------------------------------------------
 
-def _make_resp(status: int, json_data=None, text_data: str = "", headers: dict | None = None):
+
+def _make_resp(
+    status: int, json_data=None, text_data: str = "", headers: dict | None = None
+):
     resp = MagicMock()
     resp.status = status
     resp.json = AsyncMock(return_value=json_data if json_data is not None else {})
@@ -58,6 +62,7 @@ def _make_session(**method_responses):
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — fetch_firebase_config (lines 117-122)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_fetch_firebase_config_returns_dict():
@@ -91,6 +96,7 @@ async def test_fetch_firebase_config_hass_arg_ignored():
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — async_start_fcm_push early exits (lines 143-147)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_start_fcm_already_running_returns():
@@ -135,6 +141,7 @@ async def test_start_fcm_option_missing_defaults_to_disabled():
 # (lines 548-550)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
 async def test_handle_fcm_push_mark_events_read_exception_swallowed():
     """Exception from async_mark_events_read inside async_handle_fcm_push is silently swallowed."""
@@ -144,7 +151,19 @@ async def test_handle_fcm_push_mark_events_read_exception_swallowed():
     event_id = "evt-001"
 
     # Simulate a new event (prev_id != newest_id) so the mark_events_read branch is reached
-    resp = _make_resp(200, json_data=[{"id": event_id, "eventType": "MOVEMENT", "eventTags": [], "timestamp": "2026-01-01T10:00:00", "imageUrl": "", "videoClipUrl": ""}])
+    resp = _make_resp(
+        200,
+        json_data=[
+            {
+                "id": event_id,
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T10:00:00",
+                "imageUrl": "",
+                "videoClipUrl": "",
+            }
+        ],
+    )
     session = _make_session(get=MagicMock(return_value=resp))
 
     hass = MagicMock()
@@ -155,19 +174,22 @@ async def test_handle_fcm_push_mark_events_read_exception_swallowed():
     coord = SimpleNamespace(
         token="tok",
         data={CAM: {"info": {"title": "Kamera"}, "events": []}},
-        _last_event_ids={CAM: "old-id"},        # different from event_id → new event
+        _last_event_ids={CAM: "old-id"},  # different from event_id → new event
         _alert_sent_ids={},
         _bg_tasks=set(),
         _camera_entities={},
         _cached_events={},
-        options={"mark_events_read": True},     # enable the mark-as-read branch
+        options={"mark_events_read": True},  # enable the mark-as-read branch
         hass=hass,
     )
 
     async def _raising_mark(coord_, ids):
         raise RuntimeError("simulated mark failure")
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_mark_events_read",
             side_effect=_raising_mark,
@@ -179,6 +201,7 @@ async def test_handle_fcm_push_mark_events_read_exception_swallowed():
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — async_send_alert step-1 exception → early return (lines 690-692)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_step1_exception_causes_early_return():
@@ -204,17 +227,26 @@ async def test_send_alert_step1_exception_causes_early_return():
     )
 
     session = MagicMock()
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
         # Should not raise — exception in step 1 is caught, logged, and returns
         await async_send_alert(
-            coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-            image_url="", clip_url="", clip_status="",
+            coord,
+            "TestCam",
+            "MOVEMENT",
+            "2026-01-01T10:00:00",
+            image_url="",
+            clip_url="",
+            clip_status="",
         )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — async_send_alert step-2 exception (lines 752-753)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_step2_exception_is_swallowed():
@@ -254,11 +286,21 @@ async def test_send_alert_step2_exception_is_swallowed():
     )
 
     image_url = "https://media.boschsecurity.com/snap.jpg"
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             await async_send_alert(
-                coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-                image_url=image_url, clip_url="", clip_status="",
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
+                image_url=image_url,
+                clip_url="",
+                clip_status="",
             )
     # Step 1 must have fired; step 2 exception must be swallowed (no raise)
     assert call_count >= 1, "step-1 notify must have been called"
@@ -267,6 +309,7 @@ async def test_send_alert_step2_exception_is_swallowed():
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — direct clip.mp4 check 200+video (lines 781-782)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_direct_clip_mp4_detected():
@@ -328,12 +371,20 @@ async def test_send_alert_direct_clip_mp4_detected():
         hass=hass,
     )
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             with patch("custom_components.bosch_shc_camera.fcm._write_file"):
                 await async_send_alert(
-                    coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-                    image_url="",           # no snapshot → skips step 2
+                    coord,
+                    "TestCam",
+                    "MOVEMENT",
+                    "2026-01-01T10:00:00",
+                    image_url="",  # no snapshot → skips step 2
                     clip_url="",
                     clip_status="",
                 )
@@ -343,6 +394,7 @@ async def test_send_alert_direct_clip_mp4_detected():
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — step-3 exception swallowed (lines 850-851)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_step3_exception_is_swallowed():
@@ -377,10 +429,18 @@ async def test_send_alert_step3_exception_is_swallowed():
         hass=hass,
     )
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             await async_send_alert(
-                coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
                 image_url="",
                 clip_url="https://media.boschsecurity.com/clip.mp4",
                 clip_status="Done",
@@ -390,6 +450,7 @@ async def test_send_alert_step3_exception_is_swallowed():
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — mark-as-read after send exception swallowed (lines 861-862)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_mark_events_read_exception_swallowed():
@@ -417,7 +478,7 @@ async def test_send_alert_mark_events_read_exception_swallowed():
         options={
             "alert_notify_service": "notify.test",
             "alert_notify_information": "notify.test",
-            "mark_events_read": True,           # enable the post-send mark branch
+            "mark_events_read": True,  # enable the post-send mark branch
             "alert_save_snapshots": False,
             "alert_delete_after_send": False,
         },
@@ -429,21 +490,32 @@ async def test_send_alert_mark_events_read_exception_swallowed():
     async def _raising_mark(coord_, ids):
         raise RuntimeError("mark failed")
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             with patch(
                 "custom_components.bosch_shc_camera.fcm.async_mark_events_read",
                 side_effect=_raising_mark,
             ):
                 await async_send_alert(
-                    coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-                    image_url="", clip_url="", clip_status="",
+                    coord,
+                    "TestCam",
+                    "MOVEMENT",
+                    "2026-01-01T10:00:00",
+                    image_url="",
+                    clip_url="",
+                    clip_status="",
                 )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — SMB upload exception (lines 897-898)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_smb_exception_swallowed():
@@ -453,6 +525,7 @@ async def test_send_alert_smb_exception_swallowed():
     async def _executor_job(fn, *args, **kw):
         # Allow os.makedirs (or any non-SMB call) to succeed; only raise for sync_smb_upload
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         if fn is sync_smb_upload:
             raise RuntimeError("smb boom")
         return None  # os.makedirs, _write_file, etc.
@@ -484,17 +557,28 @@ async def test_send_alert_smb_exception_swallowed():
         hass=hass,
     )
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             await async_send_alert(
-                coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-                image_url="", clip_url="", clip_status="",
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
+                image_url="",
+                clip_url="",
+                clip_status="",
             )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # fcm.py — local save exception (lines 920-921)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_send_alert_local_save_exception_swallowed():
@@ -503,6 +587,7 @@ async def test_send_alert_local_save_exception_swallowed():
 
     async def _executor_job(fn, *args, **kw):
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         if fn is sync_local_save:
             raise RuntimeError("local save boom")
         return None  # os.makedirs etc.
@@ -523,7 +608,7 @@ async def test_send_alert_local_save_exception_swallowed():
         options={
             "alert_notify_service": "notify.test",
             "alert_notify_information": "notify.test",
-            "download_path": "/tmp/bosch",      # enables local save branch
+            "download_path": "/tmp/bosch",  # enables local save branch
             "alert_save_snapshots": False,
             "alert_delete_after_send": False,
         },
@@ -532,11 +617,21 @@ async def test_send_alert_local_save_exception_swallowed():
         hass=hass,
     )
 
-    with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()):
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_clientsession",
+        return_value=session,
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
+        ):
             await async_send_alert(
-                coord, "TestCam", "MOVEMENT", "2026-01-01T10:00:00",
-                image_url="", clip_url="", clip_status="",
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
+                image_url="",
+                clip_url="",
+                clip_status="",
             )
 
 
@@ -544,9 +639,11 @@ async def test_send_alert_local_save_exception_swallowed():
 # __init__.py — _INTEGRATION_VERSION fallback (lines 89-90)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def test_integration_version_is_string():
     """_INTEGRATION_VERSION must be a non-empty string under normal conditions."""
     import custom_components.bosch_shc_camera as mod
+
     assert isinstance(mod._INTEGRATION_VERSION, str), (
         "_INTEGRATION_VERSION must be a str"
     )
@@ -558,7 +655,11 @@ def test_integration_version_is_string():
 def test_integration_version_fallback_branch_in_source():
     """Source must contain the literal fallback string so coverage can reach it."""
     import pathlib
-    src_path = pathlib.Path(__file__).parent.parent / "custom_components/bosch_shc_camera/__init__.py"
+
+    src_path = (
+        pathlib.Path(__file__).parent.parent
+        / "custom_components/bosch_shc_camera/__init__.py"
+    )
     src = src_path.read_text()
     assert '_INTEGRATION_VERSION = "unknown"' in src, (
         "Fallback '_INTEGRATION_VERSION = \"unknown\"' must be present in __init__.py"
@@ -610,6 +711,7 @@ def test_integration_version_fallback_missing_file():
 # (lines 675-676)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
 async def test_refresh_local_creds_invalid_inst_value():
     """ValueError from int() on non-numeric inst= value must be swallowed; inst_val stays 1."""
@@ -633,7 +735,9 @@ async def test_refresh_local_creds_invalid_inst_value():
         get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
     )
 
-    resp_json = json.dumps({"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]})
+    resp_json = json.dumps(
+        {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
+    )
 
     # Must not raise; the ValueError from int("BROKEN") is swallowed, inst_val defaults to 1
     BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
@@ -669,7 +773,9 @@ async def test_refresh_local_creds_valid_inst_value():
         get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
     )
 
-    resp_json = json.dumps({"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]})
+    resp_json = json.dumps(
+        {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
+    )
 
     BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
         coord, CAM, resp_json, generation=1, elapsed=30.0
@@ -684,6 +790,7 @@ async def test_refresh_local_creds_valid_inst_value():
 # ═══════════════════════════════════════════════════════════════════════════════
 # __init__.py — _fetch_firebase_config delegation (line 3846)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_fetch_firebase_config_delegation():
@@ -703,14 +810,16 @@ async def test_fetch_firebase_config_delegation():
     assert result == {"project_id": "bosch-smart-cameras", "api_key": "key"}, (
         "_fetch_firebase_config must return whatever _fcm_fetch_firebase_config returns"
     )
-    mock_fcm.assert_called_once_with(hass), (
-        "_fcm_fetch_firebase_config must be called with coord.hass"
+    (
+        mock_fcm.assert_called_once_with(hass),
+        ("_fcm_fetch_firebase_config must be called with coord.hass"),
     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # __init__.py — CancelledError re-raised in async_put_camera (line 4143)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_async_put_camera_cancelled_error_on_token_refresh():

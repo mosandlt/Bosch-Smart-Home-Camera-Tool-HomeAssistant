@@ -16,6 +16,7 @@ Covers:
 These all delegate aiohttp work — patch the session + endpoints and
 verify the request shape.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +27,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -110,7 +110,9 @@ class TestRegisterGo2rtcStream:
     bundled go2rtc provider uses this), rtsps→rtspx rewrite, verify
     GET after PUT, yaml-persist HTTP-400 soft success."""
 
-    def _make_session_for_register(self, put_status=200, put_body="", get_status=200, capture=None):
+    def _make_session_for_register(
+        self, put_status=200, put_body="", get_status=200, capture=None
+    ):
         """Build a fake aiohttp.ClientSession matching how _register_go2rtc_stream
         calls it: PUT is `await s.put(...)`, GET is `async with s.get(...)`."""
 
@@ -136,13 +138,16 @@ class TestRegisterGo2rtcStream:
     @pytest.mark.asyncio
     async def test_uses_entity_id_as_stream_name(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
         coord = _make_coord(_camera_entities={CAM_A: cam_entity})
         captured = {}
         session = self._make_session_for_register(capture=captured)
         with patch("aiohttp.ClientSession", return_value=session):
             await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://x:y@host/path",
+                coord,
+                CAM_A,
+                "rtsps://x:y@host/path",
             )
         assert captured["params"]["name"] == "camera.bosch_terrasse"
 
@@ -153,13 +158,16 @@ class TestRegisterGo2rtcStream:
         Go RTSP client refuses the mismatch. Force rtspx:// (skip TLS
         verify in go2rtc) so consumer requests don't 500."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
         coord = _make_coord(_camera_entities={CAM_A: cam_entity})
         captured = {}
         session = self._make_session_for_register(capture=captured)
         with patch("aiohttp.ClientSession", return_value=session):
             await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://user:pass@cam.bosch/path",
+                coord,
+                CAM_A,
+                "rtsps://user:pass@cam.bosch/path",
             )
         assert captured["params"]["src"].startswith("rtspx://")
         assert captured["params"]["src"] == "rtspx://user:pass@cam.bosch/path"
@@ -169,12 +177,15 @@ class TestRegisterGo2rtcStream:
         """First-registration race: cam_entity not yet added → use the
         legacy `bosch_shc_cam_<id>` name."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_camera_entities={})  # no entity yet
         captured = {}
         session = self._make_session_for_register(capture=captured)
         with patch("aiohttp.ClientSession", return_value=session):
             await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://x/y",
+                coord,
+                CAM_A,
+                "rtsps://x/y",
             )
         assert captured["params"]["name"] == f"bosch_shc_cam_{CAM_A.lower()}"
 
@@ -185,6 +196,7 @@ class TestRegisterGo2rtcStream:
         The YAML persist fails with HTTP 400 + body 'yaml: ...'. The
         in-memory stream IS registered. Pin the soft-success path."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
         coord = _make_coord(_camera_entities={CAM_A: cam_entity})
         session = self._make_session_for_register(
@@ -195,7 +207,9 @@ class TestRegisterGo2rtcStream:
         with patch("aiohttp.ClientSession", return_value=session):
             # Must complete without raising, even though HTTP 400
             await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://x/y",
+                coord,
+                CAM_A,
+                "rtsps://x/y",
             )
 
     @pytest.mark.asyncio
@@ -203,6 +217,7 @@ class TestRegisterGo2rtcStream:
         """When go2rtc is not running on any port, the function must
         log + return silently — fall back to TLS proxy + HLS."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
 
         with patch(
@@ -211,12 +226,15 @@ class TestRegisterGo2rtcStream:
         ):
             # Must NOT raise
             await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://x/y",
+                coord,
+                CAM_A,
+                "rtsps://x/y",
             )
 
 
 def aiohttp_client_error(*args, **kwargs):
     import aiohttp
+
     raise aiohttp.ClientError("connection refused")
 
 
@@ -242,6 +260,7 @@ class TestUnregisterGo2rtcStream:
     @pytest.mark.asyncio
     async def test_uses_entity_id_for_delete(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
         coord = _make_coord(_camera_entities={CAM_A: cam_entity})
         captured = {}
@@ -254,6 +273,7 @@ class TestUnregisterGo2rtcStream:
     async def test_swallows_client_error(self):
         """go2rtc not running on either endpoint → swallow ClientError."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         with patch(
             "aiohttp.ClientSession",
@@ -266,6 +286,7 @@ class TestUnregisterGo2rtcStream:
     async def test_legacy_name_fallback(self):
         """No camera entity yet → use legacy `bosch_shc_cam_<id>` name."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_camera_entities={})
         captured = {}
         session = self._make_session_for_unregister(capture=captured)
@@ -283,6 +304,7 @@ class TestCheckAndRecoverWebrtc:
         """Cam removed between stream-start and watchdog tick → exit
         silently."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_camera_entities={})
         with patch("asyncio.sleep", new=AsyncMock()):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
@@ -291,8 +313,10 @@ class TestCheckAndRecoverWebrtc:
     async def test_returns_when_supported_features_no_stream(self):
         """Stream not yet ready (supported_features doesn't have STREAM
         flag) → exit; nothing to check."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         cam_entity = SimpleNamespace(supported_features=CameraEntityFeature(0))
         coord = _make_coord(_camera_entities={CAM_A: cam_entity})
         with patch("asyncio.sleep", new=AsyncMock()):
@@ -303,8 +327,10 @@ class TestCheckAndRecoverWebrtc:
     @pytest.mark.asyncio
     async def test_returns_when_webrtc_already_present(self):
         """The capability is already correct → exit; no recovery needed."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature, StreamType
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         caps = SimpleNamespace(frontend_stream_types={StreamType.WEB_RTC})
         cam_entity = SimpleNamespace(
             supported_features=CameraEntityFeature.STREAM,
@@ -320,8 +346,9 @@ class TestCheckAndRecoverWebrtc:
         """If `camera_capabilities` raises (defensive), bail without
         recovery — better to leave the stream alone than crash the
         watchdog."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         class _Cam:
             supported_features = CameraEntityFeature.STREAM
@@ -339,12 +366,15 @@ class TestCheckAndRecoverWebrtc:
     async def test_direct_refresh_restores_webrtc(self):
         """The direct schemes-refresh succeeds → return without full
         config-entry reload (cheap recovery path)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature, StreamType
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         caps_calls = [
             SimpleNamespace(frontend_stream_types={StreamType.HLS}),  # first read
-            SimpleNamespace(frontend_stream_types={StreamType.HLS, StreamType.WEB_RTC}),  # after refresh
+            SimpleNamespace(
+                frontend_stream_types={StreamType.HLS, StreamType.WEB_RTC}
+            ),  # after refresh
         ]
         caps_iter = iter(caps_calls)
 
@@ -372,8 +402,9 @@ class TestCheckAndRecoverWebrtc:
         """If the direct refresh fails AND _last_go2rtc_reload was
         recent (<3600s), skip the reload — don't spam reloads when
         go2rtc is genuinely broken."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature, StreamType
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         caps = SimpleNamespace(frontend_stream_types={StreamType.HLS})
 
@@ -403,6 +434,7 @@ class TestRefreshRcpState:
         for this cam), the function leaves it that way — only mutates
         existing entries."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         await BoschCameraCoordinator._refresh_rcp_state(coord, CAM_A)
         # setdefault inserted an empty dict but no source/fetched_at written
@@ -413,6 +445,7 @@ class TestRefreshRcpState:
         """When the cache already has data from a prior LOCAL stream,
         re-stamp source + fetched_at so consumers know it's fresh."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(
             _live_connections={CAM_A: {"_connection_type": "LOCAL"}},
             _rcp_state_cache={CAM_A: {"privacy_mode": False}},
@@ -431,8 +464,10 @@ class TestSslContextAndStartTlsProxy:
     def test_ssl_ctx_disables_verification(self):
         """Bosch cameras use self-signed certs — must disable hostname
         check + cert verify or the TLS proxy can't connect."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import ssl
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         ctx = BoschCameraCoordinator._create_ssl_ctx()
         assert ctx.check_hostname is False
         assert ctx.verify_mode == ssl.CERT_NONE
@@ -442,6 +477,7 @@ class TestSslContextAndStartTlsProxy:
         """First call must dispatch _create_ssl_ctx via executor (it's
         blocking I/O) — subsequent calls reuse the cached context."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_tls_ssl_ctx=None)
         # Stub the staticmethod on the coord (it's accessed via self._create_ssl_ctx)
         coord._create_ssl_ctx = BoschCameraCoordinator._create_ssl_ctx
@@ -451,7 +487,10 @@ class TestSslContextAndStartTlsProxy:
             return_value=12345,
         ):
             port = await BoschCameraCoordinator._start_tls_proxy(
-                coord, CAM_A, "192.0.2.1", 443,
+                coord,
+                CAM_A,
+                "192.0.2.1",
+                443,
             )
         assert port == 12345
         coord.hass.async_add_executor_job.assert_awaited_once()
@@ -461,6 +500,7 @@ class TestSslContextAndStartTlsProxy:
     @pytest.mark.asyncio
     async def test_start_tls_proxy_reuses_cached_ssl_ctx(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_tls_ssl_ctx="ALREADY_CACHED")
         coord.hass.async_add_executor_job = AsyncMock()
         with patch(
@@ -468,13 +508,17 @@ class TestSslContextAndStartTlsProxy:
             return_value=12345,
         ):
             await BoschCameraCoordinator._start_tls_proxy(
-                coord, CAM_A, "192.0.2.1", 443,
+                coord,
+                CAM_A,
+                "192.0.2.1",
+                443,
             )
         coord.hass.async_add_executor_job.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_stop_tls_proxy_delegates_to_module(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._tls_proxy_ports = {CAM_A: 12345}
         with patch(

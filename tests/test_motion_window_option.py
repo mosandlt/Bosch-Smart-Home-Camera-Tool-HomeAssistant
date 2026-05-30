@@ -15,7 +15,7 @@ Contract:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -49,7 +49,7 @@ def _make_entry(motion_active_window: object = None) -> SimpleNamespace:
 
 
 def _ago_iso(seconds: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime(
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).strftime(
         "%Y-%m-%dT%H:%M:%S"
     )
 
@@ -68,14 +68,20 @@ class TestMotionActiveWindowProperty:
     """Unit tests for _BoschBinarySensorBase._motion_active_window."""
 
     def _make_sensor(self, option_value: object = None) -> object:
-        from custom_components.bosch_shc_camera.binary_sensor import BoschMotionBinarySensor
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
         coord = _make_coord()
         entry = _make_entry(option_value)
         return BoschMotionBinarySensor(coord, CAM_ID, entry)
 
     def test_default_when_option_absent(self) -> None:
         """No option set → _motion_active_window returns DEFAULT_MOTION_ACTIVE_WINDOW (90)."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
+        from custom_components.bosch_shc_camera.const import (
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+        )
+
         sensor = self._make_sensor()
         assert sensor._motion_active_window == DEFAULT_MOTION_ACTIVE_WINDOW
 
@@ -97,18 +103,23 @@ class TestMotionActiveWindowProperty:
     def test_garbage_negative_clamped_to_min(self) -> None:
         """Negative value -5 is clamped to MOTION_ACTIVE_WINDOW_MIN (10)."""
         from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MIN
+
         sensor = self._make_sensor(-5)
         assert sensor._motion_active_window == MOTION_ACTIVE_WINDOW_MIN
 
     def test_garbage_too_large_clamped_to_max(self) -> None:
         """Value 1000 is clamped to MOTION_ACTIVE_WINDOW_MAX (300)."""
         from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MAX
+
         sensor = self._make_sensor(1000)
         assert sensor._motion_active_window == MOTION_ACTIVE_WINDOW_MAX
 
     def test_non_integer_string_falls_back_to_default(self) -> None:
         """Non-numeric string falls back to DEFAULT_MOTION_ACTIVE_WINDOW."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
+        from custom_components.bosch_shc_camera.const import (
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+        )
+
         sensor = self._make_sensor("not_a_number")
         assert sensor._motion_active_window == DEFAULT_MOTION_ACTIVE_WINDOW
 
@@ -117,9 +128,17 @@ class TestMotionActiveWindowProperty:
 
         `_make_entry(None)` stores `options={"motion_active_window": None}`.
         """
-        from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
-        entry = SimpleNamespace(entry_id="01E", data={}, options={"motion_active_window": None})
-        from custom_components.bosch_shc_camera.binary_sensor import BoschMotionBinarySensor
+        from custom_components.bosch_shc_camera.const import (
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+        )
+
+        entry = SimpleNamespace(
+            entry_id="01E", data={}, options={"motion_active_window": None}
+        )
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
         sensor = BoschMotionBinarySensor(_make_coord(), CAM_ID, entry)
         assert sensor._motion_active_window == DEFAULT_MOTION_ACTIVE_WINDOW
 
@@ -136,7 +155,10 @@ class TestMotionSensorIsOnWithWindow:
     """Integration-level: is_on respects the configured active window."""
 
     def _motion_sensor(self, option: object, events: list) -> object:
-        from custom_components.bosch_shc_camera.binary_sensor import BoschMotionBinarySensor
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
         coord = _make_coord(events)
         entry = _make_entry(option)
         return _patched_hass(BoschMotionBinarySensor(coord, CAM_ID, entry))
@@ -210,38 +232,58 @@ class TestAllSensorTypesRespectWindow:
 
     def test_audio_alarm_uses_configured_window(self) -> None:
         """AudioAlarmBinarySensor: 29 s old event with 30 s window is ON."""
-        from custom_components.bosch_shc_camera.binary_sensor import BoschAudioAlarmBinarySensor
-        coord = _make_coord([
-            {"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(29)}
-        ])
-        sensor = _patched_hass(BoschAudioAlarmBinarySensor(coord, CAM_ID, _make_entry(30)))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+        )
+
+        coord = _make_coord(
+            [{"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(29)}]
+        )
+        sensor = _patched_hass(
+            BoschAudioAlarmBinarySensor(coord, CAM_ID, _make_entry(30))
+        )
         assert sensor.is_on is True
 
     def test_audio_alarm_outside_window_is_off(self) -> None:
         """AudioAlarmBinarySensor: 31 s old event with 30 s window is OFF."""
-        from custom_components.bosch_shc_camera.binary_sensor import BoschAudioAlarmBinarySensor
-        coord = _make_coord([
-            {"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(31)}
-        ])
-        sensor = _patched_hass(BoschAudioAlarmBinarySensor(coord, CAM_ID, _make_entry(30)))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+        )
+
+        coord = _make_coord(
+            [{"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(31)}]
+        )
+        sensor = _patched_hass(
+            BoschAudioAlarmBinarySensor(coord, CAM_ID, _make_entry(30))
+        )
         assert sensor.is_on is False
 
     def test_person_detected_uses_configured_window(self) -> None:
         """PersonDetectedBinarySensor: 29 s old event with 30 s window is ON."""
-        from custom_components.bosch_shc_camera.binary_sensor import BoschPersonDetectedBinarySensor
-        coord = _make_coord([
-            {"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(29)}
-        ])
-        sensor = _patched_hass(BoschPersonDetectedBinarySensor(coord, CAM_ID, _make_entry(30)))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        coord = _make_coord(
+            [{"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(29)}]
+        )
+        sensor = _patched_hass(
+            BoschPersonDetectedBinarySensor(coord, CAM_ID, _make_entry(30))
+        )
         assert sensor.is_on is True
 
     def test_person_detected_outside_window_is_off(self) -> None:
         """PersonDetectedBinarySensor: 31 s old event with 30 s window is OFF."""
-        from custom_components.bosch_shc_camera.binary_sensor import BoschPersonDetectedBinarySensor
-        coord = _make_coord([
-            {"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(31)}
-        ])
-        sensor = _patched_hass(BoschPersonDetectedBinarySensor(coord, CAM_ID, _make_entry(30)))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        coord = _make_coord(
+            [{"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(31)}]
+        )
+        sensor = _patched_hass(
+            BoschPersonDetectedBinarySensor(coord, CAM_ID, _make_entry(30))
+        )
         assert sensor.is_on is False
 
 
@@ -250,30 +292,44 @@ class TestAllSensorTypesRespectWindow:
 
 class TestConstValues:
     def test_default_is_90(self) -> None:
-        from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
+        from custom_components.bosch_shc_camera.const import (
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+        )
+
         assert DEFAULT_MOTION_ACTIVE_WINDOW == 90
 
     def test_min_is_10(self) -> None:
         from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MIN
+
         assert MOTION_ACTIVE_WINDOW_MIN == 10
 
     def test_max_is_300(self) -> None:
         from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MAX
+
         assert MOTION_ACTIVE_WINDOW_MAX == 300
 
     def test_default_in_default_options(self) -> None:
         """DEFAULT_OPTIONS must carry the motion_active_window key with correct default."""
         from custom_components.bosch_shc_camera.const import (
-            DEFAULT_OPTIONS, DEFAULT_MOTION_ACTIVE_WINDOW
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+            DEFAULT_OPTIONS,
         )
+
         assert "motion_active_window" in DEFAULT_OPTIONS
         assert DEFAULT_OPTIONS["motion_active_window"] == DEFAULT_MOTION_ACTIVE_WINDOW
 
     def test_default_within_bounds(self) -> None:
         from custom_components.bosch_shc_camera.const import (
-            DEFAULT_MOTION_ACTIVE_WINDOW, MOTION_ACTIVE_WINDOW_MIN, MOTION_ACTIVE_WINDOW_MAX
+            DEFAULT_MOTION_ACTIVE_WINDOW,
+            MOTION_ACTIVE_WINDOW_MAX,
+            MOTION_ACTIVE_WINDOW_MIN,
         )
-        assert MOTION_ACTIVE_WINDOW_MIN <= DEFAULT_MOTION_ACTIVE_WINDOW <= MOTION_ACTIVE_WINDOW_MAX
+
+        assert (
+            MOTION_ACTIVE_WINDOW_MIN
+            <= DEFAULT_MOTION_ACTIVE_WINDOW
+            <= MOTION_ACTIVE_WINDOW_MAX
+        )
 
 
 # ── config_flow OPTIONS_SECTIONS wiring ─────────────────────────────────────
@@ -283,11 +339,13 @@ class TestConfigFlowWiring:
     def test_motion_active_window_in_features_section(self) -> None:
         """motion_active_window must be listed in the 'features' OPTIONS_SECTIONS key."""
         from custom_components.bosch_shc_camera.config_flow import OPTIONS_SECTIONS
+
         assert "motion_active_window" in OPTIONS_SECTIONS["features"]
 
     def test_flatten_sections_handles_motion_active_window(self) -> None:
         """_flatten_sections correctly unwraps motion_active_window from features section."""
         from custom_components.bosch_shc_camera.config_flow import _flatten_sections
+
         # Build a minimal sectioned user_input that includes motion_active_window
         user_input = {
             "features": {"motion_active_window": 120, "enable_binary_sensors": True},

@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -29,10 +28,16 @@ def _mock_resp(status: int, json_data=None, text: str = ""):
     return ctx
 
 
-def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "192.0.2.103"):
+def _stub_coord(
+    *, gen2: bool = True, with_token: bool = True, shc_ip: str = "192.0.2.103"
+):
     opts = {}
     if shc_ip:
-        opts = {"shc_ip": shc_ip, "shc_cert_path": "/cert.pem", "shc_key_path": "/key.pem"}
+        opts = {
+            "shc_ip": shc_ip,
+            "shc_cert_path": "/cert.pem",
+            "shc_key_path": "/key.pem",
+        }
     coord = SimpleNamespace(
         token="tok-AAA" if with_token else "",
         options=opts,
@@ -40,7 +45,9 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "19
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
-        _shc_state_cache={CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}},
+        _shc_state_cache={
+            CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}
+        },
         # _cached_status added 2026-05-12: production async_cloud_set_privacy_mode
         # reads coordinator._cached_status.get(cam_id) to skip cloud for OFFLINE cams
         # (HTTP 444 spam guard). The stub was missing this attribute, so the
@@ -81,6 +88,7 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_missing_opts_returns_none(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord(shc_ip="")  # empty shc_ip
         coord.options = {}
         result = await async_shc_request(coord, "GET", "/devices")
@@ -89,14 +97,18 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_ssl_setup_failure_returns_none(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
-        with patch("ssl.SSLContext.load_cert_chain", side_effect=FileNotFoundError("no cert")):
+        with patch(
+            "ssl.SSLContext.load_cert_chain", side_effect=FileNotFoundError("no cert")
+        ):
             result = await async_shc_request(coord, "GET", "/devices")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_get_200_returns_json(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         devices = [{"id": "dev1", "name": "Terrasse"}]
         mock_session_cm = MagicMock()
@@ -105,9 +117,11 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/devices")
         assert result == devices
@@ -115,6 +129,7 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_get_non200_marks_failure(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
@@ -122,9 +137,11 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/devices")
         assert result is None
@@ -132,6 +149,7 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_put_returns_status_dict(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
@@ -139,16 +157,21 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
-            result = await async_shc_request(coord, "PUT", "/devices/dev1/services/CameraLight/state", {})
+            result = await async_shc_request(
+                coord, "PUT", "/devices/dev1/services/CameraLight/state", {}
+            )
         assert result["ok"] is True
 
     @pytest.mark.asyncio
     async def test_put_failure_status(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
@@ -156,9 +179,11 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "PUT", "/path", {})
         assert result["ok"] is False
@@ -166,17 +191,21 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_timeout_returns_none(self):
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
-        mock_session.get.side_effect = asyncio.TimeoutError()
+        mock_session.get.side_effect = TimeoutError()
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
         assert result is None
@@ -184,7 +213,9 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_client_error_returns_none(self):
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
@@ -192,9 +223,11 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
         assert result is None
@@ -202,6 +235,7 @@ class TestAsyncShcRequest:
     @pytest.mark.asyncio
     async def test_generic_exception_returns_none(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
+
         coord = _stub_coord()
         mock_session_cm = MagicMock()
         mock_session = MagicMock()
@@ -209,9 +243,11 @@ class TestAsyncShcRequest:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("ssl.SSLContext") as mock_ssl, \
-             patch("aiohttp.TCPConnector"), \
-             patch("aiohttp.ClientSession", return_value=mock_session_cm):
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+        ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
         assert result is None
@@ -224,38 +260,70 @@ class TestAsyncUpdateShcStates:
     @pytest.mark.asyncio
     async def test_not_configured_returns_early(self):
         from custom_components.bosch_shc_camera.shc import async_update_shc_states
+
         coord = _stub_coord(shc_ip="")
         coord.options = {}
-        data = {CAM_ID: {"info": {"title": "Terrasse"}, "privacy_mode": False, "camera_light": False}}
+        data = {
+            CAM_ID: {
+                "info": {"title": "Terrasse"},
+                "privacy_mode": False,
+                "camera_light": False,
+            }
+        }
         await async_update_shc_states(coord, data)
         # Must not crash and must not modify data when SHC not configured
 
     @pytest.mark.asyncio
     async def test_empty_devices_returns_early(self):
-        from custom_components.bosch_shc_camera.shc import async_update_shc_states, shc_configured
+        from custom_components.bosch_shc_camera.shc import (
+            async_update_shc_states,
+            shc_configured,
+        )
+
         coord = _stub_coord()
         coord._shc_devices_raw = []
         coord._last_shc_fetch = time.monotonic() - 120  # force fetch
-        data = {CAM_ID: {"info": {"title": "Terrasse"}, "privacy_mode": False, "camera_light": False}}
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request", AsyncMock(return_value=None)):
+        data = {
+            CAM_ID: {
+                "info": {"title": "Terrasse"},
+                "privacy_mode": False,
+                "camera_light": False,
+            }
+        }
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value=None),
+        ):
             await async_update_shc_states(coord, data)
         # No crash — empty device list is handled gracefully
 
     @pytest.mark.asyncio
     async def test_device_fetch_updates_shc_devices_raw(self):
         from custom_components.bosch_shc_camera.shc import async_update_shc_states
+
         coord = _stub_coord()
         coord._last_shc_fetch = float("-inf")  # force refresh
         devices = [
-            {"id": "shc-dev-1", "name": "terrasse",
-             "services": [
-                 {"id": "CameraLight", "state": {"value": "ON"}},
-                 {"id": "PrivacyMode", "state": {"value": "DISABLED"}},
-             ]},
+            {
+                "id": "shc-dev-1",
+                "name": "terrasse",
+                "services": [
+                    {"id": "CameraLight", "state": {"value": "ON"}},
+                    {"id": "PrivacyMode", "state": {"value": "DISABLED"}},
+                ],
+            },
         ]
-        data = {CAM_ID: {"info": {"title": "Terrasse"}, "privacy_mode": None, "camera_light": None}}
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value=devices)):
+        data = {
+            CAM_ID: {
+                "info": {"title": "Terrasse"},
+                "privacy_mode": None,
+                "camera_light": None,
+            }
+        }
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value=devices),
+        ):
             await async_update_shc_states(coord, data)
         assert coord._shc_devices_raw == devices
 
@@ -268,9 +336,12 @@ class TestAsyncShcSetCameraLight:
     async def test_success_updates_cache_and_notifies(self):
         """PUT 204 → cache updated, listeners notified, refresh scheduled."""
         from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
         coord = _stub_coord()
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value={"status": 204, "ok": True})):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
             result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is True
         assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
@@ -278,9 +349,12 @@ class TestAsyncShcSetCameraLight:
     @pytest.mark.asyncio
     async def test_failure_returns_false(self):
         from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
         coord = _stub_coord()
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value={"status": 500, "ok": False})):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 500, "ok": False}),
+        ):
             result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is False
 
@@ -293,10 +367,17 @@ class TestAsyncShcSetPrivacyMode:
     async def test_success_updates_cache_and_lock(self):
         """PUT 204 → cache + write-lock stamped, listeners notified."""
         from custom_components.bosch_shc_camera.shc import async_shc_set_privacy_mode
+
         coord = _stub_coord()
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value={"status": 204, "ok": True})), \
-             patch("custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_shc_request",
+                AsyncMock(return_value={"status": 204, "ok": True}),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"
+            ),
+        ):
             result = await async_shc_set_privacy_mode(coord, CAM_ID, False)
         assert result is True
         assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is False
@@ -306,10 +387,17 @@ class TestAsyncShcSetPrivacyMode:
     async def test_success_enable_does_not_schedule_snapshot(self):
         """When enabling privacy (True), snapshot snapshot is not scheduled."""
         from custom_components.bosch_shc_camera.shc import async_shc_set_privacy_mode
+
         coord = _stub_coord()
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value={"status": 204, "ok": True})), \
-             patch("custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot") as mock_snap:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_shc_request",
+                AsyncMock(return_value={"status": 204, "ok": True}),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"
+            ) as mock_snap,
+        ):
             result = await async_shc_set_privacy_mode(coord, CAM_ID, True)
         assert result is True
         mock_snap.assert_not_called()
@@ -317,9 +405,12 @@ class TestAsyncShcSetPrivacyMode:
     @pytest.mark.asyncio
     async def test_failure_returns_false(self):
         from custom_components.bosch_shc_camera.shc import async_shc_set_privacy_mode
+
         coord = _stub_coord()
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value={"status": 500, "ok": False})):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 500, "ok": False}),
+        ):
             result = await async_shc_set_privacy_mode(coord, CAM_ID, False)
         assert result is False
 
@@ -331,8 +422,10 @@ class TestCloudSetPrivacyModeBranches:
     @pytest.mark.asyncio
     async def test_timeout_falls_through_to_no_shc(self):
         """aiohttp timeout → falls through; no SHC → returns False."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
         import aiohttp
+
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
         coord = _stub_coord()
         coord._shc_state_cache[CAM_ID]["device_id"] = None  # disable SHC fallback
         session = MagicMock()
@@ -341,9 +434,15 @@ class TestCloudSetPrivacyModeBranches:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
         assert result is False
 
@@ -351,15 +450,24 @@ class TestCloudSetPrivacyModeBranches:
     async def test_shc_fallback_called_on_cloud_fail(self):
         """Cloud PUT fails → shc_ready=True → delegates to async_shc_set_privacy_mode."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
         coord = _stub_coord()
         session = MagicMock()
         session.put.return_value = _mock_resp(500)
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=True), \
-             patch("custom_components.bosch_shc_camera.shc.async_shc_set_privacy_mode",
-                   AsyncMock(return_value=True)) as mock_shc:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=True
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_shc_set_privacy_mode",
+                AsyncMock(return_value=True),
+            ) as mock_shc,
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
         mock_shc.assert_called_once()
         assert result is True
@@ -367,8 +475,10 @@ class TestCloudSetPrivacyModeBranches:
     @pytest.mark.asyncio
     async def test_persistent_notification_on_auth_outage(self):
         """auth_outage_count > 0 + no SHC → creates a persistent notification."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
         import aiohttp
+
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
         coord = _stub_coord()
         coord._auth_outage_count = 2
         session = MagicMock()
@@ -377,10 +487,18 @@ class TestCloudSetPrivacyModeBranches:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=False):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
         coord.hass.services.async_call.assert_called_once()
         assert result is False
@@ -389,13 +507,20 @@ class TestCloudSetPrivacyModeBranches:
     async def test_schedule_privacy_off_snapshot_when_disabling(self):
         """Successful cloud PUT with enabled=False → snapshot schedule triggered."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
         coord = _stub_coord()
         session = MagicMock()
         session.put.return_value = _mock_resp(204)
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot") as mock_snap:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"
+            ) as mock_snap,
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
         mock_snap.assert_called_once_with(coord, CAM_ID)
         assert result is True
@@ -403,8 +528,10 @@ class TestCloudSetPrivacyModeBranches:
     @pytest.mark.asyncio
     async def test_gen2_rcp_fallback_success(self):
         """Cloud fails, Gen2 RCP fallback succeeds → returns True."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
         import aiohttp
+
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
         coord = _stub_coord(gen2=True)
         coord._local_creds_cache[CAM_ID] = {"host": "192.0.2.149"}
         session = MagicMock()
@@ -413,12 +540,20 @@ class TestCloudSetPrivacyModeBranches:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False), \
-             patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
-                   AsyncMock(return_value=True)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                AsyncMock(return_value=True),
+            ),
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert result is True
 
@@ -430,8 +565,10 @@ class TestCloudSetCameraLightBranches:
     @pytest.mark.asyncio
     async def test_gen2_client_error_falls_to_shc(self):
         """Gen2 aiohttp error → SHC fallback called if shc_ready."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
         import aiohttp
+
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
+
         coord = _stub_coord(gen2=True)
         session = MagicMock()
         cm = MagicMock()
@@ -439,11 +576,19 @@ class TestCloudSetCameraLightBranches:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=True), \
-             patch("custom_components.bosch_shc_camera.shc.async_shc_set_camera_light",
-                   AsyncMock(return_value=True)) as mock_shc:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=True
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_shc_set_camera_light",
+                AsyncMock(return_value=True),
+            ) as mock_shc,
+        ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, True)
         mock_shc.assert_called_once()
 
@@ -451,14 +596,23 @@ class TestCloudSetCameraLightBranches:
     async def test_gen1_light_off_body_excludes_intensity(self):
         """Gen1 light OFF → body must NOT contain frontLightIntensity."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
+
         coord = _stub_coord(gen2=False)
         session = MagicMock()
         session.put.return_value = _mock_resp(204)
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+        ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, False)
         # Verify PUT was called with the correct URL (contains cam ID) and body excludes intensity
         assert session.put.called
@@ -473,14 +627,23 @@ class TestCloudSetCameraLightBranches:
     async def test_gen1_http_failure_returns_false(self):
         """Gen1 HTTP 500 → not cached, returns False."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
+
         coord = _stub_coord(gen2=False)
         session = MagicMock()
         session.put.return_value = _mock_resp(500)
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+        ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, True)
         assert result is False
 
@@ -488,7 +651,9 @@ class TestCloudSetCameraLightBranches:
     async def test_gen1_client_error_falls_to_shc(self):
         """Gen1 aiohttp error → SHC fallback if shc_ready."""
         import aiohttp
+
         from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
+
         coord = _stub_coord(gen2=False)
         session = MagicMock()
         cm = MagicMock()
@@ -496,12 +661,22 @@ class TestCloudSetCameraLightBranches:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=True), \
-             patch("custom_components.bosch_shc_camera.shc.async_shc_set_camera_light",
-                   AsyncMock(return_value=True)) as mock_shc:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=True
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_shc_set_camera_light",
+                AsyncMock(return_value=True),
+            ) as mock_shc,
+        ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, True)
         mock_shc.assert_called_once()
 
@@ -518,7 +693,10 @@ class TestSetLightComponentGen2Errors:
     @pytest.mark.asyncio
     async def test_wallwasher_step1_json_parse_error_uses_full_body(self):
         """Step-1 PUT 200 but resp.json() raises → falls back to full_body in cache."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
+
         coord = self._stub_gen2_coord()
         # Simulate hasattr check by removing _last_topdown_brightness
         if hasattr(coord, "_last_topdown_brightness"):
@@ -538,6 +716,7 @@ class TestSetLightComponentGen2Errors:
         step2_cm.__aexit__ = AsyncMock(return_value=None)
 
         call_count = [0]
+
         def make_put(url, json, headers):
             call_count[0] += 1
             return step1_cm if call_count[0] == 1 else step2_cm
@@ -545,9 +724,13 @@ class TestSetLightComponentGen2Errors:
         session = MagicMock()
         session.put.side_effect = make_put
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+        ):
             await async_cloud_set_light_component(coord, CAM_ID, "wallwasher", True)
         # full_body must be set as fallback since json() raised
         assert CAM_ID in coord._lighting_switch_cache
@@ -555,7 +738,10 @@ class TestSetLightComponentGen2Errors:
     @pytest.mark.asyncio
     async def test_wallwasher_step1_http_error_logged(self):
         """Step-1 PUT non-200 → warning logged, step 2 still proceeds."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
+
         coord = self._stub_gen2_coord()
 
         step1_cm = _mock_resp(500)
@@ -569,22 +755,33 @@ class TestSetLightComponentGen2Errors:
         session = MagicMock()
         session.put.side_effect = make_put
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+        ):
             await async_cloud_set_light_component(coord, CAM_ID, "wallwasher", True)
 
     @pytest.mark.asyncio
     async def test_gen2_step2_http_failure_logged(self):
         """Step-2 PUT non-200 → warning logged, returns False."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
+
         coord = self._stub_gen2_coord()
         session = MagicMock()
         session.put.return_value = _mock_resp(500)
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+        ):
             result = await async_cloud_set_light_component(coord, CAM_ID, "front", True)
         assert result is False
 
@@ -592,7 +789,11 @@ class TestSetLightComponentGen2Errors:
     async def test_gen2_step2_client_error_logged(self):
         """Step-2 PUT raises aiohttp.ClientError → caught, returns False."""
         import aiohttp
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
+
         coord = self._stub_gen2_coord()
         session = MagicMock()
         cm = MagicMock()
@@ -600,9 +801,13 @@ class TestSetLightComponentGen2Errors:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+        ):
             result = await async_cloud_set_light_component(coord, CAM_ID, "front", True)
         assert result is False
 
@@ -615,6 +820,7 @@ class TestCloudSetPanBodyException:
     async def test_200_json_parse_error_falls_back_to_position(self):
         """resp.status==200 but json() raises → actual=requested_position, eta=0."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
+
         coord = _stub_coord()
         coord._pan_cache = {}
         # privacy mode off so pan is not blocked
@@ -629,8 +835,10 @@ class TestCloudSetPanBodyException:
         session = MagicMock()
         session.put.return_value = cm
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+            return_value=session,
+        ):
             result = await async_cloud_set_pan(coord, CAM_ID, 45)
         # Should still return True (200 is success) and cache the requested position
         assert result is True

@@ -10,6 +10,7 @@ the GET fallback is exercised:
 In all three cases `coordinator.async_put_camera` must NOT be called and
 local `_is_on` must remain None (the toggle had no effect).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 MODULE = "custom_components.bosch_shc_camera.switch"
@@ -92,7 +92,9 @@ class TestMotionLightNoTokenEarlyReturn:
         # Sentinel: if we reach session.get the test failed.
         session = MagicMock()
         session.get = MagicMock(
-            side_effect=AssertionError("session.get must not be called when token is missing")
+            side_effect=AssertionError(
+                "session.get must not be called when token is missing"
+            )
         )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
@@ -119,8 +121,9 @@ class TestMotionLightGetHttpError:
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             await sw.async_turn_on()
 
-        coord.async_put_camera.assert_not_awaited(), (
-            "non-200 GET must short-circuit before async_put_camera"
+        (
+            coord.async_put_camera.assert_not_awaited(),
+            ("non-200 GET must short-circuit before async_put_camera"),
         )
         assert sw._is_on is None, "failed GET must leave local state untouched"
 
@@ -157,16 +160,15 @@ class TestMotionLightGetRaises:
         _bind_hass(sw)
 
         session = MagicMock()
-        session.get = MagicMock(
-            return_value=_resp_cm(0, raise_exc=asyncio.TimeoutError())
-        )
+        session.get = MagicMock(return_value=_resp_cm(0, raise_exc=TimeoutError()))
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             # Must not raise even though session.get raises
             await sw.async_turn_on()
 
-        coord.async_put_camera.assert_not_awaited(), (
-            "GET timeout must be swallowed and short-circuit before PUT"
+        (
+            coord.async_put_camera.assert_not_awaited(),
+            ("GET timeout must be swallowed and short-circuit before PUT"),
         )
         assert sw._is_on is None
 

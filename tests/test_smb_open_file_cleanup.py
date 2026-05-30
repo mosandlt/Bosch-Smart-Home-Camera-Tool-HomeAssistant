@@ -19,17 +19,21 @@ from custom_components.bosch_shc_camera.media_source import _SmbBackend
 def _backend() -> _SmbBackend:
     hass = MagicMock()
     hass.data = {}
-    return _SmbBackend(hass, {
-        "smb_server": "nas",
-        "smb_share": "M",
-        "smb_username": "u",
-        "smb_password": "p",
-        "smb_base_path": "",
-    })
+    return _SmbBackend(
+        hass,
+        {
+            "smb_server": "nas",
+            "smb_share": "M",
+            "smb_username": "u",
+            "smb_password": "p",
+            "smb_base_path": "",
+        },
+    )
 
 
-def _install_failing_smbclient(stat_raises: Exception | None = None,
-                               open_raises: Exception | None = None) -> MagicMock:
+def _install_failing_smbclient(
+    stat_raises: Exception | None = None, open_raises: Exception | None = None
+) -> MagicMock:
     """Inject a fake `smbclient` into sys.modules whose stat/open_file raise."""
     mod = MagicMock()
     mod.register_session = MagicMock()
@@ -54,10 +58,18 @@ class TestOpenFileExceptionCleanup:
         backend = _backend()
         _install_failing_smbclient(open_raises=OSError("NtStatus 0xc0000043"))
         with patch.object(
-            backend, "_close_session_cache", wraps=backend._close_session_cache,
+            backend,
+            "_close_session_cache",
+            wraps=backend._close_session_cache,
         ) as close_spy:
             with pytest.raises(OSError, match="NtStatus 0xc0000043"):
-                backend.open_file("Terrasse", "2026", "05", "19", "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4")
+                backend.open_file(
+                    "Terrasse",
+                    "2026",
+                    "05",
+                    "19",
+                    "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4",
+                )
         close_spy.assert_called_once()
 
     def test_open_flat_file_closes_session_on_smb_error(self):
@@ -65,10 +77,14 @@ class TestOpenFileExceptionCleanup:
         backend = _backend()
         _install_failing_smbclient(open_raises=OSError("simulated SMB blowup"))
         with patch.object(
-            backend, "_close_session_cache", wraps=backend._close_session_cache,
+            backend,
+            "_close_session_cache",
+            wraps=backend._close_session_cache,
         ) as close_spy:
             with pytest.raises(OSError, match="simulated SMB blowup"):
-                backend.open_flat_file("Terrasse", "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4")
+                backend.open_flat_file(
+                    "Terrasse", "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4"
+                )
         close_spy.assert_called_once()
 
     def test_open_file_closes_session_on_stat_error(self):
@@ -76,8 +92,16 @@ class TestOpenFileExceptionCleanup:
         backend = _backend()
         _install_failing_smbclient(stat_raises=PermissionError("EACCES"))
         with patch.object(
-            backend, "_close_session_cache", wraps=backend._close_session_cache,
+            backend,
+            "_close_session_cache",
+            wraps=backend._close_session_cache,
         ) as close_spy:
             with pytest.raises(PermissionError):
-                backend.open_file("Terrasse", "2026", "05", "19", "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4")
+                backend.open_file(
+                    "Terrasse",
+                    "2026",
+                    "05",
+                    "19",
+                    "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4",
+                )
         close_spy.assert_called_once()

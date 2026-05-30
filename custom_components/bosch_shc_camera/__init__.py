@@ -28,15 +28,15 @@ import re as _re_mod
 import ssl
 import threading
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, TYPE_CHECKING
+from collections.abc import Coroutine
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .maintenance import MaintenanceWindow
 from urllib.parse import urlparse
 
 import aiohttp
-
 
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
 _SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
@@ -51,36 +51,61 @@ def _is_safe_bosch_url(url: str) -> bool:
         and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
     )
 
-from .fcm import (
-    fetch_firebase_config as _fcm_fetch_firebase_config,
-    async_start_fcm_push as _fcm_async_start_fcm_push,
-    register_fcm_with_bosch as _fcm_register_fcm_with_bosch,
-    async_stop_fcm_push as _fcm_async_stop_fcm_push,
-    async_handle_fcm_push as _fcm_async_handle_fcm_push,
-    async_send_alert as _fcm_async_send_alert,
-    async_mark_events_read as _fcm_async_mark_events_read,
-    get_alert_services as _fcm_get_alert_services,
-    build_notify_data as _fcm_build_notify_data,
-    _write_file as _fcm_write_file,
-)
-from .smb import (
-    sync_smb_upload,
-    sync_smb_cleanup,
-)
-from . import recorder as nvr_recorder
-from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_tls_proxy, stop_all_proxies
-from . import shc as shc_mod
-from .rcp import async_update_rcp_data, get_cached_rcp_session
-from .auth_utils import async_digest_request
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+from . import recorder as nvr_recorder
+from . import shc as shc_mod
+from .auth_utils import async_digest_request
+from .fcm import (
+    _write_file as _fcm_write_file,
+)
+from .fcm import (
+    async_handle_fcm_push as _fcm_async_handle_fcm_push,
+)
+from .fcm import (
+    async_mark_events_read as _fcm_async_mark_events_read,
+)
+from .fcm import (
+    async_send_alert as _fcm_async_send_alert,
+)
+from .fcm import (
+    async_start_fcm_push as _fcm_async_start_fcm_push,
+)
+from .fcm import (
+    async_stop_fcm_push as _fcm_async_stop_fcm_push,
+)
+from .fcm import (
+    build_notify_data as _fcm_build_notify_data,
+)
+from .fcm import (
+    fetch_firebase_config as _fcm_fetch_firebase_config,
+)
+from .fcm import (
+    get_alert_services as _fcm_get_alert_services,
+)
+from .fcm import (
+    register_fcm_with_bosch as _fcm_register_fcm_with_bosch,
+)
+from .rcp import async_update_rcp_data
+from .rcp import get_cached_rcp_session as get_cached_rcp_session  # re-export for tests
+from .smb import (
+    sync_smb_cleanup,
+)
+from .smb import sync_smb_upload as sync_smb_upload  # re-export for tests/consumers
+from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_all_proxies, stop_tls_proxy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +138,9 @@ SELF_HEAL_SUCCESS_WINDOW_SEC = 600.0
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
 try:
-    import json as _json, pathlib as _pathlib
+    import json as _json
+    import pathlib as _pathlib
+
     _INTEGRATION_VERSION: str = _json.loads(
         (_pathlib.Path(__file__).parent / "manifest.json").read_text()
     )["version"]
@@ -155,8 +182,9 @@ class _StreamSupportNoiseFilter(logging.Filter):
         # ── "Camera not found" burst (startup race, no entity_id in message) ──
         if "Camera not found" in msg and "Error requesting stream" in msg:
             import time as _t
+
             now = _t.monotonic()
-            last = self._last_passed.get(self._NOT_FOUND_KEY, float('-inf'))
+            last = self._last_passed.get(self._NOT_FOUND_KEY, float("-inf"))
             if (now - last) < self._NOT_FOUND_WINDOW:
                 return False
             self._last_passed[self._NOT_FOUND_KEY] = now
@@ -170,13 +198,14 @@ class _StreamSupportNoiseFilter(logging.Filter):
         prefix = "camera."
         idx = msg.find(prefix)
         if idx != -1:
-            tail = msg[idx + len(prefix):]
+            tail = msg[idx + len(prefix) :]
             ent = tail.split(" ", 1)[0]
         if not ent.startswith("bosch_"):
             return True  # not us, leave alone
         import time as _t
+
         now = _t.monotonic()
-        last = self._last_passed.get(ent, float('-inf'))
+        last = self._last_passed.get(ent, float("-inf"))
         if (now - last) < 30.0:
             return False
         # Prune oldest entry when dict grows too large
@@ -248,7 +277,7 @@ class _StreamWorkerErrorListener(logging.Handler):
             loop.call_soon_threadsafe(
                 self._coordinator._schedule_stream_worker_error, cam_id, msg
             )
-        except Exception:  # noqa: BLE001 — log handler must never raise
+        except Exception:  # noqa: S110 # logging.emit handler must never raise; exception would recurse into logging itself
             # Never let the log handler crash the event loop or the logger.
             # Intentionally broad: this runs inside logging.emit and any
             # exception here would be routed back to logging's own error path.
@@ -266,7 +295,8 @@ def _looks_like_uuid_name(n: str) -> bool:
 
 
 def _rehydrate_cams_from_registry(
-    hass: HomeAssistant, entry_id: str,
+    hass: HomeAssistant,
+    entry_id: str,
 ) -> tuple[set[str], dict[str, str]]:
     """Discover known cam_ids + human-readable titles from the HA registries.
 
@@ -288,8 +318,9 @@ def _rehydrate_cams_from_registry(
     registry, the device name is repaired in place so newly-registered
     entities pick up the correct slug.
     """
-    from homeassistant.helpers import entity_registry as er
     from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
     ereg = er.async_get(hass)
     dreg = dr.async_get(hass)
     cam_ids: set[str] = set()
@@ -312,10 +343,12 @@ def _rehydrate_cams_from_registry(
             title = t[6:] if t.startswith("Bosch ") else t
         else:
             cam_eid = ereg.async_get_entity_id(
-                "camera", DOMAIN, f"bosch_shc_cam_{cid.lower()}",
+                "camera",
+                DOMAIN,
+                f"bosch_shc_cam_{cid.lower()}",
             )
             if cam_eid and cam_eid.startswith("camera.bosch_"):
-                slug = cam_eid[len("camera.bosch_"):]
+                slug = cam_eid[len("camera.bosch_") :]
                 title = slug.replace("_", " ").title()
         if title:
             cam_titles[cid] = title
@@ -325,8 +358,9 @@ def _rehydrate_cams_from_registry(
             if device and device.name and _looks_like_uuid_name(device.name):
                 dreg.async_update_device(device.id, name=f"Bosch {title}")
                 _LOGGER.info(
-                    "Repaired device name for %s: 'Bosch %s' "
-                    "(was a UUID placeholder)", cid[:8], title,
+                    "Repaired device name for %s: 'Bosch %s' (was a UUID placeholder)",
+                    cid[:8],
+                    title,
                 )
     return cam_ids, cam_titles
 
@@ -339,7 +373,11 @@ def _redact_creds(d: dict[str, Any]) -> dict[str, Any]:
     the log line useful for diagnostics without exposing the secret.
     """
     return {
-        k: (f"{v[:3]}***({len(v)} chars)" if k == "password" and isinstance(v, str) else v)
+        k: (
+            f"{v[:3]}***({len(v)} chars)"
+            if k == "password" and isinstance(v, str)
+            else v
+        )
         for k, v in d.items()
     }
 
@@ -384,7 +422,7 @@ def _parse_onvif_scopes(raw: bytes) -> dict[str, Any]:
         for scope in scopes:
             if not scope.startswith("onvif://www.onvif.org/"):
                 continue
-            path = scope[len("onvif://www.onvif.org/"):]
+            path = scope[len("onvif://www.onvif.org/") :]
             if "/" not in path:
                 continue
             key, _, val = path.partition("/")
@@ -394,23 +432,23 @@ def _parse_onvif_scopes(raw: bytes) -> dict[str, Any]:
             elif key == "hardware":
                 result["hardware"] = val_decoded
             elif key == "Profile":
-                profiles: list[str] = result["profiles"]  # type: ignore[assignment]
+                profiles: list[str] = result["profiles"]
                 profiles.append(val_decoded)
-    except Exception:  # pragma: no cover — defensive; raw bytes from live camera
+    except Exception:  # noqa: S110 # pragma: no cover — defensive parse of raw camera bytes; partial result still returned
         pass
     return result
 
 
-from .const import (  # noqa: E402
-    DOMAIN,
-    CLOUD_API,
+from .const import (
     ALL_PLATFORMS,
-    LIVE_SESSION_TTL,
+    CLOUD_API,
     DEFAULT_OPTIONS,
+    DOMAIN,
+    LIVE_SESSION_TTL,  # noqa: F401  # re-exported for tests
     SHC_MAX_FAILS,
     SHC_RETRY_INTERVAL,
-    TIMEOUT_SNAP,
     TIMEOUT_PUT_CONNECTION,
+    TIMEOUT_SNAP,
 )
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -465,7 +503,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         )
         # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
         self._live_connections: dict[str, dict[str, Any]] = {}
-        self._live_opened_at:   dict[str, float] = {}   # timestamp when session was opened
+        self._live_opened_at: dict[str, float] = {}  # timestamp when session was opened
         # Local-RCP+ state cache: per-cam {"privacy_mode": bool, "led_dimmer": int, "fetched_at": float, "source": "local"|"remote"}
         # Refreshed opportunistically after each successful PUT /connection.
         # Used as a refinement source for SHC-cache values when SHC is offline /
@@ -475,7 +513,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # None = use options setting; "local" / "auto" / "remote" = override.
         self._stream_type_override: str | None = None
         # Per-camera audio setting — True = audio+video on (default), False = snapshot-only
-        self._audio_enabled:    dict[str, bool]  = {}
+        self._audio_enabled: dict[str, bool] = {}
         # Auto-renewal tasks and generation counters per camera.
         # The generation counter increments on every new stream start,
         # allowing stale renewal loops to detect they belong to an old session.
@@ -511,19 +549,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
         self._last_status: float = -86400.0  # force status check on first tick
         self._last_events: float = -86400.0  # force event check on first tick
-        self._last_slow:   float = -86400.0  # force slow check on first tick
+        self._last_slow: float = -86400.0  # force slow check on first tick
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         self._cached_events: dict[str, list[Any]] = {}
         # SHC local API state cache — keyed by cam_id
         # Each entry: {"device_id": str, "camera_light": bool|None, "privacy_mode": bool|None}
         self._shc_state_cache: dict[str, dict[str, Any]] = {}
-        self._shc_devices_raw: list[Any] = []       # cached GET /smarthome/devices response
-        self._last_shc_fetch: float = 0.0      # last time SHC devices were fetched
+        self._shc_devices_raw: list[Any] = []  # cached GET /smarthome/devices response
+        self._last_shc_fetch: float = 0.0  # last time SHC devices were fetched
         # SHC health tracking — skip SHC calls when offline to avoid latency
-        self._shc_available: bool = True        # assume available until proven otherwise
-        self._shc_fail_count: int = 0           # consecutive failures
-        self._shc_last_check: float = 0.0       # last time we probed SHC after it went offline
+        self._shc_available: bool = True  # assume available until proven otherwise
+        self._shc_fail_count: int = 0  # consecutive failures
+        self._shc_last_check: float = (
+            0.0  # last time we probed SHC after it went offline
+        )
         # _SHC_MAX_FAILS + _SHC_RETRY_INTERVAL are class-level constants
         # mirrored from const.py — see top-of-class declaration.
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
@@ -533,19 +573,41 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Ambient light sensor cache — keyed by cam_id, populated from GET /ambient_light_sensor_level
         self._ambient_light_cache: dict[str, float | None] = {}
         # RCP data caches — keyed by cam_id, populated via RCP protocol over cloud proxy
-        self._rcp_dimmer_cache: dict[str, int | None] = {}    # LED dimmer value 0–100
-        self._rcp_privacy_cache: dict[str, int | None] = {}   # privacy mask byte[1] (1=ON)
-        self._rcp_clock_offset_cache: dict[str, float | None] = {}  # camera clock offset vs server (seconds)
-        self._rcp_lan_ip_cache: dict[str, str | None] = {}          # camera LAN IP via RCP 0x0a36
-        self._rcp_product_name_cache: dict[str, str | None] = {}    # camera product name via RCP 0x0aea
-        self._rcp_bitrate_cache: dict[str, list[int]] = {}          # bitrate ladder kbps from 0x0c81
+        self._rcp_dimmer_cache: dict[str, int | None] = {}  # LED dimmer value 0–100
+        self._rcp_privacy_cache: dict[
+            str, int | None
+        ] = {}  # privacy mask byte[1] (1=ON)
+        self._rcp_clock_offset_cache: dict[
+            str, float | None
+        ] = {}  # camera clock offset vs server (seconds)
+        self._rcp_lan_ip_cache: dict[
+            str, str | None
+        ] = {}  # camera LAN IP via RCP 0x0a36
+        self._rcp_product_name_cache: dict[
+            str, str | None
+        ] = {}  # camera product name via RCP 0x0aea
+        self._rcp_bitrate_cache: dict[
+            str, list[int]
+        ] = {}  # bitrate ladder kbps from 0x0c81
         # Phase 2 RCP caches
-        self._rcp_alarm_catalog_cache: dict[str, list[dict[str, Any]]] = {}  # alarm types from 0x0c38
-        self._rcp_motion_zones_cache: dict[str, list[dict[str, Any]]] = {}   # motion zones from 0x0c00
-        self._rcp_motion_coords_cache: dict[str, list[dict[str, Any]]] = {}  # zone coords from 0x0c0a
-        self._rcp_tls_cert_cache: dict[str, dict[str, Any]] = {}             # TLS cert info from 0x0b91
-        self._rcp_network_services_cache: dict[str, list[str]] = {} # network services from 0x0c62
-        self._rcp_iva_catalog_cache: dict[str, list[dict[str, Any]]] = {}    # IVA analytics from 0x0b60
+        self._rcp_alarm_catalog_cache: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # alarm types from 0x0c38
+        self._rcp_motion_zones_cache: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # motion zones from 0x0c00
+        self._rcp_motion_coords_cache: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # zone coords from 0x0c0a
+        self._rcp_tls_cert_cache: dict[
+            str, dict[str, Any]
+        ] = {}  # TLS cert info from 0x0b91
+        self._rcp_network_services_cache: dict[
+            str, list[str]
+        ] = {}  # network services from 0x0c62
+        self._rcp_iva_catalog_cache: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # IVA analytics from 0x0b60
         # F4: ONVIF scopes cache — keyed by cam_id, from RCP 0x0a98 via LAN cbs-auth (300s slow-tier)
         self._rcp_onvif_scopes_cache: dict[str, dict[str, Any]] = {}
         # F6: RCP protocol version cache — keyed by cam_id, from RCP 0xff00+0xff04 via LAN (300s slow-tier)
@@ -553,7 +615,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Commands that consistently return error=0x90 (not supported via proxy).
         # Key: cam_id, value: set of command hex strings. After 3 consecutive
         # failures the command is skipped for the rest of the session.
-        self._rcp_cmd_failures: dict[str, dict[str, int]] = {}  # cam_id → {cmd → fail_count}
+        self._rcp_cmd_failures: dict[
+            str, dict[str, int]
+        ] = {}  # cam_id → {cmd → fail_count}
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
@@ -594,12 +658,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # memory.
         self._alert_sent_ids: dict[str, float] = {}
         # FCM push client — near-instant event detection via Firebase Cloud Messaging
-        self._fcm_client = None        # FcmPushClient instance (or None if disabled)
-        self._fcm_token: str = ""      # FCM registration token
+        self._fcm_client = None  # FcmPushClient instance (or None if disabled)
+        self._fcm_token: str = ""  # FCM registration token
         self._fcm_running: bool = False
-        self._fcm_last_push: float = float("-inf")  # monotonic time of last received push
-        self._fcm_healthy: bool = False   # True when FCM is connected and receiving
-        self._fcm_last_self_heal: float = float("-inf")  # monotonic ts of last creds-purge self-heal
+        self._fcm_last_push: float = float(
+            "-inf"
+        )  # monotonic time of last received push
+        self._fcm_healthy: bool = False  # True when FCM is connected and receiving
+        self._fcm_last_self_heal: float = float(
+            "-inf"
+        )  # monotonic ts of last creds-purge self-heal
         # Self-heal failure backoff (live bug 2026-05-21): persistent
         # PHONE_REGISTRATION_ERROR or other Google-side rejections triggered the
         # watchdog every 30 min, producing visible "FCM ↔ polling" UI flicker.
@@ -618,7 +686,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # tokens in 2 s; the first listener died with NoneType-in-_login
         # (orphaned client whose credentials were overwritten by the second).
         self._fcm_start_lock: asyncio.Lock = asyncio.Lock()
-        self._fcm_push_mode: str = "unknown"  # "auto" once FCM listener is up, else "unknown"
+        self._fcm_push_mode: str = (
+            "unknown"  # "auto" once FCM listener is up, else "unknown"
+        )
         # Lock serializing cross-thread FCM state writes.
         # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
         self._fcm_lock: threading.Lock = threading.Lock()
@@ -636,14 +706,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self._firmware_cache: dict[str, dict[str, Any]] = {}
         # SMB maintenance — last run timestamps (monotonic)
-        self._last_smb_cleanup: float = float("-inf")  # float('-inf') → runs on first tick
+        self._last_smb_cleanup: float = float(
+            "-inf"
+        )  # float('-inf') → runs on first tick
         # Token refresh failure tracking — alert once, not every 80s
-        self._token_alert_sent: bool = False     # True after first alert sent
-        self._token_fail_count: int = 0          # consecutive refresh failures
+        self._token_alert_sent: bool = False  # True after first alert sent
+        self._token_fail_count: int = 0  # consecutive refresh failures
         # Bosch auth-server outage tracking — distinct from hard failures.
         # 5xx from Keycloak = Bosch infrastructure problem, NOT user/config issue:
         # no reauth trigger, no escalation, just back off and retry.
-        self._auth_outage_count: int = 0         # consecutive 5xx responses
+        self._auth_outage_count: int = 0  # consecutive 5xx responses
         self._auth_outage_alert_sent: bool = False
         self._auth_outage_next_retry_ts: float = 0.0  # monotonic time gate
         # Cached LOCAL Digest credentials per camera — survives live-connection
@@ -741,15 +813,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
-        self._light_set_at:         dict[str, float] = {}  # lighting_override write timestamp
-        self._notif_set_at:         dict[str, float] = {}  # enable_notifications write timestamp
-        self._privacy_set_at:       dict[str, float] = {}  # privacy write timestamp
-        self._privacy_sound_set_at: dict[str, float] = {}  # privacy_sound_override write
-        self._timestamp_set_at:     dict[str, float] = {}  # timestamp overlay write
-        self._ledlights_set_at:     dict[str, float] = {}  # status LED write
-        self._arming_set_at:        dict[str, float] = {}  # alarm system arm/disarm write
-        self._intrusion_config_set_at: dict[str, float] = {}  # intrusionDetectionConfig write
-        self._WRITE_LOCK_SECS = 30.0             # seconds to hold write lock (Bosch cloud propagation can take 20s+)
+        self._light_set_at: dict[str, float] = {}  # lighting_override write timestamp
+        self._notif_set_at: dict[
+            str, float
+        ] = {}  # enable_notifications write timestamp
+        self._privacy_set_at: dict[str, float] = {}  # privacy write timestamp
+        self._privacy_sound_set_at: dict[
+            str, float
+        ] = {}  # privacy_sound_override write
+        self._timestamp_set_at: dict[str, float] = {}  # timestamp overlay write
+        self._ledlights_set_at: dict[str, float] = {}  # status LED write
+        self._arming_set_at: dict[str, float] = {}  # alarm system arm/disarm write
+        self._intrusion_config_set_at: dict[
+            str, float
+        ] = {}  # intrusionDetectionConfig write
+        self._WRITE_LOCK_SECS = (
+            30.0  # seconds to hold write lock (Bosch cloud propagation can take 20s+)
+        )
         # RCP-LAN denied-cache: (cam_id, opcode_hex) → monotonic timestamp when
         # the 401 was observed. CBS users lack permission for some opcodes
         # (e.g. 0x0a98 iconLedBrightness); without this throttle, each slow-tier
@@ -777,7 +857,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # and AUTO has already stopped attempting LOCAL.
         self._stream_error_count: dict[str, int] = {}
         self._stream_error_at: dict[str, float] = {}
-        self._stream_fell_back: dict[str, bool] = {}  # True = currently using REMOTE fallback
+        self._stream_fell_back: dict[
+            str, bool
+        ] = {}  # True = currently using REMOTE fallback
         # LOCAL session-cred rescue counter. When the HLS consumer goes idle
         # the camera quietly invalidates the per-session digest creds; a later
         # reconnect on the same TLS proxy gets HTTP 401. Re-issuing PUT
@@ -793,7 +875,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # the first rescue and the next 401 burst (typically 8–14 min later)
         # would skip straight to REMOTE.
         self._local_rescue_attempts: dict[str, int] = {}
-        self._local_rescue_at: dict[str, float] = {}  # cam_id → monotonic ts of last rescue
+        self._local_rescue_at: dict[
+            str, float
+        ] = {}  # cam_id → monotonic ts of last rescue
         # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
         # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
         self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
@@ -820,7 +904,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._offline_since: dict[str, float] = {}
         # Extended offline interval: cameras offline for >15 min are checked every 15 min
         # instead of the normal interval_status (5 min), reducing unnecessary cloud calls.
-        self._OFFLINE_EXTENDED_INTERVAL = 900    # 15 minutes
+        self._OFFLINE_EXTENDED_INTERVAL = 900  # 15 minutes
         # Per-camera status check timestamps (for extended offline intervals)
         self._per_cam_status_at: dict[str, float] = {}
         # Stream warm-up state — eagerly initialised so clear_stream_warming() and
@@ -834,7 +918,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # limited by _MAINTENANCE_REACTIVE_COOLDOWN_S). Cleared explicitly only
         # when the fetcher returns a fresh window — transient community-site
         # outages leave the previous value in place so the sensor stays stable.
-        from .maintenance import MaintenanceWindow  # local import: avoid module-load order issues
+        from .maintenance import (
+            MaintenanceWindow,
+        )  # local import: avoid module-load order issues
+
         self._maintenance_cache: MaintenanceWindow | None = None
         self._maintenance_last_fetch: float = float("-inf")
         self._MAINTENANCE_INTERVAL_S: float = 3600.0
@@ -866,7 +953,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # than _SESSION_QUOTA_WINDOW_S are pruned on each new hit. When ≥3
         # hits occur within the window a persistent notification is shown.
         self._session_quota_hits: dict[str, list[float]] = {}
-        self._SESSION_QUOTA_WINDOW_S: float = 300.0   # 5 minutes
+        self._SESSION_QUOTA_WINDOW_S: float = 300.0  # 5 minutes
         self._SESSION_QUOTA_NOTIFY_THRESHOLD: int = 3
         # ── Mini-NVR (Phase 1 MVP) — see custom_components/.../recorder.py ───
         # _nvr_processes:  cam_id → live ffmpeg subprocess (one per recording).
@@ -882,7 +969,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._nvr_user_intent: dict[str, bool] = {}
         self._nvr_error_state: dict[str, str] = {}
         self._nvr_recent_crash: dict[str, float] = {}
-        self._last_nvr_cleanup: float = float("-inf")  # float('-inf') → runs on first tick
+        self._last_nvr_cleanup: float = float(
+            "-inf"
+        )  # float('-inf') → runs on first tick
         # Phase 4: pre-roll buffer — one short-segment ffmpeg per camera writing to tmpfs.
         # Keyed by cam_id, lifecycle mirrors _nvr_processes but independently controlled.
         self._nvr_preroll_processes: dict[str, asyncio.subprocess.Process] = {}
@@ -902,6 +991,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     def get_model_config(self, cam_id: str) -> Any:
         """Return CameraModelConfig for a camera (from models.py)."""
         from .models import get_model_config
+
         hw = self._hw_version.get(cam_id, "CAMERA")
         return get_model_config(hw)
 
@@ -921,7 +1011,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         that don't have the `_rcp_lan_denied_until` attribute — treat absence
         as "not denied" rather than raising.
         """
-        cache: dict[tuple[str, str], float] | None = getattr(self, "_rcp_lan_denied_until", None)
+        cache: dict[tuple[str, str], float] | None = getattr(
+            self, "_rcp_lan_denied_until", None
+        )
         if not cache:
             return False
         ts = cache.get((cam_id, opcode_hex))
@@ -975,11 +1067,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self.hass.bus.async_fire(
                 "bosch_shc_camera_intrusion",
                 {
-                    "camera_id":        cam_id,
-                    "camera_name":      cam_name,
-                    "alarm_type":       new_type,
-                    "intrusion_system": str(alarm_status.get("intrusionSystem", "")).upper(),
-                    "timestamp":        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "camera_id": cam_id,
+                    "camera_name": cam_name,
+                    "alarm_type": new_type,
+                    "intrusion_system": str(
+                        alarm_status.get("intrusionSystem", "")
+                    ).upper(),
+                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 },
             )
         self._last_alarm_type[cam_id] = new_type
@@ -1019,7 +1113,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         return bool(self._session_stale.get(cam_id, False))
 
     def _refresh_local_creds_from_heartbeat(
-        self, cam_id: str, resp_text: str, generation: int, elapsed: float,
+        self,
+        cam_id: str,
+        resp_text: str,
+        generation: int,
+        elapsed: float,
     ) -> None:
         """Cache fresh LOCAL creds from a heartbeat PUT response and rebuild
         the cached rtspsUrl so the next stream-worker restart picks them up.
@@ -1041,6 +1139,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         try:
             import json as _json
             from urllib.parse import quote as _q
+
             rj = _json.loads(resp_text or "{}")
             new_user = rj.get("user")
             new_pass = rj.get("password")
@@ -1066,7 +1165,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     except ValueError:
                         pass
                     break
-            audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+            audio_param = (
+                "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+            )
             mcfg = self.get_model_config(cam_id)
             new_url = (
                 f"rtsp://{_q(new_user, safe='')}:{_q(new_pass, safe='')}@"
@@ -1078,21 +1179,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             live["rtspsUrl"] = new_url
             live["rtspUrl"] = new_url
             cache = self._local_creds_cache.get(cam_id, {})
-            cache.update({
-                "user": new_user,
-                "password": new_pass,
-                "ts": time.monotonic(),
-            })
+            cache.update(
+                {
+                    "user": new_user,
+                    "password": new_pass,
+                    "ts": time.monotonic(),
+                }
+            )
             self._local_creds_cache[cam_id] = cache
             cam_entity = self._camera_entities.get(cam_id)
             stream = getattr(cam_entity, "stream", None) if cam_entity else None
             if stream is not None:
                 try:
                     stream.update_source(new_url)
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     _LOGGER.debug(
                         "Heartbeat: Stream.update_source for %s failed (will heal at next worker restart): %s",
-                        cam_id[:8], err,
+                        cam_id[:8],
+                        err,
                     )
             # NVR sidecar: ffmpeg holds the OLD creds — once the camera rotates
             # them out (~60 s grace per Bosch session), reconnects 401 and the
@@ -1105,12 +1209,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     name=f"bosch_nvr_restart_{cam_id[:8]}",
                 )
             _LOGGER.debug(
-                    "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
-                    cam_id[:8], generation, elapsed, new_user,
-                )
-        except Exception as err:  # noqa: BLE001 — never crash the heartbeat loop
+                "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
+                cam_id[:8],
+                generation,
+                elapsed,
+                new_user,
+            )
+        except Exception as err:
             _LOGGER.debug(
-                "Heartbeat cred-refresh skipped for %s: %s", cam_id[:8], err,
+                "Heartbeat cred-refresh skipped for %s: %s",
+                cam_id[:8],
+                err,
             )
 
     def record_stream_error(self, cam_id: str) -> None:
@@ -1131,18 +1240,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if count == cfg.max_stream_errors:
             _LOGGER.warning(
                 "Stream error %d/%d for %s — will fall back to REMOTE on next start",
-                count, cfg.max_stream_errors, cam_id[:8],
+                count,
+                cfg.max_stream_errors,
+                cam_id[:8],
             )
         elif count > cfg.max_stream_errors:
             _LOGGER.debug(
                 "Stream error %d/%d for %s (repeat)",
-                count, cfg.max_stream_errors, cam_id[:8],
+                count,
+                cfg.max_stream_errors,
+                cam_id[:8],
             )
 
     def record_stream_success(self, cam_id: str) -> None:
         """Reset error counter on successful stream."""
         if self._stream_error_count.get(cam_id, 0) > 0:
-            _LOGGER.info("Stream recovered for %s — resetting error counter", cam_id[:8])
+            _LOGGER.info(
+                "Stream recovered for %s — resetting error counter", cam_id[:8]
+            )
         self._stream_error_count[cam_id] = 0
         self._stream_error_at.pop(cam_id, None)
         self._stream_fell_back[cam_id] = False
@@ -1207,7 +1322,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             except Exception as exc:  # pragma: no cover — defensive: HA state write
                 _LOGGER.debug(
                     "live-stream switch state write for %s skipped: %s",
-                    cam_id[:8], exc,
+                    cam_id[:8],
+                    exc,
                 )
         # Step 2 — stop the NVR sidecar best-effort. Ordering: BEFORE
         # _stop_tls_proxy so ffmpeg gets a chance to flush MP4 cleanly,
@@ -1221,7 +1337,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 _LOGGER.warning(
                     "stop_recorder for %s raised %s during teardown — "
                     "switch state already cleared, continuing with proxy/stream cleanup",
-                    cam_id[:8], exc,
+                    cam_id[:8],
+                    exc,
                 )
         await self._stop_tls_proxy(cam_id)
         await self._unregister_go2rtc_stream(cam_id)
@@ -1241,14 +1358,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # a background task once the reference is dropped.
                 try:
                     await asyncio.wait_for(stream.stop(), timeout=5)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     _LOGGER.warning(
                         "camera.stream.stop() for %s timed out after 5s — "
                         "force-detaching, worker will be GC'd",
                         cam_id[:8],
                     )
                 except Exception as exc:
-                    _LOGGER.debug("camera.stream.stop() for %s failed: %s", cam_id[:8], exc)
+                    _LOGGER.debug(
+                        "camera.stream.stop() for %s failed: %s", cam_id[:8], exc
+                    )
                 cam_entity.stream = None
 
     def _schedule_stream_worker_error(self, cam_id: str, msg: str) -> None:
@@ -1263,9 +1382,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if cam_id in pending:
             return
         pending.add(cam_id)
-        self.hass.async_create_task(
-            self._handle_stream_worker_error(cam_id, msg)
-        )
+        self.hass.async_create_task(self._handle_stream_worker_error(cam_id, msg))
 
     async def _handle_stream_worker_error(self, cam_id: str, msg: str) -> None:
         """React to an HA stream-worker error for one camera.
@@ -1354,7 +1471,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if result:
                     _LOGGER.info(
                         "LOCAL rescue: %s restarted as %s",
-                        cam_id[:8], result.get("_connection_type", "?"),
+                        cam_id[:8],
+                        result.get("_connection_type", "?"),
                     )
                 return  # whatever try_live_connection produced is the new state
 
@@ -1365,7 +1483,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 _LOGGER.warning(
                     "Stream worker errors still occurring for %s on %s — "
                     "HA backoff continues, no further fallback available",
-                    cam_id[:8], conn_type or "(no session)",
+                    cam_id[:8],
+                    conn_type or "(no session)",
                 )
                 return
             _LOGGER.warning(
@@ -1380,13 +1499,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if result:
                 _LOGGER.info(
                     "Stream worker error recovery: %s restarted as %s",
-                    cam_id[:8], result.get("_connection_type", "?"),
+                    cam_id[:8],
+                    result.get("_connection_type", "?"),
                 )
         finally:
             if pending is not None:
                 pending.discard(cam_id)
 
-    def _replace_renewal_task(self, cam_id: str, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+    def _replace_renewal_task(
+        self, cam_id: str, coro: Coroutine[Any, Any, None]
+    ) -> asyncio.Task[None]:
         """Cancel any existing renewal task for cam_id, then create and track the new one.
 
         Uses async_create_background_task: the keepalive coroutines run as
@@ -1410,11 +1532,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     @property
     def token(self) -> str:
         # Prefer in-memory refreshed token over config entry (avoids stale reads)
-        return getattr(self, "_refreshed_token", None) or self._entry.data.get("bearer_token", "")  # type: ignore[no-any-return]
+        return getattr(self, "_refreshed_token", None) or self._entry.data.get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            "bearer_token", ""
+        )
 
     @property
     def refresh_token(self) -> str:
-        return getattr(self, "_refreshed_refresh", None) or self._entry.data.get("refresh_token", "")  # type: ignore[no-any-return]
+        return getattr(self, "_refreshed_refresh", None) or self._entry.data.get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            "refresh_token", ""
+        )
 
     @property
     def options(self) -> dict[str, Any]:
@@ -1430,6 +1556,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         import base64 as _b64
         import json as _json
         import time as _time
+
         token = self.token
         if not token:
             return False
@@ -1468,7 +1595,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return await self._refresh_token_locked()
 
     async def _refresh_token_locked(self) -> str:
-        from .config_flow import _do_refresh, RefreshTokenInvalidError, AuthServerOutageError
+        from .config_flow import (
+            AuthServerOutageError,
+            RefreshTokenInvalidError,
+            _do_refresh,
+        )
+
         # Another caller may have just refreshed the token while we were
         # waiting on the lock — if so, skip the POST entirely.
         if self._token_still_valid(min_remaining=60):
@@ -1477,6 +1609,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # until the back-off gate opens — avoids hammering a server that
         # is already known to be down.
         import time as _time
+
         now_m = _time.monotonic()
         if self._auth_outage_count > 0 and now_m < self._auth_outage_next_retry_ts:
             remaining = int(self._auth_outage_next_retry_ts - now_m)
@@ -1487,7 +1620,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Always prefer the freshest refresh_token from the config entry
         # (persisted by previous successful refresh) over our in-memory
         # copy, which could be stale in edge cases (e.g. entry reload).
-        refresh = self._entry.data.get("refresh_token", "") or getattr(self, "_refreshed_refresh", None) or ""
+        refresh = (
+            self._entry.data.get("refresh_token", "")
+            or getattr(self, "_refreshed_refresh", None)
+            or ""
+        )
         if not refresh:
             # No refresh token at all — trigger the built-in HA reauth button
             # (shows "Reconfigure" on the integration card, runs our auto-login).
@@ -1507,7 +1644,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if tokens:
                     break
                 if attempt < 2:
-                    _LOGGER.debug("Token refresh attempt %d failed (transient), retrying in 2s...", attempt + 1)
+                    _LOGGER.debug(
+                        "Token refresh attempt %d failed (transient), retrying in 2s...",
+                        attempt + 1,
+                    )
                     await asyncio.sleep(2)
         except RefreshTokenInvalidError:
             # Do not log the exception body — Keycloak error responses can echo
@@ -1528,7 +1668,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "Bosch Keycloak auth server outage (%s) — NOT triggering reauth "
                 "(server-side problem, refresh token is probably still valid). "
                 "Backing off %ds before next attempt (outage #%d).",
-                err, backoff, self._auth_outage_count,
+                err,
+                backoff,
+                self._auth_outage_count,
             )
             # One-time repair issue after 3 consecutive outages so the user
             # sees a clear explanation in Settings → Repairs while entities
@@ -1570,7 +1712,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._schedule_token_refresh()
             # Reset failure tracking on success
             if self._token_fail_count > 0:
-                _LOGGER.info("Token refresh recovered after %d failures", self._token_fail_count)
+                _LOGGER.info(
+                    "Token refresh recovered after %d failures", self._token_fail_count
+                )
             self._token_fail_count = 0
             if self._token_alert_sent:
                 self._token_alert_sent = False
@@ -1588,7 +1732,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     ir.async_delete_issue(self.hass, DOMAIN, "auth_server_outage")
             return self._refreshed_token  # type: ignore[no-any-return]
         self._token_fail_count += 1
-        _LOGGER.warning("Silent token renewal failed (attempt %d)", self._token_fail_count)
+        _LOGGER.warning(
+            "Silent token renewal failed (attempt %d)", self._token_fail_count
+        )
         # After 3 consecutive complete failures the refresh token is very
         # likely invalidated on Keycloak's side (invalid_grant). Trigger the
         # built-in HA reauth flow — a "Reconfigure" button appears on the
@@ -1624,7 +1770,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if self.hass.services.has_service(domain, name):
                 try:
                     await self.hass.services.async_call(
-                        domain, name, {"message": message, "title": title},
+                        domain,
+                        name,
+                        {"message": message, "title": title},
                     )
                     _LOGGER.info("Token failure alert sent via %s", svc)
                 except Exception as err:
@@ -1643,6 +1791,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         import base64 as _b64
         import json as _json
         import time as _time
+
         token = self.token
         if not token:
             return
@@ -1659,7 +1808,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             refresh_in = max(remaining - 300, 10)
             _LOGGER.debug(
                 "Token expires in %.0fs — proactive refresh scheduled in %.0fs",
-                remaining, refresh_in,
+                remaining,
+                refresh_in,
             )
             # Cancel any previously scheduled handle so reloads/reschedules
             # don't stack multiple timers that all fire the same refresh.
@@ -1668,7 +1818,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 try:
                     prev.cancel()
                 except (AttributeError, RuntimeError) as err:
-                    _LOGGER.debug("Could not cancel prior token-refresh handle: %s", err)
+                    _LOGGER.debug(
+                        "Could not cancel prior token-refresh handle: %s", err
+                    )
             self._token_refresh_handle = self.hass.loop.call_later(
                 refresh_in,
                 lambda: self.hass.async_create_task(self._proactive_refresh()),
@@ -1748,7 +1900,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             writer.close()
             await writer.wait_closed()
             result = True
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             result = False
         self._lan_tcp_reachable[cam_id] = (result, time.monotonic())
         return result
@@ -1782,9 +1934,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         _ok = sum(1 for r in results if r is True)
         _LOGGER.info(
             "Outage LAN-ping: %d/%d cam(s) reachable (%s)",
-            _ok, len(cam_ids),
-            ", ".join(f"{cid[:8]}={'on' if r is True else 'off' if r is False else 'err'}"
-                      for cid, r in zip(cam_ids, results)),
+            _ok,
+            len(cam_ids),
+            ", ".join(
+                f"{cid[:8]}={'on' if r is True else 'off' if r is False else 'err'}"
+                for cid, r in zip(cam_ids, results, strict=False)
+            ),
         )
         # Notify dependent entities (binary_sensor.*_lan_reachable, privacy/light
         # switch `available` checks) so the new ping result reflects in the UI
@@ -1799,7 +1954,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         creds = self._local_creds_cache.get(cam_id)
         return creds.get("host") if creds else None
 
-    def _should_check_status(self, cam_id: str, now: float, interval_status: int) -> bool:
+    def _should_check_status(
+        self, cam_id: str, now: float, interval_status: int
+    ) -> bool:
         """Determine if this camera needs a status check this tick.
 
         - Normal cameras: check every interval_status seconds.
@@ -1837,13 +1994,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if not token and not self.refresh_token:
             raise UpdateFailed("Not authenticated — re-add the integration to log in")
 
-        opts    = self.options
-        now     = time.monotonic()
+        opts = self.options
+        now = time.monotonic()
 
         # Fast first tick: on startup, only fetch camera list + basic status.
         # Skip events + slow-tier to reduce startup from ~2 min to ~15s.
         # Full data loads on the second tick (60s later).
-        is_first_tick = not hasattr(self, '_first_tick_done')
+        is_first_tick = not hasattr(self, "_first_tick_done")
         if is_first_tick:
             self._first_tick_done = True
 
@@ -1859,10 +2016,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # we don't misfire when the cameras are simply idle overnight.
         with self._fcm_lock:
             fcm_dead = False
-            if opts.get("enable_fcm_push", False) and self._fcm_running and self._fcm_healthy:
+            if (
+                opts.get("enable_fcm_push", False)
+                and self._fcm_running
+                and self._fcm_healthy
+            ):
                 try:
-                    fcm_dead = self._fcm_client is not None and not self._fcm_client.is_started()
-                except Exception:  # noqa: BLE001 — library API may vary across versions
+                    fcm_dead = (
+                        self._fcm_client is not None
+                        and not self._fcm_client.is_started()
+                    )
+                except Exception:
                     fcm_dead = False
             if fcm_dead:
                 self._fcm_healthy = False
@@ -1903,7 +2067,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             ):
                 _LOGGER.info(
                     "FCM self-heal: stable for ≥%d s after recovery — resetting failure counter (was %d)",
-                    int(SELF_HEAL_SUCCESS_WINDOW_SEC), failures,
+                    int(SELF_HEAL_SUCCESS_WINDOW_SEC),
+                    failures,
                 )
                 self._fcm_self_heal_failures = 0
                 self._fcm_self_heal_paused_logged = False
@@ -1928,7 +2093,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # jitter is sampled per tick — small variance over ticks is
                     # acceptable since the cool-down is large; this avoids
                     # storing per-coordinator jitter state.
-                    jitter = base * SELF_HEAL_JITTER_FRACTION * (random.random() * 2 - 1)
+                    jitter = (
+                        base * SELF_HEAL_JITTER_FRACTION * (random.random() * 2 - 1)
+                    )
                     effective = base + jitter
                     cool_down_ok = (now - last_heal) > effective
 
@@ -1937,6 +2104,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         heal_needed = True
                     elif self._fcm_running and self._fcm_healthy:
                         from .fcm import get_recent_fcm_error_count
+
                         if get_recent_fcm_error_count(300.0) >= 3:
                             heal_needed = True
                     elif not self._fcm_running:
@@ -1949,19 +2117,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # ladder predictably. Success detection (above) clears it later.
             self._fcm_self_heal_failures = failures + 1
             from .fcm import async_self_heal_fcm_push
+
             self.hass.async_create_task(async_self_heal_fcm_push(self))
         if _fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
         else:
             event_interval = int(opts.get("interval_events", 60))
         do_events = (now - self._last_events) >= event_interval
-        do_slow   = (now - self._last_slow)   >= int(opts.get("interval_slow", 300))
+        do_slow = (now - self._last_slow) >= int(opts.get("interval_slow", 300))
 
         # First tick: skip heavy operations
         if is_first_tick:
             do_events = False
             do_slow = False
-            _LOGGER.info("Fast first tick — skipping events + slow-tier for quick startup")
+            _LOGGER.info(
+                "Fast first tick — skipping events + slow-tier for quick startup"
+            )
 
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -1975,7 +2146,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     if resp.status == 401:
                         _LOGGER.info("Token expired (401) — attempting silent renewal")
                         token = await self._ensure_valid_token()
-                        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+                        headers = {
+                            "Authorization": f"Bearer {token}",
+                            "Accept": "application/json",
+                        }
                     elif resp.status != 200:
                         # Cloud 5xx often coincides with announced maintenance —
                         # kick off a background fetch of the community RSS so
@@ -2007,7 +2181,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 "Bosch Smart Home Camera → Configure → Force new browser login"
                             )
                         if resp2.status != 200:
-                            raise UpdateFailed(f"Camera list returned HTTP {resp2.status}")
+                            raise UpdateFailed(
+                                f"Camera list returned HTTP {resp2.status}"
+                            )
                         cam_list = await resp2.json()
 
             # ── Feature flags (fetch once — rarely changes) ────────────────
@@ -2022,7 +2198,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 _LOGGER.debug("Feature flags: %s", self._feature_flags)
                 except asyncio.CancelledError:
                     raise
-                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+                except (TimeoutError, aiohttp.ClientError) as err:
                     _LOGGER.debug("Feature flags fetch failed: %s", err)
 
             # ── Protocol version check (once at startup) ──────────────────
@@ -2044,7 +2220,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         proto_data.get("state"),
                                     )
                                 else:
-                                    _LOGGER.debug("Protocol v11 supported: %s", proto_data)
+                                    _LOGGER.debug(
+                                        "Protocol v11 supported: %s", proto_data
+                                    )
                             else:
                                 _LOGGER.warning(
                                     "Bosch API protocol version check returned HTTP %s "
@@ -2082,7 +2260,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if await self._async_local_tcp_ping(cam_id):
                     self._per_cam_status_at[cam_id] = now
                     self._offline_since.pop(cam_id, None)  # clear offline tracking
-                    _LOGGER.debug("Local TCP ping OK for %s — ONLINE (cloud check skipped)", cam_id[:8])
+                    _LOGGER.debug(
+                        "Local TCP ping OK for %s — ONLINE (cloud check skipped)",
+                        cam_id[:8],
+                    )
                     # Active LOCAL promotion: if this cam is currently pinned to
                     # REMOTE because of a past LAN-fail burst (auto-mode
                     # fallback) and the LAN is reachable again, clear the
@@ -2102,7 +2283,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             _LOGGER.info(
                                 "AUTO mode: %s LAN reachable again — clearing "
                                 "REMOTE fallback flag (counter=%d)",
-                                cam_id[:8], err_count_was,
+                                cam_id[:8],
+                                err_count_was,
                             )
                             self._stream_error_count.pop(cam_id, None)
                             self._stream_error_at.pop(cam_id, None)
@@ -2111,7 +2293,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # actively running on REMOTE-fallback.
                             live = self._live_connections.get(cam_id, {})
                             if live.get("_connection_type") == "REMOTE":
-                                last_promote = self._local_promote_at.get(cam_id, float('-inf'))
+                                last_promote = self._local_promote_at.get(
+                                    cam_id, float("-inf")
+                                )
                                 _LOCAL_PROMOTE_COOLDOWN_S = 300
                                 if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
                                     self._local_promote_at[cam_id] = now
@@ -2163,7 +2347,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 if r.status == 200:
                                     comm = await r.json()
                                     self._commissioned_cache[cam_id] = comm
-                                    if comm.get("connected") and comm.get("commissioned"):
+                                    if comm.get("connected") and comm.get(
+                                        "commissioned"
+                                    ):
                                         status = "ONLINE"
                                     elif comm.get("configured"):
                                         status = "OFFLINE"
@@ -2175,7 +2361,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     )
                                     status = "SESSION_LIMIT"
                     except Exception as err:
-                        _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
+                        _LOGGER.debug(
+                            "Commissioned fallback error for %s: %s", cam_id, err
+                        )
 
                 self._per_cam_status_at[cam_id] = now
                 # Track offline duration for extended interval.
@@ -2188,7 +2376,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     self._offline_since.pop(cam_id, None)
                 # Fire persistent notification if 444 hits accumulate
                 if status == "SESSION_LIMIT":
-                    _handle_quota = getattr(self, "_async_handle_session_quota_hit", None)
+                    _handle_quota = getattr(
+                        self, "_async_handle_session_quota_hit", None
+                    )
                     if _handle_quota is not None:
                         self.hass.async_create_task(_handle_quota(cam_id))
                 return (cam_id, status)
@@ -2226,15 +2416,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             if le_resp.status == 200:
                                 last_ev = await le_resp.json()
                                 last_ev_id = last_ev.get("id", "")
-                                if last_ev_id and last_ev_id == self._last_event_ids.get(cam_id):
+                                if (
+                                    last_ev_id
+                                    and last_ev_id == self._last_event_ids.get(cam_id)
+                                ):
                                     skip_full_fetch = True
                                     events = self._cached_events.get(cam_id, [])
                                     _LOGGER.debug(
                                         "last_event unchanged for %s (id=%s) — skipping full fetch",
-                                        cam_id, last_ev_id[:8],
+                                        cam_id,
+                                        last_ev_id[:8],
                                     )
                 except Exception as err:
-                    _LOGGER.debug("last_event check error for %s: %s — falling back to full fetch", cam_id, err)
+                    _LOGGER.debug(
+                        "last_event check error for %s: %s — falling back to full fetch",
+                        cam_id,
+                        err,
+                    )
 
                 if not skip_full_fetch:
                     try:
@@ -2244,7 +2442,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 if r.status == 200:
                                     events = await r.json()
                     except Exception as err:
-                        _LOGGER.debug("Events fetch error for %s: %s", cam_id, BoschCameraCoordinator._err_str(err))
+                        _LOGGER.debug(
+                            "Events fetch error for %s: %s",
+                            cam_id,
+                            BoschCameraCoordinator._err_str(err),
+                        )
                 return (cam_id, events)
 
             if do_events:
@@ -2267,23 +2469,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
                 if do_events and events:
                     newest_id = events[0].get("id", "")
-                    prev_id   = self._last_event_ids.get(cam_id)
+                    prev_id = self._last_event_ids.get(cam_id)
                     if prev_id is None:
                         unread_ids = [
-                            ev.get("id") for ev in events
+                            ev.get("id")
+                            for ev in events
                             if ev.get("id") and not ev.get("isRead", False)
                         ]
                         if unread_ids and self.options.get("mark_events_read", False):
                             _LOGGER.debug(
                                 "Startup: marking %d unread event(s) as read for %s",
-                                len(unread_ids), cam_id,
+                                len(unread_ids),
+                                cam_id,
                             )
                             try:
                                 await self.async_mark_events_read(unread_ids)
                             except asyncio.CancelledError:
                                 raise
                             except Exception as err:
-                                _LOGGER.debug("Mark-read (startup) failed for %s: %s", cam_id, err)
+                                _LOGGER.debug(
+                                    "Mark-read (startup) failed for %s: %s", cam_id, err
+                                )
                         # Bootstrap _last_event_ids so the next polling tick can
                         # detect newer events. Without this seed, prev_id stays
                         # None forever in polling-only mode (no FCM) — every
@@ -2299,38 +2505,43 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # Guards against a polling tick firing an alert that the
                         # FCM handler already dispatched for the same event ID.
                         _now_mono = time.monotonic()
-                        _dedup_skip = self._alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0
+                        _dedup_skip = (
+                            self._alert_sent_ids.get(newest_id, float("-inf"))
+                            > _now_mono - 60.0
+                        )
                         self._last_event_ids[cam_id] = newest_id
                         if _dedup_skip:
                             _LOGGER.debug(
                                 "Polling dedup: skipping duplicate alert for %s id=%s",
-                                cam_id, newest_id,
+                                cam_id,
+                                newest_id,
                             )
                         else:
                             self._alert_sent_ids[newest_id] = _now_mono
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
-                                cam_id, newest_id,
+                                cam_id,
+                                newest_id,
                             )
                             cam_entity = self._camera_entities.get(cam_id)
                             if cam_entity:
                                 self.hass.async_create_task(
                                     cam_entity._async_trigger_image_refresh(delay=2)
                                 )
-                            newest_event  = events[0]
-                            event_type    = newest_event.get("eventType", "")
-                            event_tags    = newest_event.get("eventTags", []) or []
+                            newest_event = events[0]
+                            event_type = newest_event.get("eventType", "")
+                            event_tags = newest_event.get("eventTags", []) or []
                             # Gen2 DualRadar fires eventType=MOVEMENT w/ eventTags=["PERSON"]
                             # when a human is detected — the tag is more specific, so upgrade.
                             if "PERSON" in event_tags and event_type == "MOVEMENT":
                                 event_type = "PERSON"
-                            cam_name      = cam.get("title", cam_id)
+                            cam_name = cam.get("title", cam_id)
                             event_payload = {
-                                "camera_id":   cam_id,
+                                "camera_id": cam_id,
                                 "camera_name": cam_name,
-                                "timestamp":   newest_event.get("timestamp", ""),
-                                "image_url":   newest_event.get("imageUrl", ""),
-                                "event_id":    newest_id,
+                                "timestamp": newest_event.get("timestamp", ""),
+                                "image_url": newest_event.get("imageUrl", ""),
+                                "event_id": newest_id,
                             }
                             if event_type == "MOVEMENT":
                                 self.hass.bus.async_fire(
@@ -2346,7 +2557,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 )
                             self.hass.async_create_task(
                                 self._async_send_alert(
-                                    cam_name, event_type,
+                                    cam_name,
+                                    event_type,
                                     newest_event.get("timestamp", ""),
                                     newest_event.get("imageUrl", ""),
                                     newest_event.get("videoClipUrl", ""),
@@ -2360,15 +2572,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 except asyncio.CancelledError:
                                     raise
                                 except Exception as err:
-                                    _LOGGER.debug("Mark-read (new event) failed for %s: %s", cam_id, err)
+                                    _LOGGER.debug(
+                                        "Mark-read (new event) failed for %s: %s",
+                                        cam_id,
+                                        err,
+                                    )
                     elif newest_id:
                         self._last_event_ids[cam_id] = newest_id
 
                 data[cam_id] = {
-                    "info":   cam,
+                    "info": cam,
                     "status": status,
                     "events": events,
-                    "live":   self._live_connections.get(cam_id, {}),
+                    "live": self._live_connections.get(cam_id, {}),
                 }
 
             # Update timestamps only after successful fetches
@@ -2385,31 +2601,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # no extra request needed. SHC (step 5) supplements as fallback.
             for cam_id_key, cam_entry in data.items():
                 cam_raw = cam_entry.get("info", {})
-                privacy_str  = cam_raw.get("privacyMode", "")
+                privacy_str = cam_raw.get("privacyMode", "")
                 feat_support = cam_raw.get("featureSupport", {})
-                has_light    = feat_support.get("light", False)
-                feat_status  = cam_raw.get("featureStatus", {})
-                light_on     = feat_status.get("frontIlluminatorInGeneralLightOn")
+                has_light = feat_support.get("light", False)
+                feat_status = cam_raw.get("featureStatus", {})
+                light_on = feat_status.get("frontIlluminatorInGeneralLightOn")
 
-                cache = self._shc_state_cache.setdefault(cam_id_key, {
-                    "device_id":           None,
-                    "camera_light":        None,
-                    "front_light":         None,
-                    "wallwasher":          None,
-                    "front_light_intensity": None,
-                    "privacy_mode":        None,
-                    "has_light":           False,
-                    "notifications_status": None,
-                })
+                cache = self._shc_state_cache.setdefault(
+                    cam_id_key,
+                    {
+                        "device_id": None,
+                        "camera_light": None,
+                        "front_light": None,
+                        "wallwasher": None,
+                        "front_light_intensity": None,
+                        "privacy_mode": None,
+                        "has_light": False,
+                        "notifications_status": None,
+                    },
+                )
                 # Cloud is authoritative for privacy (fast, always available).
                 # Skip overwrite if a write happened within _WRITE_LOCK_SECS — same
                 # propagation-delay race as camera light.
                 privacy_locked = (
                     cam_id_key in self._privacy_set_at
-                    and (time.monotonic() - self._privacy_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
+                    and (time.monotonic() - self._privacy_set_at[cam_id_key])
+                    < self._WRITE_LOCK_SECS
                 )
                 if privacy_str and not privacy_locked:
-                    new_privacy = (privacy_str.upper() == "ON")
+                    new_privacy = privacy_str.upper() == "ON"
                     old_privacy = cache.get("privacy_mode")
                     cache["privacy_mode"] = new_privacy
                     # Hardware/external privacy trigger detection.
@@ -2442,12 +2662,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # would flip the switch back to OFF right after the user turned it ON.
                 light_locked = (
                     cam_id_key in self._light_set_at
-                    and (time.monotonic() - self._light_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
+                    and (time.monotonic() - self._light_set_at[cam_id_key])
+                    < self._WRITE_LOCK_SECS
                 )
                 if light_on is not None and not light_locked:
                     # Gen2: Use lighting/switch cache for actual light state
                     # (featureStatus reports config state, not physical on/off)
                     from .models import get_model_config as _gmc_light
+
                     _hw = cam_raw.get("hardwareVersion", "CAMERA")
                     if _gmc_light(_hw).generation >= 2:
                         # Gen2: Only update light state from lighting/switch cache
@@ -2455,19 +2677,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # If cache not yet populated, keep current state (don't overwrite)
                         lsc = self._lighting_switch_cache.get(cam_id_key)
                         if lsc:
-                            front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
-                            top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-                            bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                            front_bri = lsc.get("frontLightSettings", {}).get(
+                                "brightness", 0
+                            )
+                            top_bri = lsc.get("topLedLightSettings", {}).get(
+                                "brightness", 0
+                            )
+                            bot_bri = lsc.get("bottomLedLightSettings", {}).get(
+                                "brightness", 0
+                            )
                             cache["front_light"] = front_bri > 0
                             cache["wallwasher"] = top_bri > 0 or bot_bri > 0
-                            cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
-                            cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+                            cache["camera_light"] = (
+                                front_bri > 0 or top_bri > 0 or bot_bri > 0
+                            )
+                            cache["front_light_intensity"] = (
+                                front_bri / 100.0 if front_bri else 0.0
+                            )
                         # else: keep current cache values, don't overwrite from featureStatus
                     else:
                         cache["camera_light"] = light_on
-                        cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
-                        cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
-                        intensity = feat_status.get("frontIlluminatorGeneralLightIntensity")
+                        cache["front_light"] = feat_status.get(
+                            "frontIlluminatorInGeneralLightOn"
+                        )
+                        cache["wallwasher"] = feat_status.get(
+                            "wallwasherInGeneralLightOn"
+                        )
+                        intensity = feat_status.get(
+                            "frontIlluminatorGeneralLightIntensity"
+                        )
                         if intensity is not None:
                             cache["front_light_intensity"] = intensity
                 elif cache.get("camera_light") is None:
@@ -2477,7 +2715,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 notif_status = cam_raw.get("notificationsEnabledStatus", "")
                 notif_locked = (
                     cam_id_key in self._notif_set_at
-                    and (time.monotonic() - self._notif_set_at[cam_id_key]) < self._WRITE_LOCK_SECS
+                    and (time.monotonic() - self._notif_set_at[cam_id_key])
+                    < self._WRITE_LOCK_SECS
                 )
                 if notif_status and not notif_locked:
                     cache["notifications_status"] = notif_status
@@ -2497,14 +2736,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             ) as pan_resp:
                                 if pan_resp.status == 200:
                                     pan_data = await pan_resp.json()
-                                    self._pan_cache[cam_id_key] = pan_data.get("currentAbsolutePosition")
+                                    self._pan_cache[cam_id_key] = pan_data.get(
+                                        "currentAbsolutePosition"
+                                    )
                     except Exception as err:
-                        _LOGGER.debug("Pan fetch error for %s: %s", cam_id_key, BoschCameraCoordinator._err_str(err))
+                        _LOGGER.debug(
+                            "Pan fetch error for %s: %s",
+                            cam_id_key,
+                            BoschCameraCoordinator._err_str(err),
+                        )
 
                 # ── Gen2 lighting/switch — fetched every tick (60s) ──
                 # Bosch app polls this every ~40s. Slow tier (300s) is too slow
                 # for responsive light state sync when lights are changed via the app.
                 from .models import get_model_config as _gmc_tick
+
                 hw_tick = cam_raw.get("hardwareVersion", "")
                 if is_online and _gmc_tick(hw_tick).generation >= 2:
                     try:
@@ -2514,9 +2760,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 headers=headers,
                             ) as ls_resp:
                                 if ls_resp.status == 200:
-                                    self._lighting_switch_cache[cam_id_key] = await ls_resp.json()
+                                    self._lighting_switch_cache[
+                                        cam_id_key
+                                    ] = await ls_resp.json()
                     except Exception as err:
-                        _LOGGER.debug("lighting/switch fetch error for %s: %s", cam_id_key, BoschCameraCoordinator._err_str(err))
+                        _LOGGER.debug(
+                            "lighting/switch fetch error for %s: %s",
+                            cam_id_key,
+                            BoschCameraCoordinator._err_str(err),
+                        )
 
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
@@ -2524,7 +2776,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # Skipped when camera is offline or session-quota hit (444) — endpoints
                 # would return 444 too, and the camera isn't truly unreachable.
                 if do_slow and not is_online:
-                    _LOGGER.debug("Slow-tier skipped for %s (%s)", cam_id_key, cam_status.lower())
+                    _LOGGER.debug(
+                        "Slow-tier skipped for %s (%s)", cam_id_key, cam_status.lower()
+                    )
                 if do_slow and is_online:
                     # ── Parallel slow-tier fetch ──────────────────────────────
                     # All endpoints are independent — fetch in parallel with
@@ -2533,7 +2787,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     hw = cam_raw.get("hardwareVersion", "")
                     pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
 
-                    async def _fetch(endpoint: str) -> tuple[str, int, dict[str, Any] | None]:
+                    async def _fetch(
+                        endpoint: str,
+                    ) -> tuple[str, int, dict[str, Any] | None]:
                         """Fetch a single slow-tier endpoint. Returns (endpoint, status, data)."""
                         try:
                             async with asyncio.timeout(8):
@@ -2545,17 +2801,29 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         return (endpoint, 200, await r.json())
                                     return (endpoint, r.status, None)
                         except Exception as err:
-                            _LOGGER.debug("%s fetch error for %s: %s", endpoint, cam_id_key, BoschCameraCoordinator._err_str(err))
+                            _LOGGER.debug(
+                                "%s fetch error for %s: %s",
+                                endpoint,
+                                cam_id_key,
+                                BoschCameraCoordinator._err_str(err),
+                            )
                             return (endpoint, 0, None)
 
                     # Build task list (skip endpoints not applicable to this camera)
                     from .models import get_model_config as _gmc2
+
                     is_gen2 = _gmc2(hw).generation >= 2
                     endpoints = [
-                        "wifiinfo", "ambient_light_sensor_level", "motion",
-                        "firmware", "recording_options",
-                        "unread_events_count", "commissioned", "timestamp",
-                        "notifications", "rules",
+                        "wifiinfo",
+                        "ambient_light_sensor_level",
+                        "motion",
+                        "firmware",
+                        "recording_options",
+                        "unread_events_count",
+                        "commissioned",
+                        "timestamp",
+                        "notifications",
+                        "rules",
                     ]
                     # Gen1 uses motion_sensitive_areas + privacy_masks (rectangles)
                     # Gen2 Outdoor II uses zones + privateAreas (polygons) — different endpoints!
@@ -2567,7 +2835,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             endpoints.append("privateAreas")
                     else:
                         endpoints.extend(["motion_sensitive_areas", "privacy_masks"])
-                    if hw in ("INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+                    if hw in (
+                        "INDOOR",
+                        "CAMERA_360",
+                        "HOME_Eyes_Indoor",
+                        "CAMERA_INDOOR_GEN2",
+                    ):
                         endpoints.append("privacy_sound_override")
                     if pan_limit:
                         endpoints.append("autofollow")
@@ -2577,15 +2850,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
                     # Gen2-only endpoints
                     if is_gen2:
-                        endpoints.extend(["ledlights", "lens_elevation", "audio", "lighting/motion", "lighting/ambient", "lighting", "intrusionDetectionConfig"])
+                        endpoints.extend(
+                            [
+                                "ledlights",
+                                "lens_elevation",
+                                "audio",
+                                "lighting/motion",
+                                "lighting/ambient",
+                                "lighting",
+                                "intrusionDetectionConfig",
+                            ]
+                        )
                     # Gen2 Indoor II-only endpoints (alarm system + power-LED).
                     # privacy_sound_override is added above (same as Gen1 Indoor).
                     if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                        endpoints.extend([
-                            "alarm_settings",
-                            "alarmStatus",
-                            "iconLedBrightness",
-                        ])
+                        endpoints.extend(
+                            [
+                                "alarm_settings",
+                                "alarmStatus",
+                                "iconLedBrightness",
+                            ]
+                        )
 
                     results = await asyncio.gather(
                         *[_fetch(ep) for ep in endpoints],
@@ -2602,7 +2887,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         if ep == "wifiinfo":
                             self._wifiinfo_cache[cam_id_key] = ep_data
                         elif ep == "ambient_light_sensor_level":
-                            self._ambient_light_cache[cam_id_key] = ep_data.get("ambientLightSensorLevel")
+                            self._ambient_light_cache[cam_id_key] = ep_data.get(
+                                "ambientLightSensorLevel"
+                            )
                         elif ep == "motion":
                             data[cam_id_key]["motion"] = ep_data
                         elif ep == "firmware":
@@ -2611,62 +2898,110 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             data[cam_id_key]["recordingOptions"] = ep_data
                         elif ep == "unread_events_count":
                             if isinstance(ep_data, dict):
-                                self._unread_events_cache[cam_id_key] = int(ep_data.get("count", ep_data.get("result", 0)) or 0)
+                                self._unread_events_cache[cam_id_key] = int(
+                                    ep_data.get("count", ep_data.get("result", 0)) or 0
+                                )
                             elif isinstance(ep_data, (int, float)):
                                 self._unread_events_cache[cam_id_key] = int(ep_data)
                         elif ep == "privacy_sound_override":
-                            if not self._is_write_locked(cam_id_key, self._privacy_sound_set_at):
-                                self._privacy_sound_cache[cam_id_key] = ep_data.get("result", False)
+                            if not self._is_write_locked(
+                                cam_id_key, self._privacy_sound_set_at
+                            ):
+                                self._privacy_sound_cache[cam_id_key] = ep_data.get(
+                                    "result", False
+                                )
                         elif ep == "commissioned":
                             self._commissioned_cache[cam_id_key] = ep_data
                         elif ep == "autofollow":
                             data[cam_id_key]["autofollow"] = ep_data
                         elif ep == "timestamp":
-                            if not self._is_write_locked(cam_id_key, self._timestamp_set_at):
-                                self._timestamp_cache[cam_id_key] = ep_data.get("result", False)
+                            if not self._is_write_locked(
+                                cam_id_key, self._timestamp_set_at
+                            ):
+                                self._timestamp_cache[cam_id_key] = ep_data.get(
+                                    "result", False
+                                )
                         elif ep == "notifications":
                             self._notifications_cache[cam_id_key] = ep_data
                         elif ep == "rules":
-                            self._rules_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                            self._rules_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, list) else []
+                            )
                         elif ep == "motion_sensitive_areas":
-                            self._cloud_zones_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                            self._cloud_zones_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, list) else []
+                            )
                         elif ep == "privacy_masks":
-                            self._cloud_privacy_masks_cache[cam_id_key] = ep_data if isinstance(ep_data, list) else []
+                            self._cloud_privacy_masks_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, list) else []
+                            )
                         elif ep == "lighting_options":
-                            self._lighting_options_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._lighting_options_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                         elif ep == "ledlights":
-                            if not self._is_write_locked(cam_id_key, self._ledlights_set_at):
-                                self._ledlights_cache[cam_id_key] = ep_data.get("state") == "ON" if isinstance(ep_data, dict) else None
+                            if not self._is_write_locked(
+                                cam_id_key, self._ledlights_set_at
+                            ):
+                                self._ledlights_cache[cam_id_key] = (
+                                    ep_data.get("state") == "ON"
+                                    if isinstance(ep_data, dict)
+                                    else None
+                                )
                         elif ep == "lens_elevation":
-                            self._lens_elevation_cache[cam_id_key] = ep_data.get("elevation") if isinstance(ep_data, dict) else None
+                            self._lens_elevation_cache[cam_id_key] = (
+                                ep_data.get("elevation")
+                                if isinstance(ep_data, dict)
+                                else None
+                            )
                         elif ep == "audio":
-                            self._audio_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._audio_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                         elif ep == "lighting/motion":
-                            self._motion_light_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._motion_light_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                             # Update MotionLightSwitch state
-                            for ent in self.hass.data.get("entity_platform", {}).get(f"{DOMAIN}.switch", []):
+                            for ent in self.hass.data.get("entity_platform", {}).get(
+                                f"{DOMAIN}.switch", []
+                            ):
                                 pass  # State synced via switch._is_on in next update
                         elif ep == "lighting/ambient":
-                            self._ambient_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._ambient_lighting_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                         elif ep == "lighting":
-                            self._global_lighting_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._global_lighting_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                         elif ep == "intrusionDetectionConfig":
                             # Skip cache overwrite within the write-lock window —
                             # otherwise a slow-tier poll hitting before the cloud
                             # has caught up to the user's toggle reverts the
                             # switch back to the stale enabled value.
-                            if not self._is_write_locked(cam_id_key, self._intrusion_config_set_at):
-                                self._intrusion_config_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            if not self._is_write_locked(
+                                cam_id_key, self._intrusion_config_set_at
+                            ):
+                                self._intrusion_config_cache[cam_id_key] = (
+                                    ep_data if isinstance(ep_data, dict) else {}
+                                )
                         elif ep == "alarm_settings":
-                            self._alarm_settings_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._alarm_settings_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                         elif ep == "alarmStatus":
                             # Actual response format confirmed 2026-04-11:
                             #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
-                            self._alarm_status_cache[cam_id_key] = ep_data if isinstance(ep_data, dict) else {}
+                            self._alarm_status_cache[cam_id_key] = (
+                                ep_data if isinstance(ep_data, dict) else {}
+                            )
                             if isinstance(ep_data, dict) and not self._is_write_locked(
                                 cam_id_key, self._arming_set_at
                             ):
-                                intrusion = str(ep_data.get("intrusionSystem", "")).upper()
+                                intrusion = str(
+                                    ep_data.get("intrusionSystem", "")
+                                ).upper()
                                 if intrusion == "ACTIVE":
                                     self._arming_cache[cam_id_key] = True
                                 elif intrusion == "INACTIVE":
@@ -2688,18 +3023,36 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         elif ep == "iconLedBrightness":
                             # Power-LED brightness 0-4 (5 discrete steps: off + 4 levels)
                             try:
-                                val = int(ep_data.get("value", 0)) if isinstance(ep_data, dict) else 0
-                                self._icon_led_brightness_cache[cam_id_key] = max(0, min(4, val))
+                                val = (
+                                    int(ep_data.get("value", 0))
+                                    if isinstance(ep_data, dict)
+                                    else 0
+                                )
+                                self._icon_led_brightness_cache[cam_id_key] = max(
+                                    0, min(4, val)
+                                )
                             except (TypeError, ValueError):
                                 self._icon_led_brightness_cache[cam_id_key] = 0
                         elif ep == "zones":
-                            zones_data: list[Any] = ep_data if isinstance(ep_data, list) else []
+                            zones_data: list[Any] = (
+                                ep_data if isinstance(ep_data, list) else []
+                            )
                             self._gen2_zones_cache[cam_id_key] = zones_data
-                            _LOGGER.debug("Gen2 zones for %s: %d zones fetched", cam_id_key[:8], len(zones_data))
+                            _LOGGER.debug(
+                                "Gen2 zones for %s: %d zones fetched",
+                                cam_id_key[:8],
+                                len(zones_data),
+                            )
                         elif ep == "privateAreas":
-                            areas_data: list[Any] = ep_data if isinstance(ep_data, list) else []
+                            areas_data: list[Any] = (
+                                ep_data if isinstance(ep_data, list) else []
+                            )
                             self._gen2_private_areas_cache[cam_id_key] = areas_data
-                            _LOGGER.debug("Gen2 privateAreas for %s: %d areas fetched", cam_id_key[:8], len(areas_data))
+                            _LOGGER.debug(
+                                "Gen2 privateAreas for %s: %d areas fetched",
+                                cam_id_key[:8],
+                                len(areas_data),
+                            )
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -2712,47 +3065,69 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # camera's RCP endpoint. Avoids noisy debug logs every 5 min.
                 local_stream_active = (
                     cam_id_key in self._live_connections
-                    and self._live_connections[cam_id_key].get("_connection_type") == "LOCAL"
+                    and self._live_connections[cam_id_key].get("_connection_type")
+                    == "LOCAL"
                 )
-                privacy_on = (cam_raw.get("privacyMode", "").upper() == "ON")
+                privacy_on = cam_raw.get("privacyMode", "").upper() == "ON"
                 if is_online and do_slow and privacy_on:
-                    _LOGGER.debug("RCP slow-tier skipped for %s (privacy ON)", cam_id_key)
+                    _LOGGER.debug(
+                        "RCP slow-tier skipped for %s (privacy ON)", cam_id_key
+                    )
                 if is_online and do_slow and not local_stream_active and not privacy_on:
                     try:
                         rcp_connector = aiohttp.TCPConnector(ssl=False)
-                        rcp_headers   = {
+                        rcp_headers = {
                             "Authorization": f"Bearer {token}",
-                            "Content-Type":  "application/json",
-                            "Accept":        "application/json",
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
                         }
-                        async with aiohttp.ClientSession(connector=rcp_connector) as rcp_session:
+                        async with aiohttp.ClientSession(
+                            connector=rcp_connector
+                        ) as rcp_session:
                             try:
                                 async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                                     async with rcp_session.put(
                                         f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/connection",
-                                        json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id_key)[0]},
+                                        json={
+                                            "type": "REMOTE",
+                                            "highQualityVideo": self.get_quality_params(
+                                                cam_id_key
+                                            )[0],
+                                        },
                                         headers=rcp_headers,
                                     ) as conn_resp:
                                         if conn_resp.status in (200, 201):
                                             import json as _json
-                                            conn_data = _json.loads(await conn_resp.text())
+
+                                            conn_data = _json.loads(
+                                                await conn_resp.text()
+                                            )
                                             urls = conn_data.get("urls", [])
                                             if urls:
                                                 # urls[0] = "proxy-NN.live.cbs.boschsecurity.com:42090/{hash}"
                                                 parts = urls[0].split("/", 1)
                                                 if len(parts) == 2:
-                                                    proxy_host = parts[0]  # "proxy-NN:42090"
+                                                    proxy_host = parts[
+                                                        0
+                                                    ]  # "proxy-NN:42090"
                                                     proxy_hash = parts[1]  # "{hash}"
                                                     await self._async_update_rcp_data(
-                                                        cam_id_key, proxy_host, proxy_hash
+                                                        cam_id_key,
+                                                        proxy_host,
+                                                        proxy_hash,
                                                     )
                                         else:
                                             _LOGGER.debug(
                                                 "RCP proxy connection HTTP %d for %s",
-                                                conn_resp.status, cam_id_key,
+                                                conn_resp.status,
+                                                cam_id_key,
                                             )
-                            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                                _LOGGER.debug("RCP proxy connect error for %s: %s", cam_id_key, err)
+                            except (TimeoutError, aiohttp.ClientError) as err:
+                                _LOGGER.debug(
+                                    "RCP proxy connect error for %s: %s",
+                                    cam_id_key,
+                                    err,
+                                )
                     except Exception as err:
                         _LOGGER.debug("RCP update skipped for %s: %s", cam_id_key, err)
 
@@ -2761,11 +3136,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # from camera HTTPS LAN endpoint using cached cbs Digest creds.
                 # Only runs when LAN IP and cbs creds are available — fully
                 # non-blocking (errors are swallowed, sensor stays unavailable).
-                if is_online and do_slow and self._get_cam_lan_ip(cam_id_key) and self._local_creds_cache.get(cam_id_key):
+                if (
+                    is_online
+                    and do_slow
+                    and self._get_cam_lan_ip(cam_id_key)
+                    and self._local_creds_cache.get(cam_id_key)
+                ):
                     try:
                         await self._async_update_lan_diagnostic_sensors(cam_id_key)
                     except Exception as err:
-                        _LOGGER.debug("LAN diagnostic sensors skipped for %s: %s", cam_id_key, err)
+                        _LOGGER.debug(
+                            "LAN diagnostic sensors skipped for %s: %s", cam_id_key, err
+                        )
 
             # ── 5. SHC states (supplementary + offline fallback) ────────────────
             # Cloud is primary (step 4, ~113ms). SHC supplements with camera
@@ -2826,7 +3208,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # test suite).
             _announce = getattr(self, "_async_maybe_announce_camera_status", None)
             _compute = getattr(self, "_compute_status_for", None)
-            if not is_first_tick and data and _announce is not None and _compute is not None:
+            if (
+                not is_first_tick
+                and data
+                and _announce is not None
+                and _compute is not None
+            ):
                 for _cam_id in data:
                     _cam_data = data[_cam_id]
                     new_status = _compute(_cam_id, _cam_data)
@@ -2864,10 +3251,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if _creds_store is not None and self._local_creds_cache:
                 _cred_snapshot = {
                     k: {
-                        "user":     v["user"],
+                        "user": v["user"],
                         "password": v["password"],
-                        "host":     v["host"],
-                        "port":     v.get("port", 443),
+                        "host": v["host"],
+                        "port": v.get("port", 443),
                     }
                     for k, v in self._local_creds_cache.items()
                     if v.get("user") and v.get("password") and v.get("host")
@@ -2902,7 +3289,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if _cloud_alert is not None:
                 self.hass.async_create_task(_cloud_alert(False))
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _maint = getattr(self, "_async_refresh_maintenance", None)
             if _maint is not None:
                 self.hass.async_create_task(_maint(reactive=True))
@@ -2930,8 +3317,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         does not flap on a transient community-site outage.
         """
         from .maintenance import async_fetch_maintenance
+
         now = time.monotonic()
-        if reactive and (now - self._maintenance_last_fetch) < self._MAINTENANCE_REACTIVE_COOLDOWN_S:
+        if (
+            reactive
+            and (now - self._maintenance_last_fetch)
+            < self._MAINTENANCE_REACTIVE_COOLDOWN_S
+        ):
             return
         self._maintenance_last_fetch = now
         try:
@@ -2944,8 +3336,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._maintenance_cache = result
             _LOGGER.debug(
                 "Maintenance: %s state=%s window=%s..%s",
-                result.title[:60], result.state(),
-                result.scheduled_start, result.scheduled_end,
+                result.title[:60],
+                result.state(),
+                result.scheduled_start,
+                result.scheduled_end,
             )
             await self._async_maybe_announce_maintenance(result)
 
@@ -2977,19 +3371,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             prior = self._maintenance_notified_key
             if prior is None or prior[0] != mw.link or prior[1] != "active":
                 self._maintenance_notified_key = (mw.link, state)
-                getattr(self, '_persist_maint_notified_key', lambda: None)()
+                getattr(self, "_persist_maint_notified_key", lambda: None)()
                 return
         notify_key = (mw.link, state)
         if self._maintenance_notified_key == notify_key:
             return
-        from .fcm import get_alert_services, build_notify_data
+        from .fcm import build_notify_data, get_alert_services
+
         services = get_alert_services(self, "system")
         if not services:
             _LOGGER.debug("Maintenance announce skipped: no notify service configured")
             self._maintenance_notified_key = notify_key
-            getattr(self, '_persist_maint_notified_key', lambda: None)()
+            getattr(self, "_persist_maint_notified_key", lambda: None)()
             return
         from zoneinfo import ZoneInfo
+
         when = ""
         if mw.scheduled_start and mw.scheduled_end:
             tz = ZoneInfo("Europe/Berlin")
@@ -3018,17 +3414,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
                 # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
-                await self.hass.services.async_call(_domain, _service, data, blocking=False)
+                await self.hass.services.async_call(
+                    _domain, _service, data, blocking=False
+                )
                 _LOGGER.info(
                     "Maintenance announce sent via notify.%s (state=%s, window=%s)",
-                    svc, state, when or "(no window)",
+                    svc,
+                    state,
+                    when or "(no window)",
                 )
-            except Exception as exc:  # noqa: BLE001 — any notify failure is non-fatal
+            except Exception as exc:
                 _LOGGER.warning(
-                    "Maintenance announce via notify.%s failed: %s", svc, exc,
+                    "Maintenance announce via notify.%s failed: %s",
+                    svc,
+                    exc,
                 )
         self._maintenance_notified_key = notify_key
-        getattr(self, '_persist_maint_notified_key', lambda: None)()
+        getattr(self, "_persist_maint_notified_key", lambda: None)()
 
     def _persist_maint_notified_key(self) -> None:
         """Write `_maintenance_notified_key` to disk so HA restarts mid-
@@ -3041,9 +3443,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         store = getattr(self, "_maint_notified_store", None)
         if store is None or key is None:
             return
-        self.hass.async_create_task(
-            store.async_save({"link": key[0], "state": key[1]})
-        )
+        self.hass.async_create_task(store.async_save({"link": key[0], "state": key[1]}))
 
     def _persist_cloud_outage_flag(self) -> None:
         """Mirror the maintenance-key persistence for the cloud-state
@@ -3057,7 +3457,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         )
 
     async def _async_maybe_announce_camera_status(
-        self, cam_id: str, new_status: str,
+        self,
+        cam_id: str,
+        new_status: str,
     ) -> None:
         """Fire a notification when a camera flips between online and offline.
 
@@ -3085,14 +3487,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._last_camera_status[cam_id] = new_status
             return
         self._last_camera_status[cam_id] = new_status
-        from .fcm import get_alert_services, build_notify_data
+        from .fcm import build_notify_data, get_alert_services
+
         services = get_alert_services(self, "system")
         cam_info = self.data.get(cam_id, {}).get("info", {})
         cam_name = cam_info.get("title") or cam_id[:8]
         if not services:
             _LOGGER.debug(
                 "Camera status announce skipped for %s (%s→%s): no notify service configured",
-                cam_name, last, new_status,
+                cam_name,
+                last,
+                new_status,
             )
             return
         if new_status == "offline":
@@ -3113,15 +3518,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
                 # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
-                await self.hass.services.async_call(_domain, _service, data, blocking=False)
+                await self.hass.services.async_call(
+                    _domain, _service, data, blocking=False
+                )
                 _LOGGER.info(
                     "Camera status announce sent via notify.%s for %s (%s→%s)",
-                    svc, cam_name, last, new_status,
+                    svc,
+                    cam_name,
+                    last,
+                    new_status,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _LOGGER.warning(
                     "Camera status announce via notify.%s for %s failed: %s",
-                    svc, cam_name, exc,
+                    svc,
+                    cam_name,
+                    exc,
                 )
 
     async def _async_handle_session_quota_hit(self, cam_id: str) -> None:
@@ -3139,7 +3551,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             hits.append(now)
 
             if len(hits) >= self._SESSION_QUOTA_NOTIFY_THRESHOLD:
-                cam_info = self.data.get(cam_id, {}).get("info", {}) if self.data else {}
+                cam_info = (
+                    self.data.get(cam_id, {}).get("info", {}) if self.data else {}
+                )
                 cam_name = cam_info.get("title") or cam_id[:8]
                 notification_id = f"bosch_session_quota_{cam_id[:8].lower()}"
                 title = f"Bosch Kamera {cam_name}: Sitzungslimit erreicht"
@@ -3166,7 +3580,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     len(hits),
                     self._SESSION_QUOTA_WINDOW_S,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _LOGGER.debug("Session-quota notification failed (non-fatal): %s", exc)
 
     async def _async_maybe_announce_cloud_state(self, success: bool) -> None:
@@ -3204,9 +3618,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # We previously announced an outage — announce recovery now.
             self._cloud_outage_notified = False
             self._cloud_outage_started_at = None
-            getattr(self, '_persist_cloud_outage_flag', lambda: None)()
+            getattr(self, "_persist_cloud_outage_flag", lambda: None)()
             if in_maintenance:
-                _LOGGER.debug("Cloud recovered during active maintenance — staying silent")
+                _LOGGER.debug(
+                    "Cloud recovered during active maintenance — staying silent"
+                )
                 return
             await self._async_dispatch_cloud_alert(recovered=True)
             return
@@ -3221,7 +3637,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Outage has persisted long enough → announce, but stay silent during
         # known maintenance.
         self._cloud_outage_notified = True
-        getattr(self, '_persist_cloud_outage_flag', lambda: None)()
+        getattr(self, "_persist_cloud_outage_flag", lambda: None)()
         if in_maintenance:
             _LOGGER.debug("Cloud outage suppressed: known active maintenance window")
             return
@@ -3230,6 +3646,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     async def _async_dispatch_cloud_alert(self, *, recovered: bool) -> None:
         """Send the actual notification through the integration's alert pipeline."""
         from .fcm import build_notify_data, get_alert_services
+
         services = get_alert_services(self, "system")
         if not services:
             _LOGGER.debug(
@@ -3259,18 +3676,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # correctly. Pre-fix: hardcoded "notify" + svc="notify.<svc>"
                 # produced `notify.notify.<svc>` and silently failed.
                 _domain, _service = svc.split(".", 1) if "." in svc else ("notify", svc)
-                await self.hass.services.async_call(_domain, _service, data, blocking=False)
+                await self.hass.services.async_call(
+                    _domain, _service, data, blocking=False
+                )
                 _LOGGER.info(
                     "Cloud-state alert sent via notify.%s (recovered=%s)",
-                    svc, recovered,
+                    svc,
+                    recovered,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _LOGGER.warning(
-                    "Cloud-state alert via notify.%s failed: %s", svc, exc,
+                    "Cloud-state alert via notify.%s failed: %s",
+                    svc,
+                    exc,
                 )
 
     def _compute_status_for(
-        self, cam_id: str, cam_data: dict[str, Any] | None = None,
+        self,
+        cam_id: str,
+        cam_data: dict[str, Any] | None = None,
     ) -> str:
         """Re-uses the BoschCameraStatusSensor logic so the announce path and
         the sensor never drift apart.
@@ -3287,7 +3711,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         raw = str(cam_data.get("status", "UNKNOWN")).lower()
         if raw == "online":
             events = cam_data.get("events", [])
-            if events and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT":
+            if (
+                events
+                and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT"
+            ):
                 return "offline"
         return raw
 
@@ -3301,6 +3728,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         as `unavailable` forever.
         """
         from homeassistant.helpers import device_registry as dr
+
         dev_reg = dr.async_get(self.hass)
         for device in dr.async_entries_for_config_entry(dev_reg, self._entry.entry_id):
             cam_id = next(
@@ -3360,11 +3788,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
              cleanly rather than blocking privacy/snapshot UI forever.
         """
         import time as _time
+
         if cam_id not in self._stream_warming:
             return False
         # Scenario 1: warming flag without _live_connections entry
         if cam_id not in self._live_connections:
-            _LOGGER.debug("Clearing stale stream-warming flag for %s (no live conn)", cam_id[:8])
+            _LOGGER.debug(
+                "Clearing stale stream-warming flag for %s (no live conn)", cam_id[:8]
+            )
             self._stream_warming.discard(cam_id)
             self._stream_warming_started.pop(cam_id, None)
             return False
@@ -3386,7 +3817,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if started and (_time.monotonic() - started) > 180:
             _LOGGER.warning(
                 "Clearing stuck stream-warming flag for %s (warming for %.0fs)",
-                cam_id[:8], _time.monotonic() - started,
+                cam_id[:8],
+                _time.monotonic() - started,
             )
             self._stream_warming.discard(cam_id)
             self._stream_warming_started.pop(cam_id, None)
@@ -3394,7 +3826,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         return True
 
     # ── Live stream ───────────────────────────────────────────────────────────
-    async def try_live_connection(self, cam_id: str, is_renewal: bool = False) -> dict[str, Any] | None:
+    async def try_live_connection(
+        self, cam_id: str, is_renewal: bool = False
+    ) -> dict[str, Any] | None:
         """
         Open a live proxy connection via PUT /v11/video_inputs/{id}/connection.
         Uses "REMOTE" (confirmed working) → cloud proxy, fast (~1.5s).
@@ -3407,12 +3841,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Privacy guard — fail-open if cache not yet populated at boot
         if bool(self._shc_state_cache.get(cam_id, {}).get("privacy_mode")):
             _LOGGER.info(
-                "try_live_connection: privacy mode active for %s — stream blocked", cam_id[:8]
+                "try_live_connection: privacy mode active for %s — stream blocked",
+                cam_id[:8],
             )
             return None
         lock = self._get_stream_lock(cam_id)
         if lock.locked() and not is_renewal:
-            _LOGGER.warning("try_live_connection: already in progress for %s — skipping", cam_id[:8])
+            _LOGGER.warning(
+                "try_live_connection: already in progress for %s — skipping", cam_id[:8]
+            )
             return None
         # Pre-emptive: if go2rtc's `_supported_schemes` is stale (HA Core bug),
         # the post-stream watchdog reload would race against the card's caps
@@ -3424,7 +3861,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         async with lock:
             return await self._try_live_connection_inner(cam_id, is_renewal)
 
-    async def _try_live_connection_inner(self, cam_id: str, is_renewal: bool = False) -> dict[str, Any] | None:
+    async def _try_live_connection_inner(
+        self, cam_id: str, is_renewal: bool = False
+    ) -> dict[str, Any] | None:
         """Inner implementation of try_live_connection (called under lock)."""
         token = self.token
         if not token:
@@ -3440,19 +3879,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # connector_owner=True makes session.close() also close the connector,
         # so the finally block below is leak-free.
         connector = aiohttp.TCPConnector(ssl=False)
-        session   = aiohttp.ClientSession(connector=connector)
+        session = aiohttp.ClientSession(connector=connector)
 
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
         try:
             hq, inst = self.get_quality_params(cam_id)
             opts = get_options(self._entry)
-            conn_type_pref = self._stream_type_override or opts.get("stream_connection_type", "local")
+            conn_type_pref = self._stream_type_override or opts.get(
+                "stream_connection_type", "local"
+            )
             if conn_type_pref == "local":
                 candidates = ["LOCAL"]
             elif conn_type_pref == "auto":
@@ -3475,7 +3916,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         _LOGGER.info(
                             "AUTO mode: %s stream-error counter aged out "
                             "(%.0fs since last error, LAN=%s) — re-attempting LOCAL",
-                            cam_id[:8], time.monotonic() - err_ts,
+                            cam_id[:8],
+                            time.monotonic() - err_ts,
                             "ok" if lan_ok else "unknown",
                         )
                     self._stream_error_count.pop(cam_id, None)
@@ -3487,19 +3929,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if err_count >= cfg.max_stream_errors:
                     _LOGGER.warning(
                         "AUTO mode: %s had %d consecutive LOCAL errors — falling back to REMOTE",
-                        cam_id[:8], err_count,
+                        cam_id[:8],
+                        err_count,
                     )
                     self._stream_fell_back[cam_id] = True
                     candidates = ["REMOTE"]
                 else:
                     # 2. WiFi signal too weak → prefer REMOTE
-                    wifi = self._wifiinfo_cache.get(cam_id, {}).get("signalStrength", 100)
+                    wifi = self._wifiinfo_cache.get(cam_id, {}).get(
+                        "signalStrength", 100
+                    )
                     if isinstance(wifi, (int, float)) and wifi < cfg.min_wifi_for_local:
                         _LOGGER.info(
                             "AUTO mode: %s WiFi %d%% < %d%% threshold — using REMOTE",
-                            cam_id[:8], wifi, cfg.min_wifi_for_local,
+                            cam_id[:8],
+                            wifi,
+                            cfg.min_wifi_for_local,
                         )
-                        candidates = ["REMOTE", "LOCAL"]  # prefer REMOTE but try LOCAL as fallback
+                        candidates = [
+                            "REMOTE",
+                            "LOCAL",
+                        ]  # prefer REMOTE but try LOCAL as fallback
                     else:
                         candidates = ["LOCAL", "REMOTE"]
                     self._stream_fell_back[cam_id] = False
@@ -3522,13 +3972,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         tcp_ok = cached_tcp[0]
                         _LOGGER.debug(
                             "TCP pre-check cache HIT for %s (%s): %s",
-                            cam_id[:8], lan_ip, "reachable" if tcp_ok else "unreachable",
+                            cam_id[:8],
+                            lan_ip,
+                            "reachable" if tcp_ok else "unreachable",
                         )
                     else:
                         tcp_ok = await self._async_local_tcp_ping(cam_id)
                         _LOGGER.debug(
                             "TCP pre-check for %s (%s): %s",
-                            cam_id[:8], lan_ip, "reachable" if tcp_ok else "unreachable",
+                            cam_id[:8],
+                            lan_ip,
+                            "reachable" if tcp_ok else "unreachable",
                         )
                     if not tcp_ok:
                         _LOGGER.info(
@@ -3560,16 +4014,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         body = await resp.text()
                     _LOGGER.debug(
                         "PUT /connection type=%s → HTTP %d (%d bytes)",
-                        type_val, resp.status, len(body),
+                        type_val,
+                        resp.status,
+                        len(body),
                     )
                     if resp.status in (200, 201):
                         import json as _json
+
                         result: dict[str, Any] = _json.loads(body)
                         _LOGGER.info(
                             "Live connection opened! type=%s → %s",
-                            type_val, _redact_creds(result),
+                            type_val,
+                            _redact_creds(result),
                         )
-                        audio_param = "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
+                        audio_param = (
+                            "&enableaudio=1"
+                            if self._audio_enabled.get(cam_id, True)
+                            else ""
+                        )
                         # Extract bufferingTime for FFmpeg tuning (LOCAL=500ms, REMOTE=1000ms)
                         buffering_ms = result.get("bufferingTime", 1000)
                         result["_bufferingTime"] = buffering_ms
@@ -3579,38 +4041,50 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         local_rtsp_url = ""  # guard: set inside `if urls:` below; "" means pre-warm skipped
                         if type_val == "LOCAL" and local_user and local_pass:
                             result["_connection_type"] = "LOCAL"
-                            result["_local_user"]     = local_user
+                            result["_local_user"] = local_user
                             result["_local_password"] = local_pass
                             urls = result.get("urls", [])
-                            img_scheme = result.get("imageUrlScheme", "https://{url}/snap.jpg")
+                            img_scheme = result.get(
+                                "imageUrlScheme", "https://{url}/snap.jpg"
+                            )
                             if urls:
                                 from urllib.parse import quote as _q
+
                                 cam_addr = urls[0]  # "192.168.x.x:443"
                                 # Cache LOCAL creds for cloud-outage fallback paths.
                                 # Stays populated after the live connection is torn down.
                                 try:
                                     _host, _port = cam_addr.split(":")
                                     self._local_creds_cache[cam_id] = {
-                                        "user":     local_user,
+                                        "user": local_user,
                                         "password": local_pass,
-                                        "host":     _host,
-                                        "port":     int(_port),
-                                        "ts":       time.monotonic(),
+                                        "host": _host,
+                                        "port": int(_port),
+                                        "ts": time.monotonic(),
                                     }
                                 except Exception as _e:
-                                    _LOGGER.debug("LOCAL creds cache skip for %s: %s", cam_id[:8], _e)
+                                    _LOGGER.debug(
+                                        "LOCAL creds cache skip for %s: %s",
+                                        cam_id[:8],
+                                        _e,
+                                    )
                                 _snap_url = img_scheme.replace("{url}", cam_addr)
                                 if "JpegSize=" not in _snap_url:
-                                    _snap_url += ("&" if "?" in _snap_url else "?") + "JpegSize=1206"
+                                    _snap_url += (
+                                        "&" if "?" in _snap_url else "?"
+                                    ) + "JpegSize=1206"
                                 result["proxyUrl"] = _snap_url
                                 cam_host, cam_port = cam_addr.split(":")
                                 proxy_port = await self._start_tls_proxy(
-                                    cam_id, cam_host, int(cam_port),
+                                    cam_id,
+                                    cam_host,
+                                    int(cam_port),
                                     is_renewal=is_renewal,
                                 )
                                 eu = _q(local_user, safe="")
                                 ep = _q(local_pass, safe="")
                                 from .models import get_model_config as _gmc
+
                                 _mcfg = _gmc(self._hw_version.get(cam_id, "CAMERA"))
                                 local_rtsp_url = (
                                     f"rtsp://{eu}:{ep}@127.0.0.1:{proxy_port}"
@@ -3625,17 +4099,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             cloud_rtsps_url = None
                             if urls:
                                 proxy_host_path = urls[0]
-                                result["proxyUrl"] = f"https://{proxy_host_path}/snap.jpg?JpegSize=1206"
-                                rtsps_host_path   = proxy_host_path.replace(":42090", ":443")
+                                result["proxyUrl"] = (
+                                    f"https://{proxy_host_path}/snap.jpg?JpegSize=1206"
+                                )
+                                rtsps_host_path = proxy_host_path.replace(
+                                    ":42090", ":443"
+                                )
                                 cloud_rtsps_url = (
                                     f"rtsps://{rtsps_host_path}/rtsp_tunnel"
                                     f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
                                 )
                             elif result.get("hash"):
-                                h  = result["hash"]
-                                ph = result.get("proxyHost", "proxy-01.live.cbs.boschsecurity.com")
+                                h = result["hash"]
+                                ph = result.get(
+                                    "proxyHost", "proxy-01.live.cbs.boschsecurity.com"
+                                )
                                 pp = result.get("proxyPort", 42090)
-                                result["proxyUrl"] = f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
+                                result["proxyUrl"] = (
+                                    f"https://{ph}:{pp}/{h}/snap.jpg?JpegSize=1206"
+                                )
                                 cloud_rtsps_url = (
                                     f"rtsps://{ph}:443/{h}/rtsp_tunnel"
                                     f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration=3600"
@@ -3655,29 +4137,39 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 # blocked, identical to v10.3.24 behavior).
                                 try:
                                     from urllib.parse import urlparse as _up
+
                                     parsed = _up(cloud_rtsps_url)
-                                    pq = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-                                    proxy_port = await self._start_tls_proxy(
-                                        cam_id, parsed.hostname or "", parsed.port or 443,
+                                    pq = parsed.path + (
+                                        f"?{parsed.query}" if parsed.query else ""
                                     )
-                                    local_rtsp_url = f"rtsp://127.0.0.1:{proxy_port}{pq}"
+                                    proxy_port = await self._start_tls_proxy(
+                                        cam_id,
+                                        parsed.hostname or "",
+                                        parsed.port or 443,
+                                    )
+                                    local_rtsp_url = (
+                                        f"rtsp://127.0.0.1:{proxy_port}{pq}"
+                                    )
                                     result["rtspsUrl"] = local_rtsp_url
                                     result["rtspUrl"] = local_rtsp_url
                                     result["_remote_origin_url"] = cloud_rtsps_url
                                     _LOGGER.debug(
                                         "REMOTE TLS proxy %s: %s → %s",
-                                        cam_id[:8], parsed.hostname, local_rtsp_url[:80],
+                                        cam_id[:8],
+                                        parsed.hostname,
+                                        local_rtsp_url[:80],
                                     )
-                                except Exception as err:  # noqa: BLE001
+                                except Exception as err:
                                     _LOGGER.warning(
                                         "REMOTE TLS proxy start failed for %s — falling back "
                                         "to direct rtsps:// (HLS works, WebRTC will cert-fail): %s",
-                                        cam_id[:8], err,
+                                        cam_id[:8],
+                                        err,
                                     )
                                     result["rtspsUrl"] = cloud_rtsps_url
                                     result["rtspUrl"] = cloud_rtsps_url
                         self._live_connections[cam_id] = result
-                        self._live_opened_at[cam_id]   = time.monotonic()
+                        self._live_opened_at[cam_id] = time.monotonic()
 
                         # ── LOCAL encoder warm-up (model-specific) ────────
                         # Camera needs time after PUT /connection before the
@@ -3730,18 +4222,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     # detach instead; HA will GC the worker.
                                     try:
                                         await asyncio.wait_for(stale.stop(), timeout=5)
-                                    except asyncio.TimeoutError:
+                                    except TimeoutError:
                                         _LOGGER.warning(
                                             "%s: stale Stream.stop() for %s timed out — "
                                             "force-detaching",
                                             "Renewal" if is_renewal else "Fresh toggle",
                                             cam_id[:8],
                                         )
-                                    except Exception as _exc:  # noqa: BLE001
+                                    except Exception as _exc:
                                         _LOGGER.debug(
                                             "%s: stale Stream.stop() for %s failed: %s",
                                             "Renewal" if is_renewal else "Fresh toggle",
-                                            cam_id[:8], _exc,
+                                            cam_id[:8],
+                                            _exc,
                                         )
                                     cam_ent.stream = None
                                     _LOGGER.debug(
@@ -3756,13 +4249,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             if proxy_port_val:
                                 _LOGGER.debug(
                                     "LOCAL pre-warm for %s (%s, hw=%s): delay=%ds, retries=%d, wait=%ds, buffer=%ds, min_total=%ds",
-                                    cam_id[:8], cfg.display_name, hw, cfg.pre_warm_delay,
-                                    cfg.pre_warm_retries, cfg.pre_warm_retry_wait,
-                                    cfg.post_warm_buffer, cfg.min_total_wait,
+                                    cam_id[:8],
+                                    cfg.display_name,
+                                    hw,
+                                    cfg.pre_warm_delay,
+                                    cfg.pre_warm_retries,
+                                    cfg.pre_warm_retry_wait,
+                                    cfg.post_warm_buffer,
+                                    cfg.min_total_wait,
                                 )
                                 await asyncio.sleep(cfg.pre_warm_delay)
                                 prewarm_ok = await pre_warm_rtsp(
-                                    proxy_port_val, local_user, local_pass,
+                                    proxy_port_val,
+                                    local_user,
+                                    local_pass,
                                     cam_addr.split(":")[0],
                                     max_attempts=cfg.pre_warm_retries,
                                     retry_wait=cfg.pre_warm_retry_wait,
@@ -3781,7 +4281,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # In "local" mode there's nothing to fall back to,
                             # so keep the LOCAL URL so the user can see the
                             # actual failure mode.
-                            if not prewarm_ok and "REMOTE" in candidates and type_val == "LOCAL":
+                            if (
+                                not prewarm_ok
+                                and "REMOTE" in candidates
+                                and type_val == "LOCAL"
+                            ):
                                 _LOGGER.warning(
                                     "LOCAL pre-warm failed for %s — camera LAN unreachable? "
                                     "Falling back to REMOTE.",
@@ -3814,13 +4318,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 self._stream_warming_started.pop(cam_id, None)
                             # Ensure minimum total time from PUT /connection.
                             # Renewals use 2/3 of this (camera encoder already warm).
-                            min_wait = (cfg.min_total_wait * 2 // 3) if is_renewal else cfg.min_total_wait
+                            min_wait = (
+                                (cfg.min_total_wait * 2 // 3)
+                                if is_renewal
+                                else cfg.min_total_wait
+                            )
                             elapsed = time.monotonic() - put_time
                             remaining = min_wait - elapsed
                             if remaining > 0:
                                 _LOGGER.debug(
                                     "LOCAL %s: waiting %.0fs more (%.0fs elapsed, min %ds)",
-                                    cam_id[:8], remaining, elapsed, cfg.min_total_wait,
+                                    cam_id[:8],
+                                    remaining,
+                                    elapsed,
+                                    cfg.min_total_wait,
                                 )
                                 await asyncio.sleep(remaining)
                             # Set URL — encoder should be ready now
@@ -3835,26 +4346,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # AFTER pre-warm so FFmpeg connects to a ready encoder.
                         cam_entity = self._camera_entities.get(cam_id)
                         if cam_entity is not None and rtsps_url:
-                            if hasattr(cam_entity, 'stream') and cam_entity.stream is not None:
+                            if (
+                                hasattr(cam_entity, "stream")
+                                and cam_entity.stream is not None
+                            ):
                                 try:
                                     cam_entity.stream.update_source(rtsps_url)
                                     _LOGGER.debug(
                                         "Stream.update_source() for %s → %s",
-                                        cam_id[:8], rtsps_url[:60],
+                                        cam_id[:8],
+                                        rtsps_url[:60],
                                     )
-                                except Exception as err:  # noqa: BLE001 — HA stream internals vary by version
+                                except Exception as err:
                                     _LOGGER.debug(
                                         "Stream.update_source() failed for %s — forcing stream rebuild: %s",
-                                        cam_id[:8], err,
+                                        cam_id[:8],
+                                        err,
                                     )
                                     cam_entity.stream = None
                             else:
                                 cam_entity.stream = None
 
                         # ── Register with go2rtc (AFTER pre-warm) ────────
-                        go2rtc_ok = False
                         if rtsps_url:
-                            go2rtc_ok = await self._register_go2rtc_stream(cam_id, rtsps_url)
+                            await self._register_go2rtc_stream(cam_id, rtsps_url)
                             # Synchronously push provider discovery on the cam
                             # entity NOW so `frontend_stream_types` includes
                             # WEB_RTC by the time the next state-write fires.
@@ -3871,10 +4386,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             if cam_ent is not None:
                                 try:
                                     await cam_ent.async_refresh_providers()
-                                except Exception as err:  # noqa: BLE001
+                                except Exception as err:
                                     _LOGGER.debug(
                                         "post-register refresh_providers failed for %s: %s",
-                                        cam_id[:8], err,
+                                        cam_id[:8],
+                                        err,
                                     )
                             # NOTE: An earlier patch (2026-05-27) auto-stopped
                             # HA's FFmpeg Stream after a successful go2rtc
@@ -3920,7 +4436,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # the new rtsps_url or the renewed stream breaks. 2026-05-29.
                         if not is_renewal:
                             self.hass.async_create_task(self.async_request_refresh())
-                        self.hass.async_create_task(self._check_and_recover_webrtc(cam_id))
+                        self.hass.async_create_task(
+                            self._check_and_recover_webrtc(cam_id)
+                        )
                         # Opportunistic RCP+ state pull: refresh privacy + LED-dimmer
                         # via lokales / Cloud-Proxy RCP+ on the freshly opened session.
                         # No-op silently on failure; fallback paths (SHC + cloud
@@ -3952,23 +4470,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     else:
                         _LOGGER.warning(
                             "try_live_connection: HTTP %d for type=%s: %s",
-                            resp.status, type_val, body[:200],
+                            resp.status,
+                            type_val,
+                            body[:200],
                         )
-                except asyncio.TimeoutError:
-                    _LOGGER.warning("try_live_connection: timeout for type=%s", type_val)
+                except TimeoutError:
+                    _LOGGER.warning(
+                        "try_live_connection: timeout for type=%s", type_val
+                    )
                 except aiohttp.ClientError as err:
-                    _LOGGER.warning("try_live_connection: connection error for type=%s: %s", type_val, err)
+                    _LOGGER.warning(
+                        "try_live_connection: connection error for type=%s: %s",
+                        type_val,
+                        err,
+                    )
         finally:
             await session.close()
 
-        _LOGGER.warning("Could not open live connection for %s — all types failed", cam_id)
+        _LOGGER.warning(
+            "Could not open live connection for %s — all types failed", cam_id
+        )
         return None
 
     async def _run_smb_cleanup_bg(self) -> None:
         """Run the SMB retention cleanup in the background without blocking the coordinator tick."""
         try:
             await self.hass.async_add_executor_job(sync_smb_cleanup, self)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("SMB cleanup background task error: %s", err)
 
     # ── Mini-NVR plumbing (delegate to recorder.py) ──────────────────────────
@@ -4006,7 +4534,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """Run NVR retention purge in an executor thread (called once per day)."""
         try:
             await self.hass.async_add_executor_job(nvr_recorder.sync_nvr_cleanup, self)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("NVR cleanup background task error: %s", err)
 
     async def _restart_recorder_if_active(self, cam_id: str) -> None:
@@ -4071,10 +4599,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(connector=connector) as session:
-            headers   = {
+            headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type":  "application/json",
-                "Accept":        "application/json",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
             }
             conn_url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
@@ -4087,7 +4615,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     if now < expires_at:
                         _LOGGER.debug(
                             "fetch_live_snapshot: proxy cache HIT for %s (%.0fs remaining)",
-                            cam_id, expires_at - now,
+                            cam_id,
+                            expires_at - now,
                         )
                         return url_entry
                     del self._proxy_url_cache[cam_id]
@@ -4096,13 +4625,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                     async with session.put(
                         conn_url,
-                        json={"type": "REMOTE", "highQualityVideo": self.get_quality_params(cam_id)[0]},
+                        json={
+                            "type": "REMOTE",
+                            "highQualityVideo": self.get_quality_params(cam_id)[0],
+                        },
                         headers=headers,
                     ) as resp:
                         if resp.status not in (200, 201):
                             _LOGGER.debug(
                                 "fetch_live_snapshot: PUT /connection → HTTP %d for %s",
-                                resp.status, cam_id,
+                                resp.status,
+                                cam_id,
                             )
                             return None
                         result = _json.loads(await resp.text())
@@ -4132,29 +4665,36 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # don't auto-populate dicts. Without the fallback every snapshot
                 # test (~14 cases across test_init_round7, test_init_sprint_*)
                 # raises AttributeError before reaching the gate logic.
-                hw_gen2 = getattr(self, "_hw_version", {}).get(cam_id, "") in ("HOME_Eyes_Indoor", "HOME_Eyes_Outdoor")
+                hw_gen2 = getattr(self, "_hw_version", {}).get(cam_id, "") in (
+                    "HOME_Eyes_Indoor",
+                    "HOME_Eyes_Outdoor",
+                )
                 parts = url_entry.split("/", 1)
                 if len(parts) == 2 and not hw_gen2:
                     proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                     rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
                     try:
-                        session_id = await self._get_cached_rcp_session(proxy_host_rcp, proxy_hash_rcp)
+                        session_id = await self._get_cached_rcp_session(
+                            proxy_host_rcp, proxy_hash_rcp
+                        )
                         if session_id:
                             raw = await self._rcp_read(rcp_base, "0x099e", session_id)
                             if raw and raw[:2] == b"\xff\xd8":
                                 _LOGGER.debug(
                                     "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
-                                    len(raw), cam_id,
+                                    len(raw),
+                                    cam_id,
                                 )
                                 return raw
                             _LOGGER.debug(
                                 "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
                                 cam_id,
                             )
-                    except Exception as _rcp_err:  # noqa: BLE001
+                    except Exception as _rcp_err:
                         _LOGGER.debug(
                             "fetch_live_snapshot: RCP error for %s: %s — using snap.jpg",
-                            cam_id, _rcp_err,
+                            cam_id,
+                            _rcp_err,
                         )
 
                 proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
@@ -4189,7 +4729,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # app, not yet reflected via cloud poll) and emit a WARNING.
                             if not data:
                                 cam_raw = self.data.get(cam_id, {})
-                                ha_privacy_on = str(cam_raw.get("privacyMode", "")).upper() == "ON"
+                                ha_privacy_on = (
+                                    str(cam_raw.get("privacyMode", "")).upper() == "ON"
+                                )
                                 if ha_privacy_on:
                                     _LOGGER.debug(
                                         "fetch_live_snapshot: %s → empty response (privacy mode ON, HA agrees)",
@@ -4209,11 +4751,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             return data
                         _LOGGER.debug(
                             "fetch_live_snapshot: snap.jpg → HTTP %d for %s",
-                            snap_resp.status, cam_id,
+                            snap_resp.status,
+                            cam_id,
                         )
                         return None
 
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            except (TimeoutError, aiohttp.ClientError) as err:
                 _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
                 return None
 
@@ -4255,8 +4798,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     return data
 
             from homeassistant.helpers.aiohttp_client import async_get_clientsession
-            session  = async_get_clientsession(self.hass, verify_ssl=False)
-            headers  = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+            session = async_get_clientsession(self.hass, verify_ssl=False)
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
             events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
 
             try:
@@ -4265,10 +4809,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         if resp.status != 200:
                             _LOGGER.debug(
                                 "fetch_fresh_event_snapshot: events HTTP %d for %s",
-                                resp.status, cam_id,
+                                resp.status,
+                                cam_id,
                             )
                             return None
                         import json as _json
+
                         events = _json.loads(await resp.text())
 
                 if not events:
@@ -4285,23 +4831,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         continue
                     try:
                         async with asyncio.timeout(20):
-                            async with session.get(img_url, headers=img_headers) as snap_resp:
+                            async with session.get(
+                                img_url, headers=img_headers
+                            ) as snap_resp:
                                 if snap_resp.status == 200:
                                     evdata: bytes = await snap_resp.read()
                                     if evdata:
                                         _LOGGER.debug(
                                             "fetch_fresh_event_snapshot: %s → %d bytes @ %s",
-                                            cam_id, len(evdata), ev.get("timestamp", "")[:19],
+                                            cam_id,
+                                            len(evdata),
+                                            ev.get("timestamp", "")[:19],
                                         )
                                         self._fresh_snap_cache[cam_id] = (
-                                            evdata, time.monotonic() + _FRESH_SNAP_TTL
+                                            evdata,
+                                            time.monotonic() + _FRESH_SNAP_TTL,
                                         )
                                         return evdata
-                    except (asyncio.TimeoutError, aiohttp.ClientError):
+                    except (TimeoutError, aiohttp.ClientError):
                         continue
 
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug("fetch_fresh_event_snapshot error for %s: %s", cam_id, err)
+            except (TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.debug(
+                    "fetch_fresh_event_snapshot error for %s: %s", cam_id, err
+                )
 
             return None
 
@@ -4324,10 +4877,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return None
 
         connector = aiohttp.TCPConnector(ssl=False)
-        headers   = {
+        headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type":  "application/json",
-            "Accept":        "application/json",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
 
@@ -4336,57 +4889,81 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with asyncio.timeout(15):
                     async with session.put(
-                        url, json={"type": "LOCAL", "highQualityVideo": self.get_quality_params(cam_id)[0]}, headers=headers
+                        url,
+                        json={
+                            "type": "LOCAL",
+                            "highQualityVideo": self.get_quality_params(cam_id)[0],
+                        },
+                        headers=headers,
                     ) as resp:
                         if resp.status not in (200, 201):
                             _LOGGER.debug(
                                 "fetch_live_snapshot_local: PUT LOCAL → HTTP %d for %s",
-                                resp.status, cam_id,
+                                resp.status,
+                                cam_id,
                             )
                             return None
                         import json as _json
+
                         result = _json.loads(await resp.text())
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.debug("fetch_live_snapshot_local: PUT error for %s: %s", cam_id, err)
+        except (TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.debug(
+                "fetch_live_snapshot_local: PUT error for %s: %s", cam_id, err
+            )
             return None
 
-        user     = result.get("user")
+        user = result.get("user")
         password = result.get("password")
-        urls     = result.get("urls", [])
+        urls = result.get("urls", [])
         if not user or not password or not urls:
             _LOGGER.debug(
                 "fetch_live_snapshot_local: missing credentials/urls for %s "
                 "(has_user=%s, has_password=%s, urls=%d)",
-                cam_id, bool(user), bool(password), len(urls),
+                cam_id,
+                bool(user),
+                bool(password),
+                len(urls),
             )
             return None
 
         camera_host = urls[0]  # e.g. "192.168.x.x:443"
-        snap_url    = f"https://{camera_host}/snap.jpg?JpegSize=1206"
+        snap_url = f"https://{camera_host}/snap.jpg?JpegSize=1206"
 
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
         session = async_get_clientsession(self.hass, verify_ssl=False)
         try:
             async with asyncio.timeout(12):
                 async with await async_digest_request(
-                    session, "GET", snap_url, user, password,
-                    timeout=10.0, ssl=False,
+                    session,
+                    "GET",
+                    snap_url,
+                    user,
+                    password,
+                    timeout=10.0,
+                    ssl=False,
                 ) as resp:
-                    if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
+                    if resp.status == 200 and "image" in resp.headers.get(
+                        "Content-Type", ""
+                    ):
                         content: bytes = await resp.read()
                         _LOGGER.debug(
                             "fetch_live_snapshot_local: %s → %d bytes via Digest",
-                            cam_id, len(content),
+                            cam_id,
+                            len(content),
                         )
                         return content
                     _LOGGER.debug(
                         "fetch_live_snapshot_local: Digest snap.jpg → HTTP %d for %s",
-                        resp.status, cam_id,
+                        resp.status,
+                        cam_id,
                     )
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
             # ValueError: malformed/missing WWW-Authenticate (cam Digest state
             # may be half-rotated during FCM flap). Forum 998974/15 (Andrew75).
-            _LOGGER.debug("fetch_live_snapshot_local: aiohttp error for %s: %s", cam_id, err)
+            _LOGGER.debug(
+                "fetch_live_snapshot_local: aiohttp error for %s: %s", cam_id, err
+            )
         return None
 
     # ── Local / Cloud-Proxy RCP+ READ helpers ────────────────────────────────
@@ -4413,6 +4990,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 return None
             host = urls[0]  # "192.168.x.x:443"
             from .local_rcp import rcp_read_local_sync
+
             return await self.hass.async_add_executor_job(
                 rcp_read_local_sync, host, user, pwd, command, type_
             )
@@ -4423,6 +5001,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # Cloud-Proxy URL form: "proxy-XX.live.cbs.boschsecurity.com:42090/{hash}"
             proxy_with_hash = urls[0]
             from .local_rcp import rcp_read_remote_sync
+
             return await self.hass.async_add_executor_job(
                 rcp_read_remote_sync, proxy_with_hash, command, type_
             )
@@ -4485,13 +5064,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if cam_entity is None:
             return
         from homeassistant.components.camera import CameraEntityFeature, StreamType
+
         if CameraEntityFeature.STREAM not in cam_entity.supported_features:
             return  # stream_source not yet ready, nothing to check
         try:
             caps = cam_entity.camera_capabilities
             if StreamType.WEB_RTC in caps.frontend_stream_types:
                 return  # all good
-        except Exception as err:  # noqa: BLE001 — defensive
+        except Exception as err:
             _LOGGER.debug("webrtc-watchdog: capabilities probe failed: %s", err)
             return
         # First-line recovery: direct-refresh `_supported_schemes` on the
@@ -4500,9 +5080,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # usually does the job (the schemes are already populated, the cams
         # just need to re-query the providers).
         try:
-            self._last_schemes_refresh = float('-inf')  # force next _ensure_go2rtc_schemes_fresh past the 600s throttle
+            self._last_schemes_refresh = float(
+                "-inf"
+            )  # force next _ensure_go2rtc_schemes_fresh past the 600s throttle
             await self._ensure_go2rtc_schemes_fresh()
-            cam_entity._invalidate_camera_capabilities_cache()  # noqa: SLF001
+            cam_entity._invalidate_camera_capabilities_cache()
             caps2 = cam_entity.camera_capabilities
             if StreamType.WEB_RTC in caps2.frontend_stream_types:
                 _LOGGER.info(
@@ -4510,16 +5092,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     cam_id[:8],
                 )
                 return
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("webrtc-watchdog: direct refresh failed: %s", err)
         now = time.monotonic()
         if not hasattr(self, "_last_go2rtc_reload"):
-            self._last_go2rtc_reload = float('-inf')
+            self._last_go2rtc_reload = float("-inf")
         if now - self._last_go2rtc_reload < 3600:
             return  # already reloaded recently — don't spam
         from homeassistant.config_entries import ConfigEntryState
+
         go2rtc_entries = [
-            e for e in self.hass.config_entries.async_entries("go2rtc")
+            e
+            for e in self.hass.config_entries.async_entries("go2rtc")
             if e.state == ConfigEntryState.LOADED
         ]
         if not go2rtc_entries:
@@ -4531,11 +5115,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "webrtc-watchdog: WebRTC capability missing for %s while stream is active — "
                 "reloading bundled go2rtc entry %s to refresh stale _supported_schemes "
                 "(HA Core bug; reload runs WebRTCProvider.initialize() again)",
-                cam_id[:8], entry.entry_id,
+                cam_id[:8],
+                entry.entry_id,
             )
             try:
                 await self.hass.config_entries.async_reload(entry.entry_id)
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.warning("webrtc-watchdog: go2rtc reload failed: %s", err)
         # After reload, the cam entity's `_webrtc_provider` is still None — HA
         # only auto-refreshes on `supported_features & STREAM` flips, but our
@@ -4551,10 +5136,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             try:
                 if CameraEntityFeature.STREAM in cam_ent.supported_features:
                     await cam_ent.async_refresh_providers()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.debug(
                     "webrtc-watchdog: async_refresh_providers failed for %s: %s",
-                    getattr(cam_ent, "entity_id", "?"), err,
+                    getattr(cam_ent, "entity_id", "?"),
+                    err,
                 )
 
     async def _ensure_go2rtc_schemes_fresh(self) -> None:
@@ -4573,7 +5159,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         current scheme list now that go2rtc is ready.
         """
         if not hasattr(self, "_last_schemes_refresh"):
-            self._last_schemes_refresh = float('-inf')
+            self._last_schemes_refresh = float("-inf")
         now = time.monotonic()
         if now - self._last_schemes_refresh < 600:
             return
@@ -4587,19 +5173,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._last_schemes_refresh = now
         refreshed = False
         for provider in providers:
-            if not hasattr(provider, "_rest_client") or not hasattr(provider, "_supported_schemes"):
+            if not hasattr(provider, "_rest_client") or not hasattr(
+                provider, "_supported_schemes"
+            ):
                 continue  # not the bundled go2rtc provider
             try:
-                fresh = await provider._rest_client.schemes.list()  # noqa: SLF001
+                fresh = await provider._rest_client.schemes.list()
                 if fresh:
-                    old_count = len(provider._supported_schemes)  # noqa: SLF001
-                    provider._supported_schemes = fresh  # noqa: SLF001
+                    old_count = len(provider._supported_schemes)
+                    provider._supported_schemes = fresh
                     refreshed = True
                     _LOGGER.info(
                         "webrtc-watchdog: refreshed go2rtc provider _supported_schemes "
-                        "(was %d schemes, now %d)", old_count, len(fresh),
+                        "(was %d schemes, now %d)",
+                        old_count,
+                        len(fresh),
                     )
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.debug("webrtc-watchdog: scheme-refresh failed: %s", err)
         # Push the now-fresh provider to every camera entity that has STREAM
         # in supported_features. Without this, cams that ran async_refresh_providers
@@ -4609,6 +5199,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # `supported_features & STREAM` flips, but our streams may already be up.
         if refreshed:
             from homeassistant.components.camera import CameraEntityFeature
+
             for cam_id_x, cam_ent in list(self._camera_entities.items()):
                 # Only touch cameras that already have an active session.
                 # HA Core's `async_refresh_providers` calls `stream_source()`
@@ -4627,10 +5218,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             "webrtc-watchdog: refreshed providers on %s",
                             getattr(cam_ent, "entity_id", "?"),
                         )
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     _LOGGER.debug(
                         "webrtc-watchdog: cam refresh-providers failed for %s: %s",
-                        getattr(cam_ent, "entity_id", "?"), err,
+                        getattr(cam_ent, "entity_id", "?"),
+                        err,
                     )
 
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> bool:
@@ -4671,7 +5263,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Default behavior since v10.3.23 (was Beta-gated v10.3.21–v10.3.22).
         # See: https://github.com/AlexxIT/go2rtc/blob/master/internal/rtsp/README.md
         if go2rtc_src.startswith("rtsps://"):
-            go2rtc_src = "rtspx://" + go2rtc_src[len("rtsps://"):]
+            go2rtc_src = "rtspx://" + go2rtc_src[len("rtsps://") :]
 
         # Try multiple go2rtc API endpoints
         endpoints = [
@@ -4691,9 +5283,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         try:
                             connector = aiohttp.UnixConnector(path=sock_path)
                         except (OSError, RuntimeError) as err:
-                            _LOGGER.debug("go2rtc Unix socket connector unavailable: %s", err)
+                            _LOGGER.debug(
+                                "go2rtc Unix socket connector unavailable: %s", err
+                            )
                     async with aiohttp.ClientSession(connector=connector) as s:
-                        put_url = url if not connector else "http://localhost/api/streams"
+                        put_url = (
+                            url if not connector else "http://localhost/api/streams"
+                        )
                         resp = await s.put(
                             put_url,
                             params={"src": go2rtc_src, "name": stream_name},
@@ -4720,7 +5316,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 async with s.get(check_url) as check_resp:
                                     if check_resp.status == 200:
                                         verified = True
-                            except (asyncio.TimeoutError, aiohttp.ClientError):
+                            except (TimeoutError, aiohttp.ClientError):
                                 pass
                             if verified:
                                 _LOGGER.info(
@@ -4728,25 +5324,32 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     stream_name,
                                     "unix socket" if connector else url,
                                     resp.status,
-                                    ", yaml-persist warn ignored" if is_yaml_persist_warning else "",
+                                    ", yaml-persist warn ignored"
+                                    if is_yaml_persist_warning
+                                    else "",
                                 )
                                 return True  # verified-registered success
                             _LOGGER.debug(
                                 "go2rtc PUT returned %d via %s but verify GET missed '%s' — trying next endpoint",
-                                resp.status, "unix socket" if connector else url, stream_name,
+                                resp.status,
+                                "unix socket" if connector else url,
+                                stream_name,
                             )
                             continue
                         _LOGGER.debug(
                             "go2rtc stream '%s' → HTTP %d via %s (body: %s)",
-                            stream_name, resp.status,
+                            stream_name,
+                            resp.status,
                             "unix socket" if connector else url,
                             body[:80],
                         )
                         continue
-            except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
+            except (TimeoutError, aiohttp.ClientError, OSError):
                 continue
 
-        _LOGGER.debug("go2rtc API not reachable on any endpoint — using TLS proxy + HLS")
+        _LOGGER.debug(
+            "go2rtc API not reachable on any endpoint — using TLS proxy + HLS"
+        )
         return False
 
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
@@ -4772,16 +5375,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 async with asyncio.timeout(3):
                     async with aiohttp.ClientSession() as s:
                         await s.delete(url, params={"name": stream_name})
-                        _LOGGER.debug("go2rtc stream '%s' removed via %s", stream_name, url)
+                        _LOGGER.debug(
+                            "go2rtc stream '%s' removed via %s", stream_name, url
+                        )
                         break  # stop after first success
-            except (asyncio.TimeoutError, aiohttp.ClientError):
+            except (TimeoutError, aiohttp.ClientError):
                 pass  # go2rtc may not be running on this port — try next
 
-    async def _start_tls_proxy(self, cam_id: str, cam_host: str, cam_port: int, is_renewal: bool = False) -> int:
+    async def _start_tls_proxy(
+        self, cam_id: str, cam_host: str, cam_port: int, is_renewal: bool = False
+    ) -> int:
         """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
         # Lazy-init SSL context in executor (blocking I/O, must not run in event loop)
         if self._tls_ssl_ctx is None:
-            self._tls_ssl_ctx = await self.hass.async_add_executor_job(self._create_ssl_ctx)
+            self._tls_ssl_ctx = await self.hass.async_add_executor_job(
+                self._create_ssl_ctx
+            )
         ssl_ctx: ssl.SSLContext = self._tls_ssl_ctx
 
         # Hop from the proxy daemon thread back to the HA event loop and
@@ -4791,15 +5400,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         def _died_callback() -> None:
             try:
                 self.hass.loop.call_soon_threadsafe(
-                    lambda: self.hass.async_create_task(
-                        self._on_tls_proxy_died(cam_id)
-                    )
+                    lambda: self.hass.async_create_task(self._on_tls_proxy_died(cam_id))
                 )
             except RuntimeError:
                 pass  # event loop closed (HA shutting down)
 
         return start_tls_proxy(
-            ssl_ctx, cam_id, cam_host, cam_port, self._tls_proxy_ports,
+            ssl_ctx,
+            cam_id,
+            cam_host,
+            cam_port,
+            self._tls_proxy_ports,
             is_renewal=is_renewal,
             on_proxy_died=_died_callback,
         )
@@ -4819,11 +5430,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         _PRE_WAIT = 5.0  # give the camera a moment to actually recover
 
         now = time.monotonic()
-        last = self._tls_proxy_rebuild_last.get(cam_id, float('-inf'))
+        last = self._tls_proxy_rebuild_last.get(cam_id, float("-inf"))
         if (now - last) < _TLS_PROXY_REBUILD_MIN_INTERVAL:
             _LOGGER.debug(
                 "TLS proxy rebuild for %s skipped — last rebuild %.0fs ago (< %.0fs)",
-                cam_id[:8], now - last, _TLS_PROXY_REBUILD_MIN_INTERVAL,
+                cam_id[:8],
+                now - last,
+                _TLS_PROXY_REBUILD_MIN_INTERVAL,
             )
             return
         self._tls_proxy_rebuild_last[cam_id] = now
@@ -4843,7 +5456,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             _LOGGER.debug(
                 "TLS proxy rebuild for %s skipped — active connection is %s, "
                 "not LOCAL (another recovery flow owns it)",
-                cam_id[:8], live.get("_connection_type"),
+                cam_id[:8],
+                live.get("_connection_type"),
             )
             return
 
@@ -4865,17 +5479,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if result:
                 _LOGGER.info(
                     "TLS proxy rebuild for %s succeeded (%s)",
-                    cam_id[:8], result.get("_connection_type", "?"),
+                    cam_id[:8],
+                    result.get("_connection_type", "?"),
                 )
             else:
                 _LOGGER.warning(
                     "TLS proxy rebuild for %s returned no result — next "
-                    "heartbeat/renewal will retry", cam_id[:8],
+                    "heartbeat/renewal will retry",
+                    cam_id[:8],
                 )
         except Exception as exc:
             _LOGGER.warning(
                 "TLS proxy rebuild for %s failed: %s — next heartbeat/renewal will retry",
-                cam_id[:8], exc,
+                cam_id[:8],
+                exc,
             )
 
     @staticmethod
@@ -4913,137 +5530,180 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         renewal_interval = cfg.renewal_interval
         _LOGGER.debug(
             "Session keepalive started for %s (gen=%d, heartbeat=%ds, renewal=%ds)",
-            cam_id[:8], generation, heartbeat_interval, renewal_interval,
+            cam_id[:8],
+            generation,
+            heartbeat_interval,
+            renewal_interval,
         )
         consecutive_fails = 0
         renewal_fails = 0  # consecutive full-renewal failures (for session_stale)
         session_start = time.monotonic()
         try:
-          while True:
-            await asyncio.sleep(heartbeat_interval)
-            # Stop if a newer generation was started (OFF→ON cycle)
-            if self._auto_renew_generation.get(cam_id, 0) != generation:
-                _LOGGER.debug("Keepalive: stale gen=%d for %s — stopping", generation, cam_id[:8])
-                break
-            # Stop if stream was turned off
-            if cam_id not in self._live_connections:
-                _LOGGER.debug("Keepalive: stream off for %s — stopping", cam_id[:8])
-                break
-            live = self._live_connections.get(cam_id, {})
-            if live.get("_connection_type") != "LOCAL":
-                _LOGGER.debug("Keepalive: not LOCAL for %s — stopping", cam_id[:8])
-                break
-
-            elapsed = time.monotonic() - session_start
-
-            # ── Full session renewal (proactive, time-based) ─────────
-            if elapsed >= renewal_interval:
-                _LOGGER.info(
-                    "Session renewal for %s after %.0fs (interval=%ds)",
-                    cam_id[:8], elapsed, renewal_interval,
-                )
-                try:
-                    result = await self.try_live_connection(cam_id, is_renewal=True)
-                    if result:
-                        _LOGGER.info("Session renewed for %s", cam_id[:8])
-                        renewal_fails = 0
-                        if self._session_stale.get(cam_id):
-                            self._session_stale[cam_id] = False
-                            _LOGGER.info("Session recovered for %s — stale flag cleared", cam_id[:8])
-                    else:
-                        renewal_fails += 1
-                        _LOGGER.warning("Session renewal failed for %s — retrying next cycle", cam_id[:8])
-                        session_start = time.monotonic()  # reset to avoid spamming
-                except Exception as exc:
-                    renewal_fails += 1
-                    _LOGGER.warning("Session renewal error for %s: %s", cam_id[:8], exc)
-                    session_start = time.monotonic()
-                # Mark session stale after 3 consecutive renewal failures so
-                # entities can surface "unavailable" instead of silently
-                # showing a frozen picture.
-                if renewal_fails >= 3 and not self._session_stale.get(cam_id):
-                    self._session_stale[cam_id] = True
-                    _LOGGER.warning(
-                        "Session renewal persistently failing for %s (%d consecutive)",
-                        cam_id[:8], renewal_fails,
+            while True:
+                await asyncio.sleep(heartbeat_interval)
+                # Stop if a newer generation was started (OFF→ON cycle)
+                if self._auto_renew_generation.get(cam_id, 0) != generation:
+                    _LOGGER.debug(
+                        "Keepalive: stale gen=%d for %s — stopping",
+                        generation,
+                        cam_id[:8],
                     )
-                # try_live_connection creates a NEW heartbeat task with new generation,
-                # so this loop will exit at the stale-gen check above.
-                continue
+                    break
+                # Stop if stream was turned off
+                if cam_id not in self._live_connections:
+                    _LOGGER.debug("Keepalive: stream off for %s — stopping", cam_id[:8])
+                    break
+                live = self._live_connections.get(cam_id, {})
+                if live.get("_connection_type") != "LOCAL":
+                    _LOGGER.debug("Keepalive: not LOCAL for %s — stopping", cam_id[:8])
+                    break
 
-            # ── Lightweight cloud heartbeat ───────────────────────────
-            # Bosch rotates the per-session digest creds on EVERY successful
-            # PUT /connection LOCAL (verified across all captures, see
-            # captures/api-findings.md §1). The original creds remain valid
-            # for the active RTSP connection as long as FFmpeg keeps the
-            # session alive — but a reconnect after RTSP idle (HLS consumer
-            # disconnect) gets HTTP 401 because the ~14-min-old creds were
-            # rotated out long ago by 28+ subsequent heartbeats.
-            #
-            # We parse the response, cache the new creds in the live-session
-            # state, rebuild the rtspsUrl with fresh creds, and call
-            # Stream.update_source(). HA's stream component changes the
-            # source for the next worker restart only — the running worker
-            # is not disturbed, so there is no glitch in the live view. When
-            # the worker eventually restarts (idle reconnect, crash) it
-            # picks up the fresh URL automatically and avoids the 401.
-            try:
-                token = self.token
-                if not token:
-                    continue
-                async with aiohttp.ClientSession(
-                    connector=aiohttp.TCPConnector(ssl=False),
-                    connector_owner=True,
-                ) as session:
-                    url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
-                    async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
-                        async with session.put(
-                            url,
-                            json={"type": "LOCAL", "highQualityVideo": True},
-                            headers={
-                                "Authorization": f"Bearer {token}",
-                                "Content-Type": "application/json",
-                            },
-                        ) as resp:
-                            resp_text = await resp.text() if resp.status in (200, 201) else ""
-                            if resp.status in (200, 201):
-                                consecutive_fails = 0
-                                self._refresh_local_creds_from_heartbeat(
-                                    cam_id, resp_text, generation, elapsed,
-                                )
-                            else:
-                                consecutive_fails += 1
-                                _LOGGER.warning(
-                                    "Heartbeat HTTP %d for %s (fail %d)",
-                                    resp.status, cam_id[:8], consecutive_fails,
-                                )
-            except Exception as exc:
-                consecutive_fails += 1
-                _LOGGER.warning("Heartbeat error for %s: %s (fail %d)", cam_id[:8], exc, consecutive_fails)
+                elapsed = time.monotonic() - session_start
 
-            # After 3 consecutive heartbeat failures, force immediate renewal
-            if consecutive_fails >= 3:
-                _LOGGER.warning(
-                    "Heartbeat: %d consecutive failures for %s — forcing renewal",
-                    consecutive_fails, cam_id[:8],
-                )
-                consecutive_fails = 0
-                try:
-                    result = await self.try_live_connection(cam_id, is_renewal=True)
-                    if result:
-                        _LOGGER.info("Heartbeat: session renewed for %s", cam_id[:8])
-                        renewal_fails = 0  # prevent stale flag misfiring after heartbeat rescue
-                    else:
-                        _LOGGER.warning("Heartbeat: renewal failed for %s", cam_id[:8])
+                # ── Full session renewal (proactive, time-based) ─────────
+                if elapsed >= renewal_interval:
+                    _LOGGER.info(
+                        "Session renewal for %s after %.0fs (interval=%ds)",
+                        cam_id[:8],
+                        elapsed,
+                        renewal_interval,
+                    )
+                    try:
+                        result = await self.try_live_connection(cam_id, is_renewal=True)
+                        if result:
+                            _LOGGER.info("Session renewed for %s", cam_id[:8])
+                            renewal_fails = 0
+                            if self._session_stale.get(cam_id):
+                                self._session_stale[cam_id] = False
+                                _LOGGER.info(
+                                    "Session recovered for %s — stale flag cleared",
+                                    cam_id[:8],
+                                )
+                        else:
+                            renewal_fails += 1
+                            _LOGGER.warning(
+                                "Session renewal failed for %s — retrying next cycle",
+                                cam_id[:8],
+                            )
+                            session_start = time.monotonic()  # reset to avoid spamming
+                    except Exception as exc:
+                        renewal_fails += 1
+                        _LOGGER.warning(
+                            "Session renewal error for %s: %s", cam_id[:8], exc
+                        )
                         session_start = time.monotonic()
+                    # Mark session stale after 3 consecutive renewal failures so
+                    # entities can surface "unavailable" instead of silently
+                    # showing a frozen picture.
+                    if renewal_fails >= 3 and not self._session_stale.get(cam_id):
+                        self._session_stale[cam_id] = True
+                        _LOGGER.warning(
+                            "Session renewal persistently failing for %s (%d consecutive)",
+                            cam_id[:8],
+                            renewal_fails,
+                        )
+                    # try_live_connection creates a NEW heartbeat task with new generation,
+                    # so this loop will exit at the stale-gen check above.
+                    continue
+
+                # ── Lightweight cloud heartbeat ───────────────────────────
+                # Bosch rotates the per-session digest creds on EVERY successful
+                # PUT /connection LOCAL (verified across all captures, see
+                # captures/api-findings.md §1). The original creds remain valid
+                # for the active RTSP connection as long as FFmpeg keeps the
+                # session alive — but a reconnect after RTSP idle (HLS consumer
+                # disconnect) gets HTTP 401 because the ~14-min-old creds were
+                # rotated out long ago by 28+ subsequent heartbeats.
+                #
+                # We parse the response, cache the new creds in the live-session
+                # state, rebuild the rtspsUrl with fresh creds, and call
+                # Stream.update_source(). HA's stream component changes the
+                # source for the next worker restart only — the running worker
+                # is not disturbed, so there is no glitch in the live view. When
+                # the worker eventually restarts (idle reconnect, crash) it
+                # picks up the fresh URL automatically and avoids the 401.
+                try:
+                    token = self.token
+                    if not token:
+                        continue
+                    async with aiohttp.ClientSession(
+                        connector=aiohttp.TCPConnector(ssl=False),
+                        connector_owner=True,
+                    ) as session:
+                        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
+                        async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
+                            async with session.put(
+                                url,
+                                json={"type": "LOCAL", "highQualityVideo": True},
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json",
+                                },
+                            ) as resp:
+                                resp_text = (
+                                    await resp.text()
+                                    if resp.status in (200, 201)
+                                    else ""
+                                )
+                                if resp.status in (200, 201):
+                                    consecutive_fails = 0
+                                    self._refresh_local_creds_from_heartbeat(
+                                        cam_id,
+                                        resp_text,
+                                        generation,
+                                        elapsed,
+                                    )
+                                else:
+                                    consecutive_fails += 1
+                                    _LOGGER.warning(
+                                        "Heartbeat HTTP %d for %s (fail %d)",
+                                        resp.status,
+                                        cam_id[:8],
+                                        consecutive_fails,
+                                    )
                 except Exception as exc:
-                    _LOGGER.warning("Heartbeat: renewal error for %s: %s", cam_id[:8], exc)
-                    session_start = time.monotonic()
+                    consecutive_fails += 1
+                    _LOGGER.warning(
+                        "Heartbeat error for %s: %s (fail %d)",
+                        cam_id[:8],
+                        exc,
+                        consecutive_fails,
+                    )
+
+                # After 3 consecutive heartbeat failures, force immediate renewal
+                if consecutive_fails >= 3:
+                    _LOGGER.warning(
+                        "Heartbeat: %d consecutive failures for %s — forcing renewal",
+                        consecutive_fails,
+                        cam_id[:8],
+                    )
+                    consecutive_fails = 0
+                    try:
+                        result = await self.try_live_connection(cam_id, is_renewal=True)
+                        if result:
+                            _LOGGER.info(
+                                "Heartbeat: session renewed for %s", cam_id[:8]
+                            )
+                            renewal_fails = (
+                                0  # prevent stale flag misfiring after heartbeat rescue
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "Heartbeat: renewal failed for %s", cam_id[:8]
+                            )
+                            session_start = time.monotonic()
+                    except Exception as exc:
+                        _LOGGER.warning(
+                            "Heartbeat: renewal error for %s: %s", cam_id[:8], exc
+                        )
+                        session_start = time.monotonic()
         except asyncio.CancelledError:
-          _LOGGER.debug("Keepalive cancelled for %s (gen=%d)", cam_id[:8], generation)
+            _LOGGER.debug("Keepalive cancelled for %s (gen=%d)", cam_id[:8], generation)
         finally:
-          self._renewal_tasks.pop(cam_id, None)
-          _LOGGER.debug("Keepalive loop ended for %s (gen=%d)", cam_id[:8], generation)
+            self._renewal_tasks.pop(cam_id, None)
+            _LOGGER.debug(
+                "Keepalive loop ended for %s (gen=%d)", cam_id[:8], generation
+            )
 
     async def _promote_to_local(self, cam_id: str) -> None:
         """Lift an active REMOTE-fallback stream onto LOCAL via a renewal.
@@ -5066,22 +5726,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if not result:
                 _LOGGER.debug(
                     "Active LOCAL promotion: %s renewal returned None — "
-                    "stream stays on REMOTE", cam_id[:8],
+                    "stream stays on REMOTE",
+                    cam_id[:8],
                 )
                 return
             new_type = result.get("_connection_type")
             if new_type == "LOCAL":
                 _LOGGER.info(
-                    "Active LOCAL promotion: %s migrated REMOTE → LOCAL", cam_id[:8],
+                    "Active LOCAL promotion: %s migrated REMOTE → LOCAL",
+                    cam_id[:8],
                 )
             else:
                 _LOGGER.debug(
                     "Active LOCAL promotion: %s renewal landed on %s "
-                    "(LAN attempt did not stick)", cam_id[:8], new_type,
+                    "(LAN attempt did not stick)",
+                    cam_id[:8],
+                    new_type,
                 )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.warning(
-                "Active LOCAL promotion failed for %s: %s", cam_id[:8], err,
+                "Active LOCAL promotion failed for %s: %s",
+                cam_id[:8],
+                err,
             )
 
     async def _remote_session_terminator(self, cam_id: str, generation: int) -> None:
@@ -5112,7 +5778,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         delay = max(1, cfg.max_session_duration - 60)
         _LOGGER.debug(
             "REMOTE session terminator scheduled for %s (gen=%d, %ds until teardown)",
-            cam_id[:8], generation, delay,
+            cam_id[:8],
+            generation,
+            delay,
         )
         try:
             await asyncio.sleep(delay)
@@ -5121,7 +5789,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if self._auto_renew_generation.get(cam_id, 0) != generation:
                 _LOGGER.debug(
                     "REMOTE terminator: stale gen=%d for %s — skipping",
-                    generation, cam_id[:8],
+                    generation,
+                    cam_id[:8],
                 )
                 return
             # Stop if the stream was already turned off.
@@ -5135,7 +5804,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if live.get("_connection_type") != "REMOTE":
                 _LOGGER.debug(
                     "REMOTE terminator: %s is %s now — skipping",
-                    cam_id[:8], live.get("_connection_type"),
+                    cam_id[:8],
+                    live.get("_connection_type"),
                 )
                 return
             _LOGGER.info(
@@ -5146,7 +5816,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self.hass.async_create_task(self.async_request_refresh())
         except asyncio.CancelledError:
             _LOGGER.debug(
-                "REMOTE terminator cancelled for %s (gen=%d)", cam_id[:8], generation,
+                "REMOTE terminator cancelled for %s (gen=%d)",
+                cam_id[:8],
+                generation,
             )
         finally:
             self._renewal_tasks.pop(cam_id, None)
@@ -5178,19 +5850,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
     @staticmethod
     def _build_notify_data(
-        svc: str, message: str, file_path: str | None = None, title: str | None = None,
+        svc: str,
+        message: str,
+        file_path: str | None = None,
+        title: str | None = None,
     ) -> dict[str, Any]:
         """Build notify service call data (delegated to fcm.py)."""
         return _fcm_build_notify_data(svc, message, file_path, title)
 
     async def _async_send_alert(
-        self, cam_name: str, event_type: str, timestamp: str,
-        image_url: str, clip_url: str = "", clip_status: str = "",
+        self,
+        cam_name: str,
+        event_type: str,
+        timestamp: str,
+        image_url: str,
+        clip_url: str = "",
+        clip_status: str = "",
         event_id: str = "",
     ) -> None:
         """Send a 3-step alert (delegated to fcm.py)."""
         return await _fcm_async_send_alert(
-            self, cam_name, event_type, timestamp, image_url, clip_url, clip_status,
+            self,
+            cam_name,
+            event_type,
+            timestamp,
+            image_url,
+            clip_url,
+            clip_status,
             event_id=event_id,
         )
 
@@ -5215,7 +5901,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._rcp_session_cache.pop(proxy_hash, None) is not None:
             _LOGGER.debug("RCP session cache invalidated for %s", proxy_hash[:8])
 
-    async def _get_cached_rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
+    async def _get_cached_rcp_session(
+        self, proxy_host: str, proxy_hash: str
+    ) -> str | None:
         """Return a cached RCP session ID, opening a new one if missing or expired.
 
         Caches valid session IDs for 5 minutes (TTL 300 s) to avoid the 2-step
@@ -5231,7 +5919,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         new_session_id: str | None = await self._rcp_session(proxy_host, proxy_hash)
         if new_session_id:
-            self._rcp_session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
+            self._rcp_session_cache[proxy_hash] = (
+                new_session_id,
+                now + 300.0,
+            )  # 5-min TTL
         return new_session_id
 
     async def _rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
@@ -5245,47 +5936,55 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         The proxy_host should be in the form "proxy-NN.live.cbs.boschsecurity.com:42090".
         """
         base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
-        init_payload = "0x0102004000000000040000000000000000010000000000000001000000000000"
+        init_payload = (
+            "0x0102004000000000040000000000000000010000000000000001000000000000"
+        )
 
         connector = aiohttp.TCPConnector(ssl=False)
         try:
             async with aiohttp.ClientSession(connector=connector) as session:
                 # Step 1: open session
                 params1 = {
-                    "command":   "0xff0c",
+                    "command": "0xff0c",
                     "direction": "WRITE",
-                    "type":      "P_OCTET",
-                    "payload":   init_payload,
+                    "type": "P_OCTET",
+                    "payload": init_payload,
                 }
                 try:
                     async with asyncio.timeout(8):
                         async with session.get(base, params=params1) as resp:
                             if resp.status != 200:
                                 _LOGGER.debug(
-                                    "_rcp_session: step1 HTTP %d for %s", resp.status, proxy_host
+                                    "_rcp_session: step1 HTTP %d for %s",
+                                    resp.status,
+                                    proxy_host,
                                 )
                                 return None
                             text = await resp.text()
-                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                    _LOGGER.debug("_rcp_session: step1 error for %s: %s", proxy_host, err)
+                except (TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug(
+                        "_rcp_session: step1 error for %s: %s", proxy_host, err
+                    )
                     return None
 
                 # Parse <sessionid> from XML response
                 import re as _re
+
                 m = _re.search(r"<sessionid>(\S+)</sessionid>", text, _re.IGNORECASE)
                 if not m:
                     _LOGGER.debug(
                         "_rcp_session: no <sessionid> in response for %s: %s",
-                        proxy_host, text[:200],
+                        proxy_host,
+                        text[:200],
                     )
                     return None
                 session_id = m.group(1)
 
                 # Step 2: ACK the session
                 params2 = {
-                    "command":   "0xff0d",
+                    "command": "0xff0d",
                     "direction": "WRITE",
-                    "type":      "P_OCTET",
+                    "type": "P_OCTET",
                     "sessionid": session_id,
                 }
                 try:
@@ -5293,10 +5992,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         async with session.get(base, params=params2) as resp2:
                             _LOGGER.debug(
                                 "_rcp_session: ACK HTTP %d for %s (sessionid=%s)",
-                                resp2.status, proxy_host, session_id,
+                                resp2.status,
+                                proxy_host,
+                                session_id,
                             )
-                except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                    _LOGGER.debug("_rcp_session: step2 error for %s: %s", proxy_host, err)
+                except (TimeoutError, aiohttp.ClientError) as err:
+                    _LOGGER.debug(
+                        "_rcp_session: step2 error for %s: %s", proxy_host, err
+                    )
                     # Session may still be valid — return it anyway
 
                 return session_id
@@ -5327,9 +6030,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         (session closed) — the dead ID would otherwise block reads until TTL.
         """
         params: dict[str, str] = {
-            "command":   command,
+            "command": command,
             "direction": "READ",
-            "type":      type_,
+            "type": type_,
             "sessionid": sessionid,
         }
         if num:
@@ -5357,11 +6060,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             self._invalidate_rcp_session(proxy_hash)
                         return None
                     return bytes(raw)
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("_rcp_read: command=%s error: %s", command, err)
             return None
 
-    async def _async_update_rcp_data(self, cam_id: str, proxy_host: str, proxy_hash: str) -> None:
+    async def _async_update_rcp_data(
+        self, cam_id: str, proxy_host: str, proxy_hash: str
+    ) -> None:
         """Fetch all RCP data for a camera via cloud proxy.
 
         Delegates to rcp.py's async_update_rcp_data() which reads:
@@ -5405,15 +6110,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         port: int = creds.get("port", 443)
         base = f"https://{ip}:{port}/rcp.xml"
         params: dict[str, str] = {
-            "command":   opcode_hex,
+            "command": opcode_hex,
             "direction": "READ",
-            "type":      "P_OCTET",
-            "num":       "1",
+            "type": "P_OCTET",
+            "num": "1",
         }
         from urllib.parse import urlencode
+
         url = f"{base}?{urlencode(params)}"
         try:
             import re as _re_lan
+
             async with await async_digest_request(
                 async_get_clientsession(self.hass, verify_ssl=False),
                 "GET",
@@ -5437,19 +6144,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # Check for RCP-level error
                 if b"<err>" in raw.lower():
                     _LOGGER.debug(
-                        "_fetch_rcp_lan: %s@%s RCP error: %s",
-                        opcode_hex, ip, raw[:120]
+                        "_fetch_rcp_lan: %s@%s RCP error: %s", opcode_hex, ip, raw[:120]
                     )
                     return None
                 # Extract payload from <str>HEXDATA</str>
-                m = _re_lan.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re_lan.IGNORECASE)
+                m = _re_lan.search(
+                    rb"<str>([0-9a-fA-F]+)</str>", raw, _re_lan.IGNORECASE
+                )
                 if m:
                     return bytes.fromhex(m.group(1).decode("ascii"))
                 # Fallback: raw bytes if not XML envelope
                 if raw and not raw.lstrip(b"\n\r\t ").startswith(b"<"):
                     return bytes(raw)
                 return None
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug("_fetch_rcp_lan: %s@%s %s", opcode_hex, ip, err)
             return None
         except Exception as err:  # pragma: no cover
@@ -5471,7 +6179,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 self._rcp_onvif_scopes_cache[cam_id] = scopes_dict
                 _LOGGER.debug("ONVIF scopes for %s: %s", cam_id[:8], scopes_dict)
         except Exception as err:
-            _LOGGER.debug("ONVIF scopes fetch error for %s: %s", cam_id[:8], BoschCameraCoordinator._err_str(err))
+            _LOGGER.debug(
+                "ONVIF scopes fetch error for %s: %s",
+                cam_id[:8],
+                BoschCameraCoordinator._err_str(err),
+            )
 
         # F6: RCP protocol versions via 0xff00 (primary) + 0xff04 (secondary)
         try:
@@ -5481,7 +6193,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 self._rcp_version_cache[cam_id] = version_str
                 _LOGGER.debug("RCP version for %s: %s", cam_id[:8], version_str)
         except Exception as err:
-            _LOGGER.debug("RCP version fetch error for %s: %s", cam_id[:8], BoschCameraCoordinator._err_str(err))
+            _LOGGER.debug(
+                "RCP version fetch error for %s: %s",
+                cam_id[:8],
+                BoschCameraCoordinator._err_str(err),
+            )
 
     def clock_offset(self, cam_id: str) -> float | None:
         """Return clock offset in seconds (camera time − server time), or None."""
@@ -5521,11 +6237,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """Return (highQualityVideo: bool, inst: int) for current quality preference."""
         q = self.get_quality(cam_id)
         if q == "high":
-            return True, 1    # primary encoder, max quality (~30 Mbps)
+            return True, 1  # primary encoder, max quality (~30 Mbps)
         elif q == "low":
-            return False, 4   # low-bandwidth stream (~1.9 Mbps)
+            return False, 4  # low-bandwidth stream (~1.9 Mbps)
         else:  # "auto"
-            return False, 2   # iOS default, balanced (~7.5 Mbps)
+            return False, 2  # iOS default, balanced (~7.5 Mbps)
 
     def motion_settings(self, cam_id: str) -> dict[str, Any]:
         """Return motion detection settings dict, or empty dict."""
@@ -5535,10 +6251,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """Return recording options dict, or empty dict."""
         return self.data.get(cam_id, {}).get("recordingOptions", {})  # type: ignore[no-any-return]
 
-    async def async_put_camera(self, cam_id: str, endpoint: str, payload: dict[str, Any]) -> bool:
+    async def async_put_camera(
+        self, cam_id: str, endpoint: str, payload: dict[str, Any]
+    ) -> bool:
         """PUT to /v11/video_inputs/{cam_id}/{endpoint} with payload. Returns True on success."""
         token = self.token
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         session = async_get_clientsession(self.hass, verify_ssl=False)
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
         try:
@@ -5546,17 +6267,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 async with session.put(url, headers=headers, json=payload) as resp:
                     if resp.status == 401:
                         # Token expired — refresh and retry once
-                        _LOGGER.info("async_put_camera %s/%s: 401 — refreshing token", cam_id, endpoint)
+                        _LOGGER.info(
+                            "async_put_camera %s/%s: 401 — refreshing token",
+                            cam_id,
+                            endpoint,
+                        )
                         try:
                             token = await self._ensure_valid_token()
                             headers["Authorization"] = f"Bearer {token}"
                         except asyncio.CancelledError:
                             raise
                         except Exception as err:
-                            _LOGGER.debug("async_put_camera token refresh failed: %s", err)
+                            _LOGGER.debug(
+                                "async_put_camera token refresh failed: %s", err
+                            )
                             return False
                         async with asyncio.timeout(10):
-                            async with session.put(url, headers=headers, json=payload) as resp2:
+                            async with session.put(
+                                url, headers=headers, json=payload
+                            ) as resp2:
                                 return resp2.status in (200, 204)
                     return resp.status in (200, 201, 204)
         except Exception as err:
@@ -5617,6 +6346,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
     # SMB/NAS upload, download, cleanup, and disk-check functions are in smb.py
 
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     # Register services at domain level — ensures they are available even when
     # the config entry is in setup_retry (e.g. token expired).
@@ -5626,20 +6356,35 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     # Serve the bundled card JS files via HA's static path handler.
     # cache_headers=False → no-store so browsers always revalidate.
     from pathlib import Path as _Path
+
     from homeassistant.components.http import StaticPathConfig as _StaticPathConfig
     from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+
     from .const import CARD_VERSION
+
     _www = _Path(__file__).parent / "www"
-    await hass.http.async_register_static_paths([
-        _StaticPathConfig(f"/{DOMAIN}/bosch-camera-card.js", str(_www / "bosch-camera-card.js"), False),
-        _StaticPathConfig(f"/{DOMAIN}/bosch-camera-autoplay-fix.js", str(_www / "bosch-camera-autoplay-fix.js"), False),
-    ])
+    await hass.http.async_register_static_paths(
+        [
+            _StaticPathConfig(
+                f"/{DOMAIN}/bosch-camera-card.js",
+                str(_www / "bosch-camera-card.js"),
+                False,
+            ),
+            _StaticPathConfig(
+                f"/{DOMAIN}/bosch-camera-autoplay-fix.js",
+                str(_www / "bosch-camera-autoplay-fix.js"),
+                False,
+            ),
+        ]
+    )
 
     async def _register_lovelace_resources() -> None:
         """Write card URLs into Lovelace resource storage (appears in UI)."""
         lovelace = hass.data.get("lovelace")
         if lovelace is None:
-            _LOGGER.warning("%s: Lovelace not available — card not auto-registered", DOMAIN)
+            _LOGGER.warning(
+                "%s: Lovelace not available — card not auto-registered", DOMAIN
+            )
             return
         resources = lovelace.resources
         await resources.async_load()
@@ -5663,35 +6408,42 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         for item in list(resources.async_items()):
             if item.get("url", "").startswith(_remove_prefixes):
                 await resources.async_delete_item(item["id"])
-                _LOGGER.debug("%s: Removed deprecated Lovelace resource: %s", DOMAIN, item["url"])
+                _LOGGER.debug(
+                    "%s: Removed deprecated Lovelace resource: %s", DOMAIN, item["url"]
+                )
 
-        for card_path in (
-            f"/{DOMAIN}/bosch-camera-card.js",
-        ):
+        for card_path in (f"/{DOMAIN}/bosch-camera-card.js",):
             versioned = f"{card_path}?v={CARD_VERSION}"
             existing_id = None
             already_current = False
             for item in resources.async_items():
                 item_url = item.get("url", "")
                 if item_url.startswith(card_path):
-                    already_current = (item_url == versioned)
+                    already_current = item_url == versioned
                     existing_id = item["id"]
                     break
             if already_current:
-                _LOGGER.debug("%s: Lovelace resource already current: %s", DOMAIN, versioned)
+                _LOGGER.debug(
+                    "%s: Lovelace resource already current: %s", DOMAIN, versioned
+                )
                 continue
             if existing_id:
-                await resources.async_update_item(existing_id, {"res_type": "module", "url": versioned})
+                await resources.async_update_item(
+                    existing_id, {"res_type": "module", "url": versioned}
+                )
                 _LOGGER.debug("%s: Updated Lovelace resource: %s", DOMAIN, versioned)
             else:
-                await resources.async_create_item({"res_type": "module", "url": versioned})
+                await resources.async_create_item(
+                    {"res_type": "module", "url": versioned}
+                )
                 _LOGGER.debug("%s: Registered Lovelace resource: %s", DOMAIN, versioned)
 
     if hass.is_running:
         # Integration reloaded while HA is already up
         await _register_lovelace_resources()
     else:
-        from homeassistant.core import Event as _Event, callback as _callback
+        from homeassistant.core import Event as _Event
+        from homeassistant.core import callback as _callback
 
         @_callback  # type: ignore[untyped-decorator]
         def _on_ha_started(_event: _Event) -> None:
@@ -5728,6 +6480,7 @@ async def _migrate_doubled_prefix_entity_ids(
     Reported in forum 998974/15 (Andrew75, 2026-05-15).
     """
     from homeassistant.helpers import entity_registry as er
+
     ent_reg = er.async_get(hass)
     renamed: list[tuple[str, str]] = []
 
@@ -5754,9 +6507,7 @@ async def _migrate_doubled_prefix_entity_ids(
             len(renamed),
             "; ".join(f"{old} → {new}" for old, new in renamed),
         )
-        examples = ", ".join(
-            f"`{old}` → `{new}`" for old, new in renamed[:5]
-        )
+        examples = ", ".join(f"`{old}` → `{new}`" for old, new in renamed[:5])
         if len(renamed) > 5:
             examples += ", …"
         ir.async_create_issue(
@@ -5853,7 +6604,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # doesn't go through the entity-translation pipeline).
     try:
         last_hint_version = entry.options.get("feedback_hint_version", "")
-        if last_hint_version != _INTEGRATION_VERSION and _INTEGRATION_VERSION != "unknown":
+        if (
+            last_hint_version != _INTEGRATION_VERSION
+            and _INTEGRATION_VERSION != "unknown"
+        ):
             _disc_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/discussions"
             _iss_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues"
             _lang_messages: dict[str, tuple[str, str]] = {
@@ -5944,7 +6698,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _title, _message = _lang_messages.get(_lang_key, _lang_messages["en"])
             hass.async_create_task(
                 hass.services.async_call(
-                    "persistent_notification", "create",
+                    "persistent_notification",
+                    "create",
                     {
                         "notification_id": f"{DOMAIN}_feedback_v{_INTEGRATION_VERSION}",
                         "title": _title,
@@ -5967,8 +6722,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # `_maintenance_notified_key` and the next coordinator tick re-fired
     # the active-state notify.
     from homeassistant.helpers.storage import Store
+
     _maint_key_store: Store = Store(hass, version=1, key=f"{DOMAIN}_maint_notified")
-    coordinator._maint_notified_store = _maint_key_store  # type: ignore[attr-defined]
+    coordinator._maint_notified_store = _maint_key_store
     _persisted_maint_key = await _maint_key_store.async_load() or None
     if isinstance(_persisted_maint_key, dict):
         _link = _persisted_maint_key.get("link")
@@ -5977,14 +6733,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator._maintenance_notified_key = (_link, _state)
             _LOGGER.info(
                 "Loaded persisted maintenance-notify dedup key: %s for %s",
-                _state, _link[:60],
+                _state,
+                _link[:60],
             )
 
     # Same problem for cloud-state-alert: `_cloud_outage_notified` lived only
     # in memory, so a restart during an outage could re-fire "Cloud nicht
     # erreichbar". Persist a tiny boolean so restarts honour the dedup.
-    _cloud_alert_store: Store = Store(hass, version=1, key=f"{DOMAIN}_cloud_alert_state")
-    coordinator._cloud_alert_store = _cloud_alert_store  # type: ignore[attr-defined]
+    _cloud_alert_store: Store = Store(
+        hass, version=1, key=f"{DOMAIN}_cloud_alert_state"
+    )
+    coordinator._cloud_alert_store = _cloud_alert_store
     _persisted_cloud_alert = await _cloud_alert_store.async_load() or {}
     if isinstance(_persisted_cloud_alert, dict):
         if _persisted_cloud_alert.get("outage_notified") is True:
@@ -5997,7 +6756,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # have something to work with on a cloud-degraded startup. Written below
     # on every successful coordinator refresh.
     _lan_ips_store: Store = Store(hass, version=1, key=f"{DOMAIN}_lan_ips")
-    coordinator._lan_ips_store = _lan_ips_store  # type: ignore[attr-defined]
+    coordinator._lan_ips_store = _lan_ips_store
     _persisted_ips = await _lan_ips_store.async_load() or {}
     if isinstance(_persisted_ips, dict):
         for _cid, _ip in _persisted_ips.items():
@@ -6017,7 +6776,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # but missed this persistence; 2026-05-20 maintenance window exposed the
     # gap (cloud 503 for 30+ minutes, switches grey, no toggle).
     _hw_version_store: Store = Store(hass, version=1, key=f"{DOMAIN}_hw_versions")
-    coordinator._hw_version_store = _hw_version_store  # type: ignore[attr-defined]
+    coordinator._hw_version_store = _hw_version_store
     _persisted_hw = await _hw_version_store.async_load() or {}
     if isinstance(_persisted_hw, dict):
         for _cid, _hw in _persisted_hw.items():
@@ -6038,7 +6797,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Security note: stored in HA's .storage (same protection level as the
     # cloud bearer token). LAN-only effective scope (camera not internet-exposed).
     _creds_store: Store = Store(hass, version=1, key=f"{DOMAIN}_local_creds")
-    coordinator._local_creds_store = _creds_store  # type: ignore[attr-defined]
+    coordinator._local_creds_store = _creds_store
     _persisted_creds = await _creds_store.async_load() or {}
     if isinstance(_persisted_creds, dict):
         _loaded_creds = 0
@@ -6047,11 +6806,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 continue
             if "user" in _payload and "password" in _payload and "host" in _payload:
                 coordinator._local_creds_cache[_cid.upper()] = {
-                    "user":     _payload["user"],
+                    "user": _payload["user"],
                     "password": _payload["password"],
-                    "host":     _payload["host"],
-                    "port":     int(_payload.get("port", 443)),
-                    "ts":       time.monotonic(),
+                    "host": _payload["host"],
+                    "port": int(_payload.get("port", 443)),
+                    "ts": time.monotonic(),
                 }
                 _loaded_creds += 1
         if _loaded_creds:
@@ -6069,7 +6828,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # initialised DeviceRegistry mock; rehydrate is best-effort.
     try:
         from homeassistant.helpers import device_registry as dr
+
         from .models import MODELS
+
         _dreg = dr.async_get(hass)
         _display_to_hw: dict[str, str] = {}
         for _hw_key, _cfg in MODELS.items():
@@ -6087,9 +6848,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     coordinator._hw_version[_cid.upper()] = _hw_from_model
                     _LOGGER.info(
                         "Recovered hardware version for %s from device registry: %s (%s)",
-                        _cid[:8], _hw_from_model, _device.model,
+                        _cid[:8],
+                        _hw_from_model,
+                        _device.model,
                     )
-    except Exception as exc:  # noqa: BLE001 — best-effort rehydrate
+    except Exception as exc:
         _LOGGER.debug("Device-registry hw_version rehydrate skipped: %s", exc)
 
     # First refresh — tolerate a cloud-side 5xx so the integration can still
@@ -6122,7 +6885,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.last_update_success = False
             _LOGGER.info(
                 "Bosch cloud-degraded startup: rehydrated %d camera(s) from entity registry: %s",
-                len(cam_ids), ", ".join(sorted(c[:8] for c in cam_ids)),
+                len(cam_ids),
+                ", ".join(sorted(c[:8] for c in cam_ids)),
             )
             # Kick an immediate LAN ping so the LAN-reachable sensors and
             # switch fallbacks have a useful state right away.
@@ -6145,9 +6909,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # canonical `binary_sensor.bosch_<X>_lan_reachable` slug derived from
     # the translation key. No-op on clean installs.
     from homeassistant.helpers import entity_registry as er
+
     _ereg = er.async_get(hass)
     _stale_lan_ids = [
-        e.entity_id for e in er.async_entries_for_config_entry(_ereg, entry.entry_id)
+        e.entity_id
+        for e in er.async_entries_for_config_entry(_ereg, entry.entry_id)
         if e.entity_id.endswith("_lan_reachable")
         and e.entity_id.count("_bosch_") >= 1
         and e.entity_id.startswith("binary_sensor.bosch_")
@@ -6169,10 +6935,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if _hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             _indoor_ii_cam_ids.add(_cam_id.lower())
     _orphan_uid_suffixes = (
-        "_front_light_entity",      # BoschFrontLight (v12.5.0 mistake)
-        "_top_led_brightness",      # BoschTopLedBrightnessNumber (Outdoor-only)
-        "_bottom_led_brightness",   # BoschBottomLedBrightnessNumber (Outdoor-only)
-        "_white_balance",           # BoschWhiteBalanceNumber (Outdoor-only)
+        "_front_light_entity",  # BoschFrontLight (v12.5.0 mistake)
+        "_top_led_brightness",  # BoschTopLedBrightnessNumber (Outdoor-only)
+        "_bottom_led_brightness",  # BoschBottomLedBrightnessNumber (Outdoor-only)
+        "_white_balance",  # BoschWhiteBalanceNumber (Outdoor-only)
     )
     _stale_indoor_ids: list[str] = []
     for _ent in er.async_entries_for_config_entry(_ereg, entry.entry_id):
@@ -6206,7 +6972,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     opts = get_options(entry)
     platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
     if opts.get("enable_binary_sensors", True):
-        platforms = ["binary_sensor"] + platforms
+        platforms = ["binary_sensor", *platforms]
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
@@ -6220,6 +6986,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the iOS Companion App on cellular ("HLS wird geladen…" hang).
     # See cf_unbuffer.py docstring + knowledge-base/cloudflared-tunnel-hls-buffering.md
     from . import cf_unbuffer
+
     cf_unbuffer.register(hass)
 
     # Listen on HA's stream component logger for worker-error events. This
@@ -6228,7 +6995,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # "available" window. See _StreamWorkerErrorListener for the full
     # reasoning. Only installs once per process regardless of reloads.
     stream_logger = logging.getLogger("homeassistant.components.stream")
-    if not any(isinstance(h, _StreamWorkerErrorListener) for h in stream_logger.handlers):
+    if not any(
+        isinstance(h, _StreamWorkerErrorListener) for h in stream_logger.handlers
+    ):
         listener = _StreamWorkerErrorListener(coordinator)
         stream_logger.addHandler(listener)
         coordinator._stream_log_listener = listener
@@ -6236,7 +7005,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Rebind the existing listener to the current coordinator so a
         # config reload doesn't leave it pointing at the old coordinator.
         existing = next(
-            h for h in stream_logger.handlers
+            h
+            for h in stream_logger.handlers
             if isinstance(h, _StreamWorkerErrorListener)
         )
         existing._coordinator = coordinator
@@ -6245,14 +7015,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # v8.0.2 migration: auto-enable front light / wallwasher / intensity entities
     # that were initially created with disabled_by=integration in earlier builds.
     from homeassistant.helpers import entity_registry as er
+
     ent_reg = er.async_get(hass)
     for uid_suffix in ("front_light_", "wallwasher_", "front_light_intensity_"):
         for cam_id in coordinator.data:
             uid = f"bosch_shc_{uid_suffix}{cam_id.lower()}"
-            ent = ent_reg.async_get_entity_id("switch" if "intensity" not in uid_suffix else "number", DOMAIN, uid)
+            ent = ent_reg.async_get_entity_id(
+                "switch" if "intensity" not in uid_suffix else "number", DOMAIN, uid
+            )
             if ent:
                 entry_obj = ent_reg.async_get(ent)
-                if entry_obj and entry_obj.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+                if (
+                    entry_obj
+                    and entry_obj.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+                ):
                     ent_reg.async_update_entity(ent, disabled_by=None)
                     _LOGGER.info("v8.0.2 migration: enabled %s", ent)
 
@@ -6275,13 +7051,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         data={},
                     )
                     if result.get("type") == "create_entry":
-                        _LOGGER.info("go2rtc integration auto-created for WebRTC streaming support")
+                        _LOGGER.info(
+                            "go2rtc integration auto-created for WebRTC streaming support"
+                        )
                     else:
-                        _LOGGER.debug("go2rtc setup result: %s", result.get("type", "unknown"))
+                        _LOGGER.debug(
+                            "go2rtc setup result: %s", result.get("type", "unknown")
+                        )
                 except Exception as err:
                     _LOGGER.debug("go2rtc auto-setup skipped: %s", err)
             else:
-                _LOGGER.debug("go2rtc integration already active (entry: %s)", go2rtc_entries[0].entry_id)
+                _LOGGER.debug(
+                    "go2rtc integration already active (entry: %s)",
+                    go2rtc_entries[0].entry_id,
+                )
 
     # Reload integration when options change (e.g. scan_interval updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
@@ -6327,6 +7110,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _async_deliver_webhook(event: Any) -> None:
         """POST event payload to the configured webhook URL."""
         from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+
         cur_opts = get_options(entry)
         if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
             return
@@ -6338,33 +7122,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         payload: dict[str, Any] = {
             "event_type": event.event_type,
-            "camera":     event.data.get("camera_name", event.data.get("camera_id", "")),
-            "camera_id":  event.data.get("camera_id", ""),
-            "timestamp":  event.data.get("timestamp", ""),
-            "extra":      {k: v for k, v in event.data.items()
-                           if k not in ("camera_name", "camera_id", "timestamp")},
+            "camera": event.data.get("camera_name", event.data.get("camera_id", "")),
+            "camera_id": event.data.get("camera_id", ""),
+            "timestamp": event.data.get("timestamp", ""),
+            "extra": {
+                k: v
+                for k, v in event.data.items()
+                if k not in ("camera_name", "camera_id", "timestamp")
+            },
         }
         session = async_get_clientsession(hass)
         try:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status >= 400:
                     _LOGGER.warning(
                         "Webhook POST returned HTTP %d for event %s",
-                        resp.status, event.event_type,
+                        resp.status,
+                        event.event_type,
                     )
                 else:
                     _LOGGER.debug(
                         "Webhook POST %s → HTTP %d", event.event_type, resp.status
                     )
         except aiohttp.ClientError as err:
-            _LOGGER.error(
-                "Webhook delivery failed for %s: %s", event.event_type, err
-            )
+            _LOGGER.error("Webhook delivery failed for %s: %s", event.event_type, err)
 
     for _evt_type in _WEBHOOK_EVENT_TYPES:
-        entry.async_on_unload(
-            hass.bus.async_listen(_evt_type, _async_deliver_webhook)
-        )
+        entry.async_on_unload(hass.bus.async_listen(_evt_type, _async_deliver_webhook))
 
     # send_event_webhook service — test/manual trigger
     # Uses live-entry iteration so the handler always reads the current options
@@ -6372,14 +7158,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_send_event_webhook(call: ServiceCall) -> None:
         """Manually fire a webhook POST for testing."""
         import datetime as _dt
+
         from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+
         loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
         if not loaded:
-            _LOGGER.warning("send_event_webhook: no loaded entries for domain %s", DOMAIN)
+            _LOGGER.warning(
+                "send_event_webhook: no loaded entries for domain %s", DOMAIN
+            )
             return
         cur_opts = get_options(loaded[0])
         if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
-            _LOGGER.warning("send_event_webhook: webhook delivery is disabled in options")
+            _LOGGER.warning(
+                "send_event_webhook: webhook delivery is disabled in options"
+            )
             return
         url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
         if not url:
@@ -6395,22 +7187,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 cam_name = state.attributes.get("friendly_name", entity_id_val)
         payload: dict[str, Any] = {
             "event_type": event_type_val,
-            "camera":     cam_name,
-            "camera_id":  "",
-            "timestamp":  _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-            "extra":      {"source": "manual"},
+            "camera": cam_name,
+            "camera_id": "",
+            "timestamp": _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z"),
+            "extra": {"source": "manual"},
         }
         session = async_get_clientsession(hass)
         try:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                _LOGGER.info(
-                    "send_event_webhook: POST %s → HTTP %d", url, resp.status
-                )
+            async with session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                _LOGGER.info("send_event_webhook: POST %s → HTTP %d", url, resp.status)
         except aiohttp.ClientError as err:
             _LOGGER.error("send_event_webhook: POST failed: %s", err)
 
     if not hass.services.has_service(DOMAIN, "send_event_webhook"):
-        hass.services.async_register(DOMAIN, "send_event_webhook", handle_send_event_webhook)
+        hass.services.async_register(
+            DOMAIN, "send_event_webhook", handle_send_event_webhook
+        )
 
     return True
 
@@ -6461,7 +7255,7 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
         drain_task.cancel()
         try:
             await drain_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        except (asyncio.CancelledError, Exception):  # noqa: S110 # drain_task cancelled intentionally on shutdown; any residual error is non-actionable
             pass
         coord._nvr_drain_task = None
     # Stop all NVR recorders BEFORE the TLS proxies — once the proxies are
@@ -6470,7 +7264,7 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # stays playable.
     try:
         await nvr_recorder.stop_all(coord)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.debug("NVR stop_all on unload raised: %s", err)
     # Tear down every active LOCAL/REMOTE live stream cleanly BEFORE
     # stop_all_proxies. Without this, integration reload leaves stale state
@@ -6490,10 +7284,11 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
             break
         try:
             await teardown(cam_id)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug(
                 "teardown live stream for %s on unload raised: %s",
-                cam_id[:8], err,
+                cam_id[:8],
+                err,
             )
     # Stop all TLS proxies (closes server sockets, terminates threads).
     # Idempotent — _tear_down_live_stream already stopped per-cam proxies,
@@ -6545,7 +7340,9 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
         # Fallback for the first update before async_setup_entry stored the
         # hass.data snapshot (and for tests that only populate runtime_data).
         coord = getattr(entry, "runtime_data", None)
-        coord_snap = getattr(coord, "_options_snapshot", None) if coord is not None else None
+        coord_snap = (
+            getattr(coord, "_options_snapshot", None) if coord is not None else None
+        )
         if isinstance(coord_snap, dict):
             prev_opts = coord_snap
     if prev_opts is not None and prev_opts == new_opts:
@@ -6580,16 +7377,26 @@ def _register_services(hass: HomeAssistant) -> None:
         """Try to open a live proxy connection for a specific camera."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         is_renewal = bool(call.data.get("renewal", False))
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 result = await coord.try_live_connection(cam_id, is_renewal=is_renewal)
                 if result:
-                    _LOGGER.info("Live connection established: %s", _redact_creds(result))
+                    _LOGGER.info(
+                        "Live connection established: %s", _redact_creds(result)
+                    )
                     return
-        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="live_connection_failed", translation_placeholders={"cam_id_prefix": cam_id[:8]})
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="live_connection_failed",
+            translation_placeholders={"cam_id_prefix": cam_id[:8]},
+        )
 
     async def handle_create_rule(call: ServiceCall) -> None:
         """Create a cloud-side schedule rule for a camera."""
@@ -6603,27 +7410,48 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 payload = {
-                    "id": None, "name": name, "isActive": is_active,
-                    "startTime": start_time, "endTime": end_time,
+                    "id": None,
+                    "name": name,
+                    "isActive": is_active,
+                    "startTime": start_time,
+                    "endTime": end_time,
                     "weekdays": weekdays,
                 }
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
-                            headers=headers, json=payload,
+                            headers=headers,
+                            json=payload,
                         ) as resp:
                             if resp.status in (200, 201):
                                 result = await resp.json()
                                 _LOGGER.info("Rule created: %s", result)
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Create rule", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "Create rule",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Create rule", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Create rule",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_delete_rule(call: ServiceCall) -> None:
@@ -6644,11 +7472,25 @@ def _register_services(hass: HomeAssistant) -> None:
                             if resp.status == 204:
                                 _LOGGER.info("Rule %s deleted", rule_id)
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Delete rule", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "Delete rule",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Delete rule", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Delete rule",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_update_rule(call: ServiceCall) -> None:
@@ -6656,12 +7498,19 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         rule_id = call.data.get("rule_id", "")
         if not cam_id or not rule_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and rule_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id and rule_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 # Fetch current rule from cache or API (API needs all fields for PUT)
                 existing = None
                 for rule in coord._rules_cache.get(cam_id, []):
@@ -6683,9 +7532,20 @@ def _register_services(hass: HomeAssistant) -> None:
                                             existing = dict(rule)
                                             break
                     except Exception as err:
-                        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Fetch rules for update", "error": str(err)}) from err
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN,
+                            translation_key="unexpected_error",
+                            translation_placeholders={
+                                "action": "Fetch rules for update",
+                                "error": str(err),
+                            },
+                        ) from err
                 if not existing:
-                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="not_found", translation_placeholders={"kind": "Rule", "id": rule_id})
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="not_found",
+                        translation_placeholders={"kind": "Rule", "id": rule_id},
+                    )
                 # Overlay provided fields
                 if "name" in call.data:
                     existing["name"] = call.data["name"]
@@ -6701,18 +7561,34 @@ def _register_services(hass: HomeAssistant) -> None:
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
-                            headers=headers, json=existing,
+                            headers=headers,
+                            json=existing,
                         ) as resp:
                             if resp.status in (200, 201, 204):
                                 _LOGGER.info("Rule %s updated", rule_id)
                                 await coord.async_request_refresh()
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Update rule", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Update rule",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Update rule", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Update rule",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_set_motion_zones(call: ServiceCall) -> None:
@@ -6720,47 +7596,105 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         zones = call.data.get("zones", [])
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         if not isinstance(zones, list):
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_must_be_list", translation_placeholders={"argument": "zones"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_must_be_list",
+                translation_placeholders={"argument": "zones"},
+            )
         # Validate zone coordinates
         for i, z in enumerate(zones):
             for key in ("x", "y", "w", "h"):
                 if key not in z:
-                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="missing_field", translation_placeholders={"kind": "zone", "index": str(i), "field": key})
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="missing_field",
+                        translation_placeholders={
+                            "kind": "zone",
+                            "index": str(i),
+                            "field": key,
+                        },
+                    )
                 val = float(z[key])
                 if val < 0.0 or val > 1.0:
-                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="value_out_of_range", translation_placeholders={"kind": "zone", "index": str(i), "field": key, "value": f"{val:.3f}"})
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="value_out_of_range",
+                        translation_placeholders={
+                            "kind": "zone",
+                            "index": str(i),
+                            "field": key,
+                            "value": f"{val:.3f}",
+                        },
+                    )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers, json=zones,
+                            headers=headers,
+                            json=zones,
                         ) as resp:
                             if resp.status in (200, 201, 204):
-                                _LOGGER.info("Motion zones set for %s (%d zones)", cam_id[:8], len(zones))
+                                _LOGGER.info(
+                                    "Motion zones set for %s (%d zones)",
+                                    cam_id[:8],
+                                    len(zones),
+                                )
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="privacy_blocked", translation_placeholders={"action": "Set motion zones"})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="privacy_blocked",
+                                    translation_placeholders={
+                                        "action": "Set motion zones"
+                                    },
+                                )
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Set motion zones", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Set motion zones",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Set motion zones", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Set motion zones",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_get_motion_zones(call: ServiceCall) -> None:
         """Read current motion detection zones and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
@@ -6779,27 +7713,54 @@ def _register_services(hass: HomeAssistant) -> None:
                                 else:
                                     lines = [f"{len(zones)} Motion-Zone(n):"]
                                     for i, z in enumerate(zones):
-                                        lines.append(f"• Zone {i+1}: x={z.get('x',0):.3f} y={z.get('y',0):.3f} w={z.get('w',0):.3f} h={z.get('h',0):.3f}")
+                                        lines.append(
+                                            f"• Zone {i + 1}: x={z.get('x', 0):.3f} y={z.get('y', 0):.3f} w={z.get('w', 0):.3f} h={z.get('h', 0):.3f}"
+                                        )
                                     msg = "\n".join(lines)
                                 _LOGGER.info("Motion zones for %s: %s", cam_id[:8], msg)
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Motion-Zonen", "message": msg, "notification_id": "bosch_motion_zones"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Motion-Zonen",
+                                        "message": msg,
+                                        "notification_id": "bosch_motion_zones",
+                                    },
                                 )
                             elif resp.status == 443:
                                 msg = "Motion-Zonen nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Motion-Zonen", "message": msg, "notification_id": "bosch_motion_zones"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Motion-Zonen",
+                                        "message": msg,
+                                        "notification_id": "bosch_motion_zones",
+                                    },
                                 )
                                 raise HomeAssistantError(msg)
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Get motion zones", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Get motion zones",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Get motion zones", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Get motion zones",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_share_camera(call: ServiceCall) -> None:
@@ -6808,13 +7769,22 @@ def _register_services(hass: HomeAssistant) -> None:
         camera_ids = call.data.get("camera_ids", [])
         days = call.data.get("days", 30)
         if not friend_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "friend_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "friend_id"},
+            )
         if not camera_ids:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_ids"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_ids"},
+            )
         if isinstance(camera_ids, str):
             camera_ids = [camera_ids]
-        from datetime import datetime, timedelta, timezone
-        now = datetime.now(timezone.utc)
+        from datetime import datetime, timedelta
+
+        now = datetime.now(UTC)
         end = now + timedelta(days=int(days))
         shares = [
             {
@@ -6830,33 +7800,65 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/friends/{friend_id}/share",
-                            headers=headers, json=shares,
+                            headers=headers,
+                            json=shares,
                         ) as resp:
                             if resp.status in (200, 201, 204):
-                                _LOGGER.info("Shared %d camera(s) with friend %s for %d days", len(camera_ids), friend_id[:8], days)
+                                _LOGGER.info(
+                                    "Shared %d camera(s) with friend %s for %d days",
+                                    len(camera_ids),
+                                    friend_id[:8],
+                                    days,
+                                )
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Kamera-Freigabe", "message": f"{len(camera_ids)} Kamera(s) für {days} Tage geteilt."},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Kamera-Freigabe",
+                                        "message": f"{len(camera_ids)} Kamera(s) für {days} Tage geteilt.",
+                                    },
                                 )
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Share camera", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Share camera",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Share camera", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Share camera",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_get_privacy_masks(call: ServiceCall) -> None:
         """Read current privacy masks and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
@@ -6875,27 +7877,56 @@ def _register_services(hass: HomeAssistant) -> None:
                                 else:
                                     lines = [f"{len(masks)} Privacy-Maske(n):"]
                                     for i, m in enumerate(masks):
-                                        lines.append(f"• Maske {i+1}: x={m.get('x',0):.3f} y={m.get('y',0):.3f} w={m.get('w',0):.3f} h={m.get('h',0):.3f}")
+                                        lines.append(
+                                            f"• Maske {i + 1}: x={m.get('x', 0):.3f} y={m.get('y', 0):.3f} w={m.get('w', 0):.3f} h={m.get('h', 0):.3f}"
+                                        )
                                     msg = "\n".join(lines)
-                                _LOGGER.info("Privacy masks for %s: %s", cam_id[:8], msg)
+                                _LOGGER.info(
+                                    "Privacy masks for %s: %s", cam_id[:8], msg
+                                )
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Privacy-Masken", "message": msg, "notification_id": "bosch_privacy_masks"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Privacy-Masken",
+                                        "message": msg,
+                                        "notification_id": "bosch_privacy_masks",
+                                    },
                                 )
                             elif resp.status == 443:
                                 msg = "Privacy-Masken nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Privacy-Masken", "message": msg, "notification_id": "bosch_privacy_masks"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Privacy-Masken",
+                                        "message": msg,
+                                        "notification_id": "bosch_privacy_masks",
+                                    },
                                 )
                                 raise HomeAssistantError(msg)
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Get privacy masks", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Get privacy masks",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Get privacy masks", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Get privacy masks",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_set_privacy_masks(call: ServiceCall) -> None:
@@ -6903,36 +7934,81 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         masks = call.data.get("masks", [])
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         if not isinstance(masks, list):
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_must_be_list", translation_placeholders={"argument": "masks"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_must_be_list",
+                translation_placeholders={"argument": "masks"},
+            )
         for i, m in enumerate(masks):
             for key in ("x", "y", "w", "h"):
                 if key not in m:
-                    raise ServiceValidationError(translation_domain=DOMAIN, translation_key="missing_field", translation_placeholders={"kind": "mask", "index": str(i), "field": key})
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="missing_field",
+                        translation_placeholders={
+                            "kind": "mask",
+                            "index": str(i),
+                            "field": key,
+                        },
+                    )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
-                            headers=headers, json=masks,
+                            headers=headers,
+                            json=masks,
                         ) as resp:
                             if resp.status in (200, 201, 204):
-                                _LOGGER.info("Privacy masks set for %s (%d masks)", cam_id[:8], len(masks))
+                                _LOGGER.info(
+                                    "Privacy masks set for %s (%d masks)",
+                                    cam_id[:8],
+                                    len(masks),
+                                )
                                 await coord.async_request_refresh()
                             elif resp.status == 443:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="privacy_blocked", translation_placeholders={"action": "Set privacy masks"})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="privacy_blocked",
+                                    translation_placeholders={
+                                        "action": "Set privacy masks"
+                                    },
+                                )
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Set privacy masks", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Set privacy masks",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Set privacy masks", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Set privacy masks",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_delete_motion_zone(call: ServiceCall) -> None:
@@ -6940,13 +8016,20 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         zone_index = call.data.get("zone_index", -1)
         if not cam_id or zone_index < 0:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and zone_index"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id and zone_index"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 # Fetch current zones, remove the one at index, re-POST
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.get(
@@ -6954,33 +8037,70 @@ def _register_services(hass: HomeAssistant) -> None:
                             headers=headers,
                         ) as resp:
                             if resp.status != 200:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "delete_motion_zone fetch", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "delete_motion_zone fetch",
+                                        "status": str(resp.status),
+                                    },
+                                )
                             zones = await resp.json()
                     if zone_index >= len(zones):
-                        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="index_out_of_range", translation_placeholders={"index": str(zone_index), "count": str(len(zones))})
+                        raise ServiceValidationError(
+                            translation_domain=DOMAIN,
+                            translation_key="index_out_of_range",
+                            translation_placeholders={
+                                "index": str(zone_index),
+                                "count": str(len(zones)),
+                            },
+                        )
                     removed = zones.pop(zone_index)
                     _LOGGER.info("Removing zone %d: %s", zone_index, removed)
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers, json=zones,
+                            headers=headers,
+                            json=zones,
                         ) as resp:
                             if resp.status in (200, 201, 204):
-                                _LOGGER.info("Zone %d deleted, %d zones remaining", zone_index, len(zones))
+                                _LOGGER.info(
+                                    "Zone %d deleted, %d zones remaining",
+                                    zone_index,
+                                    len(zones),
+                                )
                                 await coord.async_request_refresh()
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "delete_motion_zone POST", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "delete_motion_zone POST",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "delete_motion_zone", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "delete_motion_zone",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_get_lighting_schedule(call: ServiceCall) -> None:
         """Read the full lighting schedule and show as persistent notification."""
         cam_id = call.data.get("camera_id", "")
         if not cam_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
@@ -6999,7 +8119,14 @@ def _register_services(hass: HomeAssistant) -> None:
                                 if resp.status == 200:
                                     data = await resp.json()
                                 else:
-                                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "get_lighting_schedule", "status": str(resp.status)})
+                                    raise HomeAssistantError(
+                                        translation_domain=DOMAIN,
+                                        translation_key="http_error",
+                                        translation_placeholders={
+                                            "action": "get_lighting_schedule",
+                                            "status": str(resp.status),
+                                        },
+                                    )
                     sched = data.get("scheduleStatus", "?")
                     on_time = data.get("generalLightOnTime", "?")
                     off_time = data.get("generalLightOffTime", "?")
@@ -7019,13 +8146,25 @@ def _register_services(hass: HomeAssistant) -> None:
                     )
                     _LOGGER.info("Lighting schedule for %s: %s", cam_id[:8], msg)
                     await hass.services.async_call(
-                        "persistent_notification", "create",
-                        {"title": "Licht-Zeitplan", "message": msg, "notification_id": "bosch_lighting"},
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "Licht-Zeitplan",
+                            "message": msg,
+                            "notification_id": "bosch_lighting",
+                        },
                     )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "get_lighting_schedule", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "get_lighting_schedule",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_rename_camera(call: ServiceCall) -> None:
@@ -7033,40 +8172,74 @@ def _register_services(hass: HomeAssistant) -> None:
         cam_id = call.data.get("camera_id", "")
         new_name = call.data.get("new_name", "")
         if not cam_id or not new_name:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "camera_id and new_name"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id and new_name"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/video_inputs",
                             headers=headers,
-                            json={"videoInputId": cam_id, "title": new_name, "timeZone": "Europe/Berlin"},
+                            json={
+                                "videoInputId": cam_id,
+                                "title": new_name,
+                                "timeZone": "Europe/Berlin",
+                            },
                         ) as resp:
                             if resp.status in (200, 201, 204):
-                                _LOGGER.info("Camera %s renamed to '%s'", cam_id[:8], new_name)
+                                _LOGGER.info(
+                                    "Camera %s renamed to '%s'", cam_id[:8], new_name
+                                )
                                 await coord.async_request_refresh()
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Rename", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "Rename",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Rename", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Rename",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_invite_friend(call: ServiceCall) -> None:
         """Invite a friend for camera sharing."""
         email = call.data.get("email", "")
         if not email:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "email"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "email"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
                 session = async_get_clientsession(hass, verify_ssl=False)
-                headers = {"Authorization": f"Bearer {coord.token}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
                 try:
                     async with asyncio.timeout(10):
                         async with session.post(
@@ -7076,18 +8249,41 @@ def _register_services(hass: HomeAssistant) -> None:
                         ) as resp:
                             if resp.status in (200, 201):
                                 data = await resp.json()
-                                _LOGGER.info("Friend invited: %s (ID: %s)", email, data.get("id", "?"))
+                                _LOGGER.info(
+                                    "Friend invited: %s (ID: %s)",
+                                    email,
+                                    data.get("id", "?"),
+                                )
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Kamera-Freigabe", "message": f"Einladung an {email} gesendet. Friend-ID: {data.get('id', '?')}"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Kamera-Freigabe",
+                                        "message": f"Einladung an {email} gesendet. Friend-ID: {data.get('id', '?')}",
+                                    },
                                 )
                             else:
                                 body = await resp.text()
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error_with_body", translation_placeholders={"action": "Invite", "status": str(resp.status), "body": body[:200]})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Invite",
+                                        "status": str(resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Invite", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Invite",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_list_friends(call: ServiceCall) -> None:
@@ -7099,7 +8295,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):
-                        async with session.get(f"{CLOUD_API}/v11/friends", headers=headers) as resp:
+                        async with session.get(
+                            f"{CLOUD_API}/v11/friends", headers=headers
+                        ) as resp:
                             if resp.status == 200:
                                 friends = await resp.json()
                                 if not friends:
@@ -7107,30 +8305,59 @@ def _register_services(hass: HomeAssistant) -> None:
                                 else:
                                     lines = [f"{len(friends)} Freund(e):"]
                                     for f in friends:
-                                        email = f.get("email", f.get("invitationEmail", "?"))
-                                        status = f.get("status", f.get("invitationStatus", "?"))
+                                        email = f.get(
+                                            "email", f.get("invitationEmail", "?")
+                                        )
+                                        status = f.get(
+                                            "status", f.get("invitationStatus", "?")
+                                        )
                                         fid = f.get("id", "?")
                                         shares = f.get("sharedVideoInputs", [])
-                                        lines.append(f"• {email} (Status: {status}, ID: {fid}, Kameras: {len(shares)})")
+                                        lines.append(
+                                            f"• {email} (Status: {status}, ID: {fid}, Kameras: {len(shares)})"
+                                        )
                                     msg = "\n".join(lines)
                                 _LOGGER.info("Friends: %s", msg)
                                 await hass.services.async_call(
-                                    "persistent_notification", "create",
-                                    {"title": "Kamera-Freigaben", "message": msg, "notification_id": "bosch_friends_list"},
+                                    "persistent_notification",
+                                    "create",
+                                    {
+                                        "title": "Kamera-Freigaben",
+                                        "message": msg,
+                                        "notification_id": "bosch_friends_list",
+                                    },
                                 )
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "List friends", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "List friends",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "List friends", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "List friends",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_remove_friend(call: ServiceCall) -> None:
         """Remove a friend and revoke camera shares."""
         friend_id = call.data.get("friend_id", "")
         if not friend_id:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="argument_required", translation_placeholders={"argument": "friend_id"})
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "friend_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
@@ -7144,17 +8371,31 @@ def _register_services(hass: HomeAssistant) -> None:
                             if resp.status in (200, 201, 204):
                                 _LOGGER.info("Friend %s removed", friend_id)
                             else:
-                                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="http_error", translation_placeholders={"action": "Remove friend", "status": str(resp.status)})
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error",
+                                    translation_placeholders={
+                                        "action": "Remove friend",
+                                        "status": str(resp.status),
+                                    },
+                                )
                 except HomeAssistantError:
                     raise
                 except Exception as err:
-                    raise HomeAssistantError(translation_domain=DOMAIN, translation_key="unexpected_error", translation_placeholders={"action": "Remove friend", "error": str(err)}) from err
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Remove friend",
+                            "error": str(err),
+                        },
+                    ) from err
                 break
 
     async def handle_migrate_flat_events(call: ServiceCall) -> None:
         """Move flat event files (camera/file) into date hierarchy (camera/year/month/day/file)."""
-        import shutil
         import re as _re
+        import shutil
         from pathlib import Path
 
         _PAT = _re.compile(
@@ -7191,7 +8432,9 @@ def _register_services(hass: HomeAssistant) -> None:
                         dest_dir.mkdir(parents=True, exist_ok=True)
                         dest = dest_dir / f.name
                         if dest.exists():
-                            _LOGGER.warning("migrate_flat_events: skip %s — dest exists", f.name)
+                            _LOGGER.warning(
+                                "migrate_flat_events: skip %s — dest exists", f.name
+                            )
                             continue
                         shutil.move(str(f), str(dest))
                         moved += 1
@@ -7202,8 +8445,13 @@ def _register_services(hass: HomeAssistant) -> None:
             _LOGGER.info("migrate_flat_events: moved %d file(s) in %s", n, base)
 
         await hass.services.async_call(
-            "persistent_notification", "create",
-            {"title": "Bosch Kamera", "message": f"Flat-file migration complete: {total} file(s) moved to date hierarchy.", "notification_id": "bosch_migrate"},
+            "persistent_notification",
+            "create",
+            {
+                "title": "Bosch Kamera",
+                "message": f"Flat-file migration complete: {total} file(s) moved to date hierarchy.",
+                "notification_id": "bosch_migrate",
+            },
         )
 
     async def handle_delete_event(call: ServiceCall) -> None:
@@ -7227,6 +8475,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
             def _delete(base: Path, file_path: str, camera: str, date: str) -> int:
                 import re as _re2
+
                 _PAT2 = _re2.compile(
                     r"^(?:(?P<cam>.+?)_)?(?P<date>\d{4}-\d{2}-\d{2})_",
                     _re2.IGNORECASE,
@@ -7237,7 +8486,11 @@ def _register_services(hass: HomeAssistant) -> None:
                     try:
                         target.relative_to(base)
                     except ValueError:
-                        _LOGGER.warning("delete_event: path %s outside base %s — rejected", target, base)
+                        _LOGGER.warning(
+                            "delete_event: path %s outside base %s — rejected",
+                            target,
+                            base,
+                        )
                         return 0
                     if target.is_file():
                         target.unlink()
@@ -7272,38 +8525,61 @@ def _register_services(hass: HomeAssistant) -> None:
                             pass
                 return count
 
-            n = await hass.async_add_executor_job(_delete, base, file_path, camera, date)
+            n = await hass.async_add_executor_job(
+                _delete, base, file_path, camera, date
+            )
             deleted += n
             break
 
         _LOGGER.info("delete_event: deleted %d file(s)", deleted)
         await hass.services.async_call(
-            "persistent_notification", "create",
-            {"title": "Bosch Kamera", "message": f"Deleted {deleted} event file(s).", "notification_id": "bosch_delete_event"},
+            "persistent_notification",
+            "create",
+            {
+                "title": "Bosch Kamera",
+                "message": f"Deleted {deleted} event file(s).",
+                "notification_id": "bosch_delete_event",
+            },
         )
 
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
-        hass.services.async_register(DOMAIN, "trigger_snapshot", handle_trigger_snapshot)
+        hass.services.async_register(
+            DOMAIN, "trigger_snapshot", handle_trigger_snapshot
+        )
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
-        hass.services.async_register(DOMAIN, "open_live_connection", handle_open_live_connection)
+        hass.services.async_register(
+            DOMAIN, "open_live_connection", handle_open_live_connection
+        )
     if not hass.services.has_service(DOMAIN, "create_rule"):
         hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
     if not hass.services.has_service(DOMAIN, "delete_rule"):
         hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
     if not hass.services.has_service(DOMAIN, "delete_motion_zone"):
-        hass.services.async_register(DOMAIN, "delete_motion_zone", handle_delete_motion_zone)
+        hass.services.async_register(
+            DOMAIN, "delete_motion_zone", handle_delete_motion_zone
+        )
     if not hass.services.has_service(DOMAIN, "get_lighting_schedule"):
-        hass.services.async_register(DOMAIN, "get_lighting_schedule", handle_get_lighting_schedule)
+        hass.services.async_register(
+            DOMAIN, "get_lighting_schedule", handle_get_lighting_schedule
+        )
     if not hass.services.has_service(DOMAIN, "get_privacy_masks"):
-        hass.services.async_register(DOMAIN, "get_privacy_masks", handle_get_privacy_masks)
+        hass.services.async_register(
+            DOMAIN, "get_privacy_masks", handle_get_privacy_masks
+        )
     if not hass.services.has_service(DOMAIN, "set_privacy_masks"):
-        hass.services.async_register(DOMAIN, "set_privacy_masks", handle_set_privacy_masks)
+        hass.services.async_register(
+            DOMAIN, "set_privacy_masks", handle_set_privacy_masks
+        )
     if not hass.services.has_service(DOMAIN, "update_rule"):
         hass.services.async_register(DOMAIN, "update_rule", handle_update_rule)
     if not hass.services.has_service(DOMAIN, "set_motion_zones"):
-        hass.services.async_register(DOMAIN, "set_motion_zones", handle_set_motion_zones)
+        hass.services.async_register(
+            DOMAIN, "set_motion_zones", handle_set_motion_zones
+        )
     if not hass.services.has_service(DOMAIN, "get_motion_zones"):
-        hass.services.async_register(DOMAIN, "get_motion_zones", handle_get_motion_zones)
+        hass.services.async_register(
+            DOMAIN, "get_motion_zones", handle_get_motion_zones
+        )
     if not hass.services.has_service(DOMAIN, "share_camera"):
         hass.services.async_register(DOMAIN, "share_camera", handle_share_camera)
     if not hass.services.has_service(DOMAIN, "rename_camera"):
@@ -7315,6 +8591,8 @@ def _register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "remove_friend"):
         hass.services.async_register(DOMAIN, "remove_friend", handle_remove_friend)
     if not hass.services.has_service(DOMAIN, "migrate_flat_events"):
-        hass.services.async_register(DOMAIN, "migrate_flat_events", handle_migrate_flat_events)
+        hass.services.async_register(
+            DOMAIN, "migrate_flat_events", handle_migrate_flat_events
+        )
     if not hass.services.has_service(DOMAIN, "delete_event"):
         hass.services.async_register(DOMAIN, "delete_event", handle_delete_event)

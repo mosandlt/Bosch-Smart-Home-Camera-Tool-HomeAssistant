@@ -14,6 +14,7 @@ Targets:
 Each test uses SimpleNamespace coordinator stubs and calls methods as unbound functions
 via `BoschCameraCoordinator.method(coord, ...)` — no HA runtime required.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 CAM_B = "22222222-2222-2222-2222-222222222222"
@@ -67,7 +67,9 @@ def _make_coord(**overrides):
 # ── 1. async_fetch_live_snapshot_local ───────────────────────────────────────
 
 
-def _make_digest_resp_cm(status: int, content_type: str = "image/jpeg", body: bytes = b"") -> MagicMock:
+def _make_digest_resp_cm(
+    status: int, content_type: str = "image/jpeg", body: bytes = b""
+) -> MagicMock:
     """Return an async context-manager mock for async_digest_request."""
     resp = MagicMock()
     resp.status = status
@@ -93,6 +95,7 @@ class TestFetchDigestClosure:
     async def _run_with_mock_put(coord, cam_id, *, digest_cm_or_exc=None):
         """Wire aiohttp PUT mock + digest_request mock so the full method runs."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         put_resp = MagicMock()
@@ -111,13 +114,26 @@ class TestFetchDigestClosure:
         # async_get_clientsession returns a plain MagicMock (not the aiohttp session above)
         client_session = MagicMock()
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch("custom_components.bosch_shc_camera.async_digest_request",
-                   side_effect=digest_cm_or_exc if isinstance(digest_cm_or_exc, type) and issubclass(digest_cm_or_exc, Exception) else None,
-                   new_callable=None if isinstance(digest_cm_or_exc, type) and issubclass(digest_cm_or_exc, Exception) else lambda: _make_patch_digest(digest_cm_or_exc)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                side_effect=digest_cm_or_exc
+                if isinstance(digest_cm_or_exc, type)
+                and issubclass(digest_cm_or_exc, Exception)
+                else None,
+                new_callable=None
+                if isinstance(digest_cm_or_exc, type)
+                and issubclass(digest_cm_or_exc, Exception)
+                # passes an Exception type, so this lambda is never evaluated.
+                else lambda: _make_patch_digest(digest_cm_or_exc),  # noqa: F821
+            ),
+        ):
             return await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, cam_id
             )
@@ -126,6 +142,7 @@ class TestFetchDigestClosure:
     async def test_200_image_returns_bytes(self):
         """200 + image Content-Type → returns bytes."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         img_bytes = b"\xff\xd8\xff" * 10
@@ -152,13 +169,21 @@ class TestFetchDigestClosure:
         client_session = MagicMock()
 
         coord = _make_coord()
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
-            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result == img_bytes
 
     @pytest.mark.asyncio
@@ -189,13 +214,21 @@ class TestFetchDigestClosure:
         client_session = MagicMock()
 
         coord = _make_coord()
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
-            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result is None
 
     @pytest.mark.asyncio
@@ -226,19 +259,28 @@ class TestFetchDigestClosure:
         client_session = MagicMock()
 
         coord = _make_coord()
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
-            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_aiohttp_error_returns_none(self):
         """aiohttp.ClientError → None."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         put_resp = MagicMock()
@@ -255,13 +297,21 @@ class TestFetchDigestClosure:
         client_session = MagicMock()
 
         coord = _make_coord()
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock(side_effect=_aiohttp.ClientError("network error"))):
-            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                new=AsyncMock(side_effect=_aiohttp.ClientError("network error")),
+            ),
+        ):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
         assert result is None
 
     @pytest.mark.asyncio
@@ -272,8 +322,9 @@ class TestFetchDigestClosure:
         coord = _make_coord(
             _shc_state_cache={CAM_A: {"privacy_mode": True}},
         )
-        with patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock()) as mock_digest:
+        with patch(
+            "custom_components.bosch_shc_camera.async_digest_request", new=AsyncMock()
+        ) as mock_digest:
             result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, CAM_A
             )
@@ -286,8 +337,9 @@ class TestFetchDigestClosure:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(token=None)
-        with patch("custom_components.bosch_shc_camera.async_digest_request",
-                   new=AsyncMock()) as mock_digest:
+        with patch(
+            "custom_components.bosch_shc_camera.async_digest_request", new=AsyncMock()
+        ) as mock_digest:
             result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, CAM_A
             )
@@ -311,8 +363,10 @@ class TestFetchDigestClosure:
         session_mock.put = MagicMock(return_value=put_resp)
 
         coord = _make_coord()
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, CAM_A
             )
@@ -325,6 +379,7 @@ class TestFetchDigestClosure:
 def _make_cam_entity_with_stream_feature(*, has_webrtc=False):
     """Fake camera entity: supports STREAM, optionally WEB_RTC."""
     from homeassistant.components.camera import CameraEntityFeature, StreamType
+
     caps = MagicMock()
     if has_webrtc:
         caps.frontend_stream_types = {StreamType.WEB_RTC, StreamType.HLS}
@@ -340,13 +395,13 @@ def _make_cam_entity_with_stream_feature(*, has_webrtc=False):
 
 
 class TestCheckAndRecoverWebrtc:
-
     @pytest.mark.asyncio
     async def test_direct_refresh_exception_sets_last_reload_attr(self):
         """_ensure_go2rtc_schemes_fresh raises → sets _last_go2rtc_reload=0.0 if missing (lines 3310-3314)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.components.camera import CameraEntityFeature, StreamType
         from homeassistant.config_entries import ConfigEntryState
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         # Make second camera_capabilities call also return no WEB_RTC (after invalidate)
@@ -364,11 +419,14 @@ class TestCheckAndRecoverWebrtc:
         # Also must not have _last_go2rtc_reload so line 3313 initialises it
         assert not hasattr(coord, "_last_go2rtc_reload")
 
-        with patch.object(
-            BoschCameraCoordinator,
-            "_ensure_go2rtc_schemes_fresh",
-            side_effect=_raise,
-        ), patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                BoschCameraCoordinator,
+                "_ensure_go2rtc_schemes_fresh",
+                side_effect=_raise,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
         assert hasattr(coord, "_last_go2rtc_reload")
@@ -376,8 +434,9 @@ class TestCheckAndRecoverWebrtc:
     @pytest.mark.asyncio
     async def test_last_go2rtc_reload_init_to_zero(self):
         """If _last_go2rtc_reload missing and reload throttle check fires, initialise to 0.0."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.config_entries import ConfigEntryState
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         coord = _make_coord(_camera_entities={CAM_A: cam_ent})
@@ -388,24 +447,30 @@ class TestCheckAndRecoverWebrtc:
         async def _raise(*a, **kw):
             raise RuntimeError("boom")
 
-        with patch.object(
-            BoschCameraCoordinator,
-            "_ensure_go2rtc_schemes_fresh",
-            side_effect=_raise,
-        ), patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                BoschCameraCoordinator,
+                "_ensure_go2rtc_schemes_fresh",
+                side_effect=_raise,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
-        assert coord._last_go2rtc_reload == float('-inf')
+        assert coord._last_go2rtc_reload == float("-inf")
 
     @pytest.mark.asyncio
     async def test_go2rtc_reload_exception_does_not_raise(self):
         """async_reload raises → watchdog logs warning and continues (line 3335-3336)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.config_entries import ConfigEntryState
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         coord = _make_coord(_camera_entities={CAM_A: cam_ent})
-        coord._last_go2rtc_reload = float('-inf')  # never reloaded — ensure throttle does not fire
+        coord._last_go2rtc_reload = float(
+            "-inf"
+        )  # never reloaded — ensure throttle does not fire
 
         go2rtc_entry = MagicMock()
         go2rtc_entry.state = ConfigEntryState.LOADED
@@ -418,11 +483,14 @@ class TestCheckAndRecoverWebrtc:
         async def _raise(*a, **kw):
             raise RuntimeError("schemes boom")
 
-        with patch.object(
-            BoschCameraCoordinator,
-            "_ensure_go2rtc_schemes_fresh",
-            side_effect=_raise,
-        ), patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                BoschCameraCoordinator,
+                "_ensure_go2rtc_schemes_fresh",
+                side_effect=_raise,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             # Should not raise despite reload failure
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
@@ -431,8 +499,9 @@ class TestCheckAndRecoverWebrtc:
     @pytest.mark.asyncio
     async def test_async_refresh_providers_exception_does_not_raise(self):
         """cam_ent.async_refresh_providers raises → watchdog logs debug, continues (lines 3345-3346)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from homeassistant.config_entries import ConfigEntryState
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_ent = _make_cam_entity_with_stream_feature(has_webrtc=False)
         cam_ent.async_refresh_providers = AsyncMock(side_effect=Exception("rp boom"))
@@ -444,7 +513,7 @@ class TestCheckAndRecoverWebrtc:
             _camera_entities={CAM_A: cam_ent},
             _live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
         )
-        coord._last_go2rtc_reload = float('-inf')
+        coord._last_go2rtc_reload = float("-inf")
 
         go2rtc_entry = MagicMock()
         go2rtc_entry.state = ConfigEntryState.LOADED
@@ -455,11 +524,14 @@ class TestCheckAndRecoverWebrtc:
         async def _raise(*a, **kw):
             raise RuntimeError("schemes boom")
 
-        with patch.object(
-            BoschCameraCoordinator,
-            "_ensure_go2rtc_schemes_fresh",
-            side_effect=_raise,
-        ), patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                BoschCameraCoordinator,
+                "_ensure_go2rtc_schemes_fresh",
+                side_effect=_raise,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
         cam_ent.async_refresh_providers.assert_called_once()
@@ -501,11 +573,14 @@ class TestCheckAndRecoverWebrtc:
         async def _raise(*a, **kw):
             raise RuntimeError("schemes boom")
 
-        with patch.object(
-            BoschCameraCoordinator,
-            "_ensure_go2rtc_schemes_fresh",
-            side_effect=_raise,
-        ), patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                BoschCameraCoordinator,
+                "_ensure_go2rtc_schemes_fresh",
+                side_effect=_raise,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             await BoschCameraCoordinator._check_and_recover_webrtc(coord, CAM_A)
 
         coord.hass.config_entries.async_reload.assert_not_called()
@@ -515,7 +590,6 @@ class TestCheckAndRecoverWebrtc:
 
 
 class TestEnsureGo2rtcSchemesFresh:
-
     @pytest.mark.asyncio
     async def test_init_last_schemes_refresh_when_missing(self):
         """_last_schemes_refresh not set → initialised to 0.0 (line 3366-3367)."""
@@ -536,7 +610,7 @@ class TestEnsureGo2rtcSchemesFresh:
             coord.hass.data = {fake_providers_key: set()}
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
 
-        assert coord._last_schemes_refresh == float('-inf')
+        assert coord._last_schemes_refresh == float("-inf")
 
     @pytest.mark.asyncio
     async def test_throttle_returns_early_within_600s(self):
@@ -564,7 +638,9 @@ class TestEnsureGo2rtcSchemesFresh:
         coord = _make_coord()
         coord._last_schemes_refresh = 0.0
 
-        with patch.dict("sys.modules", {"homeassistant.components.camera.webrtc": None}):
+        with patch.dict(
+            "sys.modules", {"homeassistant.components.camera.webrtc": None}
+        ):
             # None in sys.modules causes ImportError on 'from ... import'
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
 
@@ -601,7 +677,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float('-inf')
+        coord._last_schemes_refresh = float("-inf")
 
         bare_provider = MagicMock(spec=[])  # no _rest_client, no _supported_schemes
 
@@ -627,7 +703,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float('-inf')
+        coord._last_schemes_refresh = float("-inf")
 
         fresh_schemes = {"rtsp", "rtsps"}
         provider = MagicMock()
@@ -638,6 +714,7 @@ class TestEnsureGo2rtcSchemesFresh:
 
         cam_ent = MagicMock()
         from homeassistant.components.camera import CameraEntityFeature
+
         cam_ent.supported_features = CameraEntityFeature.STREAM
         cam_ent.async_refresh_providers = AsyncMock()
         cam_ent.entity_id = "camera.test"
@@ -669,7 +746,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float('-inf')
+        coord._last_schemes_refresh = float("-inf")
 
         fresh_schemes = {"rtsp"}
         provider = MagicMock()
@@ -680,11 +757,16 @@ class TestEnsureGo2rtcSchemesFresh:
 
         cam_ent = MagicMock()
         from homeassistant.components.camera import CameraEntityFeature
+
         cam_ent.supported_features = CameraEntityFeature.STREAM
-        cam_ent.async_refresh_providers = AsyncMock(side_effect=Exception("cam rp fail"))
+        cam_ent.async_refresh_providers = AsyncMock(
+            side_effect=Exception("cam rp fail")
+        )
         cam_ent.entity_id = "camera.test"
         coord._camera_entities = {CAM_A: cam_ent}
-        coord._live_connections = {CAM_A: {"rtspsUrl": "rtsps://x"}}  # see fix 2026-05-20
+        coord._live_connections = {
+            CAM_A: {"rtspsUrl": "rtsps://x"}
+        }  # see fix 2026-05-20
 
         fake_key = object()
 
@@ -713,7 +795,9 @@ class TestEnsureGo2rtcSchemesFresh:
         provider = MagicMock()
         provider._rest_client = MagicMock()
         provider._rest_client.schemes = MagicMock()
-        provider._rest_client.schemes.list = AsyncMock(side_effect=Exception("list fail"))
+        provider._rest_client.schemes.list = AsyncMock(
+            side_effect=Exception("list fail")
+        )
         provider._supported_schemes = set()
 
         fake_key = object()
@@ -737,7 +821,6 @@ class TestEnsureGo2rtcSchemesFresh:
 
 
 class TestRunSmbCleanupBg:
-
     @pytest.mark.asyncio
     async def test_exception_does_not_raise(self):
         """executor raises → exception is caught and logged as debug (lines 2812-2815)."""
@@ -775,7 +858,6 @@ class TestRunSmbCleanupBg:
 
 
 class TestRunNvrCleanupBg:
-
     @pytest.mark.asyncio
     async def test_exception_does_not_raise(self):
         """executor raises → exception caught and logged (lines 2850-2853)."""
@@ -812,7 +894,6 @@ class TestRunNvrCleanupBg:
 
 
 class TestAsyncFetchLiveSnapshotLockCreation:
-
     @pytest.mark.asyncio
     async def test_creates_lock_on_first_call(self):
         """_snapshot_fetch_locks is empty → a new Lock is created and stored (lines 2886-2889)."""
@@ -826,9 +907,7 @@ class TestAsyncFetchLiveSnapshotLockCreation:
         coord.token = "tok-A"
         coord._shc_state_cache = {}
 
-        result = await BoschCameraCoordinator.async_fetch_live_snapshot(
-            coord, CAM_A
-        )
+        result = await BoschCameraCoordinator.async_fetch_live_snapshot(coord, CAM_A)
 
         assert result == b"\xff\xd8\xff"
         assert CAM_A in coord._snapshot_fetch_locks
@@ -890,15 +969,19 @@ class TestProxyCacheEviction:
         session_mock.put = MagicMock(return_value=put_resp)
         session_mock.get = MagicMock(return_value=snap_resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
             )
 
         # Old cache should have been evicted; result is new data or None depending on
         # the impl path, but crucially the old expired entry is gone.
-        assert CAM_A not in coord._proxy_url_cache or True  # it may now have a fresh entry
+        assert (
+            CAM_A not in coord._proxy_url_cache or True
+        )  # it may now have a fresh entry
 
     @pytest.mark.asyncio
     async def test_privacy_mode_short_circuits_impl(self):
@@ -954,7 +1037,6 @@ def _make_go2rtc_session(put_status=200, put_body="", check_status=200):
 
 
 class TestRegisterGo2rtcStream:
-
     @pytest.mark.asyncio
     async def test_unix_socket_oserror_falls_back_to_http(self):
         """aiohttp.UnixConnector raises OSError → falls back to HTTP endpoint (line 3474)."""
@@ -967,8 +1049,10 @@ class TestRegisterGo2rtcStream:
             put_status=200, check_status=200
         )
 
-        with patch("aiohttp.UnixConnector", side_effect=OSError("no socket")), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.UnixConnector", side_effect=OSError("no socket")),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._register_go2rtc_stream(
                 coord, CAM_A, "rtsps://host/stream"
             )
@@ -979,8 +1063,9 @@ class TestRegisterGo2rtcStream:
     @pytest.mark.asyncio
     async def test_verify_get_exception_falls_through_to_next_endpoint(self):
         """verify GET raises ClientError → continues to next endpoint (lines 3504-3505)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import aiohttp as aiohttp_real
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
         coord.hass.config.config_dir = None  # no Unix socket

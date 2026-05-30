@@ -54,7 +54,9 @@ class TestShcFunctionContracts:
 # ── async_shc_set_camera_light ────────────────────────────────────────────────
 
 
-def _coord_with_shc(cam_id: str = CAM_ID, device_id: str = "dev-001") -> SimpleNamespace:
+def _coord_with_shc(
+    cam_id: str = CAM_ID, device_id: str = "dev-001"
+) -> SimpleNamespace:
     return SimpleNamespace(
         hass=MagicMock(),
         options={
@@ -179,7 +181,10 @@ class TestAsyncCloudSetNotifications:
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["notifications_status"] == "FOLLOW_CAMERA_SCHEDULE"
+        assert (
+            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            == "FOLLOW_CAMERA_SCHEDULE"
+        )
 
     @pytest.mark.asyncio
     async def test_204_updates_cache(self):
@@ -242,7 +247,7 @@ class TestAsyncCloudSetNotifications:
 
         coord = _notif_coord()
         session = MagicMock()
-        session.put = MagicMock(side_effect=asyncio.TimeoutError())
+        session.put = MagicMock(side_effect=TimeoutError())
 
         with patch(
             "custom_components.bosch_shc_camera.shc.async_get_clientsession",
@@ -309,7 +314,9 @@ class TestShcFetcherWriteLockCheck:
         fetcher_start = src.find("async def async_update_shc_states")
         assert fetcher_start != -1
         fetcher_end = src.find("\nasync def ", fetcher_start + 1)
-        body = src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
+        body = (
+            src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
+        )
         assert "_privacy_set_at" in body, (
             "async_update_shc_states must check _privacy_set_at before writing — "
             "without it the SHC poll always overwrites the privacy cache (BUG-4)"
@@ -320,7 +327,9 @@ class TestShcFetcherWriteLockCheck:
         fetcher_start = src.find("async def async_update_shc_states")
         assert fetcher_start != -1
         fetcher_end = src.find("\nasync def ", fetcher_start + 1)
-        body = src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
+        body = (
+            src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
+        )
         assert "_light_set_at" in body, (
             "async_update_shc_states must check _light_set_at — same race shape as BUG-4"
         )

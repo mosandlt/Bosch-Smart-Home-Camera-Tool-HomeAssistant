@@ -3,6 +3,7 @@
 Extracted from __init__.py to keep the coordinator lean.
 All functions that previously used `self` now take a `coordinator` parameter.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -14,6 +15,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -45,15 +47,17 @@ def _bosch_ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
-def _http_get(url: str, token: str, timeout: int = 60, stream: bool = False) -> tuple[int, bytes]:
+def _http_get(
+    url: str, token: str, timeout: int = 60, stream: bool = False
+) -> tuple[int, bytes]:
     """Download *url* using stdlib urllib (no third-party dependency).
 
     Returns (status_code, body_bytes).  For streaming downloads use
     _http_get_chunked() instead so memory stays bounded.
     If the request fails with a network error, raises urllib.error.URLError or OSError.
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
+    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
         return r.status, r.read()
 
 
@@ -63,8 +67,8 @@ def _http_get_to_file(url: str, token: str, dest_path: str, timeout: int = 60) -
     Returns True on success (HTTP 200), False on non-200.
     Raises urllib.error.URLError / OSError on network failure.
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
+    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
         if r.status != 200:
             return False
         with open(dest_path, "wb") as f:
@@ -85,8 +89,8 @@ def _http_get_chunked(url: str, token: str, timeout: int = 60) -> Any:
                 while chunk := r.read(65536):
                     ...
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-    return urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout)
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
+    return urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout)  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
 
 
 def _safe_name(name: str) -> str:
@@ -99,7 +103,10 @@ def _safe_name(name: str) -> str:
 
 # ── Local save (FCM-triggered, runs in executor thread) ───────────────────────
 
-def sync_local_save(coordinator: "BoschCameraCoordinator", ev: dict[str, Any], token: str, cam_name: str) -> None:
+
+def sync_local_save(
+    coordinator: BoschCameraCoordinator, ev: dict[str, Any], token: str, cam_name: str
+) -> None:
     """Save a single event's image/clip to the local download_path on FCM trigger.
 
     Folder structure follows folder_pattern option (default: {camera}/{year}/{month}/{day}).
@@ -128,10 +135,11 @@ def sync_local_save(coordinator: "BoschCameraCoordinator", ev: dict[str, Any], t
             if ev_epoch < started_at - 60:
                 _LOGGER.debug(
                     "Local save skipped: event %s predates session start (%.0fs old at startup)",
-                    ts[:19], started_at - ev_epoch,
+                    ts[:19],
+                    started_at - ev_epoch,
                 )
                 return
-        except Exception:
+        except Exception:  # noqa: S110 # timestamp parse failure is non-actionable; event proceeds without age-filter
             pass
 
     cam_safe = _safe_name(cam_name)
@@ -141,20 +149,41 @@ def sync_local_save(coordinator: "BoschCameraCoordinator", ev: dict[str, Any], t
     ev_id = (ev.get("id") or "")[:8].upper()
 
     year, month, day = date_str[:4], date_str[5:7], date_str[8:10]
-    folder_pattern = (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}").strip().strip("/")
-    file_pattern = (opts.get("file_pattern") or "{camera}_{date}_{time}_{type}_{id}").strip()
+    folder_pattern = (
+        (opts.get("folder_pattern") or "{camera}/{year}/{month}/{day}")
+        .strip()
+        .strip("/")
+    )
+    file_pattern = (
+        opts.get("file_pattern") or "{camera}_{date}_{time}_{type}_{id}"
+    ).strip()
 
     try:
-        sub = folder_pattern.format(camera=cam_safe, year=year, month=month, day=day,
-                                    date=date_str, time=time_str, type=etype)
+        sub = folder_pattern.format(
+            camera=cam_safe,
+            year=year,
+            month=month,
+            day=day,
+            date=date_str,
+            time=time_str,
+            type=etype,
+        )
     except (KeyError, ValueError):
         sub = cam_safe
 
     folder = os.path.join(download_path, sub.replace("/", os.sep))
 
     try:
-        stem = file_pattern.format(camera=cam_safe, date=date_str, time=time_str,
-                                   type=etype, id=ev_id, year=year, month=month, day=day)
+        stem = file_pattern.format(
+            camera=cam_safe,
+            date=date_str,
+            time=time_str,
+            type=etype,
+            id=ev_id,
+            year=year,
+            month=month,
+            day=day,
+        )
     except (KeyError, ValueError):
         stem = f"{cam_safe}_{date_str}_{time_str}_{etype}_{ev_id}"
 
@@ -179,7 +208,10 @@ def sync_local_save(coordinator: "BoschCameraCoordinator", ev: dict[str, Any], t
 
 # ── SMB/NAS upload (runs in executor thread) ──────────────────────────────────
 
-def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any], token: str) -> None:
+
+def sync_smb_upload(
+    coordinator: BoschCameraCoordinator, data: dict[str, Any], token: str
+) -> None:
     """Upload new event files to SMB or FTP.
 
     Folder structure: {smb_base_path}/{camera}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
@@ -196,16 +228,23 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
     folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
-    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    file_pattern = opts.get(
+        "file_pattern", "{camera}_{date}_{time}_{type}_{id}"
+    ).strip()
 
     if not opts.get("enable_smb_upload") or not server or not share:
         return
 
     try:
-        from smbclient import (  # type: ignore[import-not-found]
-            register_session, mkdir, open_file, stat as smb_stat
-        )
         import smbclient  # noqa: F401
+        from smbclient import (
+            mkdir,  # noqa: F401  # imported to assert availability of the SMB API surface
+            open_file,
+            register_session,
+        )
+        from smbclient import (
+            stat as smb_stat,
+        )
     except ImportError:
         _LOGGER.warning(
             "smbprotocol not installed — SMB upload disabled. "
@@ -231,7 +270,9 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
         for ev in ev_list:
             ts = ev.get("timestamp", "")
             if not ts or len(ts) < 19:
-                _LOGGER.debug("SMB upload: skipping event with short/empty timestamp: %r", ts)
+                _LOGGER.debug(
+                    "SMB upload: skipping event with short/empty timestamp: %r", ts
+                )
                 continue
 
             # Parse timestamp for folder/file patterns
@@ -245,16 +286,25 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
 
             # Build folder path from pattern
             folder_parts = folder_pattern.format(
-                year=year, month=month, day=day,
-                camera=cam_name, type=etype,
+                year=year,
+                month=month,
+                day=day,
+                camera=cam_name,
+                type=etype,
             )
             smb_folder = f"\\\\{server}\\{share}\\{base_path}\\{folder_parts}"
             smb_folder = smb_folder.replace("/", "\\")
 
             # Build file name from pattern
             file_base = file_pattern.format(
-                camera=cam_name, date=date_str, time=time_str,
-                type=etype, id=ev_id, year=year, month=month, day=day,
+                camera=cam_name,
+                date=date_str,
+                time=time_str,
+                type=etype,
+                id=ev_id,
+                year=year,
+                month=month,
+                day=day,
             )
 
             # Ensure folder exists (create recursively)
@@ -277,9 +327,17 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
                         if status == 200 and content:
                             with open_file(smb_path, mode="wb") as f:
                                 f.write(content)
-                            _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".jpg", len(content))
+                            _LOGGER.info(
+                                "SMB uploaded: %s (%d bytes)",
+                                file_base + ".jpg",
+                                len(content),
+                            )
                         else:
-                            _LOGGER.warning("SMB snapshot download failed: HTTP %d, %d bytes", status, len(content))
+                            _LOGGER.warning(
+                                "SMB snapshot download failed: HTTP %d, %d bytes",
+                                status,
+                                len(content),
+                            )
                     except Exception as err:
                         _LOGGER.warning("SMB upload error for %s: %s", file_base, err)
             else:
@@ -296,10 +354,10 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
                 except OSError:
                     try:
                         total = 0
-                        req_obj = urllib.request.Request(
+                        req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer; from Bosch API response (not user-supplied)
                             clip_url, headers={"Authorization": f"Bearer {token}"}
                         )
-                        with urllib.request.urlopen(
+                        with urllib.request.urlopen(  # noqa: S310 # Bosch cloud clip URL, https+bearer; from Bosch API response (not user-supplied)
                             req_obj, context=_bosch_ssl_ctx(), timeout=60
                         ) as r:
                             if r.status == 200:
@@ -310,19 +368,32 @@ def sync_smb_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any],
                                             break
                                         f.write(chunk)
                                         total += len(chunk)
-                                _LOGGER.info("SMB uploaded: %s (%d bytes)", file_base + ".mp4", total)
+                                _LOGGER.info(
+                                    "SMB uploaded: %s (%d bytes)",
+                                    file_base + ".mp4",
+                                    total,
+                                )
                             else:
-                                _LOGGER.warning("SMB clip download failed: HTTP %d", r.status)
+                                _LOGGER.warning(
+                                    "SMB clip download failed: HTTP %d", r.status
+                                )
                     except Exception as err:
-                        _LOGGER.warning("SMB clip upload error for %s: %s", file_base, err)
+                        _LOGGER.warning(
+                            "SMB clip upload error for %s: %s", file_base, err
+                        )
 
 
-def smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder_parts: str) -> None:
+def smb_makedirs(
+    full_path: str, server: str, share: str, base_path: str, folder_parts: str
+) -> None:
     """Create SMB directories recursively."""
-    from smbclient import mkdir, stat as smb_stat
+    from smbclient import mkdir
+    from smbclient import stat as smb_stat
 
     # Build path incrementally
-    parts = [p for p in f"{base_path}\\{folder_parts}".replace("/", "\\").split("\\") if p]
+    parts = [
+        p for p in f"{base_path}\\{folder_parts}".replace("/", "\\").split("\\") if p
+    ]
     current = f"\\\\{server}\\{share}"
 
     for part in parts:
@@ -338,13 +409,15 @@ def smb_makedirs(full_path: str, server: str, share: str, base_path: str, folder
 
 # ── SMB retention cleanup (runs in executor thread, once per day) ─────────────
 
-def sync_smb_cleanup(coordinator: "BoschCameraCoordinator") -> None:
+
+def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     """Delete files on the SMB or FTP share that are older than smb_retention_days."""
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
     if protocol == "ftp":
         return _sync_ftp_cleanup(coordinator)
     try:
-        from smbclient import register_session, scandir, remove, stat as smb_stat
+        from smbclient import register_session, remove, scandir
+        from smbclient import stat as smb_stat
     except ImportError:
         return
 
@@ -356,7 +429,12 @@ def sync_smb_cleanup(coordinator: "BoschCameraCoordinator") -> None:
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
     retention_days = int(opts.get("smb_retention_days", 180))
 
-    if not opts.get("enable_smb_upload") or not server or not share or retention_days <= 0:
+    if (
+        not opts.get("enable_smb_upload")
+        or not server
+        or not share
+        or retention_days <= 0
+    ):
         return
 
     try:
@@ -397,14 +475,22 @@ def sync_smb_cleanup(coordinator: "BoschCameraCoordinator") -> None:
     if deleted:
         _LOGGER.info(
             "SMB cleanup: deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, root,
+            deleted,
+            retention_days,
+            root,
         )
         _fire_cleanup_alert(coordinator, deleted, retention_days, root)
 
 
 # ── Cleanup alert (fires after age-based retention deletes files) ─────────────
 
-def _fire_cleanup_alert(coordinator: "BoschCameraCoordinator", deleted: int, retention_days: int, location: str) -> None:
+
+def _fire_cleanup_alert(
+    coordinator: BoschCameraCoordinator,
+    deleted: int,
+    retention_days: int,
+    location: str,
+) -> None:
     """Schedule a cleanup summary notification on the HA event loop (thread-safe)."""
     opts = coordinator.options
     system_raw = opts.get("alert_notify_system", "").strip()
@@ -421,14 +507,17 @@ def _fire_cleanup_alert(coordinator: "BoschCameraCoordinator", deleted: int, ret
     )
 
 
-async def _async_cleanup_alert(coordinator: "BoschCameraCoordinator", message: str, notify_service: str) -> None:
+async def _async_cleanup_alert(
+    coordinator: BoschCameraCoordinator, message: str, notify_service: str
+) -> None:
     """Send NAS retention summary via configured notify service."""
     for svc in [s.strip() for s in notify_service.split(",") if s.strip()]:
         domain, _, name = svc.partition(".")
         if coordinator.hass.services.has_service(domain, name):
             try:
                 await coordinator.hass.services.async_call(
-                    domain, name,
+                    domain,
+                    name,
                     {"message": message, "title": "Bosch Kamera — NAS-Bereinigung"},
                 )
                 return
@@ -442,9 +531,11 @@ async def _async_cleanup_alert(coordinator: "BoschCameraCoordinator", message: s
 # (server / username / password / base_path / patterns); smb_share is unused
 # because FTP has no shares — the base_path is relative to the FTP root.
 
+
 def _ftp_connect(server: str, username: str, password: str) -> Any:
     """Open a passive-mode FTP connection. Caller closes via .quit()."""
     import ftplib
+
     ftp = ftplib.FTP(server, timeout=30)
     ftp.login(username, password)
     ftp.set_pasv(True)
@@ -453,6 +544,7 @@ def _ftp_connect(server: str, username: str, password: str) -> Any:
 
 def _ftp_exists(ftp: Any, path: str) -> bool:
     import ftplib
+
     try:
         ftp.size(path)
         return True
@@ -465,6 +557,7 @@ def _ftp_exists(ftp: Any, path: str) -> bool:
 def _ftp_makedirs(ftp: Any, path: str) -> None:
     """Create FTP directories recursively, ignoring already-exists errors."""
     import ftplib
+
     parts = [p for p in path.split("/") if p]
     current = ""
     for part in parts:
@@ -475,7 +568,9 @@ def _ftp_makedirs(ftp: Any, path: str) -> None:
             pass  # already exists or permission — ignore
 
 
-def _sync_ftp_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any], token: str) -> None:
+def _sync_ftp_upload(
+    coordinator: BoschCameraCoordinator, data: dict[str, Any], token: str
+) -> None:
     """Upload event files to an FTP server (e.g. FRITZ.NAS via plain FTP)."""
     from io import BytesIO
 
@@ -485,7 +580,9 @@ def _sync_ftp_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any]
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
     folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
-    file_pattern = opts.get("file_pattern", "{camera}_{date}_{time}_{type}_{id}").strip()
+    file_pattern = opts.get(
+        "file_pattern", "{camera}_{date}_{time}_{type}_{id}"
+    ).strip()
 
     if not server:
         return
@@ -516,12 +613,21 @@ def _sync_ftp_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any]
                 ev_id = ev.get("id", "")[:8]
 
                 folder_parts = folder_pattern.format(
-                    year=year, month=month, day=day,
-                    camera=cam_name, type=etype,
+                    year=year,
+                    month=month,
+                    day=day,
+                    camera=cam_name,
+                    type=etype,
                 ).strip("/")
                 file_base = file_pattern.format(
-                    camera=cam_name, date=date_str, time=time_str,
-                    type=etype, id=ev_id, year=year, month=month, day=day,
+                    camera=cam_name,
+                    date=date_str,
+                    time=time_str,
+                    type=etype,
+                    id=ev_id,
+                    year=year,
+                    month=month,
+                    day=day,
                 )
 
                 ftp_dir = f"/{base_path}/{folder_parts}".replace("//", "/").rstrip("/")
@@ -539,9 +645,13 @@ def _sync_ftp_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any]
                             status, content = _http_get(img_url, token, timeout=30)
                             if status == 200 and content:
                                 ftp.storbinary(f"STOR {fpath}", BytesIO(content))
-                                _LOGGER.info("FTP uploaded: %s (%d bytes)", fname, len(content))
+                                _LOGGER.info(
+                                    "FTP uploaded: %s (%d bytes)", fname, len(content)
+                                )
                             else:
-                                _LOGGER.warning("FTP snapshot download failed: HTTP %d", status)
+                                _LOGGER.warning(
+                                    "FTP snapshot download failed: HTTP %d", status
+                                )
                         except Exception as err:
                             _LOGGER.warning("FTP upload error for %s: %s", fname, err)
 
@@ -555,33 +665,37 @@ def _sync_ftp_upload(coordinator: "BoschCameraCoordinator", data: dict[str, Any]
                         _LOGGER.debug("FTP skip (exists): %s", fname)
                     else:
                         try:
-                            req_obj = urllib.request.Request(
+                            req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer, guarded by _is_safe_bosch_url above
                                 clip_url, headers={"Authorization": f"Bearer {token}"}
                             )
-                            with urllib.request.urlopen(
+                            with urllib.request.urlopen(  # noqa: S310 # Bosch cloud clip URL, https+bearer, guarded by _is_safe_bosch_url above
                                 req_obj, context=_bosch_ssl_ctx(), timeout=60
                             ) as r:
                                 if r.status == 200:
                                     ftp.storbinary(f"STOR {fpath}", r)
                                     _LOGGER.info("FTP uploaded: %s", fname)
                                 else:
-                                    _LOGGER.warning("FTP clip download failed: HTTP %d", r.status)
+                                    _LOGGER.warning(
+                                        "FTP clip download failed: HTTP %d", r.status
+                                    )
                         except Exception as err:
-                            _LOGGER.warning("FTP clip upload error for %s: %s", fname, err)
+                            _LOGGER.warning(
+                                "FTP clip upload error for %s: %s", fname, err
+                            )
     finally:
         try:
             ftp.quit()
         except Exception:
             try:
                 ftp.close()
-            except Exception:
+            except Exception:  # noqa: S110 # best-effort FTP teardown, failure non-actionable
                 pass
 
 
-def _sync_ftp_cleanup(coordinator: "BoschCameraCoordinator") -> None:
+def _sync_ftp_cleanup(coordinator: BoschCameraCoordinator) -> None:
     """Delete files on the FTP server older than smb_retention_days."""
     import ftplib
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     opts = coordinator.options
     server = opts.get("smb_server", "").strip()
@@ -634,8 +748,12 @@ def _sync_ftp_cleanup(coordinator: "BoschCameraCoordinator") -> None:
                 resp = ftp.sendcmd(f"MDTM {name}")
                 # "213 YYYYMMDDHHMMSS"
                 ts_str = resp.split()[-1]
-                mt = datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp()
-            except Exception:
+                mt = (
+                    datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S")
+                    .replace(tzinfo=UTC)
+                    .timestamp()
+                )
+            except Exception:  # noqa: S112 # MDTM/parse failure → skip file, resilient cleanup loop
                 continue
             if mt < cutoff:
                 try:
@@ -648,7 +766,7 @@ def _sync_ftp_cleanup(coordinator: "BoschCameraCoordinator") -> None:
             _walk_and_delete(f"{path}/{sub}")
             try:
                 ftp.cwd(path)  # back up before next sibling
-            except Exception:
+            except Exception:  # noqa: S110 # best-effort cwd restore; sibling iteration proceeds regardless
                 pass
 
     try:
@@ -657,13 +775,15 @@ def _sync_ftp_cleanup(coordinator: "BoschCameraCoordinator") -> None:
     finally:
         try:
             ftp.quit()
-        except Exception:
+        except Exception:  # noqa: S110 # best-effort FTP cleanup teardown, failure non-actionable
             pass
 
     if deleted:
         root_label = f"{server}/{base_path}"
         _LOGGER.info(
             "FTP cleanup: deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, root_label,
+            deleted,
+            retention_days,
+            root_label,
         )
         _fire_cleanup_alert(coordinator, deleted, retention_days, root_label)

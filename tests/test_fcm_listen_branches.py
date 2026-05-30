@@ -25,6 +25,7 @@ def _make_listen_instance():
     stubbed so we can drive `_listen` through one specific branch."""
     pytest.importorskip("firebase_messaging")
     from firebase_messaging import FcmPushClientRunState
+
     from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
 
     cls = _QuietFcmPushClient._patch_class()
@@ -46,10 +47,12 @@ def _make_listen_instance():
 
     async def _ok_connect():
         return True
+
     instance._connect_with_retry = _ok_connect
 
     async def _reset():
         instance.do_listen = False
+
     instance._reset = _reset
 
     return instance, FcmPushClientRunState
@@ -64,14 +67,19 @@ class TestListenBranches:
 
         async def _bad_connect():
             return False
+
         instance._connect_with_retry = _bad_connect
 
         login_calls = []
-        async def _login(): login_calls.append(1)
+
+        async def _login():
+            login_calls.append(1)
+
         instance._login = _login
 
         async def _receive():
             return None
+
         instance._receive_msg = _receive
 
         await instance._listen()
@@ -85,9 +93,12 @@ class TestListenBranches:
         instance, _ = _make_listen_instance()
 
         warn_calls = []
-        instance._log_warn_with_limit = lambda *a, **k: warn_calls.append(a) or instance.__setattr__("do_listen", False)
+        instance._log_warn_with_limit = lambda *a, **k: (
+            warn_calls.append(a) or instance.__setattr__("do_listen", False)
+        )
 
         called = [0]
+
         async def _receive():
             called[0] += 1
             if called[0] == 1:
@@ -95,6 +106,7 @@ class TestListenBranches:
                 err.reason = "DECRYPT_ERROR"  # not CLOSE_NOTIFY
                 raise err
             return None
+
         instance._receive_msg = _receive
 
         await instance._listen()
@@ -111,23 +123,28 @@ class TestListenBranches:
         instance, _ = _make_listen_instance()
 
         reset_calls = []
+
         async def _reset():
             reset_calls.append(1)
             instance.do_listen = False
+
         instance._reset = _reset
 
         called = [0]
+
         async def _receive():
             called[0] += 1
             if called[0] == 1:
                 raise OSError("ENOSYS — not the quiet quartet")
             return None
+
         instance._receive_msg = _receive
 
         # Stub the upstream ErrorType import successfully so the
         # try_increment_error_count branch runs.
         import sys
         from types import SimpleNamespace
+
         sys.modules.setdefault(
             "firebase_messaging.fcmpushclient",
             SimpleNamespace(ErrorType=SimpleNamespace(CONNECTION="conn")),
@@ -135,6 +152,7 @@ class TestListenBranches:
 
         # Capture exception log so it can be asserted on.
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         original_exc = fcm_mod._LOGGER.exception
         captured = []
         fcm_mod._LOGGER.exception = lambda *a, **k: captured.append(a)
@@ -156,12 +174,15 @@ class TestListenBranches:
         instance._terminate = lambda: terminate_calls.append(1)
 
         writer_close_calls = []
+
         async def _writer_close():
             writer_close_calls.append(1)
+
         instance._do_writer_close = _writer_close
 
         async def _bad_login():
             raise RuntimeError("upstream login bug")
+
         instance._login = _bad_login
 
         await instance._listen()
@@ -172,16 +193,19 @@ class TestListenBranches:
         """While `run_state == RESETTING`, the loop must `asyncio.sleep(1)`
         instead of consuming a message. Pins fcm.py L239."""
         from unittest.mock import patch
+
         instance, RunState = _make_listen_instance()
         instance.run_state = RunState.RESETTING
 
         slept = []
+
         async def _fast_sleep(secs):
             slept.append(secs)
             instance.do_listen = False
 
         async def _bad_receive():
             raise AssertionError("RESETTING path must not call _receive_msg")
+
         instance._receive_msg = _bad_receive
 
         with patch("asyncio.sleep", new=_fast_sleep):
@@ -194,13 +218,16 @@ class TestListenBranches:
         instance, _ = _make_listen_instance()
 
         handled = []
+
         async def _handle(msg):
             handled.append(msg)
             instance.do_listen = False
+
         instance._handle_message = _handle
 
         async def _receive():
             return b"FCM_PAYLOAD"
+
         instance._receive_msg = _receive
 
         await instance._listen()
@@ -211,24 +238,30 @@ class TestListenBranches:
         fails (future library refactor), the ImportError arm must still
         call `_reset()`. Pins fcm.py L297-298."""
         from unittest.mock import patch
+
         instance, _ = _make_listen_instance()
 
         reset_calls = []
+
         async def _reset():
             reset_calls.append(1)
             instance.do_listen = False
+
         instance._reset = _reset
 
         called = [0]
+
         async def _receive():
             called[0] += 1
             if called[0] == 1:
                 raise OSError("ENOSYS — not in the quiet quartet")
             return None
+
         instance._receive_msg = _receive
 
         # Force the inner import to raise.
         import builtins as _bi
+
         real = _bi.__import__
 
         def _fake(name, globs=None, locs=None, fromlist=(), level=0):

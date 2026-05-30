@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
+
 
 def _mock_resp(status: int, json_data=None):
     resp = MagicMock()
@@ -72,6 +72,7 @@ def _stub_coord(*, gen2: bool = True, shc_ip: str = "192.0.2.103"):
 
 # ── shc.py lines 201-202 ─────────────────────────────────────────────────────
 
+
 class TestAsyncUpdateShcStatesNoDeviceMatch:
     """Lines 201-202: when no SHC device name matches the cam title → debug + continue."""
 
@@ -92,8 +93,10 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
         }
 
         # async_shc_request should NOT be called (last_shc_fetch is current)
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value=[])) as mock_req:
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value=[]),
+        ) as mock_req:
             await async_update_shc_states(coord, data)
             # The cam_id loop body should hit `continue` — no state-cache entry created
             assert CAM_ID not in coord._shc_state_cache
@@ -107,20 +110,24 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
 
         CAM2_ID = "22222222-OTHER-CAM"
         coord = _stub_coord()
-        coord._shc_devices_raw = [{"id": "dev-1", "name": "terrasse"}]  # only matches first cam
+        coord._shc_devices_raw = [
+            {"id": "dev-1", "name": "terrasse"}
+        ]  # only matches first cam
         coord._last_shc_fetch = float("inf")
 
         # Pre-seed cache for CAM2 so we can confirm it's NOT updated
         coord._shc_state_cache = {}
 
         data = {
-            CAM_ID: {"info": {"title": "Terrasse"}},   # matches → processed
+            CAM_ID: {"info": {"title": "Terrasse"}},  # matches → processed
             CAM2_ID: {"info": {"title": "Innenbereich"}},  # no match → skipped
         }
 
         # Patch the downstream SHC requests (CameraLight, PrivacyMode) to short-circuit
-        with patch("custom_components.bosch_shc_camera.shc.async_shc_request",
-                   AsyncMock(return_value=None)):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value=None),
+        ):
             await async_update_shc_states(coord, data)
 
         # CAM_ID was matched → cache entry created; CAM2_ID was not matched → absent
@@ -129,6 +136,7 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
 
 
 # ── shc.py lines 398-399 ─────────────────────────────────────────────────────
+
 
 class TestCloudSetPrivacyMode401TokenRefreshFails:
     """Lines 398-399: 401 response + _ensure_valid_token raises → exception swallowed."""
@@ -139,17 +147,28 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord()
-        coord._ensure_valid_token = AsyncMock(side_effect=RuntimeError("refresh failed"))
+        coord._ensure_valid_token = AsyncMock(
+            side_effect=RuntimeError("refresh failed")
+        )
         # SHC is configured but not ready (shc_available=False) so we get a clean return
         coord._shc_available = False
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_resp(401))
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc.shc_configured", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_configured",
+                return_value=True,
+            ),
+        ):
             # Must not raise — exception is swallowed at line 398-399
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
 
@@ -163,15 +182,26 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord()
-        coord._ensure_valid_token = AsyncMock(side_effect=aiohttp.ClientError("network gone"))
+        coord._ensure_valid_token = AsyncMock(
+            side_effect=aiohttp.ClientError("network gone")
+        )
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_resp(401))
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session), \
-             patch("custom_components.bosch_shc_camera.shc.shc_ready", return_value=False), \
-             patch("custom_components.bosch_shc_camera.shc.shc_configured", return_value=True):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_configured",
+                return_value=True,
+            ),
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
 
         assert result is False
@@ -179,19 +209,24 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
 
 # ── shc.py lines 659-660 ─────────────────────────────────────────────────────
 
+
 class TestCloudSetLightComponentGen2WallwasherNetworkError:
     """Lines 659-660: gen2 wallwasher /lighting/switch PUT raises aiohttp error → warning log."""
 
     @pytest.mark.asyncio
     async def test_lighting_switch_put_raises_client_error_logs_warning(self):
         """aiohttp.ClientError on /lighting/switch → warning + execution continues (lines 659-660)."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
 
         coord = _stub_coord(gen2=True)
 
         # Session raises ClientError on PUT /lighting/switch (step 1 of wallwasher logic)
         failing_ctx = MagicMock()
-        failing_ctx.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("connection refused"))
+        failing_ctx.__aenter__ = AsyncMock(
+            side_effect=aiohttp.ClientError("connection refused")
+        )
         failing_ctx.__aexit__ = AsyncMock(return_value=None)
 
         # Step 2 (topdown) uses a working response
@@ -201,8 +236,10 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
         # First call: /lighting/switch (raises), second call: /topdown (200)
         session.put = MagicMock(side_effect=[failing_ctx, ok_ctx])
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+            return_value=session,
+        ):
             # Should not raise — warning is logged and execution continues to step 2
             result = await async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", True
@@ -214,13 +251,15 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
     @pytest.mark.asyncio
     async def test_lighting_switch_put_raises_timeout_logs_warning(self):
         """asyncio.TimeoutError on /lighting/switch → warning + step 2 still runs (lines 659-660)."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
 
         coord = _stub_coord(gen2=True)
 
         # First PUT raises TimeoutError (via asyncio.timeout context manager)
         failing_ctx = MagicMock()
-        failing_ctx.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        failing_ctx.__aenter__ = AsyncMock(side_effect=TimeoutError())
         failing_ctx.__aexit__ = AsyncMock(return_value=None)
 
         ok_ctx = _mock_resp(200, json_data={"enabled": False})
@@ -228,8 +267,10 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
         session = MagicMock()
         session.put = MagicMock(side_effect=[failing_ctx, ok_ctx])
 
-        with patch("custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                   return_value=session):
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+            return_value=session,
+        ):
             result = await async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", False
             )
@@ -238,6 +279,7 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
 
 
 # ── select.py line 278 ───────────────────────────────────────────────────────
+
 
 class TestFcmPushModeSelectAvailableSuperFalse:
     """Line 278: BoschFcmPushModeSelect.available returns False when super().available is False."""

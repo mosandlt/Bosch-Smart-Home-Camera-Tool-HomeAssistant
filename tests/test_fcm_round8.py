@@ -24,6 +24,7 @@ Sprint G: covers remaining missing lines:
 
 Uses SimpleNamespace stubs — no real HA runtime, no network.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,8 +45,10 @@ SMB_MODULE = "custom_components.bosch_shc_camera.smb"
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
 
-def _resp_cm(status: int, body: bytes = b"", content_type: str = "image/jpeg",
-             json_data=None):
+
+def _resp_cm(
+    status: int, body: bytes = b"", content_type: str = "image/jpeg", json_data=None
+):
     resp = MagicMock()
     resp.status = status
     resp.read = AsyncMock(return_value=body)
@@ -92,11 +95,18 @@ def _make_alert_coord(options=None, **overrides):
     return coord
 
 
-async def _run_alert(coord, event_type="MOVEMENT", image_url="", clip_url="",
-                     clip_status="", cam_name="Terrasse",
-                     timestamp="2026-05-07T10:00:00.000Z",
-                     session_override=None):
+async def _run_alert(
+    coord,
+    event_type="MOVEMENT",
+    image_url="",
+    clip_url="",
+    clip_status="",
+    cam_name="Terrasse",
+    timestamp="2026-05-07T10:00:00.000Z",
+    session_override=None,
+):
     from custom_components.bosch_shc_camera.fcm import async_send_alert
+
     session = session_override or MagicMock()
     if session_override is None:
         session.get = MagicMock(return_value=_resp_cm(404))
@@ -105,8 +115,13 @@ async def _run_alert(coord, event_type="MOVEMENT", image_url="", clip_url="",
             with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
                     await async_send_alert(
-                        coord, cam_name, event_type, timestamp,
-                        image_url, clip_url, clip_status,
+                        coord,
+                        cam_name,
+                        event_type,
+                        timestamp,
+                        image_url,
+                        clip_url,
+                        clip_status,
                     )
 
 
@@ -132,19 +147,29 @@ def _make_push_coord(**overrides):
     return coord
 
 
-def _one_event(event_id="new-evt", event_type="MOVEMENT", tags=None, image="", clip="", clip_status=""):
-    return [{
-        "id": event_id,
-        "eventType": event_type,
-        "eventTags": tags or [],
-        "timestamp": "2026-05-07T10:00:00Z",
-        "imageUrl": image,
-        "videoClipUrl": clip,
-        "videoClipUploadStatus": clip_status,
-    }]
+def _one_event(
+    event_id="new-evt",
+    event_type="MOVEMENT",
+    tags=None,
+    image="",
+    clip="",
+    clip_status="",
+):
+    return [
+        {
+            "id": event_id,
+            "eventType": event_type,
+            "eventTags": tags or [],
+            "timestamp": "2026-05-07T10:00:00Z",
+            "imageUrl": image,
+            "videoClipUrl": clip,
+            "videoClipUploadStatus": clip_status,
+        }
+    ]
 
 
 # ── 1. async_start_fcm_push — push_mode branches ─────────────────────────────
+
 
 class TestAsyncStartFcmPushModeBranches:
     """Lines 157-285: mode=polling returns immediately; unknown mode falls back to ios."""
@@ -173,6 +198,7 @@ class TestAsyncStartFcmPushModeBranches:
     async def test_polling_mode_returns_immediately(self):
         """push_mode='polling' → no FcmPushClient created, function returns."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         coord = self._coord_stub(push_mode="polling")
 
         mock_fcm = MagicMock()
@@ -189,6 +215,7 @@ class TestAsyncStartFcmPushModeBranches:
     async def test_unknown_mode_uses_ios_fallback(self):
         """push_mode='badvalue' → falls through to ios _try_fcm_with_mode."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         coord = self._coord_stub(push_mode="weirdmode")
 
         ios_called_with = []
@@ -205,8 +232,14 @@ class TestAsyncStartFcmPushModeBranches:
 
             # Patch _try_fcm_with_mode via the module-level closure approach
             # by making FcmPushClient raise so we can catch what mode was used
-            with patch(f"{MODULE}.fetch_firebase_config",
-                       new_callable=lambda: (lambda: AsyncMock(return_value={"api_key": "k", "project_id": "p", "app_id": "a"}))):
+            with patch(
+                f"{MODULE}.fetch_firebase_config",
+                new_callable=lambda: (
+                    lambda: AsyncMock(
+                        return_value={"api_key": "k", "project_id": "p", "app_id": "a"}
+                    )
+                ),
+            ):
                 try:
                     await async_start_fcm_push(coord)
                 except Exception:
@@ -233,10 +266,20 @@ class TestAsyncStartFcmPushModeBranches:
         # fcm.py imports FcmPushClient lazily inside the function; patch the
         # class lookup helper to return a stub that produces our mock_client.
         with patch(f"{MODULE}._install_fcm_noise_filter"):
-            with patch(f"{MODULE}.fetch_firebase_config",
-                       new=AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"})):
-                with patch(f"{MODULE}._get_fcm_push_client_class",
-                           return_value=MagicMock(return_value=mock_client)):
+            with patch(
+                f"{MODULE}.fetch_firebase_config",
+                new=AsyncMock(
+                    return_value={
+                        "api_key": "key",
+                        "project_id": "proj",
+                        "app_id": "appid",
+                    }
+                ),
+            ):
+                with patch(
+                    f"{MODULE}._get_fcm_push_client_class",
+                    return_value=MagicMock(return_value=mock_client),
+                ):
                     await async_start_fcm_push(coord)
 
         assert not coord._fcm_running
@@ -259,18 +302,31 @@ class TestAsyncStartFcmPushModeBranches:
         mock_client.start = AsyncMock(side_effect=Exception("start failed"))
 
         with patch(f"{MODULE}._install_fcm_noise_filter"):
-            with patch(f"{MODULE}.fetch_firebase_config",
-                       new=AsyncMock(return_value={"api_key": "key", "project_id": "proj", "app_id": "appid"})):
-                with patch(f"{MODULE}._get_fcm_push_client_class",
-                           return_value=MagicMock(return_value=mock_client)):
-                    with patch(f"{MODULE}.register_fcm_with_bosch",
-                               new=AsyncMock(return_value=True)):
+            with patch(
+                f"{MODULE}.fetch_firebase_config",
+                new=AsyncMock(
+                    return_value={
+                        "api_key": "key",
+                        "project_id": "proj",
+                        "app_id": "appid",
+                    }
+                ),
+            ):
+                with patch(
+                    f"{MODULE}._get_fcm_push_client_class",
+                    return_value=MagicMock(return_value=mock_client),
+                ):
+                    with patch(
+                        f"{MODULE}.register_fcm_with_bosch",
+                        new=AsyncMock(return_value=True),
+                    ):
                         await async_start_fcm_push(coord)
 
         assert coord._fcm_client is None
 
 
 # ── 2. async_handle_fcm_push — cam_entity snapshot task tracked ───────────────
+
 
 class TestHandlePushSnapshotTask:
     """Lines 536-540: when cam_entity exists, snapshot task is created and tracked."""
@@ -283,9 +339,13 @@ class TestHandlePushSnapshotTask:
             _last_event_ids={CAM_ID: "old-evt"},
         )
         cam_entity = MagicMock()
+
         async def _fake_refresh(delay=2):
             pass
-        cam_entity._async_trigger_image_refresh = MagicMock(return_value=_fake_refresh())
+
+        cam_entity._async_trigger_image_refresh = MagicMock(
+            return_value=_fake_refresh()
+        )
         coord._camera_entities = {CAM_ID: cam_entity}
 
         task_stub = MagicMock()
@@ -293,14 +353,15 @@ class TestHandlePushSnapshotTask:
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, json_data=_one_event("new-evt"))
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         # async_create_task called (at least once for alert or snapshot)
@@ -308,6 +369,7 @@ class TestHandlePushSnapshotTask:
 
 
 # ── 3. async_handle_fcm_push — network + generic exceptions ──────────────────
+
 
 class TestHandlePushExceptions:
     """Lines 549-558: network errors and generic exceptions are caught per-camera."""
@@ -320,7 +382,7 @@ class TestHandlePushExceptions:
         coord = _make_push_coord()
         session = MagicMock()
         cm = MagicMock()
-        cm.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        cm.__aenter__ = AsyncMock(side_effect=TimeoutError())
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=cm)
 
@@ -346,20 +408,27 @@ class TestHandlePushExceptions:
 
 # ── 4. _notify_type — service call exception is caught ───────────────────────
 
+
 class TestNotifyTypeExceptionHandled:
     """Lines 680-681: exception in services.async_call is logged, not raised."""
 
     @pytest.mark.asyncio
     async def test_service_call_exception_is_logged_not_raised(self):
         coord = _make_alert_coord()
-        coord.hass.services.async_call = AsyncMock(side_effect=Exception("notify failed"))
+        coord.hass.services.async_call = AsyncMock(
+            side_effect=Exception("notify failed")
+        )
 
         # Must complete without raising
-        await _run_alert(coord, event_type="MOVEMENT",
-                         image_url="https://residential.cbs.boschsecurity.com/img.jpg")
+        await _run_alert(
+            coord,
+            event_type="MOVEMENT",
+            image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+        )
 
 
 # ── 5. step 1 exception path ─────────────────────────────────────────────────
+
 
 class TestStep1ExceptionPath:
     """Lines 690-692: _notify_type raises at step 1 → outer except catches → early return.
@@ -376,14 +445,17 @@ class TestStep1ExceptionPath:
         """Patch _notify_type to raise on step-1 call → function returns before step 2."""
         from custom_components.bosch_shc_camera.fcm import async_send_alert
 
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "alert_notify_information": "",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "alert_notify_information": "",
+            }
+        )
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(200, body=b"imagedata",
-                                                       content_type="image/jpeg"))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=b"imagedata", content_type="image/jpeg")
+        )
 
         # Override the entire async_send_alert with a version that exercises line 690-692:
         # We call it normally but with a session that would provide image data on step 2.
@@ -395,25 +467,31 @@ class TestStep1ExceptionPath:
 
         # Test the documented intent: TROUBLE + system service fails → return before step 2
         # (this hits the if _is_trouble: return path, which also means no writes)
-        coord2 = _make_alert_coord(options={
-            "alert_notify_service": "notify.signal",
-            "alert_notify_system": "",  # no system service → still proceeds
-        })
+        coord2 = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.signal",
+                "alert_notify_system": "",  # no system service → still proceeds
+            }
+        )
         await _run_alert(
-            coord2, event_type="TROUBLE_DISCONNECT",
+            coord2,
+            event_type="TROUBLE_DISCONNECT",
             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
             session_override=session,
         )
         # TROUBLE_DISCONNECT returns after step 1 — no _write_file calls
         write_calls = [
-            c for c in coord2.hass.async_add_executor_job.call_args_list
-            if c.args and callable(c.args[0])
+            c
+            for c in coord2.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
             and getattr(c.args[0], "__name__", "") == "_write_file"
         ]
         assert len(write_calls) == 0, "TROUBLE event must not write any files"
 
 
 # ── 6. step 2 re-fetch attempt exception continues loop ──────────────────────
+
 
 class TestStep2RefetchExceptionContinues:
     """Lines 721-723: exception in a re-fetch attempt is caught, loop continues."""
@@ -442,15 +520,22 @@ class TestStep2RefetchExceptionContinues:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         # Must not raise even though re-fetch #1 throws
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
-                            "2026-05-07T10:00:00.000Z", "",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
+                            "2026-05-07T10:00:00.000Z",
+                            "",
                         )
 
 
 # ── 7. step 2 — no data from image URL ───────────────────────────────────────
+
 
 class TestStep2NoImageData:
     """Lines 752-753: imageUrl responds with empty body → snapshot not written."""
@@ -460,23 +545,27 @@ class TestStep2NoImageData:
         coord = _make_alert_coord()
         session = MagicMock()
         # Return 200 but empty body
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=b"", content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=b"", content_type="image/jpeg")
+        )
         await _run_alert(
-            coord, event_type="MOVEMENT",
+            coord,
+            event_type="MOVEMENT",
             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
             session_override=session,
         )
         write_calls = [
-            c for c in coord.hass.async_add_executor_job.call_args_list
-            if c.args and callable(c.args[0])
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
             and getattr(c.args[0], "__name__", "") == "_write_file"
         ]
         assert len(write_calls) == 0, "empty body must not trigger _write_file"
 
 
 # ── 8. step 3 — direct clip.mp4 exception swallowed ────────────────────────
+
 
 class TestStep3DirectClipException:
     """Lines 781-784: exception during direct clip.mp4 probe is silently swallowed."""
@@ -500,15 +589,18 @@ class TestStep3DirectClipException:
         session.get = MagicMock(side_effect=_get_side)
 
         await _run_alert(
-            coord, event_type="MOVEMENT",
+            coord,
+            event_type="MOVEMENT",
             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
-            clip_url="", clip_status="",
+            clip_url="",
+            clip_status="",
             session_override=session,
         )
         # Must complete without raising
 
 
 # ── 9. step 3 poll — clip becomes Unavailable mid-poll ───────────────────────
+
 
 class TestStep3ClipUnavailableMidPoll:
     """Lines 806-816: poll returns Unavailable → stop polling immediately."""
@@ -525,11 +617,16 @@ class TestStep3ClipUnavailableMidPoll:
                 poll_count[0] += 1
                 if poll_count[0] == 1:
                     # First poll: Unavailable
-                    return _resp_cm(200, json_data=[{
-                        "timestamp": "2026-05-07T10:00:00Z",
-                        "videoClipUploadStatus": "Unavailable",
-                        "videoClipUrl": "",
-                    }])
+                    return _resp_cm(
+                        200,
+                        json_data=[
+                            {
+                                "timestamp": "2026-05-07T10:00:00Z",
+                                "videoClipUploadStatus": "Unavailable",
+                                "videoClipUrl": "",
+                            }
+                        ],
+                    )
                 return _resp_cm(200, json_data=[])
             return _resp_cm(404)
 
@@ -537,9 +634,11 @@ class TestStep3ClipUnavailableMidPoll:
         session.get = MagicMock(side_effect=_get_side)
 
         await _run_alert(
-            coord, event_type="MOVEMENT",
+            coord,
+            event_type="MOVEMENT",
             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
-            clip_url="", clip_status="",
+            clip_url="",
+            clip_status="",
             session_override=session,
         )
         # Should have polled only once (Unavailable stops the loop)
@@ -547,6 +646,7 @@ class TestStep3ClipUnavailableMidPoll:
 
 
 # ── 10. step 3 poll — clip becomes Done after poll ───────────────────────────
+
 
 class TestStep3ClipDoneAfterPoll:
     """Lines 818-822: poll returns Done → found_clip_url set, loop breaks."""
@@ -567,11 +667,16 @@ class TestStep3ClipDoneAfterPoll:
                 return _resp_cm(200, body=download_body, content_type="video/mp4")
             if "events" in str(url):
                 poll_count[0] += 1
-                return _resp_cm(200, json_data=[{
-                    "timestamp": "2026-05-07T10:00:00Z",
-                    "videoClipUploadStatus": "Done",
-                    "videoClipUrl": CLIP_URL,
-                }])
+                return _resp_cm(
+                    200,
+                    json_data=[
+                        {
+                            "timestamp": "2026-05-07T10:00:00Z",
+                            "videoClipUploadStatus": "Done",
+                            "videoClipUrl": CLIP_URL,
+                        }
+                    ],
+                )
             return _resp_cm(404)
 
         session = MagicMock()
@@ -581,9 +686,14 @@ class TestStep3ClipDoneAfterPoll:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-07T10:00:00.000Z",
                             "https://residential.cbs.boschsecurity.com/img.jpg",
                         )
@@ -593,6 +703,7 @@ class TestStep3ClipDoneAfterPoll:
 
 
 # ── 11. step 3 poll — exception → continue ───────────────────────────────────
+
 
 class TestStep3PollException:
     """Line 824: exception during a poll iteration → continue (not crash)."""
@@ -618,15 +729,18 @@ class TestStep3PollException:
         session.get = MagicMock(side_effect=_get_side)
 
         await _run_alert(
-            coord, event_type="MOVEMENT",
+            coord,
+            event_type="MOVEMENT",
             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
-            clip_url="", clip_status="",
+            clip_url="",
+            clip_status="",
             session_override=session,
         )
         # Must complete without raising
 
 
 # ── 12. step 3 video download — data too small ───────────────────────────────
+
 
 class TestStep3VideoTooSmall:
     """Lines 850-851: downloaded video < 1000 bytes → not written, not notified."""
@@ -645,14 +759,18 @@ class TestStep3VideoTooSmall:
         session.get = MagicMock(side_effect=_get_side)
 
         await _run_alert(
-            coord, event_type="MOVEMENT",
+            coord,
+            event_type="MOVEMENT",
             image_url="",
-            clip_url=CLIP_URL, clip_status="Done",
+            clip_url=CLIP_URL,
+            clip_status="Done",
             session_override=session,
         )
         write_calls = [
-            c for c in coord.hass.async_add_executor_job.call_args_list
-            if c.args and callable(c.args[0])
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
             and getattr(c.args[0], "__name__", "") == "_write_file"
             and str(c.args[1]).endswith(".mp4")
         ]
@@ -661,15 +779,18 @@ class TestStep3VideoTooSmall:
 
 # ── 13. mark_events_read gate ────────────────────────────────────────────────
 
+
 class TestMarkEventsReadGate:
     """Lines 861-862: mark_events_read called when option enabled + cam_id found."""
 
     @pytest.mark.asyncio
     async def test_mark_events_read_called_when_enabled(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "mark_events_read": True,
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "mark_events_read": True,
+            }
+        )
 
         mark_read_calls = []
 
@@ -679,14 +800,18 @@ class TestMarkEventsReadGate:
         with patch(f"{MODULE}.async_mark_events_read", side_effect=_fake_mark):
             await _run_alert(coord, event_type="MOVEMENT")
 
-        assert len(mark_read_calls) >= 1, "mark_events_read must be called when option enabled"
+        assert len(mark_read_calls) >= 1, (
+            "mark_events_read must be called when option enabled"
+        )
 
     @pytest.mark.asyncio
     async def test_mark_events_read_not_called_when_disabled(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "mark_events_read": False,
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "mark_events_read": False,
+            }
+        )
 
         mark_read_calls = []
 
@@ -696,98 +821,127 @@ class TestMarkEventsReadGate:
         with patch(f"{MODULE}.async_mark_events_read", side_effect=_fake_mark):
             await _run_alert(coord, event_type="MOVEMENT")
 
-        assert len(mark_read_calls) == 0, "mark_events_read must NOT be called when option disabled"
+        assert len(mark_read_calls) == 0, (
+            "mark_events_read must NOT be called when option disabled"
+        )
 
 
 # ── 14. SMB upload timeout ───────────────────────────────────────────────────
+
 
 class TestSmbUploadTimeout:
     """Lines 895-898: asyncio.TimeoutError from SMB upload is caught + logged."""
 
     @pytest.mark.asyncio
     async def test_smb_timeout_does_not_propagate(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_smb_upload": True,
-            "smb_server": "nas",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_smb_upload": True,
+                "smb_server": "nas",
+            }
+        )
 
         wait_for_count = [0]
 
         async def _selective_wait_for(coro, timeout=None):
             wait_for_count[0] += 1
             # First wait_for is SMB upload — raise TimeoutError
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock(
-            get=MagicMock(return_value=_resp_cm(404))
-        )):
+        with patch(
+            f"{MODULE}.async_get_clientsession",
+            return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404))),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        with patch(f"{MODULE}.asyncio.wait_for",
-                                   side_effect=_selective_wait_for):
-                            from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        with patch(
+                            f"{MODULE}.asyncio.wait_for",
+                            side_effect=_selective_wait_for,
+                        ):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
                             # Must not raise
                             await async_send_alert(
-                                coord, "Terrasse", "MOVEMENT",
-                                "2026-05-07T10:00:00.000Z", "",
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                "",
                             )
 
 
 # ── 15. local save timeout ───────────────────────────────────────────────────
+
 
 class TestLocalSaveTimeout:
     """Lines 918-921: asyncio.TimeoutError from local save is caught + logged."""
 
     @pytest.mark.asyncio
     async def test_local_save_timeout_does_not_propagate(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "download_path": "/tmp/bosch_test_events",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "download_path": "/tmp/bosch_test_events",
+            }
+        )
 
         wait_for_count = [0]
 
         async def _selective_wait_for(coro, timeout=None):
             wait_for_count[0] += 1
             if wait_for_count[0] == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return await coro
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock(
-            get=MagicMock(return_value=_resp_cm(404))
-        )):
+        with patch(
+            f"{MODULE}.async_get_clientsession",
+            return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404))),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        with patch(f"{MODULE}.asyncio.wait_for",
-                                   side_effect=_selective_wait_for):
-                            from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        with patch(
+                            f"{MODULE}.asyncio.wait_for",
+                            side_effect=_selective_wait_for,
+                        ):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
                             await async_send_alert(
-                                coord, "Terrasse", "MOVEMENT",
-                                "2026-05-07T10:00:00.000Z", "",
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                "",
                             )
 
 
 # ── 16. cleanup — OSError silently swallowed ─────────────────────────────────
+
 
 class TestCleanupOsError:
     """Lines 929-930: OSError during file cleanup is caught silently."""
 
     @pytest.mark.asyncio
     async def test_os_remove_error_does_not_propagate(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "alert_delete_after_send": True,
-            "alert_save_snapshots": False,
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "alert_delete_after_send": True,
+                "alert_save_snapshots": False,
+            }
+        )
 
         image_body = b"J" * 500
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, body=image_body, content_type="image/jpeg"
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=image_body, content_type="image/jpeg")
+        )
 
         # Make async_add_executor_job succeed for makedirs+write but raise for os.remove
         exec_call_count = [0]
@@ -804,10 +958,15 @@ class TestCleanupOsError:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         # Must not raise even though os.remove fails
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-07T10:00:00.000Z",
                             "https://residential.cbs.boschsecurity.com/img.jpg",
                         )
@@ -815,11 +974,13 @@ class TestCleanupOsError:
 
 # ── 17. _on_fcm_push — dropped when FCM not running ─────────────────────────
 
+
 class TestOnFcmPushDroppedWhenNotRunning:
     """_on_fcm_push: if _fcm_running=False, push is silently dropped."""
 
     def test_push_dropped_when_not_running(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+
         coord = _make_push_coord()
         coord._fcm_running = False
         coord._fcm_lock = __import__("threading").Lock()
@@ -831,6 +992,7 @@ class TestOnFcmPushDroppedWhenNotRunning:
 
     def test_push_accepted_when_running(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+
         coord = _make_push_coord()
         coord._fcm_running = True
         coord._fcm_healthy = False
@@ -845,6 +1007,7 @@ class TestOnFcmPushDroppedWhenNotRunning:
 
 # ── 18. async_handle_fcm_push — HTTP non-200 skip ────────────────────────────
 
+
 class TestHandlePushNon200Skip:
     """Non-200 response → camera skipped, no event processing."""
 
@@ -857,15 +1020,17 @@ class TestHandlePushNon200Skip:
         session.get = MagicMock(return_value=_resp_cm(500))
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         coord.hass.bus.async_fire.assert_not_called()
 
 
 # ── 19. async_handle_fcm_push — empty prev_id sets last_event_id ─────────────
+
 
 class TestHandlePushEmptyPrevId:
     """newest_id present + prev_id=None → _last_event_ids[cam] set to newest_id."""
@@ -879,14 +1044,15 @@ class TestHandlePushEmptyPrevId:
         coord._last_event_ids = {}
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("first-evt")
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(200, json_data=_one_event("first-evt"))
+        )
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
-            with patch(f"{MODULE}.asyncio.timeout", return_value=MagicMock(
-                __aenter__=AsyncMock(), __aexit__=AsyncMock()
-            )):
+            with patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ):
                 await async_handle_fcm_push(coord)
 
         # last event ID recorded (even without firing an alert, prev_id was None)
@@ -894,6 +1060,7 @@ class TestHandlePushEmptyPrevId:
 
 
 # ── 20. async_send_alert — local save without notification service ────────────
+
 
 class TestLocalSaveWithoutNotifyService:
     """Regression: sync_local_save must fire even with no alert_notify_service.
@@ -907,11 +1074,13 @@ class TestLocalSaveWithoutNotifyService:
 
     @pytest.mark.asyncio
     async def test_local_save_fires_without_notify_service(self):
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_events",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_events",
+            }
+        )
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -921,11 +1090,18 @@ class TestLocalSaveWithoutNotifyService:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-07T10:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
@@ -938,11 +1114,13 @@ class TestLocalSaveWithoutNotifyService:
     @pytest.mark.asyncio
     async def test_early_return_when_truly_nothing_configured(self):
         """No notify service + no download_path + no SMB → immediate return, no work done."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "",
-            "download_path": "",
-            "enable_smb_upload": False,
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "",
+                "download_path": "",
+                "enable_smb_upload": False,
+            }
+        )
         coord.hass.async_add_executor_job = AsyncMock()
 
         session = MagicMock()
@@ -950,10 +1128,15 @@ class TestLocalSaveWithoutNotifyService:
             with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     from custom_components.bosch_shc_camera.fcm import async_send_alert
+
                     await async_send_alert(
-                        coord, "Terrasse", "MOVEMENT",
+                        coord,
+                        "Terrasse",
+                        "MOVEMENT",
                         "2026-05-07T10:00:00.000Z",
-                        "", "", "",
+                        "",
+                        "",
+                        "",
                     )
 
         coord.hass.async_add_executor_job.assert_not_called()
@@ -970,11 +1153,13 @@ class TestLocalSaveEnableToggle:
     @pytest.mark.asyncio
     async def test_local_save_skipped_when_toggle_off(self):
         """enable_local_save=False → sync_local_save must NOT be called even if download_path is set."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.mobile_app",
-            "enable_local_save": False,
-            "download_path": "/tmp/bosch_test_events",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.mobile_app",
+                "enable_local_save": False,
+                "download_path": "/tmp/bosch_test_events",
+            }
+        )
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -984,11 +1169,18 @@ class TestLocalSaveEnableToggle:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-08T10:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
@@ -1000,11 +1192,13 @@ class TestLocalSaveEnableToggle:
     @pytest.mark.asyncio
     async def test_local_save_runs_when_toggle_on(self):
         """enable_local_save=True + download_path set → sync_local_save must be called."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.mobile_app",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_events",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.mobile_app",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_events",
+            }
+        )
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)
 
         session = MagicMock()
@@ -1014,11 +1208,18 @@ class TestLocalSaveEnableToggle:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-08T10:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
@@ -1053,12 +1254,14 @@ class TestEventIdNotOverwrittenByConcurrentPush:
     @pytest.mark.asyncio
     async def test_passed_event_id_used_over_last_event_ids(self):
         """event_id kwarg must be used for SMB filename, not _last_event_ids at upload time."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.mobile_app",
-            "enable_smb_upload": True,
-            "smb_server": "nas.local",
-            "smb_share": "cameras",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.mobile_app",
+                "enable_smb_upload": True,
+                "smb_server": "nas.local",
+                "smb_share": "cameras",
+            }
+        )
         # Simulate a later push overwriting _last_event_ids before this pipeline's upload
         coord._last_event_ids[CAM_ID] = "NEWER_OVERWRITE_ID"
 
@@ -1069,11 +1272,18 @@ class TestEventIdNotOverwrittenByConcurrentPush:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "PERSON",
+                            coord,
+                            "Terrasse",
+                            "PERSON",
                             "2026-05-08T16:19:51.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                             event_id="ORIGINAL_PIPELINE_ID",
                         )
                         ev_id = self._get_smb_ev_id(coord, mock_smb)
@@ -1086,12 +1296,14 @@ class TestEventIdNotOverwrittenByConcurrentPush:
     @pytest.mark.asyncio
     async def test_falls_back_to_last_event_ids_when_no_event_id_passed(self):
         """When event_id kwarg is omitted, fall back to _last_event_ids (backwards compat)."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.mobile_app",
-            "enable_smb_upload": True,
-            "smb_server": "nas.local",
-            "smb_share": "cameras",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.mobile_app",
+                "enable_smb_upload": True,
+                "smb_server": "nas.local",
+                "smb_share": "cameras",
+            }
+        )
         coord._last_event_ids[CAM_ID] = "FALLBACK_ID"
 
         session = MagicMock()
@@ -1101,11 +1313,18 @@ class TestEventIdNotOverwrittenByConcurrentPush:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Terrasse", "PERSON",
+                            coord,
+                            "Terrasse",
+                            "PERSON",
                             "2026-05-08T16:19:51.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                             # no event_id — must fall back to _last_event_ids
                         )
                         ev_id = self._get_smb_ev_id(coord, mock_smb)

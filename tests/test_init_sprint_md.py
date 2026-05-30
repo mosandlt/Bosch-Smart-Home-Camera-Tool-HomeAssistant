@@ -29,6 +29,7 @@ Targets (after 2026-05-20 additions):
 
 All tests use unbound-method or minimal-stub patterns — no live HA runtime.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -73,7 +74,7 @@ class _MultiStore:
         self._payloads = payloads
         self.stores: dict[str, _FakeStore] = {}
 
-    def __call__(self, hass: Any, *, version: int, key: str) -> "_FakeStore":
+    def __call__(self, hass: Any, *, version: int, key: str) -> _FakeStore:
         """Called as Store(hass, version=1, key=...)."""
         for suffix, payload in self._payloads.items():
             if key.endswith(suffix):
@@ -85,10 +86,14 @@ class _MultiStore:
         return store
 
 
-def _make_coord_stub(camera_ids: list[str], *, first_refresh_raises: Any = None) -> MagicMock:
+def _make_coord_stub(
+    camera_ids: list[str], *, first_refresh_raises: Any = None
+) -> MagicMock:
     coord = MagicMock()
     if first_refresh_raises is not None:
-        coord.async_config_entry_first_refresh = AsyncMock(side_effect=first_refresh_raises)
+        coord.async_config_entry_first_refresh = AsyncMock(
+            side_effect=first_refresh_raises
+        )
     else:
         coord.async_config_entry_first_refresh = AsyncMock()
     coord.data = {cid: {} for cid in camera_ids}
@@ -124,7 +129,9 @@ def _make_hass() -> MagicMock:
     hass.data = {}
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_entries = MagicMock(return_value=[])
-    hass.config_entries.flow.async_init = AsyncMock(return_value={"type": "create_entry"})
+    hass.config_entries.flow.async_init = AsyncMock(
+        return_value={"type": "create_entry"}
+    )
     hass.async_create_task = MagicMock()
     hass.async_create_background_task = MagicMock()
     hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
@@ -167,12 +174,15 @@ class TestRcpLocalWriteDigestErrors:
 
         # The function does `from .auth_utils import async_digest_request` at runtime.
         # Patch at the auth_utils module level so the conditional local import picks it up.
-        with patch(
-            "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-            AsyncMock(return_value=resp_ctx),
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
+                AsyncMock(return_value=resp_ctx),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await rcp_local_write(
                 MagicMock(),
@@ -191,12 +201,15 @@ class TestRcpLocalWriteDigestErrors:
 
         resp_ctx = self._make_digest_ctx(200, b"<err>auth failed</err>")
 
-        with patch(
-            "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-            AsyncMock(return_value=resp_ctx),
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
+                AsyncMock(return_value=resp_ctx),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await rcp_local_write(
                 MagicMock(),
@@ -215,12 +228,15 @@ class TestRcpLocalWriteDigestErrors:
 
         resp_ctx = self._make_digest_ctx(200, b"<result>OK</result>")
 
-        with patch(
-            "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-            AsyncMock(return_value=resp_ctx),
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
+                AsyncMock(return_value=resp_ctx),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await rcp_local_write(
                 MagicMock(),
@@ -244,8 +260,8 @@ class TestPanPresetDeviceInfo:
 
     def test_device_info_identifiers(self) -> None:
         """device_info must include (DOMAIN, cam_id) in identifiers. Pins L506-508."""
-        from custom_components.bosch_shc_camera.select import BoschPanPresetSelect
         from custom_components.bosch_shc_camera.const import DOMAIN
+        from custom_components.bosch_shc_camera.select import BoschPanPresetSelect
 
         coord = SimpleNamespace(
             data={
@@ -304,7 +320,12 @@ class TestLiveStreamSwitchLifecycle:
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         coord = SimpleNamespace(
-            data={CAM_A: {"info": {"title": "T", "hardwareVersion": "HOME_Eyes_Outdoor"}, "status": "ONLINE"}},
+            data={
+                CAM_A: {
+                    "info": {"title": "T", "hardwareVersion": "HOME_Eyes_Outdoor"},
+                    "status": "ONLINE",
+                }
+            },
             _live_connections={},
             _user_intent_streams=set(),
             _shc_state_cache={CAM_A: {"privacy_mode": False}},
@@ -325,7 +346,9 @@ class TestLiveStreamSwitchLifecycle:
             is_stream_warming=lambda cid: False,
             _live_stream_entities={},
         )
-        entry = SimpleNamespace(entry_id="01ENTRY", data={"bearer_token": "x"}, options={})
+        entry = SimpleNamespace(
+            entry_id="01ENTRY", data={"bearer_token": "x"}, options={}
+        )
         sw = BoschLiveStreamSwitch(coord, CAM_A, entry)
 
         # Patch super().async_added_to_hass to avoid HA runtime dependency
@@ -342,7 +365,12 @@ class TestLiveStreamSwitchLifecycle:
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         coord = SimpleNamespace(
-            data={CAM_A: {"info": {"title": "T", "hardwareVersion": "HOME_Eyes_Outdoor"}, "status": "ONLINE"}},
+            data={
+                CAM_A: {
+                    "info": {"title": "T", "hardwareVersion": "HOME_Eyes_Outdoor"},
+                    "status": "ONLINE",
+                }
+            },
             _live_connections={},
             _user_intent_streams=set(),
             _shc_state_cache={CAM_A: {"privacy_mode": False}},
@@ -363,7 +391,9 @@ class TestLiveStreamSwitchLifecycle:
             is_stream_warming=lambda cid: False,
             _live_stream_entities={CAM_A: MagicMock()},  # pre-populate
         )
-        entry = SimpleNamespace(entry_id="01ENTRY", data={"bearer_token": "x"}, options={})
+        entry = SimpleNamespace(
+            entry_id="01ENTRY", data={"bearer_token": "x"}, options={}
+        )
         sw = BoschLiveStreamSwitch(coord, CAM_A, entry)
 
         with patch(
@@ -473,8 +503,15 @@ class TestCoordinatorPersistOnUpdate:
     async def test_hw_version_persisted_on_first_change(self) -> None:
         """hw_version_store.async_save called when hw_version changes. Pins L2523-2527."""
         import threading
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        from .test_init_sprint_ka import _make_coord, _make_resp, _make_session, _PATCH_SESSION
+
+        from .test_init_sprint_ka import (
+            _PATCH_SESSION,
+            _make_coord,
+            _make_resp,
+            _make_session,
+        )
 
         hw_store = MagicMock()
         hw_store.async_save = AsyncMock()
@@ -495,14 +532,18 @@ class TestCoordinatorPersistOnUpdate:
         coord._hw_version = {CAM_A: "HOME_Eyes_Outdoor"}
         coord._hw_version_store = hw_store
         coord._hw_version_snapshot = None  # different from current → will save
-        coord._local_creds_store = None    # skip creds path
+        coord._local_creds_store = None  # skip creds path
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_A, "title": "Terrasse"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_A, "title": "Terrasse"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -514,7 +555,13 @@ class TestCoordinatorPersistOnUpdate:
     async def test_local_creds_persisted_on_change(self) -> None:
         """_local_creds_store.async_save called when creds change. Pins L2535-2548."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        from .test_init_sprint_ka import _make_coord, _make_resp, _make_session, _PATCH_SESSION
+
+        from .test_init_sprint_ka import (
+            _PATCH_SESSION,
+            _make_coord,
+            _make_resp,
+            _make_session,
+        )
 
         creds_store = MagicMock()
         creds_store.async_save = AsyncMock()
@@ -531,7 +578,7 @@ class TestCoordinatorPersistOnUpdate:
         coord._lan_ips_store = MagicMock()
         coord._lan_ips_store.async_save = AsyncMock()
         coord._lan_ips_snapshot = None
-        coord._hw_version_store = None   # skip hw path
+        coord._hw_version_store = None  # skip hw path
         # Wire creds cache with a valid entry and no prior snapshot
         coord._local_creds_cache = {
             CAM_A: {
@@ -545,12 +592,16 @@ class TestCoordinatorPersistOnUpdate:
         coord._local_creds_store = creds_store
         coord._local_creds_snapshot = None  # different from current → will save
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_A, "title": "Terrasse"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_A, "title": "Terrasse"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -559,7 +610,9 @@ class TestCoordinatorPersistOnUpdate:
         saved = creds_store.async_save.call_args.args[0]
         assert CAM_A in saved
         assert saved[CAM_A]["user"] == "cbs-XXXXXXXX"
-        assert "ts" not in saved[CAM_A]  # ts is stripped (only user/password/host/port saved)
+        assert (
+            "ts" not in saved[CAM_A]
+        )  # ts is stripped (only user/password/host/port saved)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -591,18 +644,29 @@ class TestSetupEntryPersistedStores:
         hass = _make_hass()
         entry = _make_entry()
         coord_stub = _make_coord_stub([CAM_A])
-        coord_stub.data = {CAM_A: {"info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}}}
+        coord_stub.data = {
+            CAM_A: {
+                "info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}
+            }
+        }
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
         # coordinator._maintenance_notified_key should be a tuple (link, state)
-        assert coord_stub._maintenance_notified_key == ("https://example.com/maint/12345", "ACTIVE")
+        assert coord_stub._maintenance_notified_key == (
+            "https://example.com/maint/12345",
+            "ACTIVE",
+        )
 
     async def test_cloud_outage_flag_loaded_from_store(self) -> None:
         """Persisted cloud-outage flag True → coordinator._cloud_outage_notified=True.
@@ -624,11 +688,15 @@ class TestSetupEntryPersistedStores:
         coord_stub = _make_coord_stub([CAM_A])
         coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -637,8 +705,9 @@ class TestSetupEntryPersistedStores:
     async def test_local_creds_loaded_from_store(self) -> None:
         """Persisted local creds with user+password+host → cached in coordinator.
         Pins L5399-5407, L5409."""
-        from custom_components.bosch_shc_camera import async_setup_entry
         import time
+
+        from custom_components.bosch_shc_camera import async_setup_entry
 
         creds_payload = {
             CAM_A.lower(): {
@@ -647,8 +716,8 @@ class TestSetupEntryPersistedStores:
                 "host": "192.0.2.149",
                 "port": 443,
             },
-            "bad_entry": {"user": "x"},   # missing password+host → skipped
-            "also_bad": "not_a_dict",     # wrong type → skipped
+            "bad_entry": {"user": "x"},  # missing password+host → skipped
+            "also_bad": "not_a_dict",  # wrong type → skipped
         }
 
         store_factory = _MultiStore(
@@ -666,11 +735,15 @@ class TestSetupEntryPersistedStores:
         coord_stub = _make_coord_stub([CAM_A])
         coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -710,15 +783,23 @@ class TestSetupEntryPersistedStores:
         )
         fake_dreg = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()), \
-             patch("homeassistant.helpers.device_registry.async_get",
-                   return_value=fake_dreg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[fake_device]):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_get",
+                return_value=fake_dreg,
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[fake_device],
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -731,7 +812,16 @@ class TestSetupEntryPersistedStores:
         from custom_components.bosch_shc_camera.const import DOMAIN
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
 
         hass = _make_hass()
@@ -747,15 +837,23 @@ class TestSetupEntryPersistedStores:
         )
         fake_dreg = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()), \
-             patch("homeassistant.helpers.device_registry.async_get",
-                   return_value=fake_dreg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[fake_device]):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_get",
+                return_value=fake_dreg,
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[fake_device],
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -766,7 +864,16 @@ class TestSetupEntryPersistedStores:
         from custom_components.bosch_shc_camera.const import DOMAIN
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
 
         hass = _make_hass()
@@ -782,15 +889,23 @@ class TestSetupEntryPersistedStores:
         )
         fake_dreg = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()), \
-             patch("homeassistant.helpers.device_registry.async_get",
-                   return_value=fake_dreg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[fake_device]):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_get",
+                return_value=fake_dreg,
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[fake_device],
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -826,7 +941,11 @@ class TestIndoorIIOrphanMigration:
         hass = _make_hass()
         entry = _make_entry()
         coord_stub = _make_coord_stub([CAM_INDOOR])
-        coord_stub.data = {CAM_INDOOR: {"info": {"title": "Indoor", "hardwareVersion": "HOME_Eyes_Indoor"}}}
+        coord_stub.data = {
+            CAM_INDOOR: {
+                "info": {"title": "Indoor", "hardwareVersion": "HOME_Eyes_Indoor"}
+            }
+        }
         coord_stub._hw_version = {CAM_INDOOR: "HOME_Eyes_Indoor"}
 
         # The orphan entity: unique_id ends with _front_light_entity AND contains Indoor II cam_id
@@ -849,19 +968,25 @@ class TestIndoorIIOrphanMigration:
         # once for v12.4.10 stale-lan-id check (returns [] — no stale ids)
         # once for v12.5.1 indoor-II orphan check (returns [orphan, clean])
         call_count = [0]
+
         def _entries_side_effect(reg: Any, entry_id: str) -> list:
             call_count[0] += 1
             if call_count[0] == 1:
                 return []  # v12.4.10 migration: no stale LAN ids
             return [fake_orphan_ent, clean_ent]  # v12.5.1 migration
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg), \
-             patch("homeassistant.helpers.entity_registry.async_entries_for_config_entry",
-                   side_effect=_entries_side_effect):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+            patch(
+                "homeassistant.helpers.entity_registry.async_entries_for_config_entry",
+                side_effect=_entries_side_effect,
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -885,11 +1010,17 @@ class TestIndoorIIOrphanMigration:
         hass = _make_hass()
         entry = _make_entry()
         coord_stub = _make_coord_stub([CAM_OUTDOOR])
-        coord_stub.data = {CAM_OUTDOOR: {"info": {"title": "Outdoor", "hardwareVersion": "HOME_Eyes_Outdoor"}}}
+        coord_stub.data = {
+            CAM_OUTDOOR: {
+                "info": {"title": "Outdoor", "hardwareVersion": "HOME_Eyes_Outdoor"}
+            }
+        }
         coord_stub._hw_version = {CAM_OUTDOOR: "HOME_Eyes_Outdoor"}  # NOT indoor
 
         orphan_uid = f"bosch_shc_camera_{CAM_OUTDOOR.lower()}_front_light_entity"
-        fake_ent = SimpleNamespace(unique_id=orphan_uid, entity_id="switch.bosch_outdoor_front_light")
+        fake_ent = SimpleNamespace(
+            unique_id=orphan_uid, entity_id="switch.bosch_outdoor_front_light"
+        )
 
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
@@ -897,26 +1028,31 @@ class TestIndoorIIOrphanMigration:
 
         # First call = v12.4.10 migration; second call = v12.5.1 migration
         call_count = [0]
+
         def _entries_side_effect(reg: Any, entry_id: str) -> list:
             call_count[0] += 1
             if call_count[0] == 1:
                 return []
             return [fake_ent]
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg), \
-             patch("homeassistant.helpers.entity_registry.async_entries_for_config_entry",
-                   side_effect=_entries_side_effect):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+            patch(
+                "homeassistant.helpers.entity_registry.async_entries_for_config_entry",
+                side_effect=_entries_side_effect,
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
         # async_remove should NOT have been called — outdoor cam_id not in _indoor_ii_cam_ids
         calls_for_outdoor = [
-            c for c in ent_reg.async_remove.call_args_list
-            if "outdoor" in str(c)
+            c for c in ent_reg.async_remove.call_args_list if "outdoor" in str(c)
         ]
         assert len(calls_for_outdoor) == 0
 
@@ -976,40 +1112,65 @@ class TestSetupEntryWebhookClosure:
             session = self._make_session_mock(session_status)
 
         # Keep async_get_clientsession patched THROUGH the listener call
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()), \
-             patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        ):
             await async_setup_entry(hass, entry)
-            listener = next(fn for et, fn in captured if et == "bosch_shc_camera_motion")
+            listener = next(
+                fn for et, fn in captured if et == "bosch_shc_camera_motion"
+            )
             await listener(event)
 
         return session, captured
 
     async def test_webhook_listener_registered_for_four_event_types(self) -> None:
         """async_setup_entry registers _async_deliver_webhook for 4 event types. Pins L5707-5710."""
-        from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
-        )
         from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
         hass = _make_hass()
         captured: list[Any] = []
-        hass.bus.async_listen = MagicMock(side_effect=lambda et, fn: captured.append((et, fn)) or MagicMock())
+        hass.bus.async_listen = MagicMock(
+            side_effect=lambda et, fn: captured.append((et, fn)) or MagicMock()
+        )
 
-        entry = _make_entry(options={CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: ""})
+        entry = _make_entry(
+            options={CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: ""}
+        )
         coord_stub = _make_coord_stub([CAM_A])
         coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=_make_ent_reg()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         event_types = {et for et, _ in captured}
@@ -1021,14 +1182,23 @@ class TestSetupEntryWebhookClosure:
     async def test_deliver_webhook_disabled_no_post(self) -> None:
         """_async_deliver_webhook: webhook disabled → no POST. Pins L5674-5675."""
         from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
         )
+
         ev = SimpleNamespace(
             event_type="bosch_shc_camera_motion",
-            data={"camera_id": CAM_A, "camera_name": "T", "timestamp": "2026-01-01T00:00:00Z"},
+            data={
+                "camera_id": CAM_A,
+                "camera_name": "T",
+                "timestamp": "2026-01-01T00:00:00Z",
+            },
         )
         session, _ = await self._run_full_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: False,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             ev,
         )
         session.post.assert_not_called()
@@ -1036,11 +1206,17 @@ class TestSetupEntryWebhookClosure:
     async def test_deliver_webhook_enabled_empty_url_no_post(self) -> None:
         """_async_deliver_webhook: enabled but URL empty → no POST, warning. Pins L5677-5681."""
         from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
         )
+
         ev = SimpleNamespace(
             event_type="bosch_shc_camera_motion",
-            data={"camera_id": CAM_A, "camera_name": "T", "timestamp": "2026-01-01T00:00:00Z"},
+            data={
+                "camera_id": CAM_A,
+                "camera_name": "T",
+                "timestamp": "2026-01-01T00:00:00Z",
+            },
         )
         session, _ = await self._run_full_test(
             {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: ""},
@@ -1051,14 +1227,23 @@ class TestSetupEntryWebhookClosure:
     async def test_deliver_webhook_posts_to_url(self) -> None:
         """_async_deliver_webhook: enabled + URL set → POST called. Pins L5682-5701."""
         from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
         )
+
         ev = SimpleNamespace(
             event_type="bosch_shc_camera_motion",
-            data={"camera_id": CAM_A, "camera_name": "Terrasse", "timestamp": "2026-05-20T10:00:00Z"},
+            data={
+                "camera_id": CAM_A,
+                "camera_name": "Terrasse",
+                "timestamp": "2026-05-20T10:00:00Z",
+            },
         )
         session, _ = await self._run_full_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             ev,
             session_status=200,
         )
@@ -1072,14 +1257,19 @@ class TestSetupEntryWebhookClosure:
     async def test_deliver_webhook_http_400_logs_warning(self) -> None:
         """_async_deliver_webhook: server returns 400 → warning logged, no exception. Pins L5693-5697."""
         from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
         )
+
         ev = SimpleNamespace(
             event_type="bosch_shc_camera_motion",
             data={"camera_id": CAM_A, "camera_name": "T", "timestamp": ""},
         )
         session, _ = await self._run_full_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             ev,
             session_status=400,
         )
@@ -1089,8 +1279,10 @@ class TestSetupEntryWebhookClosure:
     async def test_deliver_webhook_client_error_logged(self) -> None:
         """_async_deliver_webhook: aiohttp.ClientError → caught, not propagated. Pins L5702-5705."""
         import aiohttp
+
         from custom_components.bosch_shc_camera.const import (
-            CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL,
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
         )
 
         ctx = MagicMock()
@@ -1105,7 +1297,10 @@ class TestSetupEntryWebhookClosure:
         )
         # Must not raise
         await self._run_full_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             ev,
             session=error_session,
         )
@@ -1137,7 +1332,16 @@ class TestSetupEntrySendEventWebhookService:
         from custom_components.bosch_shc_camera import async_setup_entry
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
         hass = _make_hass()
         if fake_state is not None:
@@ -1162,12 +1366,16 @@ class TestSetupEntrySendEventWebhookService:
         if session is None:
             session = self._make_service_session()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=_make_ent_reg()), \
-             patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        ):
             await async_setup_entry(hass, entry)
             handler = captured_handler[0] if captured_handler else None
             call = SimpleNamespace(data=service_call_data)
@@ -1178,40 +1386,73 @@ class TestSetupEntrySendEventWebhookService:
 
     async def test_service_handler_registered_when_not_existing(self) -> None:
         """send_event_webhook service registered when has_service returns False. Pins L5750."""
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
         from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
         hass = _make_hass()
         hass.services.has_service = MagicMock(return_value=False)
-        entry = _make_entry(options={CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: ""})
+        entry = _make_entry(
+            options={CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: ""}
+        )
         coord_stub = _make_coord_stub([CAM_A])
         coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=_make_ent_reg()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
-        calls = [c for c in hass.services.async_register.call_args_list
-                 if len(c.args) >= 2 and c.args[1] == "send_event_webhook"]
+        calls = [
+            c
+            for c in hass.services.async_register.call_args_list
+            if len(c.args) >= 2 and c.args[1] == "send_event_webhook"
+        ]
         assert len(calls) == 1
 
     async def test_service_handler_disabled_returns_early(self) -> None:
         """handle_send_event_webhook: webhook disabled → no POST. Pins L5717-5718."""
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
+
         _, session = await self._run_service_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: False,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             {"event_type": "MOVEMENT", "entity_id": ""},
         )
         session.post.assert_not_called()
 
     async def test_service_handler_no_url_returns_early(self) -> None:
         """handle_send_event_webhook: no URL → no POST. Pins L5720-5722."""
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
+
         _, session = await self._run_service_test(
             {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: ""},
             {"event_type": "MOVEMENT", "entity_id": ""},
@@ -1220,9 +1461,16 @@ class TestSetupEntrySendEventWebhookService:
 
     async def test_service_handler_posts_with_manual_payload(self) -> None:
         """handle_send_event_webhook: valid options → POST with correct payload. Pins L5733-5746."""
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
+
         _, session = await self._run_service_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://hook.example.org/test"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://hook.example.org/test",
+            },
             {"event_type": "PERSON", "entity_id": ""},
         )
         session.post.assert_called_once()
@@ -1233,10 +1481,17 @@ class TestSetupEntrySendEventWebhookService:
     async def test_service_handler_resolves_entity_friendly_name(self) -> None:
         """handle_send_event_webhook: entity_id given + state found → camera = friendly_name.
         Pins L5728-5731."""
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
+
         fake_state = SimpleNamespace(attributes={"friendly_name": "Kamera Terrasse"})
         _, session = await self._run_service_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://hook.example.org/test"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://hook.example.org/test",
+            },
             {"event_type": "MOVEMENT", "entity_id": "camera.bosch_terrasse"},
             fake_state=fake_state,
         )
@@ -1247,7 +1502,11 @@ class TestSetupEntrySendEventWebhookService:
     async def test_service_handler_client_error_logged(self) -> None:
         """handle_send_event_webhook: aiohttp.ClientError → caught, no exception. Pins L5746-5747."""
         import aiohttp
-        from custom_components.bosch_shc_camera.const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
+
+        from custom_components.bosch_shc_camera.const import (
+            CONF_ENABLE_WEBHOOK_DELIVERY,
+            CONF_WEBHOOK_URL,
+        )
 
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectionError("fail"))
@@ -1257,7 +1516,10 @@ class TestSetupEntrySendEventWebhookService:
 
         # Must not raise
         await self._run_service_test(
-            {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            {
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             {"event_type": "MOVEMENT", "entity_id": ""},
             session=error_session,
         )

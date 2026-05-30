@@ -15,6 +15,7 @@ Covers ON/OFF value pins + is_on state for:
   - BoschFrontLightSwitch
   - BoschWallwasherSwitch
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -88,7 +89,10 @@ def _stub_coord(**overrides):
         is_camera_online=lambda cid: True,
         is_session_stale=lambda cid: False,
         is_stream_warming=lambda cid: False,
-        motion_settings=lambda cid: {"enabled": True, "motionAlarmConfiguration": "HIGH"},
+        motion_settings=lambda cid: {
+            "enabled": True,
+            "motionAlarmConfiguration": "HIGH",
+        },
         recording_options=lambda cid: {"recordSound": False},
         async_put_camera=AsyncMock(return_value=True),
         async_request_refresh=AsyncMock(),
@@ -135,11 +139,15 @@ def _bind_hass(sw):
 # BoschNotificationTypeSwitch — per ntype
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestNotificationTypeSwitchAudio:
     """ntype='audio' — MISSING entirely in previous rounds."""
 
     def _make(self, coord, entry):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationTypeSwitch
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNotificationTypeSwitch,
+        )
+
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "audio")
 
     def test_unique_id(self, coord, entry):
@@ -187,7 +195,10 @@ class TestNotificationTypeSwitchTrouble:
     """ntype='trouble' — ON/OFF MISSING in previous rounds."""
 
     def _make(self, coord, entry):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationTypeSwitch
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNotificationTypeSwitch,
+        )
+
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "trouble")
 
     def test_unique_id(self, coord, entry):
@@ -231,7 +242,10 @@ class TestNotificationTypeSwitchCameraAlarm:
     """ntype='cameraAlarm' — had ON only, need OFF pin."""
 
     def _make(self, coord, entry):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationTypeSwitch
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNotificationTypeSwitch,
+        )
+
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "cameraAlarm")
 
     def test_unique_id(self, coord, entry):
@@ -276,7 +290,10 @@ class TestNotificationTypeSwitchTroubleEmail:
     """ntype='troubleEmail' — had ON only, need OFF pin."""
 
     def _make(self, coord, entry):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationTypeSwitch
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNotificationTypeSwitch,
+        )
+
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "troubleEmail")
 
     def test_unique_id(self, coord, entry):
@@ -321,9 +338,11 @@ class TestNotificationTypeSwitchTroubleEmail:
 # BoschTimestampSwitch
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestTimestampSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
+
         return BoschTimestampSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -351,7 +370,9 @@ class TestTimestampSwitch:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_on()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "timestamp", {"result": True})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "timestamp", {"result": True}
+        )
         assert coord._timestamp_cache[CAM_ID] is True
 
     @pytest.mark.asyncio
@@ -360,7 +381,9 @@ class TestTimestampSwitch:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_off()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "timestamp", {"result": False})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "timestamp", {"result": False}
+        )
         assert coord._timestamp_cache[CAM_ID] is False
 
 
@@ -368,9 +391,11 @@ class TestTimestampSwitch:
 # BoschIntercomSwitch — unique_id + is_on default + ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestIntercomSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
+
         return BoschIntercomSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -392,8 +417,10 @@ class TestIntercomSwitchModePins:
         mock_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw.async_turn_on()
         _, call_kwargs = mock_session.put.call_args
         body = call_kwargs.get("json", {})
@@ -413,8 +440,10 @@ class TestIntercomSwitchModePins:
         mock_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw.async_turn_off()
         _, call_kwargs = mock_session.put.call_args
         body = call_kwargs.get("json", {})
@@ -427,9 +456,11 @@ class TestIntercomSwitchModePins:
 # BoschAutoFollowSwitch
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAutoFollowSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
+
         return BoschAutoFollowSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -456,23 +487,29 @@ class TestAutoFollowSwitch:
         sw = self._make(coord, entry)
         _bind_hass(sw)
         await sw.async_turn_on()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "autofollow", {"result": True})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "autofollow", {"result": True}
+        )
 
     @pytest.mark.asyncio
     async def test_turn_off_puts_result_false(self, coord, entry):
         sw = self._make(coord, entry)
         _bind_hass(sw)
         await sw.async_turn_off()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "autofollow", {"result": False})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "autofollow", {"result": False}
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BoschRecordSoundSwitch
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestRecordSoundSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
+
         return BoschRecordSoundSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -517,9 +554,11 @@ class TestRecordSoundSwitch:
 # BoschStatusLedSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestStatusLedSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+
         return BoschStatusLedSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -542,7 +581,9 @@ class TestStatusLedSwitchModePins:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_on()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "ledlights", {"state": "ON"})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "ledlights", {"state": "ON"}
+        )
         assert coord._ledlights_cache[CAM_ID] is True
 
     @pytest.mark.asyncio
@@ -551,7 +592,9 @@ class TestStatusLedSwitchModePins:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_off()
-        coord.async_put_camera.assert_awaited_once_with(CAM_ID, "ledlights", {"state": "OFF"})
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "ledlights", {"state": "OFF"}
+        )
         assert coord._ledlights_cache[CAM_ID] is False
 
 
@@ -559,9 +602,11 @@ class TestStatusLedSwitchModePins:
 # BoschMotionLightSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestMotionLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
+
         return BoschMotionLightSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -569,7 +614,10 @@ class TestMotionLightSwitchModePins:
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_motion_light"
 
     def test_is_on_true_from_cache(self, coord, entry):
-        coord._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": True, "sensitivity": "HIGH"}
+        coord._motion_light_cache[CAM_ID] = {
+            "lightOnMotionEnabled": True,
+            "sensitivity": "HIGH",
+        }
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
@@ -612,9 +660,11 @@ class TestMotionLightSwitchModePins:
 # BoschAmbientLightSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAmbientLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
+
         return BoschAmbientLightSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -652,13 +702,17 @@ class TestAmbientLightSwitchModePins:
         sw._set_ambient_light.assert_awaited_once_with(False)
 
     @pytest.mark.asyncio
-    async def test_set_ambient_light_on_sends_ambientLightEnabled_true(self, coord, entry):
+    async def test_set_ambient_light_on_sends_ambientLightEnabled_true(
+        self, coord, entry
+    ):
         """Full HTTP path: PUT body must include ambientLightEnabled=True."""
         sw = self._make(coord, entry)
         _bind_hass(sw)
         get_resp = MagicMock()
         get_resp.status = 200
-        get_resp.json = AsyncMock(return_value={"ambientLightEnabled": False, "schedule": "DUSK"})
+        get_resp.json = AsyncMock(
+            return_value={"ambientLightEnabled": False, "schedule": "DUSK"}
+        )
         put_resp = MagicMock()
         put_resp.status = 204
         get_ctx = MagicMock()
@@ -670,21 +724,27 @@ class TestAmbientLightSwitchModePins:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=get_ctx)
         mock_session.put = MagicMock(return_value=put_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw._set_ambient_light(True)
         _, put_kwargs = mock_session.put.call_args
         assert put_kwargs["json"]["ambientLightEnabled"] is True
         assert sw._is_on is True
 
     @pytest.mark.asyncio
-    async def test_set_ambient_light_off_sends_ambientLightEnabled_false(self, coord, entry):
+    async def test_set_ambient_light_off_sends_ambientLightEnabled_false(
+        self, coord, entry
+    ):
         """Full HTTP path: PUT body must include ambientLightEnabled=False."""
         sw = self._make(coord, entry)
         _bind_hass(sw)
         get_resp = MagicMock()
         get_resp.status = 200
-        get_resp.json = AsyncMock(return_value={"ambientLightEnabled": True, "schedule": "DUSK"})
+        get_resp.json = AsyncMock(
+            return_value={"ambientLightEnabled": True, "schedule": "DUSK"}
+        )
         put_resp = MagicMock()
         put_resp.status = 200
         get_ctx = MagicMock()
@@ -696,8 +756,10 @@ class TestAmbientLightSwitchModePins:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=get_ctx)
         mock_session.put = MagicMock(return_value=put_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw._set_ambient_light(False)
         _, put_kwargs = mock_session.put.call_args
         assert put_kwargs["json"]["ambientLightEnabled"] is False
@@ -708,9 +770,11 @@ class TestAmbientLightSwitchModePins:
 # BoschSoftLightFadingSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestSoftLightFadingSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
+
         return BoschSoftLightFadingSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -718,12 +782,18 @@ class TestSoftLightFadingSwitchModePins:
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_soft_light_fading"
 
     def test_is_on_true(self, coord, entry):
-        coord._global_lighting_cache[CAM_ID] = {"softLightFading": True, "darknessThreshold": 0.5}
+        coord._global_lighting_cache[CAM_ID] = {
+            "softLightFading": True,
+            "darknessThreshold": 0.5,
+        }
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
     def test_is_on_false(self, coord, entry):
-        coord._global_lighting_cache[CAM_ID] = {"softLightFading": False, "darknessThreshold": 0.5}
+        coord._global_lighting_cache[CAM_ID] = {
+            "softLightFading": False,
+            "darknessThreshold": 0.5,
+        }
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
@@ -749,19 +819,26 @@ class TestSoftLightFadingSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_put_global_on_sends_softLightFading_true(self, coord, entry):
-        coord._global_lighting_cache[CAM_ID] = {"softLightFading": False, "darknessThreshold": 0.4}
+        coord._global_lighting_cache[CAM_ID] = {
+            "softLightFading": False,
+            "darknessThreshold": 0.4,
+        }
         sw = self._make(coord, entry)
         _bind_hass(sw)
         put_resp = MagicMock()
         put_resp.status = 200
-        put_resp.json = AsyncMock(return_value={"softLightFading": True, "darknessThreshold": 0.4})
+        put_resp.json = AsyncMock(
+            return_value={"softLightFading": True, "darknessThreshold": 0.4}
+        )
         put_ctx = MagicMock()
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw._put_global_lighting(True)
         _, put_kwargs = mock_session.put.call_args
         assert put_kwargs["json"]["softLightFading"] is True
@@ -769,19 +846,26 @@ class TestSoftLightFadingSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_put_global_off_sends_softLightFading_false(self, coord, entry):
-        coord._global_lighting_cache[CAM_ID] = {"softLightFading": True, "darknessThreshold": 0.6}
+        coord._global_lighting_cache[CAM_ID] = {
+            "softLightFading": True,
+            "darknessThreshold": 0.6,
+        }
         sw = self._make(coord, entry)
         _bind_hass(sw)
         put_resp = MagicMock()
         put_resp.status = 200
-        put_resp.json = AsyncMock(return_value={"softLightFading": False, "darknessThreshold": 0.6})
+        put_resp.json = AsyncMock(
+            return_value={"softLightFading": False, "darknessThreshold": 0.6}
+        )
         put_ctx = MagicMock()
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
-        with patch("custom_components.bosch_shc_camera.switch.async_get_clientsession",
-                   return_value=mock_session):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
+            return_value=mock_session,
+        ):
             await sw._put_global_lighting(False)
         _, put_kwargs = mock_session.put.call_args
         assert put_kwargs["json"]["softLightFading"] is False
@@ -792,9 +876,11 @@ class TestSoftLightFadingSwitchModePins:
 # BoschPreAlarmSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPreAlarmSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschPreAlarmSwitch
+
         return BoschPreAlarmSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -844,9 +930,11 @@ class TestPreAlarmSwitch:
 #       endpoint, so state is purely local. Both ON and OFF send PUT.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPanicAlarmSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
+
         return BoschPanicAlarmSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -904,9 +992,11 @@ class TestPanicAlarmSwitch:
 # BoschFrontLightSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestFrontLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
+
         return BoschFrontLightSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -924,25 +1014,35 @@ class TestFrontLightSwitchModePins:
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_calls_cloud_set_light_component_front_true(self, coord, entry):
+    async def test_turn_on_calls_cloud_set_light_component_front_true(
+        self, coord, entry
+    ):
         sw = self._make(coord, entry)
         await sw.async_turn_on()
-        coord.async_cloud_set_light_component.assert_awaited_once_with(CAM_ID, "front", True)
+        coord.async_cloud_set_light_component.assert_awaited_once_with(
+            CAM_ID, "front", True
+        )
 
     @pytest.mark.asyncio
-    async def test_turn_off_calls_cloud_set_light_component_front_false(self, coord, entry):
+    async def test_turn_off_calls_cloud_set_light_component_front_false(
+        self, coord, entry
+    ):
         sw = self._make(coord, entry)
         await sw.async_turn_off()
-        coord.async_cloud_set_light_component.assert_awaited_once_with(CAM_ID, "front", False)
+        coord.async_cloud_set_light_component.assert_awaited_once_with(
+            CAM_ID, "front", False
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BoschWallwasherSwitch — ON/OFF value pins
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestWallwasherSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
+
         return BoschWallwasherSwitch(coord, CAM_ID, entry)
 
     def test_unique_id(self, coord, entry):
@@ -960,13 +1060,21 @@ class TestWallwasherSwitchModePins:
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_calls_cloud_set_light_component_wallwasher_true(self, coord, entry):
+    async def test_turn_on_calls_cloud_set_light_component_wallwasher_true(
+        self, coord, entry
+    ):
         sw = self._make(coord, entry)
         await sw.async_turn_on()
-        coord.async_cloud_set_light_component.assert_awaited_once_with(CAM_ID, "wallwasher", True)
+        coord.async_cloud_set_light_component.assert_awaited_once_with(
+            CAM_ID, "wallwasher", True
+        )
 
     @pytest.mark.asyncio
-    async def test_turn_off_calls_cloud_set_light_component_wallwasher_false(self, coord, entry):
+    async def test_turn_off_calls_cloud_set_light_component_wallwasher_false(
+        self, coord, entry
+    ):
         sw = self._make(coord, entry)
         await sw.async_turn_off()
-        coord.async_cloud_set_light_component.assert_awaited_once_with(CAM_ID, "wallwasher", False)
+        coord.async_cloud_set_light_component.assert_awaited_once_with(
+            CAM_ID, "wallwasher", False
+        )

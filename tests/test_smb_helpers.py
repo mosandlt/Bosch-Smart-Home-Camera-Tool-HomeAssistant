@@ -15,26 +15,29 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ── _safe_name (path-traversal sanitization) ────────────────────────────
 
 
 class TestSafeName:
     def test_normal_name_passes_through(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         assert _safe_name("Terrasse") == "Terrasse"
 
     def test_spaces_and_hyphens_allowed(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         assert _safe_name("Bosch Terrasse-Kamera") == "Bosch Terrasse-Kamera"
 
     def test_dots_allowed(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         assert _safe_name("Cam.Front") == "Cam.Front"
 
     def test_double_dot_replaced(self):
         """Path-traversal sequence must be defanged."""
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("../etc/passwd")
         assert ".." not in result
         # Must not contain a path separator
@@ -42,17 +45,20 @@ class TestSafeName:
 
     def test_slashes_replaced(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("evil/path/here")
         assert "/" not in result
 
     def test_backslash_replaced(self):
         """Windows path separator must also be sanitized."""
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("evil\\path")
         assert "\\" not in result
 
     def test_special_chars_replaced(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("name<with>special|chars*")
         for ch in "<>|*":
             assert ch not in result
@@ -60,21 +66,25 @@ class TestSafeName:
     def test_unicode_replaced(self):
         """Non-word characters become `_` — keeps fs-safe."""
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("Außenkamera")
         # `ß` is `\w` in Python regex so it stays — both fine for filesystem
         assert len(result) > 0
 
     def test_truncates_to_64_chars(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         long_name = "x" * 100
         assert len(_safe_name(long_name)) == 64
 
     def test_empty_string_returns_empty(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         assert _safe_name("") == ""
 
     def test_only_unsafe_chars_yields_underscores(self):
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         result = _safe_name("///***")
         assert all(c == "_" for c in result)
 
@@ -97,7 +107,9 @@ _FILE_RE = re.compile(
 
 
 def _make_coordinator(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(options={"enable_local_save": True, "download_path": str(tmp_path)})
+    return SimpleNamespace(
+        options={"enable_local_save": True, "download_path": str(tmp_path)}
+    )
 
 
 def _make_ev(
@@ -137,6 +149,7 @@ class TestSyncLocalSave:
         Browser to appear empty.
         """
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
         resp = self._make_urlopen_resp(b"FAKE")
@@ -145,11 +158,14 @@ class TestSyncLocalSave:
         saved = list((tmp_path / "Innenbereich").rglob("*.*"))
         assert saved, "no files saved"
         for f in saved:
-            assert _FILE_RE.match(f.name), f"filename {f.name!r} does not match _FILE_RE"
+            assert _FILE_RE.match(f.name), (
+                f"filename {f.name!r} does not match _FILE_RE"
+            )
 
     def test_camera_subdir_created(self, tmp_path):
         """Camera name subdirectory is created inside download_path."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _make_coordinator(tmp_path)
         resp = self._make_urlopen_resp(b"FAKE")
         with patch("urllib.request.urlopen", return_value=resp):
@@ -159,6 +175,7 @@ class TestSyncLocalSave:
     def test_clip_skipped_when_status_not_done(self, tmp_path):
         """MP4 not saved when videoClipUploadStatus != Done."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(clip_status="Pending")
         resp = self._make_urlopen_resp(b"FAKE")
@@ -170,6 +187,7 @@ class TestSyncLocalSave:
     def test_unsafe_url_not_fetched(self, tmp_path):
         """SSRF guard: URLs not on bosch domains must be skipped."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(image_url="https://attacker.com/evil.jpg", clip_url="")
         with patch("urllib.request.urlopen") as mock_get:
@@ -179,6 +197,7 @@ class TestSyncLocalSave:
     def test_empty_download_path_is_noop(self, tmp_path):
         """Empty download_path → function returns immediately, no files saved."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = SimpleNamespace(options={"download_path": ""})
         with patch("urllib.request.urlopen") as mock_get:
             sync_local_save(coord, _make_ev(), "tok", "Terrasse")
@@ -187,6 +206,7 @@ class TestSyncLocalSave:
     def test_existing_file_not_redownloaded(self, tmp_path):
         """Files that already exist are skipped (idempotent on FCM duplicates)."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
         # Pre-create the expected JPEG in the nested year/month/day folder
@@ -207,20 +227,28 @@ class TestSyncLocalSave:
 
 
 class TestSmbSafeBoschUrl:
-    @pytest.mark.parametrize("url", [
-        "https://residential.cbs.boschsecurity.com/event/snap.jpg",
-        "https://api.bosch.com/x",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://residential.cbs.boschsecurity.com/event/snap.jpg",
+            "https://api.bosch.com/x",
+        ],
+    )
     def test_legit_urls_allowed(self, url):
         from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+
         assert _is_safe_bosch_url(url) is True
 
-    @pytest.mark.parametrize("url", [
-        "http://residential.cbs.boschsecurity.com/x",  # not HTTPS
-        "https://attacker.com/x",
-        "https://127.0.0.1/x",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://residential.cbs.boschsecurity.com/x",  # not HTTPS
+            "https://attacker.com/x",
+            "https://127.0.0.1/x",
+            "",
+        ],
+    )
     def test_unsafe_urls_rejected(self, url):
         from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+
         assert _is_safe_bosch_url(url) is False

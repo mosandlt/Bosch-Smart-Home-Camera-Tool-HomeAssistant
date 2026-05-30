@@ -12,6 +12,7 @@ AsyncMock / MagicMock stub collaborators. Unbound method calls use the pattern
     BoschCameraCoordinator.method_name(coord, *args)
 so the real code path executes on our lightweight stub.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -52,16 +52,16 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
             options={},
             entry_id="01KM38DHZ525S61HPENAT7NHC0",
         ),
-        _feature_flags={"x": 1},       # pre-populated → skip FF fetch
-        _protocol_checked=True,         # pre-done → skip
-        _first_tick_done=True,          # skip fast-first-tick guard → process events+slow
+        _feature_flags={"x": 1},  # pre-populated → skip FF fetch
+        _protocol_checked=True,  # pre-done → skip
+        _first_tick_done=True,  # skip fast-first-tick guard → process events+slow
         _fcm_lock=threading.Lock(),
         _fcm_running=False,
         _fcm_healthy=True,
         _fcm_client=None,
-        _last_status=time_mod.monotonic(),    # recent → skip status
-        _last_events=float('-inf'),     # stale → run events
-        _last_slow=time_mod.monotonic(),      # recent → skip slow by default
+        _last_status=time_mod.monotonic(),  # recent → skip status
+        _last_events=float("-inf"),  # stale → run events
+        _last_slow=time_mod.monotonic(),  # recent → skip slow by default
         _last_smb_cleanup=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
         _hw_version={cam_id: "HOME_Eyes_Outdoor"},
@@ -77,16 +77,18 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _lan_tcp_reachable={},
         _rcp_lan_ip_cache={},
         _local_creds_cache={},
-        _shc_state_cache={cam_id: {
-            "device_id": None,
-            "camera_light": None,
-            "front_light": None,
-            "wallwasher": None,
-            "front_light_intensity": None,
-            "privacy_mode": False,
-            "has_light": False,
-            "notifications_status": None,
-        }},
+        _shc_state_cache={
+            cam_id: {
+                "device_id": None,
+                "camera_light": None,
+                "front_light": None,
+                "wallwasher": None,
+                "front_light_intensity": None,
+                "privacy_mode": False,
+                "has_light": False,
+                "notifications_status": None,
+            }
+        },
         _wifiinfo_cache={},
         _ambient_light_cache={},
         _lighting_switch_cache={},
@@ -131,7 +133,7 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _WRITE_LOCK_SECS=30.0,
         shc_ready=False,
         _async_local_tcp_ping=AsyncMock(return_value=False),
-        _should_check_status=MagicMock(return_value=False),   # skip status
+        _should_check_status=MagicMock(return_value=False),  # skip status
         _ensure_valid_token=AsyncMock(return_value="fresh-tok"),
         _async_update_shc_states=AsyncMock(),
         _async_update_rcp_data=AsyncMock(),
@@ -217,16 +219,24 @@ def _url_session(url_map: dict, default_json=None):
 def _session_for_cam(cam_entry: dict, events: list | None = None) -> MagicMock:
     """Convenience: session returning cam_entry from /v11/video_inputs and events from /events."""
     cam_id = cam_entry["id"]
-    return _url_session({
-        # Specific sub-paths must come before the generic /v11/video_inputs
-        # (sorted longest-first, so these win over the base path)
-        f"/v11/video_inputs/{cam_id}/last_event": ({"id": ""}, 404),  # force full fetch
-        f"/v11/video_inputs/{cam_id}/lighting/switch": ({}, 200),
-        f"/v11/video_inputs/{cam_id}/ping": "ONLINE",
-        f"/v11/video_inputs/{cam_id}/commissioned": {"connected": True, "commissioned": True},
-        f"/v11/events?videoInputId={cam_id}": events or [],
-        "/v11/video_inputs": [cam_entry],  # base list — matched last (shortest)
-    })
+    return _url_session(
+        {
+            # Specific sub-paths must come before the generic /v11/video_inputs
+            # (sorted longest-first, so these win over the base path)
+            f"/v11/video_inputs/{cam_id}/last_event": (
+                {"id": ""},
+                404,
+            ),  # force full fetch
+            f"/v11/video_inputs/{cam_id}/lighting/switch": ({}, 200),
+            f"/v11/video_inputs/{cam_id}/ping": "ONLINE",
+            f"/v11/video_inputs/{cam_id}/commissioned": {
+                "connected": True,
+                "commissioned": True,
+            },
+            f"/v11/events?videoInputId={cam_id}": events or [],
+            "/v11/video_inputs": [cam_entry],  # base list — matched last (shortest)
+        }
+    )
 
 
 # ── Section 1: Event processing + dedup ───────────────────────────────────────
@@ -253,11 +263,18 @@ class TestEventProcessing:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         event_id = "EVT-001"
-        events = [{"id": event_id, "eventType": "MOVEMENT", "eventTags": [], "timestamp": "2026-01-01T00:00:00Z"}]
+        events = [
+            {
+                "id": event_id,
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
         cam_entry = _make_cam_entry(CAM_A)
 
         coord = _make_coord_full(
-            _last_events=float('-inf'),    # force do_events=True
+            _last_events=float("-inf"),  # force do_events=True
             _cached_events={},
             _last_event_ids={CAM_A: "OLD-ID"},  # different from EVT-001 → new event
             _alert_sent_ids={},
@@ -272,10 +289,15 @@ class TestEventProcessing:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        coord.hass.bus.async_fire.assert_called(), (
-            "hass.bus.async_fire must be called when a new MOVEMENT event is detected"
+        (
+            coord.hass.bus.async_fire.assert_called(),
+            (
+                "hass.bus.async_fire must be called when a new MOVEMENT event is detected"
+            ),
         )
-        fired_events = [call.args[0] for call in coord.hass.bus.async_fire.call_args_list]
+        fired_events = [
+            call.args[0] for call in coord.hass.bus.async_fire.call_args_list
+        ]
         assert "bosch_shc_camera_motion" in fired_events, (
             f"Expected 'bosch_shc_camera_motion' in fired events, got: {fired_events}"
         )
@@ -292,7 +314,14 @@ class TestEventProcessing:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         event_id = "EVT-ALREADY-SENT"
-        events = [{"id": event_id, "eventType": "MOVEMENT", "eventTags": [], "timestamp": "2026-01-01T00:00:00Z"}]
+        events = [
+            {
+                "id": event_id,
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
         cam_entry = _make_cam_entry(CAM_A)
 
         # Mark as already sent 10 seconds ago → within the 60s dedup window
@@ -311,7 +340,9 @@ class TestEventProcessing:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        fired_events = [call.args[0] for call in coord.hass.bus.async_fire.call_args_list]
+        fired_events = [
+            call.args[0] for call in coord.hass.bus.async_fire.call_args_list
+        ]
         assert "bosch_shc_camera_motion" not in fired_events, (
             "Duplicate alert must be suppressed when event_id is in _alert_sent_ids "
             f"within 60s. Fired events: {fired_events}"
@@ -326,7 +357,14 @@ class TestEventProcessing:
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        events = [{"id": "EVT-002", "eventType": "MOVEMENT", "eventTags": [], "timestamp": "t"}]
+        events = [
+            {
+                "id": "EVT-002",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "t",
+            }
+        ]
         cam_entry = _make_cam_entry(CAM_A)
 
         coord = _make_coord_full(
@@ -345,7 +383,9 @@ class TestEventProcessing:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        fired_events = [call.args[0] for call in coord.hass.bus.async_fire.call_args_list]
+        fired_events = [
+            call.args[0] for call in coord.hass.bus.async_fire.call_args_list
+        ]
         assert "bosch_shc_camera_motion" not in fired_events, (
             "No events must be fired when do_events=False (fast first tick or FCM healthy)"
         )
@@ -361,7 +401,7 @@ class TestEventProcessing:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         cam_entry = _make_cam_entry(CAM_A)
-        initial_last_events = float('-inf')
+        initial_last_events = float("-inf")
 
         coord = _make_coord_full(
             _last_events=initial_last_events,  # stale → do_events=True
@@ -409,16 +449,18 @@ class TestPrivacyModeFromCloud:
         coord = _make_coord_full(
             _cached_events={CAM_A: []},
             _live_connections={CAM_A: {"_connection_type": "LOCAL"}},  # active stream
-            _shc_state_cache={CAM_A: {
-                "device_id": None,
-                "camera_light": None,
-                "front_light": None,
-                "wallwasher": None,
-                "front_light_intensity": None,
-                "privacy_mode": False,   # was OFF before this tick
-                "has_light": False,
-                "notifications_status": None,
-            }},
+            _shc_state_cache={
+                CAM_A: {
+                    "device_id": None,
+                    "camera_light": None,
+                    "front_light": None,
+                    "wallwasher": None,
+                    "front_light_intensity": None,
+                    "privacy_mode": False,  # was OFF before this tick
+                    "has_light": False,
+                    "notifications_status": None,
+                }
+            },
             _privacy_set_at={},  # no write lock
         )
 
@@ -430,9 +472,12 @@ class TestPrivacyModeFromCloud:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        coord._tear_down_live_stream.assert_called(), (
-            "_tear_down_live_stream must be scheduled when external privacyMode=ON "
-            "is detected and there is an active live connection"
+        (
+            coord._tear_down_live_stream.assert_called(),
+            (
+                "_tear_down_live_stream must be scheduled when external privacyMode=ON "
+                "is detected and there is an active live connection"
+            ),
         )
         call_args = coord._tear_down_live_stream.call_args_list
         cam_ids_called = [a[0][0] for a in call_args]
@@ -455,16 +500,18 @@ class TestPrivacyModeFromCloud:
         coord = _make_coord_full(
             _cached_events={CAM_A: []},
             _live_connections={},  # no active stream
-            _shc_state_cache={CAM_A: {
-                "device_id": None,
-                "camera_light": None,
-                "front_light": None,
-                "wallwasher": None,
-                "front_light_intensity": None,
-                "privacy_mode": False,   # cache says OFF
-                "has_light": False,
-                "notifications_status": None,
-            }},
+            _shc_state_cache={
+                CAM_A: {
+                    "device_id": None,
+                    "camera_light": None,
+                    "front_light": None,
+                    "wallwasher": None,
+                    "front_light_intensity": None,
+                    "privacy_mode": False,  # cache says OFF
+                    "has_light": False,
+                    "notifications_status": None,
+                }
+            },
             # Write lock: our switch turned privacy OFF 5s ago → cloud still says ON
             _privacy_set_at={CAM_A: time_mod.monotonic() - 5.0},
         )
@@ -484,8 +531,9 @@ class TestPrivacyModeFromCloud:
             f"Cache says: {privacy_in_cache}"
         )
         # And _tear_down_live_stream must NOT have been called
-        coord._tear_down_live_stream.assert_not_called(), (
-            "_tear_down_live_stream must not be called when write lock is active"
+        (
+            coord._tear_down_live_stream.assert_not_called(),
+            ("_tear_down_live_stream must not be called when write lock is active"),
         )
 
 
@@ -508,6 +556,7 @@ class TestOuterExceptionHandlers:
         Confirms the outer handler maps the timeout to a user-readable error.
         """
         from homeassistant.helpers.update_coordinator import UpdateFailed
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_full()
@@ -519,7 +568,7 @@ class TestOuterExceptionHandlers:
 
         # Make the context manager for session.get raise TimeoutError
         cm = MagicMock()
-        cm.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        cm.__aenter__ = AsyncMock(side_effect=TimeoutError())
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=cm)
 
@@ -530,9 +579,9 @@ class TestOuterExceptionHandlers:
             with pytest.raises(UpdateFailed) as exc_info:
                 await BoschCameraCoordinator._async_update_data(coord)
 
-        assert "Timeout" in str(exc_info.value) or "timeout" in str(exc_info.value).lower(), (
-            f"UpdateFailed message must mention timeout. Got: {exc_info.value}"
-        )
+        assert (
+            "Timeout" in str(exc_info.value) or "timeout" in str(exc_info.value).lower()
+        ), f"UpdateFailed message must mention timeout. Got: {exc_info.value}"
 
     @pytest.mark.asyncio
     async def test_client_error_raises_update_failed(self):
@@ -542,6 +591,7 @@ class TestOuterExceptionHandlers:
         """
         import aiohttp
         from homeassistant.helpers.update_coordinator import UpdateFailed
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_full()
@@ -552,7 +602,9 @@ class TestOuterExceptionHandlers:
         session.__aexit__ = AsyncMock(return_value=None)
 
         cm = MagicMock()
-        cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectionError("connection refused"))
+        cm.__aenter__ = AsyncMock(
+            side_effect=aiohttp.ClientConnectionError("connection refused")
+        )
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=cm)
 
@@ -592,8 +644,8 @@ class TestSlowTier:
         wifiinfo_data = {"signalStrength": -55, "ssid": "my-network"}
 
         coord = _make_coord_full(
-            _last_slow=float('-inf'),  # stale → do_slow=True
-            _last_events=time_mod.monotonic(),   # recent → skip events
+            _last_slow=float("-inf"),  # stale → do_slow=True
+            _last_events=time_mod.monotonic(),  # recent → skip events
             _cached_events={CAM_A: []},
             _cached_status={CAM_A: "ONLINE"},
             _wifiinfo_cache={},
@@ -602,41 +654,51 @@ class TestSlowTier:
         # Session: video_inputs returns our cam, wifiinfo returns wifiinfo_data.
         # Use full paths (longest-match wins) so specific sub-paths don't get
         # swallowed by the generic "/v11/video_inputs" entry.
-        session = _url_session({
-            f"/v11/video_inputs/{CAM_A}/last_event": ({"id": ""}, 404),
-            f"/v11/video_inputs/{CAM_A}/lighting/switch": ({}, 200),
-            f"/v11/video_inputs/{CAM_A}/lighting/motion": {},
-            f"/v11/video_inputs/{CAM_A}/lighting/ambient": {},
-            f"/v11/video_inputs/{CAM_A}/lighting": {},
-            f"/v11/video_inputs/{CAM_A}/intrusionDetectionConfig": {},
-            f"/v11/video_inputs/{CAM_A}/ambient_light_sensor_level": {"ambientLightSensorLevel": 0.5},
-            f"/v11/video_inputs/{CAM_A}/recording_options": {},
-            f"/v11/video_inputs/{CAM_A}/unread_events_count": {"count": 0},
-            f"/v11/video_inputs/{CAM_A}/privacy_sound_override": {"result": False},
-            f"/v11/video_inputs/{CAM_A}/commissioned": {"connected": True, "commissioned": True},
-            f"/v11/video_inputs/{CAM_A}/autofollow": {},
-            f"/v11/video_inputs/{CAM_A}/notifications": {},
-            f"/v11/video_inputs/{CAM_A}/privateAreas": [],
-            f"/v11/video_inputs/{CAM_A}/timestamp": {"result": True},
-            f"/v11/video_inputs/{CAM_A}/audioAlarm": {"sensitivity": "medium"},
-            f"/v11/video_inputs/{CAM_A}/firmware": {"version": "9.40.25"},
-            f"/v11/video_inputs/{CAM_A}/wifiinfo": wifiinfo_data,
-            f"/v11/video_inputs/{CAM_A}/motion": {"enabled": True},
-            f"/v11/video_inputs/{CAM_A}/ledlights": {"state": "OFF"},
-            f"/v11/video_inputs/{CAM_A}/lens_elevation": {"elevation": 0.0},
-            f"/v11/video_inputs/{CAM_A}/audio": {},
-            f"/v11/video_inputs/{CAM_A}/rules": [],
-            f"/v11/video_inputs/{CAM_A}/zones": [],
-            f"/v11/video_inputs/{CAM_A}/ping": "ONLINE",
-            f"/v11/events?videoInputId={CAM_A}": [],
-            f"/v11/video_inputs/{CAM_A}/connection": ({"urls": []}, 200),
-            "/v11/video_inputs": [cam_entry],   # base list — matched last
-        })
+        session = _url_session(
+            {
+                f"/v11/video_inputs/{CAM_A}/last_event": ({"id": ""}, 404),
+                f"/v11/video_inputs/{CAM_A}/lighting/switch": ({}, 200),
+                f"/v11/video_inputs/{CAM_A}/lighting/motion": {},
+                f"/v11/video_inputs/{CAM_A}/lighting/ambient": {},
+                f"/v11/video_inputs/{CAM_A}/lighting": {},
+                f"/v11/video_inputs/{CAM_A}/intrusionDetectionConfig": {},
+                f"/v11/video_inputs/{CAM_A}/ambient_light_sensor_level": {
+                    "ambientLightSensorLevel": 0.5
+                },
+                f"/v11/video_inputs/{CAM_A}/recording_options": {},
+                f"/v11/video_inputs/{CAM_A}/unread_events_count": {"count": 0},
+                f"/v11/video_inputs/{CAM_A}/privacy_sound_override": {"result": False},
+                f"/v11/video_inputs/{CAM_A}/commissioned": {
+                    "connected": True,
+                    "commissioned": True,
+                },
+                f"/v11/video_inputs/{CAM_A}/autofollow": {},
+                f"/v11/video_inputs/{CAM_A}/notifications": {},
+                f"/v11/video_inputs/{CAM_A}/privateAreas": [],
+                f"/v11/video_inputs/{CAM_A}/timestamp": {"result": True},
+                f"/v11/video_inputs/{CAM_A}/audioAlarm": {"sensitivity": "medium"},
+                f"/v11/video_inputs/{CAM_A}/firmware": {"version": "9.40.25"},
+                f"/v11/video_inputs/{CAM_A}/wifiinfo": wifiinfo_data,
+                f"/v11/video_inputs/{CAM_A}/motion": {"enabled": True},
+                f"/v11/video_inputs/{CAM_A}/ledlights": {"state": "OFF"},
+                f"/v11/video_inputs/{CAM_A}/lens_elevation": {"elevation": 0.0},
+                f"/v11/video_inputs/{CAM_A}/audio": {},
+                f"/v11/video_inputs/{CAM_A}/rules": [],
+                f"/v11/video_inputs/{CAM_A}/zones": [],
+                f"/v11/video_inputs/{CAM_A}/ping": "ONLINE",
+                f"/v11/events?videoInputId={CAM_A}": [],
+                f"/v11/video_inputs/{CAM_A}/connection": ({"urls": []}, 200),
+                "/v11/video_inputs": [cam_entry],  # base list — matched last
+            }
+        )
 
-        with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
-        ), patch("aiohttp.TCPConnector"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("aiohttp.TCPConnector"),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert CAM_A in coord._wifiinfo_cache, (
@@ -658,8 +720,8 @@ class TestSlowTier:
         cam_entry = _make_cam_entry(CAM_A)
 
         coord = _make_coord_full(
-            _last_slow=time_mod.monotonic(),   # recent → do_slow=False
-            _last_events=time_mod.monotonic(), # recent → do_events=False
+            _last_slow=time_mod.monotonic(),  # recent → do_slow=False
+            _last_events=time_mod.monotonic(),  # recent → do_events=False
             _cached_events={CAM_A: []},
             _cached_status={CAM_A: "ONLINE"},
             _wifiinfo_cache={},
@@ -742,8 +804,11 @@ class TestShcStatesUpdate:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        coord._async_update_shc_states.assert_called_once(), (
-            "_async_update_shc_states must be called exactly once when shc_ready=True"
+        (
+            coord._async_update_shc_states.assert_called_once(),
+            (
+                "_async_update_shc_states must be called exactly once when shc_ready=True"
+            ),
         )
 
     @pytest.mark.asyncio
@@ -771,6 +836,7 @@ class TestShcStatesUpdate:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        coord._async_update_shc_states.assert_not_called(), (
-            "_async_update_shc_states must NOT be called when shc_ready=False"
+        (
+            coord._async_update_shc_states.assert_not_called(),
+            ("_async_update_shc_states must NOT be called when shc_ready=False"),
         )

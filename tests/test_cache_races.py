@@ -21,7 +21,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -29,6 +28,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 def coord_with_helpers():
     """Build a coordinator-shaped stub with the real `_is_write_locked` method bound."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = SimpleNamespace(
         _privacy_sound_set_at={},
         _timestamp_set_at={},
@@ -80,7 +80,11 @@ class TestIsWriteLocked:
 
 def _switch_stub_coord():
     return SimpleNamespace(
-        data={CAM_ID: {"info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}}},
+        data={
+            CAM_ID: {
+                "info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"}
+            }
+        },
         _privacy_sound_cache={},
         _timestamp_cache={},
         _ledlights_cache={},
@@ -99,10 +103,12 @@ class TestPrivacySoundSwitchRecordsTimestamp:
     async def test_turn_on_records_set_at(self):
         """User toggles privacy_sound ON → cache + set_at populated together."""
         from unittest.mock import AsyncMock
+
         coord = _switch_stub_coord()
         coord.async_put_camera = AsyncMock(return_value=True)
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
+
         sw = BoschPrivacySoundSwitch(coord, CAM_ID, entry)
         # Patch async_write_ha_state since we're not in HA context
         sw.async_write_ha_state = lambda: None
@@ -117,10 +123,12 @@ class TestTimestampSwitchRecordsTimestamp:
     @pytest.mark.asyncio
     async def test_turn_on_records_set_at(self):
         from unittest.mock import AsyncMock
+
         coord = _switch_stub_coord()
         coord.async_put_camera = AsyncMock(return_value=True)
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
+
         sw = BoschTimestampSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
         await sw.async_turn_on()
@@ -131,10 +139,12 @@ class TestStatusLedSwitchRecordsTimestamp:
     @pytest.mark.asyncio
     async def test_turn_on_records_set_at(self):
         from unittest.mock import AsyncMock
+
         coord = _switch_stub_coord()
         coord.async_put_camera = AsyncMock(return_value=True)
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+
         sw = BoschStatusLedSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
         await sw.async_turn_on()
@@ -146,10 +156,12 @@ class TestArmingSwitchRecordsTimestamp:
     async def test_turn_on_records_set_at(self):
         """User arms the alarm system → cache + set_at populated."""
         from unittest.mock import AsyncMock
+
         coord = _switch_stub_coord()
         coord.async_put_camera = AsyncMock(return_value=True)
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
+
         sw = BoschAlarmSystemArmSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
         await sw.async_turn_on()
@@ -160,10 +172,12 @@ class TestArmingSwitchRecordsTimestamp:
     async def test_failed_put_does_not_record(self):
         """If the cloud PUT fails, neither the cache nor the timestamp must change."""
         from unittest.mock import AsyncMock
+
         coord = _switch_stub_coord()
         coord.async_put_camera = AsyncMock(return_value=False)
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
+
         sw = BoschAlarmSystemArmSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
         await sw.async_turn_on()

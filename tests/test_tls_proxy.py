@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ── _digest_auth ─────────────────────────────────────────────────────────
 
 
@@ -42,9 +41,13 @@ class TestDigestAuth:
         result = _digest_auth(user, password, method, uri, realm, nonce)
 
         # Manual computation
-        ha1 = hashlib.md5(f"{user}:{realm}:{password}".encode(), usedforsecurity=False).hexdigest()
+        ha1 = hashlib.md5(
+            f"{user}:{realm}:{password}".encode(), usedforsecurity=False
+        ).hexdigest()
         ha2 = hashlib.md5(f"{method}:{uri}".encode(), usedforsecurity=False).hexdigest()
-        resp = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode(), usedforsecurity=False).hexdigest()
+        resp = hashlib.md5(
+            f"{ha1}:{nonce}:{ha2}".encode(), usedforsecurity=False
+        ).hexdigest()
 
         assert f'username="{user}"' in result
         assert f'realm="{realm}"' in result
@@ -99,8 +102,10 @@ class TestStopTlsProxy:
 
     def test_stop_removes_from_port_cache(self):
         from custom_components.bosch_shc_camera.tls_proxy import (
-            stop_tls_proxy, _proxy_servers,
+            _proxy_servers,
+            stop_tls_proxy,
         )
+
         cam_id = "TEST-STOP-001"
         port_cache = {cam_id: 12345}
         # Put a mock socket in _proxy_servers
@@ -124,8 +129,10 @@ class TestStopTlsProxy:
     def test_stop_handles_close_exception(self):
         """If socket.close() raises, stop must not propagate."""
         from custom_components.bosch_shc_camera.tls_proxy import (
-            stop_tls_proxy, _proxy_servers,
+            _proxy_servers,
+            stop_tls_proxy,
         )
+
         cam_id = "TEST-CLOSE-ERR"
         port_cache = {cam_id: 9999}
         mock_srv = MagicMock()
@@ -139,8 +146,10 @@ class TestStopTlsProxy:
 
     def test_stop_all_clears_everything(self):
         from custom_components.bosch_shc_camera.tls_proxy import (
-            stop_all_proxies, _proxy_servers,
+            _proxy_servers,
+            stop_all_proxies,
         )
+
         # Setup multiple cams
         port_cache = {"CAM-A": 100, "CAM-B": 200}
         _proxy_servers["CAM-A"] = MagicMock()
@@ -169,7 +178,9 @@ class TestTransportRewriting:
         # This is the pattern from _pipe's re.sub
         pattern = r"Transport:\s*RTP/AVP[^;\r\n]*;unicast;client_port=[^\r\n]+"
         header = "Transport: RTP/AVP;unicast;client_port=5000-5001"
-        assert re.search(pattern, header), "Pattern must match standard FFmpeg Transport"
+        assert re.search(pattern, header), (
+            "Pattern must match standard FFmpeg Transport"
+        )
 
     def test_rewrite_regex_matches_rtpavpudp(self):
         """Some FFmpeg versions add /UDP explicitly."""
@@ -231,9 +242,12 @@ class TestCircuitBreakerConstants:
     def test_constants_present_in_source(self):
         """The circuit breaker constants must exist with expected values."""
         from pathlib import Path
+
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         assert "_MAX_BURST = 5" in src
         assert "_BURST_WINDOW = 30.0" in src
@@ -242,11 +256,14 @@ class TestCircuitBreakerConstants:
         """5 consecutive failures is enough to detect offline camera without
         over-logging or under-detecting."""
         # Direct extraction: regex the source to get the value
-        from pathlib import Path
         import re as _re
+        from pathlib import Path
+
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         m = _re.search(r"_MAX_BURST\s*=\s*(\d+)", src)
         assert m
@@ -254,11 +271,14 @@ class TestCircuitBreakerConstants:
         assert 3 <= val <= 10, f"_MAX_BURST={val} outside safe range"
 
     def test_burst_window_reasonable(self):
-        from pathlib import Path
         import re as _re
+        from pathlib import Path
+
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         m = _re.search(r"_BURST_WINDOW\s*=\s*([\d.]+)", src)
         assert m
@@ -289,10 +309,14 @@ class TestStartTlsProxyContract:
 
     def test_returns_port_and_populates_cache(self):
         """start_tls_proxy must return an integer port and store it in cache."""
-        from custom_components.bosch_shc_camera.tls_proxy import (
-            start_tls_proxy, stop_tls_proxy, _proxy_servers,
-        )
         import ssl
+
+        from custom_components.bosch_shc_camera.tls_proxy import (
+            _proxy_servers,
+            start_tls_proxy,
+            stop_tls_proxy,
+        )
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -301,8 +325,13 @@ class TestStartTlsProxyContract:
         cam_id = "TEST-START-001"
         mock_sock = _mock_server_socket(port=54321)
 
-        with patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=mock_sock), \
-             patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+                return_value=mock_sock,
+            ),
+            patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"),
+        ):
             port = start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
 
         try:
@@ -317,10 +346,13 @@ class TestStartTlsProxyContract:
     def test_fresh_proxy_per_call(self):
         """Calling start twice for same cam must produce different ports
         (fresh session for credential rotation)."""
-        from custom_components.bosch_shc_camera.tls_proxy import (
-            start_tls_proxy, stop_tls_proxy,
-        )
         import ssl
+
+        from custom_components.bosch_shc_camera.tls_proxy import (
+            start_tls_proxy,
+            stop_tls_proxy,
+        )
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -331,8 +363,13 @@ class TestStartTlsProxyContract:
         mock1 = _mock_server_socket(port=11111)
         mock2 = _mock_server_socket(port=22222)
 
-        with patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", side_effect=[mock1, mock2]), \
-             patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+                side_effect=[mock1, mock2],
+            ),
+            patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"),
+        ):
             port1 = start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
             port2 = start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
 
@@ -345,10 +382,13 @@ class TestStartTlsProxyContract:
 
     def test_server_socket_listens_on_localhost(self):
         """The proxy must only bind to 127.0.0.1 (not 0.0.0.0)."""
-        from custom_components.bosch_shc_camera.tls_proxy import (
-            start_tls_proxy, stop_tls_proxy,
-        )
         import ssl
+
+        from custom_components.bosch_shc_camera.tls_proxy import (
+            start_tls_proxy,
+            stop_tls_proxy,
+        )
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -357,8 +397,13 @@ class TestStartTlsProxyContract:
         cam_id = "TEST-BIND-001"
         mock_sock = _mock_server_socket(port=33333)
 
-        with patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=mock_sock), \
-             patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+                return_value=mock_sock,
+            ),
+            patch("custom_components.bosch_shc_camera.tls_proxy.threading.Thread"),
+        ):
             start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
 
         try:
@@ -390,12 +435,14 @@ class TestPipeErrnoEBADFSuppression:
 
     def test_ebadf_is_suppressed_in_source(self):
         """The _pipe exception handler must guard against EBADF before logging."""
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         # The guard must reference errno.EBADF
         assert "errno.EBADF" in src, (
@@ -405,12 +452,14 @@ class TestPipeErrnoEBADFSuppression:
 
     def test_ebadf_imported_at_module_level(self):
         """errno must be imported at module level (not inside the nested function)."""
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         # First occurrence of `import errno` must appear before the class definitions
         # (i.e., it is a top-level import, not deferred)
@@ -431,9 +480,12 @@ class TestPipeErrnoEBADFSuppression:
 
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "tls_proxy.py"
         ).read_text()
         # The guard must be `not is_ebadf` (or equivalent) so other errors pass through
-        assert "not is_ebadf" in src or "not (isinstance(exc, OSError) and exc.errno == errno.EBADF)" in src, (
-            "The EBADF guard must be a negative check so other OSErrors still get logged"
-        )
+        assert (
+            "not is_ebadf" in src
+            or "not (isinstance(exc, OSError) and exc.errno == errno.EBADF)" in src
+        ), "The EBADF guard must be a negative check so other OSErrors still get logged"

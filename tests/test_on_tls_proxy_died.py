@@ -27,7 +27,9 @@ def _coord(
     try_raises: Exception | None = None,
 ) -> SimpleNamespace:
     c = SimpleNamespace()
-    c._tls_proxy_rebuild_last = {} if last_rebuild == float("-inf") else {"C": last_rebuild}
+    c._tls_proxy_rebuild_last = (
+        {} if last_rebuild == float("-inf") else {"C": last_rebuild}
+    )
     c._live_connections = {"C": live} if live else {}
     c._stream_warming = set()
     c._stream_warming_started = {}
@@ -42,8 +44,10 @@ def _coord(
 @pytest.fixture
 def no_sleep(monkeypatch):
     """Skip the 5s pre-rebuild settle wait."""
+
     async def _fast(_seconds):
         return None
+
     monkeypatch.setattr(asyncio, "sleep", _fast)
 
 
@@ -52,6 +56,7 @@ class TestOnTlsProxyDied:
     async def test_backoff_skips_when_recent(self, monkeypatch, no_sleep):
         # last rebuild 1s ago, threshold = 30s → skip
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 100.0)
         c = _coord(last_rebuild=99.0)
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
@@ -61,6 +66,7 @@ class TestOnTlsProxyDied:
 
     async def test_stream_no_longer_active(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
         c = _coord(live=None)  # no live connection
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
@@ -69,6 +75,7 @@ class TestOnTlsProxyDied:
 
     async def test_skip_when_not_local(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
         c = _coord(live={"_connection_type": "REMOTE"})
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
@@ -78,14 +85,18 @@ class TestOnTlsProxyDied:
 
     async def test_successful_rebuild(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
-        c = _coord(live={"_connection_type": "LOCAL"}, try_result={"_connection_type": "LOCAL"})
+        c = _coord(
+            live={"_connection_type": "LOCAL"}, try_result={"_connection_type": "LOCAL"}
+        )
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
         c._stop_tls_proxy.assert_awaited_once_with("C")
         c.try_live_connection.assert_awaited_once_with("C")
 
     async def test_rebuild_returns_none(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
         # try_live_connection returns falsy → "returned no result" warning branch (L4324).
         c = _coord(live={"_connection_type": "LOCAL"}, try_result=None)
@@ -94,6 +105,7 @@ class TestOnTlsProxyDied:
 
     async def test_rebuild_raises(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
+
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
         # try_live_connection raises → except branch (L4328-L4329).
         c = _coord(

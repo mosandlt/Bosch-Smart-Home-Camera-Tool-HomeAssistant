@@ -15,6 +15,7 @@ The first set covers the step-1 failure branch (a CancelledError thrown by
 the outer `_notify_type` call). The second pins the direct-200 content-type
 guard.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,14 +24,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 MODULE = "custom_components.bosch_shc_camera.fcm"
 SMB_MODULE = "custom_components.bosch_shc_camera.smb"
 
 
-def _resp_cm(status: int, body: bytes = b"", content_type: str = "image/jpeg",
-             json_data=None):
+def _resp_cm(
+    status: int, body: bytes = b"", content_type: str = "image/jpeg", json_data=None
+):
     """aiohttp-style async context manager response mock."""
     resp = MagicMock()
     resp.status = status
@@ -121,6 +122,7 @@ class TestStep1Failure:
                         from custom_components.bosch_shc_camera.fcm import (
                             async_send_alert,
                         )
+
                         with caplog.at_level("WARNING", logger=MODULE):
                             # CancelledError must propagate out of async_send_alert
                             # because Python 3.8+ no longer catches it via
@@ -128,8 +130,11 @@ class TestStep1Failure:
                             # cancelled mid-flight — step 2 never runs.
                             with pytest.raises(asyncio.CancelledError):
                                 await async_send_alert(
-                                    coord, "Terrasse", "MOVEMENT",
-                                    "2026-05-07T10:00:00.000Z", "",
+                                    coord,
+                                    "Terrasse",
+                                    "MOVEMENT",
+                                    "2026-05-07T10:00:00.000Z",
+                                    "",
                                 )
 
         # No GET to the events endpoint must have been issued (step 2 skipped).
@@ -176,12 +181,16 @@ class TestStep1FailureNonCancelled:
                             from custom_components.bosch_shc_camera.fcm import (
                                 async_send_alert,
                             )
+
                             with caplog.at_level("WARNING", logger=MODULE):
                                 # Regular Exception → caught at line 727 →
                                 # warning + return, no propagation.
                                 await async_send_alert(
-                                    coord, "Terrasse", "MOVEMENT",
-                                    "2026-05-07T10:00:00.000Z", "",
+                                    coord,
+                                    "Terrasse",
+                                    "MOVEMENT",
+                                    "2026-05-07T10:00:00.000Z",
+                                    "",
                                 )
 
         # The outer except logs a warning starting with "Alert step 1 failed"
@@ -238,8 +247,11 @@ class TestDirectClipMp4ContentTypeGuard:
                         from custom_components.bosch_shc_camera.fcm import (
                             async_send_alert,
                         )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-07T10:00:00.000Z",
                             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                             clip_url="",  # empty → triggers direct probe
@@ -287,8 +299,11 @@ class TestDirectClipMp4ContentTypeGuard:
                         from custom_components.bosch_shc_camera.fcm import (
                             async_send_alert,
                         )
+
                         await async_send_alert(
-                            coord, "Terrasse", "MOVEMENT",
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
                             "2026-05-07T10:00:00.000Z",
                             image_url="https://residential.cbs.boschsecurity.com/img.jpg",
                             clip_url="",

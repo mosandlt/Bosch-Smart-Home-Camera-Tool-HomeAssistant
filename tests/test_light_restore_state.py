@@ -14,6 +14,7 @@ Pins the missing light.py lines none of the existing rounds touch:
 Approach: bypass __init__ via `klass.__new__()` so we don't need the HA
 framework's CoordinatorEntity setup chain. Async calls run with `pytest-asyncio`.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -21,7 +22,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -54,6 +54,7 @@ def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
     """Bypass __init__ so we don't need the HA framework's CoordinatorEntity setup chain."""
     if klass is None:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         klass = BoschTopLedLight
     coord = coord or _stub_coord()
     light = klass.__new__(klass)
@@ -79,7 +80,9 @@ def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
     return light
 
 
-def _make_put_session(status: int = 200, json_payload=None, json_raises: Exception | None = None):
+def _make_put_session(
+    status: int = 200, json_payload=None, json_raises: Exception | None = None
+):
     """Return an async-context-manager session.put() stub returning the given
     status; json() either returns json_payload or raises json_raises."""
     resp = MagicMock()
@@ -110,8 +113,9 @@ class TestDeviceInfoReturn:
         light = _make_light()
         info = light.device_info
         assert isinstance(info, dict)
-        assert (("bosch_shc_camera", CAM_ID) in info["identifiers"]
-                or any(CAM_ID in str(i) for i in info["identifiers"]))
+        assert ("bosch_shc_camera", CAM_ID) in info["identifiers"] or any(
+            CAM_ID in str(i) for i in info["identifiers"]
+        )
         # MAC populated → connections set
         assert info["connections"]
         assert info["model"] == "Eyes Outdoor"
@@ -150,6 +154,7 @@ class TestPutLightingSwitchDefensiveMerge:
             @asynccontextmanager
             async def _cm():
                 yield resp
+
             return _cm()
 
         session.put = MagicMock(side_effect=_capture)
@@ -190,9 +195,13 @@ class TestPutLightingSwitchJsonParseError:
             "custom_components.bosch_shc_camera.light.async_get_clientsession",
             return_value=session,
         ):
-            ok = await light._put_lighting_switch({"topLedLightSettings": {"brightness": 50}})
+            ok = await light._put_lighting_switch(
+                {"topLedLightSettings": {"brightness": 50}}
+            )
 
-        assert ok is True, "200 status should still count as success even if body unparseable"
+        assert ok is True, (
+            "200 status should still count as success even if body unparseable"
+        )
         # BUG-FIX 2026-05-28: cache IS updated from the sent body (optimistic update),
         # NOT left untouched. This ensures is_on reads True after a 204 No Content response.
         cache = light.coordinator._lighting_switch_cache[CAM_ID]

@@ -97,7 +97,9 @@ async def async_get_config_entry_diagnostics(
                     "stream_error_count": stream_error_count.get(cam_id, 0),
                     "stream_fell_back": stream_fell_back.get(cam_id, False),
                     "session_stale": session_stale.get(cam_id, False),
-                    "offline_since_seconds": int(now - since) if since is not None else None,
+                    "offline_since_seconds": int(now - since)
+                    if since is not None
+                    else None,
                 }
             )
 
@@ -117,7 +119,9 @@ async def async_get_config_entry_diagnostics(
             "fcm_running": getattr(coord, "_fcm_running", None),
             "fcm_healthy": getattr(coord, "_fcm_healthy", None),
             "auth_outage_count": getattr(coord, "_auth_outage_count", None),
-            "scan_interval": getattr(getattr(coord, "update_interval", None), "total_seconds", lambda: None)(),
+            "scan_interval": getattr(
+                getattr(coord, "update_interval", None), "total_seconds", lambda: None
+            )(),
             "stream_warming_count": len(stream_warming),
         },
         "cameras": cameras,

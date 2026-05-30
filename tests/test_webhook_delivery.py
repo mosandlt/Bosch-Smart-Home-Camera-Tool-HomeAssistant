@@ -18,7 +18,6 @@ import pytest
 # The module path for the async_deliver_webhook callback lives inside
 # async_setup_entry as a closure, so tests drive it directly by calling
 # the async helper extracted from __init__.py via SimpleNamespace mocking.
-
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.const import (
     CONF_ENABLE_WEBHOOK_DELIVERY,
@@ -33,7 +32,10 @@ MODULE = "custom_components.bosch_shc_camera"
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _make_event(event_type: str, extra: dict[str, Any] | None = None) -> SimpleNamespace:
+
+def _make_event(
+    event_type: str, extra: dict[str, Any] | None = None
+) -> SimpleNamespace:
     """Build a minimal HA-event-like object."""
     data: dict[str, Any] = {
         "camera_id": "DEAD-BEEF-0001",
@@ -108,31 +110,40 @@ async def _run_deliver(
         async def _deliver_webhook_impl(ev: Any) -> None:
             """Mirrors _async_deliver_webhook from async_setup_entry exactly."""
             import aiohttp as _aiohttp
+
             cur_opts: dict[str, Any] = dict(options)
             if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
                 return
             url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
             if not url:
                 import logging
+
                 logging.getLogger(MODULE).warning(
                     "Webhook delivery enabled but webhook_url is empty — skipping"
                 )
                 return
             payload: dict[str, Any] = {
                 "event_type": ev.event_type,
-                "camera":     ev.data.get("camera_name", ev.data.get("camera_id", "")),
-                "camera_id":  ev.data.get("camera_id", ""),
-                "timestamp":  ev.data.get("timestamp", ""),
-                "extra":      {k: v for k, v in ev.data.items()
-                               if k not in ("camera_name", "camera_id", "timestamp")},
+                "camera": ev.data.get("camera_name", ev.data.get("camera_id", "")),
+                "camera_id": ev.data.get("camera_id", ""),
+                "timestamp": ev.data.get("timestamp", ""),
+                "extra": {
+                    k: v
+                    for k, v in ev.data.items()
+                    if k not in ("camera_name", "camera_id", "timestamp")
+                },
             }
             sess = session  # captured from outer scope (matches production inject)
-            async with sess.post(url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+            async with sess.post(
+                url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status >= 400:
                     import logging
+
                     logging.getLogger(MODULE).warning(
                         "Webhook POST returned HTTP %d for event %s",
-                        resp.status, ev.event_type,
+                        resp.status,
+                        ev.event_type,
                     )
 
         await _deliver_webhook_impl(event)
@@ -144,6 +155,7 @@ async def _run_deliver(
 # Tests
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 class TestWebhookDelivery:
     """PIN_EVERY_MODE: one test per discrete behaviour path."""
@@ -154,7 +166,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock()
         await _run_deliver(
             _make_event("bosch_shc_camera_motion"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: False, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: False,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             session=session,
         )
         session.post.assert_not_called()
@@ -177,7 +192,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_motion"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             session=session,
         )
         session.post.assert_called_once()
@@ -193,7 +211,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_audio_alarm"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             session=session,
         )
         session.post.assert_called_once()
@@ -206,7 +227,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_person"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             session=session,
         )
         session.post.assert_called_once()
@@ -219,7 +243,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_intrusion"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://hook.example.org/"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://hook.example.org/",
+            },
             session=session,
         )
         session.post.assert_called_once()
@@ -232,28 +259,36 @@ class TestWebhookDelivery:
     async def test_post_failure_logged(self) -> None:
         """aiohttp raises ClientError → caught, logged, no exception propagation."""
         import aiohttp as _aiohttp
+
         session = MagicMock()
         ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(side_effect=_aiohttp.ClientConnectionError("connect failed"))
+        ctx.__aenter__ = AsyncMock(
+            side_effect=_aiohttp.ClientConnectionError("connect failed")
+        )
         ctx.__aexit__ = AsyncMock(return_value=None)
         session.post = MagicMock(return_value=ctx)
 
         # Must not raise — failure is logged, not propagated.
         # Re-implement the production closure with the error-handling path.
-        options = {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"}
+        options = {
+            CONF_ENABLE_WEBHOOK_DELIVERY: True,
+            CONF_WEBHOOK_URL: "https://example.com/hook",
+        }
         ev = _make_event("bosch_shc_camera_motion")
 
         async def _deliver_with_error_handling() -> None:
             url = options.get(CONF_WEBHOOK_URL, "").strip()
             payload: dict[str, Any] = {
                 "event_type": ev.event_type,
-                "camera":     ev.data.get("camera_name", ""),
-                "camera_id":  ev.data.get("camera_id", ""),
-                "timestamp":  ev.data.get("timestamp", ""),
-                "extra":      {},
+                "camera": ev.data.get("camera_name", ""),
+                "camera_id": ev.data.get("camera_id", ""),
+                "timestamp": ev.data.get("timestamp", ""),
+                "extra": {},
             }
             try:
-                async with session.post(url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.post(
+                    url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)
+                ) as resp:
                     pass
             except _aiohttp.ClientError:
                 pass  # production code logs and returns
@@ -268,7 +303,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_motion"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "https://example.com/hook"},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "https://example.com/hook",
+            },
             session=session,
         )
         payload = session.post.call_args.kwargs["json"]
@@ -285,7 +323,10 @@ class TestWebhookDelivery:
         session, _ = _make_session_mock(200)
         await _run_deliver(
             _make_event("bosch_shc_camera_motion"),
-            options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: "  https://example.com/hook  "},
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: "  https://example.com/hook  ",
+            },
             session=session,
         )
         session.post.assert_called_once()
@@ -293,7 +334,9 @@ class TestWebhookDelivery:
         assert session.post.call_args.args[0] == "https://example.com/hook"
 
     # ── Mode 10: no stale closure — service reads current entry options ────────
-    async def test_service_handler_uses_current_entry_options_after_reload(self) -> None:
+    async def test_service_handler_uses_current_entry_options_after_reload(
+        self,
+    ) -> None:
         """send_event_webhook must read options from hass.config_entries at call time.
 
         Regression guard: before Fix 3 the handler captured the setup-time entry
@@ -304,8 +347,10 @@ class TestWebhookDelivery:
         entry with the *new* URL, the POST goes to that URL — not to the URL
         present at registration time.
         """
-        import aiohttp as _aiohttp
         import datetime as _dt
+
+        import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 
         old_url = "https://old.example.com/hook"
@@ -313,7 +358,10 @@ class TestWebhookDelivery:
 
         # Live entry that hass returns after reload — has the new URL.
         live_entry = SimpleNamespace()
-        live_entry.options = {CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: new_url}
+        live_entry.options = {
+            CONF_ENABLE_WEBHOOK_DELIVERY: True,
+            CONF_WEBHOOK_URL: new_url,
+        }
 
         session, _ = _make_session_mock(200)
 
@@ -339,12 +387,16 @@ class TestWebhookDelivery:
             event_type_val: str = call.data.get("event_type", "MOVEMENT")
             payload: dict[str, Any] = {
                 "event_type": event_type_val,
-                "camera":     "",
-                "camera_id":  "",
-                "timestamp":  _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-                "extra":      {"source": "manual"},
+                "camera": "",
+                "camera_id": "",
+                "timestamp": _dt.datetime.now(_dt.UTC)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "extra": {"source": "manual"},
             }
-            async with session.post(url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.post(
+                url, json=payload, timeout=_aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 pass
 
         call_stub = SimpleNamespace(data={"event_type": "MOVEMENT", "entity_id": ""})

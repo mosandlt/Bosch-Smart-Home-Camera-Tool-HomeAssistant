@@ -8,7 +8,7 @@ Response: {current, upToDate, update, updating, status}
 import logging
 from typing import Any
 
-from homeassistant.components.update import UpdateEntity, UpdateDeviceClass
+from homeassistant.components.update import UpdateDeviceClass, UpdateEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -49,12 +49,13 @@ class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):  # type: ignore[misc
         self._cam_title = info.get("title", cam_id)
         self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
+
         self._model_name = get_display_name(self._model)
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
-        self._attr_name            = "Firmware"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_firmware_update"
+        self._attr_name = "Firmware"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_firmware_update"
         self._attr_translation_key = "firmware_update"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 

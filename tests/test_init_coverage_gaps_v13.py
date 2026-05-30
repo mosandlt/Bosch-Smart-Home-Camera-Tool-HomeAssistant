@@ -17,6 +17,7 @@ Targets:
 
 All tests use unbound-method or minimal-stub patterns — no live HA runtime.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,11 +29,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
-    _make_coord as _make_coord_ka,
+from tests.test_init_sprint_ka import (
+    _PATCH_SESSION,
     _make_resp,
     _make_session,
-    _PATCH_SESSION,
+)
+from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
+    _make_coord as _make_coord_ka,
 )
 
 MODULE = "custom_components.bosch_shc_camera"
@@ -53,7 +56,10 @@ class TestFcmWatchdogStableWindowReset:
     async def test_stable_window_resets_failure_counter(self):
         """failures > 0 + _fcm_running + _fcm_healthy + last_heal old enough
         → failure counter reset to 0 (lines 1897-1903)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator, SELF_HEAL_SUCCESS_WINDOW_SEC
+        from custom_components.bosch_shc_camera import (
+            SELF_HEAL_SUCCESS_WINDOW_SEC,
+            BoschCameraCoordinator,
+        )
 
         # last_heal was > SELF_HEAL_SUCCESS_WINDOW_SEC seconds ago
         past_heal = time.monotonic() - (SELF_HEAL_SUCCESS_WINDOW_SEC + 10)
@@ -69,14 +75,18 @@ class TestFcmWatchdogStableWindowReset:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         # Lines 1901-1903: counter reset to 0, paused_logged cleared
@@ -102,7 +112,10 @@ class TestFcmWatchdogLadderExhausted:
         """failures at max + paused_logged=False → warning logged once (line 1911).
         Second call: paused_logged=True → warning NOT logged again.
         """
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator, SELF_HEAL_COOLDOWNS_SEC
+        from custom_components.bosch_shc_camera import (
+            SELF_HEAL_COOLDOWNS_SEC,
+            BoschCameraCoordinator,
+        )
 
         coord = _make_coord_ka(
             options={"enable_fcm_push": True},
@@ -118,17 +131,21 @@ class TestFcmWatchdogLadderExhausted:
 
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         logged_warnings = []
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()), \
-             patch(f"{MODULE}._LOGGER") as mock_log:
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()),
+            patch(f"{MODULE}._LOGGER") as mock_log,
+        ):
             mock_log.warning.side_effect = lambda *a, **k: logged_warnings.append(a)
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -136,8 +153,14 @@ class TestFcmWatchdogLadderExhausted:
         assert getattr(coord, "_fcm_self_heal_paused_logged", False) is True, (
             "_fcm_self_heal_paused_logged must be set after first exhausted-ladder tick"
         )
-        paused_warnings = [w for w in logged_warnings if "pausing" in str(w).lower() or "consecutive failures" in str(w).lower()]
-        assert paused_warnings, "Must log ladder-exhausted warning on first tick (line 1911)"
+        paused_warnings = [
+            w
+            for w in logged_warnings
+            if "pausing" in str(w).lower() or "consecutive failures" in str(w).lower()
+        ]
+        assert paused_warnings, (
+            "Must log ladder-exhausted warning on first tick (line 1911)"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,16 +192,23 @@ class TestSessionLimitQuotaTask:
         coord._async_handle_session_quota_hit = _fake_quota_hit
 
         # Mock the status check to return SESSION_LIMIT
-        cam_list_resp = _make_resp(200, [{
-            "id": CAM_ID,
-            "type": "HOME_Eyes_Outdoor",
-            "title": "Terrasse",
-        }])
-        session = _make_session({
-            "v11/video_inputs": cam_list_resp,
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        cam_list_resp = _make_resp(
+            200,
+            [
+                {
+                    "id": CAM_ID,
+                    "type": "HOME_Eyes_Outdoor",
+                    "title": "Terrasse",
+                }
+            ],
+        )
+        session = _make_session(
+            {
+                "v11/video_inputs": cam_list_resp,
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         task_created = []
         orig_create_task = coord.hass.async_create_task
@@ -240,11 +270,15 @@ class TestSessionLimitQuotaTask:
         coord2._should_check_status = MagicMock(return_value=True)
         coord2.hass.async_create_task = _capture_task
 
-        session3 = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_ID, "type": "HOME_Eyes_Outdoor", "title": "T"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session3 = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_ID, "type": "HOME_Eyes_Outdoor", "title": "T"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         # Mock the status URL to return 444
         status_444 = _make_resp(444, None)
@@ -264,6 +298,7 @@ class TestSessionLimitQuotaTask:
         # (_async_handle_session_quota_hit is called internally; we verify via caplog
         #  that the quota-hit branch was reached — the WARNING line is at __init__.py:2146)
         import logging
+
         # Re-run with caplog by checking coord2 log; simplest observable: task_created
         # captured at least one coroutine (the quota-escalation task is scheduled).
         assert task_created, (
@@ -292,8 +327,8 @@ class TestLanDiagnosticSensorsException:
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from tests.test_init_sprint_kc import (  # type: ignore[import-not-found]
-            _make_coord_full,
             _make_cam_entry,
+            _make_coord_full,
             _url_session,
         )
 
@@ -305,10 +340,12 @@ class TestLanDiagnosticSensorsException:
 
         coord = _make_coord_full(
             CAM_ID,
-            _last_slow=float("-inf"),   # force slow tier
+            _last_slow=float("-inf"),  # force slow tier
             _last_events=float("-inf"),  # allow events too
             _cached_status={CAM_ID: "ONLINE"},
-            _get_cam_lan_ip=MagicMock(return_value="10.0.0.149"),  # trigger LAN diag path
+            _get_cam_lan_ip=MagicMock(
+                return_value="10.0.0.149"
+            ),  # trigger LAN diag path
             _local_creds_cache={CAM_ID: {"user": "u", "password": "p", "port": 443}},
             _async_update_lan_diagnostic_sensors=AsyncMock(
                 side_effect=RuntimeError("LAN sensor error")
@@ -316,44 +353,54 @@ class TestLanDiagnosticSensorsException:
         )
         coord._first_tick_done = True
 
-        session = _url_session({
-            f"/v11/video_inputs/{CAM_ID}/last_event": ({"id": ""}, 404),
-            f"/v11/video_inputs/{CAM_ID}/lighting/switch": ({}, 200),
-            f"/v11/video_inputs/{CAM_ID}/lighting/motion": {},
-            f"/v11/video_inputs/{CAM_ID}/lighting/ambient": {},
-            f"/v11/video_inputs/{CAM_ID}/lighting": {},
-            f"/v11/video_inputs/{CAM_ID}/intrusionDetectionConfig": {},
-            f"/v11/video_inputs/{CAM_ID}/ambient_light_sensor_level": {"ambientLightSensorLevel": 0.5},
-            f"/v11/video_inputs/{CAM_ID}/recording_options": {},
-            f"/v11/video_inputs/{CAM_ID}/unread_events_count": {"count": 0},
-            f"/v11/video_inputs/{CAM_ID}/privacy_sound_override": {"result": False},
-            f"/v11/video_inputs/{CAM_ID}/commissioned": {"connected": True, "commissioned": True},
-            f"/v11/video_inputs/{CAM_ID}/autofollow": {},
-            f"/v11/video_inputs/{CAM_ID}/notifications": {},
-            f"/v11/video_inputs/{CAM_ID}/privateAreas": [],
-            f"/v11/video_inputs/{CAM_ID}/timestamp": {"result": True},
-            f"/v11/video_inputs/{CAM_ID}/audioAlarm": {"sensitivity": "medium"},
-            f"/v11/video_inputs/{CAM_ID}/firmware": {"version": "9.40.25"},
-            f"/v11/video_inputs/{CAM_ID}/wifiinfo": {"signalStrength": -55},
-            f"/v11/video_inputs/{CAM_ID}/motion": {"enabled": True},
-            f"/v11/video_inputs/{CAM_ID}/ledlights": {"state": "OFF"},
-            f"/v11/video_inputs/{CAM_ID}/lens_elevation": {"elevation": 0.0},
-            f"/v11/video_inputs/{CAM_ID}/audio": {},
-            f"/v11/video_inputs/{CAM_ID}/rules": [],
-            f"/v11/video_inputs/{CAM_ID}/zones": [],
-            f"/v11/video_inputs/{CAM_ID}/ping": "ONLINE",
-            f"/v11/events?videoInputId={CAM_ID}": [],
-            f"/v11/video_inputs/{CAM_ID}/connection": ({"urls": []}, 200),
-            "/v11/video_inputs": [cam_entry],
-            "/feature_flags": {},
-            "/protocol_support": {"state": "SUPPORTED"},
-        })
+        session = _url_session(
+            {
+                f"/v11/video_inputs/{CAM_ID}/last_event": ({"id": ""}, 404),
+                f"/v11/video_inputs/{CAM_ID}/lighting/switch": ({}, 200),
+                f"/v11/video_inputs/{CAM_ID}/lighting/motion": {},
+                f"/v11/video_inputs/{CAM_ID}/lighting/ambient": {},
+                f"/v11/video_inputs/{CAM_ID}/lighting": {},
+                f"/v11/video_inputs/{CAM_ID}/intrusionDetectionConfig": {},
+                f"/v11/video_inputs/{CAM_ID}/ambient_light_sensor_level": {
+                    "ambientLightSensorLevel": 0.5
+                },
+                f"/v11/video_inputs/{CAM_ID}/recording_options": {},
+                f"/v11/video_inputs/{CAM_ID}/unread_events_count": {"count": 0},
+                f"/v11/video_inputs/{CAM_ID}/privacy_sound_override": {"result": False},
+                f"/v11/video_inputs/{CAM_ID}/commissioned": {
+                    "connected": True,
+                    "commissioned": True,
+                },
+                f"/v11/video_inputs/{CAM_ID}/autofollow": {},
+                f"/v11/video_inputs/{CAM_ID}/notifications": {},
+                f"/v11/video_inputs/{CAM_ID}/privateAreas": [],
+                f"/v11/video_inputs/{CAM_ID}/timestamp": {"result": True},
+                f"/v11/video_inputs/{CAM_ID}/audioAlarm": {"sensitivity": "medium"},
+                f"/v11/video_inputs/{CAM_ID}/firmware": {"version": "9.40.25"},
+                f"/v11/video_inputs/{CAM_ID}/wifiinfo": {"signalStrength": -55},
+                f"/v11/video_inputs/{CAM_ID}/motion": {"enabled": True},
+                f"/v11/video_inputs/{CAM_ID}/ledlights": {"state": "OFF"},
+                f"/v11/video_inputs/{CAM_ID}/lens_elevation": {"elevation": 0.0},
+                f"/v11/video_inputs/{CAM_ID}/audio": {},
+                f"/v11/video_inputs/{CAM_ID}/rules": [],
+                f"/v11/video_inputs/{CAM_ID}/zones": [],
+                f"/v11/video_inputs/{CAM_ID}/ping": "ONLINE",
+                f"/v11/events?videoInputId={CAM_ID}": [],
+                f"/v11/video_inputs/{CAM_ID}/connection": ({"urls": []}, 200),
+                "/v11/video_inputs": [cam_entry],
+                "/feature_flags": {},
+                "/protocol_support": {"state": "SUPPORTED"},
+            }
+        )
 
         # Should not raise even though _async_update_lan_diagnostic_sensors raises
-        with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
-        ), patch("aiohttp.TCPConnector"):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("aiohttp.TCPConnector"),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         # _async_update_lan_diagnostic_sensors must have been called
@@ -400,6 +447,7 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
 
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._async_fetch_live_snapshot_impl = types.MethodType(
             BoschCameraCoordinator._async_fetch_live_snapshot_impl, coord
         )
@@ -421,18 +469,20 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
     async def test_empty_body_with_privacy_on_logs_debug(self):
         """snap.jpg returns 200 + empty body + HA cached privacyMode='ON'
         → _LOGGER.debug at line 4176 (not warning), return None."""
-        coord = self._bind(SimpleNamespace(
-            token="tok",
-            hass=MagicMock(),
-            _entry=SimpleNamespace(entry_id="01ENTRY"),
-            _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
-            _shc_state_cache={},
-            _rcp_session_cache={},
-            _live_connections={},
-            _fresh_snap_cache={},
-            _fresh_snap_locks={},
-            data={CAM_ID: {"privacyMode": "ON"}},
-        ))
+        coord = self._bind(
+            SimpleNamespace(
+                token="tok",
+                hass=MagicMock(),
+                _entry=SimpleNamespace(entry_id="01ENTRY"),
+                _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
+                _shc_state_cache={},
+                _rcp_session_cache={},
+                _live_connections={},
+                _fresh_snap_cache={},
+                _fresh_snap_locks={},
+                data={CAM_ID: {"privacyMode": "ON"}},
+            )
+        )
         coord.get_quality_params = MagicMock(return_value=(True, 0))
         coord._get_cached_rcp_session = AsyncMock(return_value=None)
         coord._rcp_read = AsyncMock(return_value=None)
@@ -449,14 +499,20 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
         session.get = MagicMock(return_value=snap_resp)
 
         debug_calls = []
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session), \
-             patch(f"{MODULE}._LOGGER") as mock_log:
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+            patch(f"{MODULE}._LOGGER") as mock_log,
+        ):
             mock_log.debug.side_effect = lambda *a, **k: debug_calls.append(a)
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
 
         assert result is None
-        privacy_debug = [d for d in debug_calls if "privacy" in str(d).lower() and "HA agrees" in str(d)]
+        privacy_debug = [
+            d
+            for d in debug_calls
+            if "privacy" in str(d).lower() and "HA agrees" in str(d)
+        ]
         assert privacy_debug, (
             "_LOGGER.debug with 'HA agrees' must fire when empty body + privacy=ON (line 4176)"
         )
@@ -477,7 +533,9 @@ class TestFetchRcpLanDenied:
 
         coord = object.__new__(BoschCameraCoordinator)
         coord._rcp_lan_ip_cache = {CAM_ID: "10.0.0.149"}
-        coord._local_creds_cache = {CAM_ID: {"user": "cbs-XYZ", "password": "pw", "port": 443}}
+        coord._local_creds_cache = {
+            CAM_ID: {"user": "cbs-XYZ", "password": "pw", "port": 443}
+        }
         coord.hass = MagicMock()
         coord._get_cam_lan_ip = MagicMock(return_value="10.0.0.149")
 
@@ -508,7 +566,9 @@ class TestFetchRcpLanXmlNoMatch:
 
         coord = object.__new__(BoschCameraCoordinator)
         coord._rcp_lan_ip_cache = {CAM_ID: "10.0.0.149"}
-        coord._local_creds_cache = {CAM_ID: {"user": "cbs-XYZ", "password": "pw", "port": 443}}
+        coord._local_creds_cache = {
+            CAM_ID: {"user": "cbs-XYZ", "password": "pw", "port": 443}
+        }
         coord.hass = MagicMock()
         coord._get_cam_lan_ip = MagicMock(return_value="10.0.0.149")
         coord._is_rcp_lan_denied = MagicMock(return_value=False)
@@ -517,7 +577,9 @@ class TestFetchRcpLanXmlNoMatch:
 
         # Response is XML (starts with <) but no <err> and no <str>HEX</str>
         # → _re_lan.search returns None + raw starts with < → line 5433 reached
-        xml_response = b"<rcp><result><data>42</data></result></rcp>"  # no <str>, no <err>
+        xml_response = (
+            b"<rcp><result><data>42</data></result></rcp>"  # no <str>, no <err>
+        )
 
         mock_resp = AsyncMock()
         mock_resp.status = 200
@@ -525,12 +587,15 @@ class TestFetchRcpLanXmlNoMatch:
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            f"{MODULE}.async_digest_request",
-            return_value=mock_resp,
-        ), patch(
-            f"{MODULE}.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                f"{MODULE}.async_digest_request",
+                return_value=mock_resp,
+            ),
+            patch(
+                f"{MODULE}.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await coord._fetch_rcp_lan(CAM_ID, "0xff00")
 
@@ -587,17 +652,25 @@ class TestFeedbackHintNonZhLocale:
     async def test_non_zh_locale_lang_key_split(self):
         """en-US → split('-',1)[0] = 'en' (line 5915)."""
         from custom_components.bosch_shc_camera import async_setup_entry
-
         from tests.test_init_sprint_md import (  # type: ignore[import-not-found]
             _make_coord_stub,
+            _make_ent_reg,
             _make_entry,
             _make_hass,
-            _make_ent_reg,
             _MultiStore,
         )
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
 
         hass = _make_hass()
@@ -610,11 +683,16 @@ class TestFeedbackHintNonZhLocale:
         coord_stub = _make_coord_stub([CAM_ID])
         coord_stub.data = {CAM_ID: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=_make_ent_reg()), \
-             patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+        ):
             # Should not raise — line 5915 is just a string split
             await async_setup_entry(hass, entry)
 
@@ -632,17 +710,25 @@ class TestFeedbackHintExceptionSuppressed:
     async def test_feedback_hint_exception_suppressed(self):
         """Exception during feedback hint → caught, not re-raised (lines 5932-5933)."""
         from custom_components.bosch_shc_camera import async_setup_entry
-
         from tests.test_init_sprint_md import (  # type: ignore[import-not-found]
             _make_coord_stub,
+            _make_ent_reg,
             _make_entry,
             _make_hass,
-            _make_ent_reg,
             _MultiStore,
         )
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
 
         hass = _make_hass()
@@ -657,11 +743,16 @@ class TestFeedbackHintExceptionSuppressed:
         coord_stub = _make_coord_stub([CAM_ID])
         coord_stub.data = {CAM_ID: {"info": {"title": "Terrasse"}}}
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=_make_ent_reg()), \
-             patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+        ):
             # Should NOT raise even though async_update_entry raises (lines 5932-5933 catch it)
             await async_setup_entry(hass, entry)
 
@@ -679,17 +770,25 @@ class TestSendEventWebhookNoLoadedEntries:
     async def test_no_entries_logs_warning_and_returns(self):
         """async_loaded_entries returns [] → warning + return (lines 6342-6343)."""
         from custom_components.bosch_shc_camera import async_setup_entry
-
         from tests.test_init_sprint_md import (  # type: ignore[import-not-found]
             _make_coord_stub,
+            _make_ent_reg,
             _make_entry,
             _make_hass,
-            _make_ent_reg,
             _MultiStore,
         )
 
         store_factory = _MultiStore(
-            {k: None for k in ["_maint_notified", "_cloud_alert_state", "_lan_ips", "_hw_versions", "_local_creds"]}
+            {
+                k: None
+                for k in [
+                    "_maint_notified",
+                    "_cloud_alert_state",
+                    "_lan_ips",
+                    "_hw_versions",
+                    "_local_creds",
+                ]
+            }
         )
 
         hass = _make_hass()
@@ -709,11 +808,16 @@ class TestSendEventWebhookNoLoadedEntries:
         # Return empty list: no entries loaded for DOMAIN → lines 6341-6343
         hass.config_entries.async_loaded_entries = MagicMock(return_value=[])
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", side_effect=store_factory), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=_make_ent_reg()), \
-             patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+        ):
             await async_setup_entry(hass, entry)
 
         assert captured_handler, "Service handler must be registered"
@@ -727,7 +831,9 @@ class TestSendEventWebhookNoLoadedEntries:
             await handler(call)
 
         # Lines 6342-6343: warning logged, early return
-        no_entries_warnings = [w for w in logged_warnings if "no loaded entries" in str(w).lower()]
+        no_entries_warnings = [
+            w for w in logged_warnings if "no loaded entries" in str(w).lower()
+        ]
         assert no_entries_warnings, (
             "Must log 'no loaded entries' warning when no entries for domain (lines 6342-6343)"
         )
@@ -766,8 +872,10 @@ class TestAsyncCancelCoordinatorTasksBreak:
             "Test precondition: _tear_down_live_stream must be absent"
         )
 
-        with patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()), \
-             patch(f"{MODULE}.stop_all_proxies"), \
-             patch("asyncio.gather", AsyncMock(return_value=[])):
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
             # Must complete without error (break fires, loop exits cleanly)
             await _async_cancel_coordinator_tasks(coord)

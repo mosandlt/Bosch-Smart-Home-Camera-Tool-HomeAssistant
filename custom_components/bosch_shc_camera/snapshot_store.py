@@ -20,7 +20,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Bosch camera IDs are UUID-formatted: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 # All hex upper-case, 8-4-4-4-12 groups separated by hyphens.
-_CAM_ID_RE = re.compile(r"^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$")
+_CAM_ID_RE = re.compile(
+    r"^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$"
+)
 
 # Sanity bounds for snapshot byte sizes.
 # Bosch snapshots are 50–800 KiB typically; 100 B is the smallest valid JPEG.
@@ -93,13 +95,16 @@ async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     if n < _MIN_JPEG_BYTES:
         _LOGGER.warning(
             "bosch_shc_camera: snapshot for %s too small (%d B) — skipping persist",
-            cam_id, n,
+            cam_id,
+            n,
         )
         return
     if n > _MAX_JPEG_BYTES:
         _LOGGER.warning(
             "bosch_shc_camera: snapshot for %s too large (%d B > %d B) — skipping persist",
-            cam_id, n, _MAX_JPEG_BYTES,
+            cam_id,
+            n,
+            _MAX_JPEG_BYTES,
         )
         return
     await hass.async_add_executor_job(_sync_save, hass, cam_id, jpeg)
@@ -112,4 +117,4 @@ async def load_snapshot(hass: HomeAssistant, cam_id: str) -> bytes | None:
     Returns None on FileNotFoundError; logs WARNING on other OSError.
     """
     _validate_cam_id(cam_id)
-    return await hass.async_add_executor_job(_sync_load, hass, cam_id)
+    return await hass.async_add_executor_job(_sync_load, hass, cam_id)  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed

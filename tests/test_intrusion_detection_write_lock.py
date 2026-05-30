@@ -13,6 +13,7 @@ endgültig konsistent ist.
 Fix: switch setzt `_intrusion_config_set_at[cam_id]` und der Endpoint-Handler
 checked `_is_write_locked()` bevor er den Cache überschreibt.
 """
+
 from __future__ import annotations
 
 import time
@@ -20,7 +21,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 CAM_ID = "22222222-2222-2222-2222-222222222222"  # Innenkamera II (Gen2)
 
@@ -33,14 +33,16 @@ def _make_coord() -> SimpleNamespace:
         "distance": 5,
     }
     coord = SimpleNamespace(
-        data={CAM_ID: {
-            "info": {
-                "title": "Innenbereich",
-                "hardwareVersion": "HOME_Eyes_Indoor",
-                "firmwareVersion": "9.40.25",
-                "macAddress": "aa:bb:cc:dd:ee:02",
-            },
-        }},
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": "Innenbereich",
+                    "hardwareVersion": "HOME_Eyes_Indoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "aa:bb:cc:dd:ee:02",
+                },
+            }
+        },
         _intrusion_config_cache={CAM_ID: dict(cfg)},
         _intrusion_config_set_at={},
         _shc_state_cache={CAM_ID: {"privacy_mode": False}},

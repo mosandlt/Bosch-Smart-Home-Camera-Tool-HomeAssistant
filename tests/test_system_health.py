@@ -22,14 +22,14 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.bosch_shc_camera.const import DOMAIN
 from custom_components.bosch_shc_camera.system_health import (
     CLOUD_HEALTH_URL,
-    _format_ago,
     _first_loaded_coordinator,
+    _format_ago,
     async_register,
     system_health_info,
 )
 
-
 # ── Helper: build a minimal coordinator stub ─────────────────────────────────
+
 
 def _make_coord(
     *,

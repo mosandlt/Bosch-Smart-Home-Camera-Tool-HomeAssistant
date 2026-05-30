@@ -18,12 +18,13 @@ Note (v12.4.5): iOS/Android-specific dispatch paths removed from production code
   TestBuildFcmCfgIos deleted — there is no longer an iOS-specific FCM config.
   TestDispatchModes updated — auto tries FCM once (OSS key); legacy modes coerce to auto.
 """
+
 from __future__ import annotations
 
 import asyncio
 import sys
-import time
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -37,11 +38,16 @@ MODULE = "custom_components.bosch_shc_camera.fcm"
 # FCM — async_start_fcm_push dispatch modes + _build_fcm_cfg + _try_fcm_with_mode
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _mock_fcm_module(checkin_token="fcm-tok-abc", start_raises=False, checkin_raises=False):
+
+def _mock_fcm_module(
+    checkin_token="fcm-tok-abc", start_raises=False, checkin_raises=False
+):
     """Build a minimal firebase_messaging mock that passes through async_start_fcm_push."""
     mock_client = MagicMock()
     if checkin_raises:
-        mock_client.checkin_or_register = AsyncMock(side_effect=RuntimeError("checkin fail"))
+        mock_client.checkin_or_register = AsyncMock(
+            side_effect=RuntimeError("checkin fail")
+        )
     else:
         mock_client.checkin_or_register = AsyncMock(return_value=checkin_token)
     if start_raises:
@@ -96,6 +102,7 @@ class TestBuildFcmCfgAndroid:
         coord = _fcm_coord("android", entry_data={"fcm_config": stored_cfg})
 
         fetch_called = []
+
         async def fake_fetch(hass):
             fetch_called.append(True)
             return stored_cfg
@@ -103,7 +110,10 @@ class TestBuildFcmCfgAndroid:
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
                 with patch(f"{MODULE}.fetch_firebase_config", side_effect=fake_fetch):
-                    with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                    with patch(
+                        f"{MODULE}.register_fcm_with_bosch",
+                        new=AsyncMock(return_value=True),
+                    ):
                         await async_start_fcm_push(coord)
 
         assert not fetch_called, (
@@ -124,6 +134,7 @@ class TestBuildFcmCfgAndroid:
             "api_key": "fetched-key",
         }
         fetch_called = []
+
         async def fake_fetch(hass):
             fetch_called.append(True)
             return fetched_cfg
@@ -131,10 +142,15 @@ class TestBuildFcmCfgAndroid:
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
                 with patch(f"{MODULE}.fetch_firebase_config", side_effect=fake_fetch):
-                    with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                    with patch(
+                        f"{MODULE}.register_fcm_with_bosch",
+                        new=AsyncMock(return_value=True),
+                    ):
                         await async_start_fcm_push(coord)
 
-        assert fetch_called, "fetch_firebase_config must be called when no stored config"
+        assert fetch_called, (
+            "fetch_firebase_config must be called when no stored config"
+        )
 
 
 class TestTryFcmWithModeGuards:
@@ -172,7 +188,10 @@ class TestTryFcmWithModeGuards:
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         assert not coord._fcm_running, "checkin failure must not set _fcm_running=True"
@@ -188,7 +207,10 @@ class TestTryFcmWithModeGuards:
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         assert coord._fcm_client is None, "start() failure must clear _fcm_client"
@@ -207,18 +229,25 @@ class TestDispatchModes:
         coord = _fcm_coord("auto")
 
         call_count = []
+
         def track_client(**kwargs):
             call_count.append(1)
             return mock_client
+
         mock_fcm.FcmPushClient = track_client
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         assert len(call_count) == 1, "auto mode: exactly one FCM client created"
-        assert coord._fcm_running is True, "auto mode success must set _fcm_running=True"
+        assert coord._fcm_running is True, (
+            "auto mode success must set _fcm_running=True"
+        )
 
     # test_auto_mode_falls_back_to_android removed in v12.4.5: there is no
     # Android fallback — auto tries FCM once with the OSS key and falls back
@@ -240,8 +269,12 @@ class TestDispatchModes:
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_module}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.fetch_firebase_config",
-                           new=AsyncMock(return_value={"project_id": "p", "app_id": "a", "api_key": "k"})):
+                with patch(
+                    f"{MODULE}.fetch_firebase_config",
+                    new=AsyncMock(
+                        return_value={"project_id": "p", "app_id": "a", "api_key": "k"}
+                    ),
+                ):
                     # Must not raise
                     await async_start_fcm_push(coord)
 
@@ -257,7 +290,10 @@ class TestDispatchModes:
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         assert coord._fcm_push_mode == "auto", (
@@ -271,13 +307,22 @@ class TestDispatchModes:
 
         mock_fcm, mock_client = _mock_fcm_module()
         coord = _fcm_coord("android")
-        coord._entry = SimpleNamespace(data={"fcm_config": {
-            "project_id": "p", "app_id": "a", "api_key": "k",
-        }})
+        coord._entry = SimpleNamespace(
+            data={
+                "fcm_config": {
+                    "project_id": "p",
+                    "app_id": "a",
+                    "api_key": "k",
+                }
+            }
+        )
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch", new=AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         assert coord._fcm_push_mode == "auto", (
@@ -288,6 +333,7 @@ class TestDispatchModes:
 # ═══════════════════════════════════════════════════════════════════════════════
 # camera.py — _fetch_local_snap executor closure (lines 606-618)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _make_camera_for_snap(**overrides):
     """Build a minimal BoschCamera stub for _async_camera_image_impl tests."""
@@ -336,7 +382,9 @@ def _make_camera_for_snap(**overrides):
     return cam
 
 
-def _digest_cm_snap(status: int, body: bytes = b"", content_type: str = "image/jpeg") -> MagicMock:
+def _digest_cm_snap(
+    status: int, body: bytes = b"", content_type: str = "image/jpeg"
+) -> MagicMock:
     """Async CM for async_digest_request returning a controlled response."""
     resp = MagicMock()
     resp.status = status
@@ -354,22 +402,31 @@ class TestFetchLocalSnapClosure:
     @pytest.mark.asyncio
     async def test_local_snap_200_returns_bytes(self):
         """LOCAL live connection + async_digest_request 200 + image/jpeg → returns bytes."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
         import aiohttp
 
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {CAM_ID: {
-            "proxyUrl": "https://192.0.2.149:443/snap.jpg",
-            "_connection_type": "LOCAL",
-            "_local_user": "digest_user",
-            "_local_password": "digest_pass",
-        }}
+        cam.coordinator._live_connections = {
+            CAM_ID: {
+                "proxyUrl": "https://192.0.2.149:443/snap.jpg",
+                "_connection_type": "LOCAL",
+                "_local_user": "digest_user",
+                "_local_password": "digest_pass",
+            }
+        }
         cm = _digest_cm_snap(200, b"\xff\xd8\xff", "image/jpeg")
 
-        with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()), \
-             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == b"\xff\xd8\xff", (
@@ -381,24 +438,38 @@ class TestFetchLocalSnapClosure:
     async def test_local_snap_request_exception_returns_none(self):
         """aiohttp.ClientError in LOCAL snap → returns cached/placeholder (not crash)."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {CAM_ID: {
-            "proxyUrl": "https://192.0.2.149:443/snap.jpg",
-            "_connection_type": "LOCAL",
-            "_local_user": "u",
-            "_local_password": "p",
-        }}
+        cam.coordinator._live_connections = {
+            CAM_ID: {
+                "proxyUrl": "https://192.0.2.149:443/snap.jpg",
+                "_connection_type": "LOCAL",
+                "_local_user": "u",
+                "_local_password": "p",
+            }
+        }
 
-        with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()), \
-             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
-                   new=AsyncMock(side_effect=_aiohttp.ClientError("timeout"))):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=_aiohttp.ClientError("timeout")),
+            ),
+        ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         from custom_components.bosch_shc_camera.camera import BoschCamera as _Cam
-        assert result is None or result is cam._cached_image or result is _Cam._PLACEHOLDER_JPEG, (
+
+        assert (
+            result is None
+            or result is cam._cached_image
+            or result is _Cam._PLACEHOLDER_JPEG
+        ), (
             "aiohttp.ClientError in LOCAL snap must not raise; returns cached/placeholder"
         )
 
@@ -408,18 +479,26 @@ class TestFetchLocalSnapClosure:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {CAM_ID: {
-            "proxyUrl": "https://192.0.2.149/snap.jpg",
-            "_connection_type": "LOCAL",
-            "_local_user": "u",
-            "_local_password": "p",
-        }}
+        cam.coordinator._live_connections = {
+            CAM_ID: {
+                "proxyUrl": "https://192.0.2.149/snap.jpg",
+                "_connection_type": "LOCAL",
+                "_local_user": "u",
+                "_local_password": "p",
+            }
+        }
         cm = _digest_cm_snap(200, b"<html>error</html>", "text/html")
 
-        with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()), \
-             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         # non-image content-type → data=None → placeholder
@@ -430,23 +509,26 @@ class TestFetchLocalSnapClosure:
 # camera.py — outage snap fallback (uses async_digest_request directly)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestFetchOutageSnapClosure:
     """camera.py outage snap path: async_digest_request called directly.
 
     Triggered when _auth_outage_count > 0 and _local_creds_cache has cached creds.
     """
 
-    def _make_outage_cam(self) -> "MagicMock":
+    def _make_outage_cam(self) -> MagicMock:
         """Camera with outage creds."""
         cam = _make_camera_for_snap()
         cam.coordinator._auth_outage_count = 2  # triggers outage path
-        cam.coordinator._local_creds_cache = {CAM_ID: {
-            "user": "digest_user",
-            "password": "digest_pass",
-            "host": "192.0.2.149",
-            "port": 443,
-            "ts": time.monotonic(),
-        }}
+        cam.coordinator._local_creds_cache = {
+            CAM_ID: {
+                "user": "digest_user",
+                "password": "digest_pass",
+                "host": "192.0.2.149",
+                "port": 443,
+                "ts": time.monotonic(),
+            }
+        }
         cam.coordinator._live_connections = {}  # no active stream → skip path 1
         return cam
 
@@ -458,32 +540,52 @@ class TestFetchOutageSnapClosure:
         cam = self._make_outage_cam()
         cm = _digest_cm_snap(200, b"\xff\xd8outage", "image/jpeg")
 
-        with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()), \
-             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
-                   new=AsyncMock(return_value=cm)):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == b"\xff\xd8outage", (
             "outage snap 200 + image/jpeg must return the bytes"
         )
-        assert cam._cached_image == b"\xff\xd8outage", "_cached_image updated on outage snap"
+        assert cam._cached_image == b"\xff\xd8outage", (
+            "_cached_image updated on outage snap"
+        )
 
     @pytest.mark.asyncio
     async def test_outage_snap_request_exception_returns_none(self):
         """aiohttp.ClientError in outage snap → returns cached/placeholder."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = self._make_outage_cam()
 
-        with patch("custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                   return_value=MagicMock()), \
-             patch("custom_components.bosch_shc_camera.camera.async_digest_request",
-                   new=AsyncMock(side_effect=_aiohttp.ClientError("LAN unreachable"))):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=_aiohttp.ClientError("LAN unreachable")),
+            ),
+        ):
             result = await BoschCamera._async_camera_image_impl(cam)
 
         from custom_components.bosch_shc_camera.camera import BoschCamera as _Cam
-        assert result is None or result is cam._cached_image or result is _Cam._PLACEHOLDER_JPEG, (
+
+        assert (
+            result is None
+            or result is cam._cached_image
+            or result is _Cam._PLACEHOLDER_JPEG
+        ), (
             "aiohttp.ClientError in outage snap must not raise; returns cached/placeholder"
         )

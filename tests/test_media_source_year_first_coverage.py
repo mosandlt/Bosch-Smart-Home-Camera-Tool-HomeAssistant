@@ -11,13 +11,13 @@ Helpers must return `[]` for path-traversal inputs (defense-in-depth via
 `_safe_join`). The browse handler must dispatch to year-first methods
 when `_YEAR_RE.match(camera)` and emit the correct children.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ── _LocalBackend year-first None-branches ───────────────────────────────────
 
@@ -28,12 +28,14 @@ class TestLocalListYearFirstMonthsNoneBranches:
     def test_path_traversal_year_returns_empty(self, tmp_path):
         """Year arg with `..` → _safe_join returns None → caller returns []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_months("../../etc") == []
 
     def test_year_dir_not_a_dir_returns_empty(self, tmp_path):
         """Year is a file, not a directory → second arm of `not d.is_dir()` → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026").write_bytes(b"x")
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_months("2026") == []
@@ -45,12 +47,14 @@ class TestLocalListYearFirstDaysNoneBranches:
     def test_year_traversal_returns_empty(self, tmp_path):
         """Line 141: year is `../../etc` → _safe_join returns None → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_days("../../etc", "05") == []
 
     def test_month_traversal_inside_year_returns_empty(self, tmp_path):
         """Line 144: year ok but month is traversal → second _safe_join None → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_days("2026", "../../etc") == []
@@ -58,6 +62,7 @@ class TestLocalListYearFirstDaysNoneBranches:
     def test_month_dir_missing_returns_empty(self, tmp_path):
         """Line 144 (`not d.is_dir()`): month name valid but dir doesn't exist."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_days("2026", "05") == []
@@ -69,12 +74,14 @@ class TestLocalListYearFirstEventsNoneBranches:
     def test_year_traversal_returns_empty(self, tmp_path):
         """Line 150: year is `..` → first _safe_join None → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("../../etc", "05", "07") == []
 
     def test_month_traversal_returns_empty(self, tmp_path):
         """Line 153: year ok, month traversal → second _safe_join None → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "../../etc", "07") == []
@@ -82,6 +89,7 @@ class TestLocalListYearFirstEventsNoneBranches:
     def test_day_traversal_returns_empty(self, tmp_path):
         """Line 156: year+month ok, day traversal → third _safe_join None → []."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026" / "05").mkdir(parents=True)
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "05", "../../etc") == []
@@ -89,6 +97,7 @@ class TestLocalListYearFirstEventsNoneBranches:
     def test_day_dir_missing_returns_empty(self, tmp_path):
         """Line 156 (`not d.is_dir()`): day name valid but day dir absent."""
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
         (tmp_path / "2026" / "05").mkdir(parents=True)
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "05", "07") == []
@@ -169,9 +178,7 @@ class TestBrowseSmbYearFirstDays:
         with patch.object(backend, "list_year_first_days", return_value=["08", "07"]):
             node = media._browse_smb(src, backend, ["2026", "05"], single_source=True)
         titles = [c.title for c in node.children]
-        assert titles == ["08", "07"], (
-            f"year-first days must be rendered, got {titles}"
-        )
+        assert titles == ["08", "07"], f"year-first days must be rendered, got {titles}"
         assert node.title == "2026-05", (
             f"month node title must combine year+month, got {node.title}"
         )
@@ -187,6 +194,7 @@ class TestBrowseSmbYearFirstEvents:
 
     def test_year_month_day_lists_events_with_thumbnail(self, tmp_path):
         from homeassistant.components.media_player import MediaClass
+
         media, src, backend = _make_media_source(tmp_path)
         events = [
             (
@@ -227,6 +235,7 @@ class TestBrowseSmbYearFirstEvents:
     def test_year_month_day_image_only_event(self, tmp_path):
         """Image-only event (no mp4 sibling) → IMAGE class + content-type image/jpeg."""
         from homeassistant.components.media_player import MediaClass
+
         media, src, backend = _make_media_source(tmp_path)
         events = [
             (

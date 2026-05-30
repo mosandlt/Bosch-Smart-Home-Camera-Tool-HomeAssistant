@@ -22,9 +22,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.exceptions import ConfigEntryNotReady
-
 
 MODULE = "custom_components.bosch_shc_camera"
 CAM_A = "11111111-1111-1111-1111-111111111111"
@@ -35,7 +33,9 @@ def _make_coord_stub(camera_ids, *, first_refresh_raises=None):
     async_setup_entry need to exist."""
     coord = MagicMock()
     if first_refresh_raises is not None:
-        coord.async_config_entry_first_refresh = AsyncMock(side_effect=first_refresh_raises)
+        coord.async_config_entry_first_refresh = AsyncMock(
+            side_effect=first_refresh_raises
+        )
     else:
         coord.async_config_entry_first_refresh = AsyncMock()
     coord.data = {cid: {} for cid in camera_ids}
@@ -64,14 +64,16 @@ def _make_entry(options=None):
 
 def _make_hass(*, persisted_ips=None, stale_lan_ids=None):
     """Hass stubbed to expose:
-      - Store(persisted_ips) for the LAN-IP loader
-      - entity_registry returning `stale_lan_ids` for the v12.4.10 migration
+    - Store(persisted_ips) for the LAN-IP loader
+    - entity_registry returning `stale_lan_ids` for the v12.4.10 migration
     """
     hass = MagicMock()
     hass.data = {}
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_entries = MagicMock(return_value=[])
-    hass.config_entries.flow.async_init = AsyncMock(return_value={"type": "create_entry"})
+    hass.config_entries.flow.async_init = AsyncMock(
+        return_value={"type": "create_entry"}
+    )
     hass.async_create_task = MagicMock()
     hass.async_create_background_task = MagicMock()
     hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
@@ -81,6 +83,7 @@ def _make_hass(*, persisted_ips=None, stale_lan_ids=None):
 class _FakeStore:
     """Replaces `homeassistant.helpers.storage.Store` so the test can hand
     back arbitrary persisted LAN-IP maps."""
+
     def __init__(self, payload):
         self._payload = payload
         self.saved = []
@@ -106,19 +109,25 @@ class TestCloudDegradedStartup:
         hass = _make_hass()
         entry = _make_entry()
         coord_stub = _make_coord_stub(
-            [], first_refresh_raises=ConfigEntryNotReady("Bosch 503"),
+            [],
+            first_refresh_raises=ConfigEntryNotReady("Bosch 503"),
         )
 
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}._rehydrate_cams_from_registry",
-                   return_value=({CAM_A}, {CAM_A: "Terrasse"})), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(
+                f"{MODULE}._rehydrate_cams_from_registry",
+                return_value=({CAM_A}, {CAM_A: "Terrasse"}),
+            ),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -140,14 +149,16 @@ class TestCloudDegradedStartup:
         hass = _make_hass()
         entry = _make_entry()
         coord_stub = _make_coord_stub(
-            [], first_refresh_raises=ConfigEntryNotReady("Bosch 503"),
+            [],
+            first_refresh_raises=ConfigEntryNotReady("Bosch 503"),
         )
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}._rehydrate_cams_from_registry",
-                   return_value=(set(), {})), \
-             patch(f"{MODULE}.cf_unbuffer.register"):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}._rehydrate_cams_from_registry", return_value=(set(), {})),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+        ):
             with pytest.raises(ConfigEntryNotReady):
                 await async_setup_entry(hass, entry)
 
@@ -173,15 +184,21 @@ class TestPersistedLanIps:
 
         persisted = {
             CAM_A.lower(): "192.0.2.10",
-            "garbage": 42,           # wrong type → must be skipped
-            123: "ignored",          # wrong key type → must be skipped
+            "garbage": 42,  # wrong type → must be skipped
+            123: "ignored",  # wrong key type → must be skipped
         }
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(persisted)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(
+                "homeassistant.helpers.storage.Store",
+                return_value=_FakeStore(persisted),
+            ),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -208,11 +225,14 @@ class TestOptionsGatedBackgroundTasks:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         # async_start_fcm_push was invoked and its coroutine scheduled.
@@ -231,12 +251,15 @@ class TestOptionsGatedBackgroundTasks:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch(f"{MODULE}.nvr_recorder._drain_staging_to_remote"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(f"{MODULE}.nvr_recorder._drain_staging_to_remote"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         hass.async_create_background_task.assert_called()
@@ -254,8 +277,9 @@ class TestHaStopListener:
         """The `EVENT_HOMEASSISTANT_STOP` async_listen_once must be wired
         so background coroutines are cancelled at HA shutdown. Pins
         L5366 + the bus.listen call."""
-        from custom_components.bosch_shc_camera import async_setup_entry
         from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+
+        from custom_components.bosch_shc_camera import async_setup_entry
 
         hass = _make_hass()
         entry = _make_entry()
@@ -264,11 +288,14 @@ class TestHaStopListener:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         # async_listen_once was called with EVENT_HOMEASSISTANT_STOP
@@ -280,8 +307,9 @@ class TestHaStopListener:
         """Capture the registered `_on_ha_stop` callback and invoke it —
         verifies the listener body actually drives
         `_async_cancel_coordinator_tasks(coordinator)`. Pins L5366."""
-        from custom_components.bosch_shc_camera import async_setup_entry
         from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+
+        from custom_components.bosch_shc_camera import async_setup_entry
 
         hass = _make_hass()
         entry = _make_entry()
@@ -290,13 +318,18 @@ class TestHaStopListener:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch(f"{MODULE}._async_cancel_coordinator_tasks",
-                   new=AsyncMock(return_value=None)) as cancel_mock, \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                f"{MODULE}._async_cancel_coordinator_tasks",
+                new=AsyncMock(return_value=None),
+            ) as cancel_mock,
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
             # Pull the captured callback for EVENT_HOMEASSISTANT_STOP and fire it.
@@ -333,13 +366,18 @@ class TestStaleLanReachableMigration:
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
         ent_reg.async_remove = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get",
-                   return_value=ent_reg), \
-             patch("homeassistant.helpers.entity_registry.async_entries_for_config_entry",
-                   return_value=[stale_entry, clean_entry]):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+            patch(
+                "homeassistant.helpers.entity_registry.async_entries_for_config_entry",
+                return_value=[stale_entry, clean_entry],
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         # Only the stale doubled-prefix entry was removed; the clean

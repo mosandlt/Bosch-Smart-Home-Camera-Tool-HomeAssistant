@@ -38,22 +38,20 @@ import logging
 import time
 from typing import Any
 
-import aiohttp
-
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CLOUD_API
-from . import get_options, BoschCameraCoordinator
+from . import BoschCameraCoordinator, get_options
+from .const import CLOUD_API, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,9 +64,11 @@ _INDOOR_HW = {"INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
 
 def _is_gen2_indoor(entity: Any) -> bool:
     """Return True if the entity's camera is a Gen2 Indoor model."""
-    hw = entity.coordinator.data.get(entity._cam_id, {}).get(
-        "info", {}
-    ).get("hardwareVersion", "")
+    hw = (
+        entity.coordinator.data.get(entity._cam_id, {})
+        .get("info", {})
+        .get("hardwareVersion", "")
+    )
     return hw in _GEN2_INDOOR_HW
 
 
@@ -92,11 +92,13 @@ async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
     cam_title = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
     _LOGGER.warning(
         "%s write blocked for %s — camera is in privacy mode (HTTP 443 would follow).",
-        feature_name, cam_title,
+        feature_name,
+        cam_title,
     )
     try:
         await entity.hass.services.async_call(
-            "persistent_notification", "create",
+            "persistent_notification",
+            "create",
             {
                 "title": f"{feature_name} — Kamera im Privacy-Mode",
                 "message": (
@@ -119,18 +121,21 @@ async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
 class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
     """Shared base for Bosch camera switch entities."""
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
+
         self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
 
     @property
     def available(self) -> bool:
@@ -151,12 +156,12 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers  = {(DOMAIN, self._cam_id)},
-            name         = f"Bosch {self._cam_title}",
-            manufacturer = "Bosch",
-            model        = self._model_name,
-            sw_version   = self._fw,
-            connections  = {("mac", self._mac)} if self._mac else set(),
+            identifiers={(DOMAIN, self._cam_id)},
+            name=f"Bosch {self._cam_title}",
+            manufacturer="Bosch",
+            model=self._model_name,
+            sw_version=self._fw,
+            connections={("mac", self._mac)} if self._mac else set(),
         )
 
 
@@ -210,28 +215,44 @@ async def async_setup_entry(
         # Privacy sound — only for cameras where the endpoint returns 200 (not 442)
         # Indoor CAMERA_360 (Gen1) + HOME_Eyes_Indoor (Gen2) support it; outdoor returns 442.
         hw_version = cam_info.get("hardwareVersion", "")
-        if hw_version in ("CAMERA_360", "INDOOR", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
+        if hw_version in (
+            "CAMERA_360",
+            "INDOOR",
+            "HOME_Eyes_Indoor",
+            "CAMERA_INDOOR_GEN2",
+        ):
             entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
         # Timestamp overlay — available for all cameras
         entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
         # Status LED — Gen2 cameras only
         from .models import get_model_config
+
         if get_model_config(hw_version).generation >= 2:
             entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschMotionLightSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry)
+            )
+            entities.append(
+                BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry)
+            )
         # Notification type toggles — person is cloud AI (all cameras);
         # audio gated on featureSupport.sound (API-reported, not hardcoded by model).
         has_sound = cam_info.get("featureSupport", {}).get("sound", False)
         for ntype in ("movement", "person", "trouble", "cameraAlarm", "troubleEmail"):
-            entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype))
+            entities.append(
+                BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype)
+            )
         if has_sound:
-            entities.append(BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio"))
+            entities.append(
+                BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio")
+            )
         # Gen2 Indoor II — alarm system (integrated 75 dB siren)
         if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-            entities.append(BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry)
+            )
             entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
             entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
         # Gen2 panic-alarm — manual siren trigger via PUT /panic_alarm.
@@ -244,7 +265,9 @@ async def async_setup_entry(
         # applies CSS transform, the snapshot path applies PIL rotation, and
         # (for Gen1 360) the pan slider sign is inverted.
         if hw_version in _INDOOR_HW:
-            entities.append(BoschImageRotation180Switch(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschImageRotation180Switch(coordinator, cam_id, config_entry)
+            )
         # Mini-NVR recording switch — opt-in via integration option `enable_nvr`.
         # Disabled by default; user enables in options, then toggles per camera.
         if opts.get("enable_nvr", False):
@@ -272,10 +295,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     restarts (intent is not RestoreEntity-persisted).
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Live Stream"
-        self._attr_unique_id       = f"bosch_shc_live_{cam_id.lower()}"
+        self._attr_name = f"Bosch {self._cam_title} Live Stream"
+        self._attr_unique_id = f"bosch_shc_live_{cam_id.lower()}"
         self._attr_translation_key = "live_stream"
 
     async def async_added_to_hass(self) -> None:
@@ -306,7 +331,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             return False
         if not super().available:
             return False
-        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
+        if bool(
+            self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+        ):
             return False
         return not self.coordinator.is_session_stale(self._cam_id)
 
@@ -315,9 +342,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         live = self.coordinator._live_connections.get(self._cam_id, {})
         conn_type = live.get("_connection_type", "REMOTE") if live else ""
         return {
-            "connection_type":  conn_type,
-            "rtsps_url":        live.get("rtspsUrl", ""),
-            "proxy_snap_url":   live.get("proxyUrl", ""),
+            "connection_type": conn_type,
+            "rtsps_url": live.get("rtspsUrl", ""),
+            "proxy_snap_url": live.get("proxyUrl", ""),
         }
 
     # Minimum seconds between stream ON attempts per camera.
@@ -326,7 +353,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Open a new live proxy connection."""
         # Block stream start if privacy mode is active (camera shutter is closed)
-        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
+        if bool(
+            self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+        ):
             raise ServiceValidationError(
                 f"Cannot start stream for {self._cam_title} — privacy mode is active. "
                 "Turn off privacy mode first.",
@@ -336,7 +365,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         if last_off > 0 and elapsed < self._STREAM_COOLDOWN:
             _LOGGER.warning(
                 "Stream ON for %s blocked — cooldown %.0fs remaining",
-                self._cam_title, self._STREAM_COOLDOWN - elapsed,
+                self._cam_title,
+                self._STREAM_COOLDOWN - elapsed,
             )
             return
         _LOGGER.info("Live stream ON for %s", self._cam_title)
@@ -351,7 +381,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             conn_type = result.get("_connection_type", "REMOTE")
             _LOGGER.info(
                 "Live stream active for %s (%s) — %s",
-                self._cam_title, conn_type, result.get("rtspsUrl", ""),
+                self._cam_title,
+                conn_type,
+                result.get("rtspsUrl", ""),
             )
             # Schedule health check — if the LOCAL stream isn't actually
             # producing HLS segments after ~60s and still not after ~120s,
@@ -369,7 +401,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 self.coordinator._bg_tasks.add(hc_task)
                 hc_task.add_done_callback(self.coordinator._bg_tasks.discard)
         else:
-            _LOGGER.warning("Live stream failed for %s — check HA logs", self._cam_title)
+            _LOGGER.warning(
+                "Live stream failed for %s — check HA logs", self._cam_title
+            )
             # Revert the intent we set before the attempt — the open failed,
             # the switch should not be left at "on" while the underlying
             # session is dead.
@@ -399,6 +433,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         Two failed ticks in a row therefore escalate to Cloud within ~2 min
         without any hard-coded time gate.
         """
+
         def _is_local_active() -> bool:
             live = self.coordinator._live_connections.get(cam_id, {})
             return bool(live) and live.get("_connection_type") == "LOCAL"
@@ -418,7 +453,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             stream = getattr(cam_entity, "stream", None)
             if stream is None:
                 return "no_consumer"
-            return "healthy" if bool(getattr(stream, "available", False)) else "unhealthy"
+            return (
+                "healthy" if bool(getattr(stream, "available", False)) else "unhealthy"
+            )
 
         for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
             await asyncio.sleep(delay)
@@ -458,7 +495,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 _LOGGER.warning(
                     "Stream health watchdog: %s LOCAL stream not healthy at %ds — "
                     "recording error and restarting",
-                    cam_id[:8], delay,
+                    cam_id[:8],
+                    delay,
                 )
             self.coordinator._live_connections.pop(cam_id, None)
             await self.coordinator._stop_tls_proxy(cam_id)
@@ -469,15 +507,16 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # the user's wishes. Bug 2026-05-20.
             if cam_id not in self.coordinator._user_intent_streams:
                 _LOGGER.debug(
-                    "Stream health watchdog: %s — user intent gone, "
-                    "skipping reconnect", cam_id[:8],
+                    "Stream health watchdog: %s — user intent gone, skipping reconnect",
+                    cam_id[:8],
                 )
                 return
             result = await self.coordinator.try_live_connection(cam_id)
             if result:
                 _LOGGER.info(
                     "Stream health watchdog: %s restarted as %s",
-                    cam_id[:8], result.get("_connection_type", "?"),
+                    cam_id[:8],
+                    result.get("_connection_type", "?"),
                 )
                 # If we fell back to REMOTE, stop watching — REMOTE has no
                 # pre-warm dependency and no LOCAL-specific failure modes.
@@ -514,10 +553,12 @@ class BoschAudioSwitch(_BoschSwitchBase):
     so the new audio setting takes effect immediately.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Audio"
-        self._attr_unique_id       = f"bosch_shc_audio_{cam_id.lower()}"
+        self._attr_name = f"Bosch {self._cam_title} Audio"
+        self._attr_unique_id = f"bosch_shc_audio_{cam_id.lower()}"
         self._attr_translation_key = "audio"
         self._attr_entity_category = EntityCategory.CONFIG
         # Default from options (configurable in integration settings)
@@ -533,24 +574,35 @@ class BoschAudioSwitch(_BoschSwitchBase):
         """Enable audio on the live stream."""
         _LOGGER.info("Audio ON for %s", self._cam_title)
         self.coordinator._audio_enabled[self._cam_id] = True
+        # Push the new state to HA immediately. is_on reads the _audio_enabled
+        # dict (not coordinator data), so without this the toggle stayed visually
+        # stale until the next coordinator refresh — which a camera pan happened
+        # to trigger, hence "can't re-enable audio until I move the camera" (#22).
+        self.async_write_ha_state()
         await self._apply_audio_change()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable audio on the live stream (video-only)."""
         _LOGGER.info("Audio OFF for %s", self._cam_title)
         self.coordinator._audio_enabled[self._cam_id] = False
+        # See async_turn_on — write state now so the toggle reflects OFF without
+        # waiting for the next coordinator refresh (#22).
+        self.async_write_ha_state()
         await self._apply_audio_change()
 
     async def _apply_audio_change(self) -> None:
         """Re-open the live connection if active so the audio change takes effect."""
-        if bool(self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")):
+        if bool(
+            self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+        ):
             _LOGGER.warning(
                 "Audio change for %s skipped — privacy mode is active", self._cam_title
             )
             return
         if self._cam_id in self.coordinator._live_connections:
             _LOGGER.info(
-                "Re-opening live connection for %s to apply audio change", self._cam_title
+                "Re-opening live connection for %s to apply audio change",
+                self._cam_title,
             )
             await self.coordinator.try_live_connection(self._cam_id)
         else:
@@ -567,16 +619,20 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
     No SHC local API needed — works without SHC configured.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Camera Light"
-        self._attr_unique_id       = f"bosch_shc_light_{cam_id.lower()}"
-        self._attr_icon            = "mdi:led-on"
+        self._attr_name = f"Bosch {self._cam_title} Camera Light"
+        self._attr_unique_id = f"bosch_shc_light_{cam_id.lower()}"
+        self._attr_icon = "mdi:led-on"
         self._attr_translation_key = "camera_light"
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("camera_light")  # type: ignore[no-any-return]
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            "camera_light"
+        )
 
     @property
     def available(self) -> bool:
@@ -605,23 +661,31 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
     Only registered for cameras with featureSupport.light = True.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Front Light"
-        self._attr_unique_id       = f"bosch_shc_front_light_{cam_id.lower()}"
-        self._attr_icon            = "mdi:spotlight-beam"
+        self._attr_name = f"Bosch {self._cam_title} Front Light"
+        self._attr_unique_id = f"bosch_shc_front_light_{cam_id.lower()}"
+        self._attr_icon = "mdi:spotlight-beam"
         self._attr_translation_key = "front_light"
         self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("front_light")  # type: ignore[no-any-return]
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            "front_light"
+        )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(self._cam_id, "front", True)
+        await self.coordinator.async_cloud_set_light_component(
+            self._cam_id, "front", True
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(self._cam_id, "front", False)
+        await self.coordinator.async_cloud_set_light_component(
+            self._cam_id, "front", False
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -633,15 +697,22 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
     Only registered for cameras with featureSupport.light = True.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
         from .models import get_model_config
-        hw = coordinator.data.get(cam_id, {}).get("info", {}).get("hardwareVersion", "CAMERA")
+
+        hw = (
+            coordinator.data.get(cam_id, {})
+            .get("info", {})
+            .get("hardwareVersion", "CAMERA")
+        )
         is_gen2 = get_model_config(hw).generation >= 2
         label = "Oberes + Unteres Licht" if is_gen2 else "Wallwasher"
-        self._attr_name            = f"Bosch {self._cam_title} {label}"
-        self._attr_unique_id       = f"bosch_shc_wallwasher_{cam_id.lower()}"
-        self._attr_icon            = "mdi:wall-sconce-flat"
+        self._attr_name = f"Bosch {self._cam_title} {label}"
+        self._attr_unique_id = f"bosch_shc_wallwasher_{cam_id.lower()}"
+        self._attr_icon = "mdi:wall-sconce-flat"
         self._attr_translation_key = "wallwasher"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -650,10 +721,14 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
         return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("wallwasher")  # type: ignore[no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(self._cam_id, "wallwasher", True)
+        await self.coordinator.async_cloud_set_light_component(
+            self._cam_id, "wallwasher", True
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(self._cam_id, "wallwasher", False)
+        await self.coordinator.async_cloud_set_light_component(
+            self._cam_id, "wallwasher", False
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -666,10 +741,12 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
     Falls back to SHC API if cloud call fails and SHC is configured.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Privacy Mode"
-        self._attr_unique_id       = f"bosch_shc_privacy_{cam_id.lower()}"
+        self._attr_name = f"Bosch {self._cam_title} Privacy Mode"
+        self._attr_unique_id = f"bosch_shc_privacy_{cam_id.lower()}"
         self._attr_translation_key = "privacy_mode"
 
     @property
@@ -679,7 +756,9 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         Read from cloud API response (privacyMode field in /v11/video_inputs).
         Available immediately without SHC configured.
         """
-        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")  # type: ignore[no-any-return]
+        return self.coordinator._shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            "privacy_mode"
+        )
 
     @property
     def available(self) -> bool:
@@ -736,6 +815,7 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         # Bug 2026-05-20 (Bosch maintenance window, hw_version never
         # populated on Indoor II → switch grey, user stuck).
         from .shc import _is_gen2
+
         if _is_gen2(self.coordinator, self._cam_id):
             return True
         hw = self.coordinator._hw_version.get(self._cam_id)
@@ -778,7 +858,8 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             remaining = self._PRIVACY_COOLDOWN - elapsed
             _LOGGER.warning(
                 "Privacy toggle for %s blocked — cooldown %.0fs remaining (prevents camera stress)",
-                self._cam_title, remaining,
+                self._cam_title,
+                remaining,
             )
             return False
         return True
@@ -799,7 +880,9 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         if not self._check_cooldown():
             return
         if self._cam_id in self.coordinator._live_connections:
-            _LOGGER.info("Privacy ON for %s — stopping active live stream", self._cam_title)
+            _LOGGER.info(
+                "Privacy ON for %s — stopping active live stream", self._cam_title
+            )
             await self.coordinator._tear_down_live_stream(self._cam_id)
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
 
@@ -823,10 +906,12 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
     No SHC local API required.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Notifications"
-        self._attr_unique_id       = f"bosch_shc_notifications_{cam_id.lower()}"
+        self._attr_name = f"Bosch {self._cam_title} Notifications"
+        self._attr_unique_id = f"bosch_shc_notifications_{cam_id.lower()}"
         self._attr_translation_key = "notifications"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -835,7 +920,9 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
-        status = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status")
+        status = self.coordinator._shc_state_cache.get(self._cam_id, {}).get(
+            "notifications_status"
+        )
         if status is None:
             return None
         return status in self._NOTIFICATIONS_ON_STATES
@@ -849,7 +936,10 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
         """
         return (
             self.coordinator.last_update_success
-            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get("notifications_status") is not None
+            and self.coordinator._shc_state_cache.get(self._cam_id, {}).get(
+                "notifications_status"
+            )
+            is not None
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -878,9 +968,11 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
     _attr_translation_key = "motion_detection"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Motion Detection"
+        self._attr_name = f"Bosch {self._cam_title} Motion Detection"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_enabled"
 
     @property
@@ -891,10 +983,14 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
         return settings.get("enabled", False)  # type: ignore[no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungserkennung"):
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(
+            self, "Bewegungserkennung"
+        ):
             return
         settings = self.coordinator.motion_settings(self._cam_id)
-        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        sensitivity = (
+            settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        )
         await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
@@ -903,10 +999,14 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungserkennung"):
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(
+            self, "Bewegungserkennung"
+        ):
             return
         settings = self.coordinator.motion_settings(self._cam_id)
-        sensitivity = settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        sensitivity = (
+            settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
+        )
         await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
@@ -924,9 +1024,11 @@ class BoschRecordSoundSwitch(_BoschSwitchBase):
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "record_sound"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Record Sound"
+        self._attr_name = f"Bosch {self._cam_title} Record Sound"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_record_sound"
 
     @property
@@ -964,9 +1066,11 @@ class BoschAutoFollowSwitch(_BoschSwitchBase):
     _attr_translation_key = "auto_follow"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Auto Follow"
+        self._attr_name = f"Bosch {self._cam_title} Auto Follow"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_autofollow"
 
     @property
@@ -1003,9 +1107,11 @@ class BoschIntercomSwitch(_BoschSwitchBase):
     _attr_translation_key = "intercom"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Intercom"
+        self._attr_name = f"Bosch {self._cam_title} Intercom"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intercom"
         self._is_on: bool = False
 
@@ -1033,7 +1139,9 @@ class BoschIntercomSwitch(_BoschSwitchBase):
                         _LOGGER.info("Intercom ON for %s", self._cam_title)
                     else:
                         _LOGGER.warning(
-                            "Intercom ON failed for %s: HTTP %d", self._cam_title, resp.status
+                            "Intercom ON failed for %s: HTTP %d",
+                            self._cam_title,
+                            resp.status,
                         )
         except Exception:
             _LOGGER.exception("Intercom ON error for %s", self._cam_title)
@@ -1059,7 +1167,9 @@ class BoschIntercomSwitch(_BoschSwitchBase):
                         _LOGGER.info("Intercom OFF for %s", self._cam_title)
                     else:
                         _LOGGER.warning(
-                            "Intercom OFF failed for %s: HTTP %d", self._cam_title, resp.status
+                            "Intercom OFF failed for %s: HTTP %d",
+                            self._cam_title,
+                            resp.status,
                         )
         except Exception:
             _LOGGER.exception("Intercom OFF error for %s", self._cam_title)
@@ -1081,9 +1191,11 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "privacy_sound"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Privacy Sound"
+        self._attr_name = f"Bosch {self._cam_title} Privacy Sound"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_privacy_sound"
 
     @property
@@ -1129,9 +1241,11 @@ class BoschTimestampSwitch(_BoschSwitchBase):
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "timestamp_overlay"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Timestamp Overlay"
+        self._attr_name = f"Bosch {self._cam_title} Timestamp Overlay"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_timestamp"
 
     @property
@@ -1174,9 +1288,11 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "status_led"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Status LED"
+        self._attr_name = f"Bosch {self._cam_title} Status LED"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ledlights"
 
     @property
@@ -1217,11 +1333,13 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
     Toggles lightOnMotionEnabled field, preserves all other settings.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Licht bei Bewegung"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_motion_light"
-        self._attr_icon            = "mdi:motion-sensor"
+        self._attr_name = f"Bosch {self._cam_title} Licht bei Bewegung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light"
+        self._attr_icon = "mdi:motion-sensor"
         self._attr_translation_key = "motion_light"
         self._attr_entity_category = EntityCategory.CONFIG
         self._is_on: bool | None = None
@@ -1261,7 +1379,11 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
                         if resp.status == 200:
                             cache = await resp.json()
                         else:
-                            _LOGGER.warning("Motion light GET HTTP %d for %s", resp.status, self._cam_id[:8])
+                            _LOGGER.warning(
+                                "Motion light GET HTTP %d for %s",
+                                resp.status,
+                                self._cam_id[:8],
+                            )
                             return
             except Exception:
                 _LOGGER.exception("Motion light GET error for %s", self._cam_id[:8])
@@ -1275,7 +1397,9 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
         if success:
             self._is_on = enabled
             self.coordinator._motion_light_cache[self._cam_id] = data
-            _LOGGER.info("Motion light %s for %s", "ON" if enabled else "OFF", self._cam_id[:8])
+            _LOGGER.info(
+                "Motion light %s for %s", "ON" if enabled else "OFF", self._cam_id[:8]
+            )
         else:
             _LOGGER.warning("Motion light PUT failed for %s", self._cam_id[:8])
         self.async_write_ha_state()
@@ -1296,11 +1420,13 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
     Toggles ambientLightEnabled field, preserves schedule and brightness settings.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Dauerlicht"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_ambient_light"
-        self._attr_icon            = "mdi:lightbulb-auto"
+        self._attr_name = f"Bosch {self._cam_title} Dauerlicht"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ambient_light"
+        self._attr_icon = "mdi:lightbulb-auto"
         self._attr_translation_key = "ambient_light"
         self._attr_entity_category = EntityCategory.CONFIG
         self._is_on: bool | None = None
@@ -1325,7 +1451,10 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
         if not token:
             return
         session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/ambient"
         try:
             async with asyncio.timeout(10):
@@ -1361,11 +1490,13 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "soft_light_fading"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = f"Bosch {self._cam_title} Weiches Lichtfading"
+        self._attr_name = f"Bosch {self._cam_title} Weiches Lichtfading"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_soft_light_fading"
-        self._attr_icon      = "mdi:transition"
+        self._attr_icon = "mdi:transition"
 
     @property
     def is_on(self) -> bool | None:
@@ -1389,7 +1520,10 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         threshold = cache.get("darknessThreshold", 0.5)
         body = {"darknessThreshold": threshold, "softLightFading": enabled}
         session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting"
         try:
             async with asyncio.timeout(10):
@@ -1399,9 +1533,13 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
                         try:
                             rsp = await resp.json()
                             if isinstance(rsp, dict):
-                                self.coordinator._global_lighting_cache[self._cam_id] = rsp
+                                self.coordinator._global_lighting_cache[
+                                    self._cam_id
+                                ] = rsp
                             else:
-                                self.coordinator._global_lighting_cache[self._cam_id] = body
+                                self.coordinator._global_lighting_cache[
+                                    self._cam_id
+                                ] = body
                         except Exception:
                             self.coordinator._global_lighting_cache[self._cam_id] = body
         except Exception:
@@ -1425,11 +1563,13 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
     Extra attributes: sensitivity (1-5), detectionMode, distance (meters).
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Einbrucherkennung"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_intrusion_detection"
-        self._attr_icon            = "mdi:shield-home"
+        self._attr_name = f"Bosch {self._cam_title} Einbrucherkennung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_detection"
+        self._attr_icon = "mdi:shield-home"
         self._attr_translation_key = "intrusion_detection"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1486,20 +1626,20 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 _NOTIF_TYPE_ICONS = {
-    "movement":     "mdi:motion-sensor",
-    "person":       "mdi:account-eye",
-    "audio":        "mdi:volume-high",
-    "trouble":      "mdi:alert-circle",
-    "cameraAlarm":  "mdi:alarm-light",
+    "movement": "mdi:motion-sensor",
+    "person": "mdi:account-eye",
+    "audio": "mdi:volume-high",
+    "trouble": "mdi:alert-circle",
+    "cameraAlarm": "mdi:alarm-light",
     "troubleEmail": "mdi:email-alert",
 }
 
 _NOTIF_TYPE_LABELS = {
-    "movement":     "Movement Notifications",
-    "person":       "Person Notifications",
-    "audio":        "Audio Notifications",
-    "trouble":      "Trouble Notifications (Push)",
-    "cameraAlarm":  "Camera Alarm Notifications",
+    "movement": "Movement Notifications",
+    "person": "Person Notifications",
+    "audio": "Audio Notifications",
+    "trouble": "Trouble Notifications (Push)",
+    "cameraAlarm": "Camera Alarm Notifications",
     "troubleEmail": "Trouble Notifications (Email)",
 }
 
@@ -1514,14 +1654,22 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry, ntype: str) -> None:
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+        ntype: str,
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._ntype = ntype
         label = _NOTIF_TYPE_LABELS.get(ntype, ntype)
-        self._attr_name            = f"Bosch {self._cam_title} {label}"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_notif_{ntype}"
+        self._attr_name = f"Bosch {self._cam_title} {label}"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_notif_{ntype}"
         # Translation keys must match [a-z0-9_-]+; convert API CamelCase → snake_case
-        _tkey = ntype.replace("cameraAlarm", "camera_alarm").replace("troubleEmail", "trouble_email")
+        _tkey = ntype.replace("cameraAlarm", "camera_alarm").replace(
+            "troubleEmail", "trouble_email"
+        )
         self._attr_translation_key = f"notification_type_{_tkey}"
 
     @property
@@ -1538,9 +1686,8 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
         Notification type toggles go through the Bosch cloud API — overrides
         base class is_camera_online() guard intentionally.
         """
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._notifications_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._notifications_cache.get(self._cam_id)
         )
 
     async def _set_type(self, value: bool) -> None:
@@ -1572,10 +1719,12 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
     optimistic update on successful PUT.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Alarmanlage"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_arm"
+        self._attr_name = f"Bosch {self._cam_title} Alarmanlage"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_arm"
         self._attr_translation_key = "alarm_system_arm"
 
     @property
@@ -1593,7 +1742,7 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
     def extra_state_attributes(self) -> dict[str, Any]:
         status = self.coordinator._alarm_status_cache.get(self._cam_id, {})
         return {
-            "alarm_type":       status.get("alarmType"),
+            "alarm_type": status.get("alarmType"),
             "intrusion_system": status.get("intrusionSystem"),
         }
 
@@ -1616,7 +1765,7 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
 class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
     """Shared base for alarm_settings boolean toggles (alarmMode / preAlarmMode)."""
 
-    _field: str = ""   # field to toggle (alarmMode / preAlarmMode)
+    _field: str = ""  # field to toggle (alarmMode / preAlarmMode)
 
     @property
     def _settings(self) -> dict[str, Any]:
@@ -1661,11 +1810,13 @@ class BoschAlarmModeSwitch(_BoschAlarmSettingsSwitchBase):
 
     _field = "alarmMode"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Sirene"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_alarm_mode"
-        self._attr_icon            = "mdi:alarm-light"
+        self._attr_name = f"Bosch {self._cam_title} Sirene"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_mode"
+        self._attr_icon = "mdi:alarm-light"
         self._attr_translation_key = "alarm_mode"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1675,11 +1826,13 @@ class BoschPreAlarmSwitch(_BoschAlarmSettingsSwitchBase):
 
     _field = "preAlarmMode"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Pre-Alarm"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_prealarm"
-        self._attr_icon            = "mdi:led-on"
+        self._attr_name = f"Bosch {self._cam_title} Pre-Alarm"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm"
+        self._attr_icon = "mdi:led-on"
         self._attr_translation_key = "pre_alarm"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1707,11 +1860,13 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):  # type: ign
     State persists across restarts via RestoreEntity. Default: OFF.
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Bild 180° drehen"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_image_rotation_180"
-        self._attr_icon            = "mdi:image-auto-adjust"
+        self._attr_name = f"Bosch {self._cam_title} Bild 180° drehen"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_image_rotation_180"
+        self._attr_icon = "mdi:image-auto-adjust"
         self._attr_translation_key = "image_rotation_180"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1747,7 +1902,7 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):  # type: ign
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
+class BoschPanicAlarmSwitch(_BoschSwitchBase):
     """Switch: trigger the integrated 75 dB siren (Gen2 only).
 
     PUT /v11/video_inputs/{id}/panic_alarm  body {"status": "ON" | "OFF"} → 204.
@@ -1768,10 +1923,12 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
     _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:alarm-light"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Sirene auslösen"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_panic_alarm"
+        self._attr_name = f"Bosch {self._cam_title} Sirene auslösen"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_panic_alarm"
         self._attr_translation_key = "panic_alarm"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1782,7 +1939,10 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self.coordinator.is_camera_online(self._cam_id)
+        return (  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        )
 
     async def _set(self, enabled: bool) -> None:
         if not hasattr(self.coordinator, "_panic_alarm_cache"):
@@ -1798,12 +1958,14 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):  # type: ignore[misc]
             self.coordinator._panic_alarm_cache[self._cam_id] = enabled
             _LOGGER.info(
                 "Panic alarm %s for %s",
-                "TRIGGERED" if enabled else "stopped", self._cam_title,
+                "TRIGGERED" if enabled else "stopped",
+                self._cam_title,
             )
         else:
             _LOGGER.warning(
                 "Panic alarm %s for %s — PUT /panic_alarm returned non-success",
-                "trigger" if enabled else "stop", self._cam_title,
+                "trigger" if enabled else "stop",
+                self._cam_title,
             )
         self.async_write_ha_state()
 
@@ -1834,11 +1996,13 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
     `BoschImageRotation180Switch`).
     """
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} Mini-NVR"
-        self._attr_unique_id       = f"bosch_shc_nvr_recording_{cam_id.lower()}"
-        self._attr_icon            = "mdi:record-rec"
+        self._attr_name = f"Bosch {self._cam_title} Mini-NVR"
+        self._attr_unique_id = f"bosch_shc_nvr_recording_{cam_id.lower()}"
+        self._attr_icon = "mdi:record-rec"
         self._attr_translation_key = "nvr_recording"
         self._attr_entity_category = EntityCategory.CONFIG
         # Opt-in feature — hide from "default-enabled" entity list. User adds
@@ -1900,8 +2064,10 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
             if (
                 self.coordinator.last_update_success
                 and self.coordinator.is_camera_online(self._cam_id)
-                and self.coordinator._live_connections.get(self._cam_id, {})
-                    .get("_connection_type") == "LOCAL"
+                and self.coordinator._live_connections.get(self._cam_id, {}).get(
+                    "_connection_type"
+                )
+                == "LOCAL"
             ):
                 self.hass.async_create_task(
                     self.coordinator.start_recorder(self._cam_id),
@@ -1945,10 +2111,12 @@ class BoschExternalStreamSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignor
     _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:share-variant-outline"
 
-    def __init__(self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name            = f"Bosch {self._cam_title} External-Stream-URL freigeben"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_external_stream"
+        self._attr_name = f"Bosch {self._cam_title} External-Stream-URL freigeben"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_external_stream"
         self._attr_translation_key = "external_stream"
         self._attr_entity_category = EntityCategory.CONFIG
 

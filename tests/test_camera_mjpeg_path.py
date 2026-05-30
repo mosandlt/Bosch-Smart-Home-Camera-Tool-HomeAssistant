@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9"
 PLACEHOLDER_JPEG = b"\xff\xd8placeholder"
@@ -51,7 +50,8 @@ def _make_coord(
         _image_rotation_180={},
         _local_creds_cache=(
             {CAM_ID: {**local_creds, "ts": local_creds.get("ts", time.monotonic())}}
-            if local_creds else {}
+            if local_creds
+            else {}
         ),
         _timestamp_cache={},
         _audio_enabled={},
@@ -98,7 +98,9 @@ def _make_camera(
     cam.hass = SimpleNamespace(
         data={},  # required by async_get_clientsession
         async_create_task=MagicMock(
-            side_effect=lambda c: (asyncio.ensure_future(c) if asyncio.iscoroutine(c) else MagicMock())
+            side_effect=lambda c: (
+                asyncio.ensure_future(c) if asyncio.iscoroutine(c) else MagicMock()
+            )
         ),
         async_add_executor_job=AsyncMock(side_effect=lambda fn, *a: fn(*a)),
     )
@@ -108,6 +110,7 @@ def _make_camera(
 
 
 # ── Core pin tests ─────────────────────────────────────────────────────────────
+
 
 def _patch_session() -> object:
     """Patch async_get_clientsession so camera.py can call it without a real hass."""
@@ -132,9 +135,12 @@ class TestMjpegPathEnabled:
         coord = _make_coord(local_creds=local_creds)
         cam = _make_camera(coord=coord, opts={"use_mjpeg_snapshot": True})
 
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=AsyncMock(return_value=FAKE_JPEG),
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=AsyncMock(return_value=FAKE_JPEG),
+            ),
         ):
             result = await cam._async_camera_image_impl()
 
@@ -156,9 +162,12 @@ class TestMjpegPathEnabled:
         cam._cached_image = b"\xff\xd8fallback"
         cam._last_image_fetch = time.monotonic()  # not stale
 
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=AsyncMock(return_value=None),
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             result = await cam._async_camera_image_impl()
 
@@ -178,9 +187,12 @@ class TestMjpegPathEnabled:
         cam = _make_camera(coord=coord, opts={"use_mjpeg_snapshot": True})
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -212,9 +224,12 @@ class TestMjpegPathDisabled:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -230,9 +245,12 @@ class TestMjpegPathDisabled:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -262,9 +280,12 @@ class TestMjpegPathGen1:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -290,9 +311,12 @@ class TestMjpegPathGen1:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -315,9 +339,12 @@ class TestMjpegPathMissingCreds:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -337,9 +364,12 @@ class TestMjpegPathMissingCreds:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -359,9 +389,12 @@ class TestMjpegPathMissingCreds:
         cam._last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             await cam._async_camera_image_impl()
 
@@ -389,9 +422,12 @@ class TestMjpegGen2Indoor:
         )
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
-        with _patch_session(), patch(
-            "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
-            new=mock_fetch,
+        with (
+            _patch_session(),
+            patch(
+                "custom_components.bosch_shc_camera.camera.fetch_mjpeg_snapshot",
+                new=mock_fetch,
+            ),
         ):
             result = await cam._async_camera_image_impl()
 

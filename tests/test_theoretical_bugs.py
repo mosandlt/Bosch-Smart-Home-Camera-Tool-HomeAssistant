@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.source_match import assert_in_source
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -81,8 +82,8 @@ class TestAlertSentIdsEviction:
         """Mix of old + recent — only old gets evicted."""
         now = time.monotonic()
         sent = {
-            "old-1":   now - 150.0,
-            "old-2":   now - 200.0,
+            "old-1": now - 150.0,
+            "old-2": now - 200.0,
             "fresh-1": now - 30.0,
             "fresh-2": now - 90.0,
         }
@@ -118,11 +119,14 @@ class TestAlertSentIdsEviction:
     def test_fix_present_in_fcm_source(self):
         """Pin the actual fix in fcm.py — if someone re-introduces the
         size-gate eviction it would starve during burst-event scenarios."""
-        from pathlib import Path
         import re
+        from pathlib import Path
+
         fcm = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "fcm.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "fcm.py"
         )
         text = fcm.read_text()
         # Strip comments — the comment block explaining the old behavior
@@ -174,13 +178,16 @@ class TestFCMWatchdog:
     def test_fcm_running_flag_initial_state(self):
         """Coordinator starts with FCM not running — listener must be
         explicitly started."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         # Inspect __init__ source for the default
         import inspect
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(BoschCameraCoordinator.__init__)
-        assert "_fcm_running: bool = False" in src or "_fcm_running = False" in src, (
-            "Coordinator must start with FCM listener NOT running — "
-            "must be explicitly started by setup_entry"
+        # Coordinator must start with FCM listener NOT running —
+        # must be explicitly started by setup_entry
+        assert_in_source(
+            src, "_fcm_running: bool = False", "_fcm_running = False", any_of=True
         )
 
     def test_async_stop_fcm_push_clears_state(self):
@@ -190,9 +197,12 @@ class TestFCMWatchdog:
         # Direct read of the source — guards against future refactors that
         # forget one field.
         from pathlib import Path
+
         fcm = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "fcm.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "fcm.py"
         )
         text = fcm.read_text()
         # The relevant block in async_stop_fcm_push
@@ -202,8 +212,7 @@ class TestFCMWatchdog:
             "_fcm_client = None",
         ):
             assert must_assign in text, (
-                f"async_stop_fcm_push must clear `{must_assign}` "
-                f"to allow clean restart"
+                f"async_stop_fcm_push must clear `{must_assign}` to allow clean restart"
             )
 
 
@@ -221,6 +230,7 @@ class TestStreamFallbackTiming:
         """Indoor cameras on stable WLAN — should fallback at modest
         consecutive-error count."""
         from custom_components.bosch_shc_camera.models import get_model_config
+
         cfg = get_model_config("INDOOR")
         assert 3 <= cfg.max_stream_errors <= 8, (
             f"Indoor max_stream_errors={cfg.max_stream_errors} — too low "
@@ -231,6 +241,7 @@ class TestStreamFallbackTiming:
         """Outdoor cameras see real WLAN jitter — must tolerate more
         consecutive errors before falling back."""
         from custom_components.bosch_shc_camera.models import get_model_config
+
         cfg = get_model_config("OUTDOOR")
         assert cfg.max_stream_errors >= 3, (
             f"Outdoor max_stream_errors={cfg.max_stream_errors} — needs "
@@ -241,6 +252,7 @@ class TestStreamFallbackTiming:
         """`min_wifi_for_local` gates LOCAL stream attempts; below this
         signal % we go straight to REMOTE."""
         from custom_components.bosch_shc_camera.models import get_model_config
+
         for hw in ("INDOOR", "OUTDOOR", "HOME_Eyes_Outdoor", "HOME_Eyes_Indoor"):
             cfg = get_model_config(hw)
             assert 20 <= cfg.min_wifi_for_local <= 60, (
@@ -250,10 +262,11 @@ class TestStreamFallbackTiming:
 
     def test_pre_warm_min_wait_per_generation(self):
         """Pre-warm `min_total_wait` must cover encoder warm-up:
-          - Gen1 indoor: 360 SoC is fast → ≤ 30 s
-          - Gen2 outdoor: heavier encoder → up to 60 s
+        - Gen1 indoor: 360 SoC is fast → ≤ 30 s
+        - Gen2 outdoor: heavier encoder → up to 60 s
         """
         from custom_components.bosch_shc_camera.models import get_model_config
+
         gen1_indoor = get_model_config("INDOOR")
         gen2_outdoor = get_model_config("HOME_Eyes_Outdoor")
         assert gen1_indoor.min_total_wait <= 30
@@ -271,7 +284,8 @@ class TestStreamFallbackTiming:
         skip PUT-based renewal entirely and rely on FFmpeg's
         GET_PARAMETER to keep the session alive in-flight.
         """
-        from custom_components.bosch_shc_camera.models import get_model_config, MODELS
+        from custom_components.bosch_shc_camera.models import MODELS, get_model_config
+
         for hw in MODELS:
             cfg = get_model_config(hw)
             assert cfg.renewal_interval <= cfg.max_session_duration, (
@@ -284,7 +298,8 @@ class TestStreamFallbackTiming:
         """`heartbeat_interval` ≤ `max_session_duration`. For Gen2 Outdoor
         the value is intentionally high (3600) to avoid Digest-cred
         rotation — enforced by test_models.py."""
-        from custom_components.bosch_shc_camera.models import get_model_config, MODELS
+        from custom_components.bosch_shc_camera.models import MODELS, get_model_config
+
         for hw in MODELS:
             cfg = get_model_config(hw)
             assert cfg.heartbeat_interval <= cfg.max_session_duration
@@ -297,6 +312,7 @@ class TestMeta:
     def test_three_theoretical_areas_have_test_classes(self):
         """Sanity: 1 class per theoretical bug area."""
         from pathlib import Path
+
         text = Path(__file__).read_text()
         for name in (
             "TestAlertSentIdsEviction",

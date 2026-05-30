@@ -28,6 +28,7 @@ Coverage targets:
   - Backwards-compat: old config-entry shape (no options, no NVR fields)
     instantiates cleanly with safe defaults
 """
+
 from __future__ import annotations
 
 import math
@@ -39,7 +40,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.const import DOMAIN
-
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -54,7 +54,9 @@ def _make_entry(
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Bosch Smart Home Camera",
-        data=data if data is not None else {
+        data=data
+        if data is not None
+        else {
             "bearer_token": "test_bearer_token",
             "refresh_token": "test_refresh_token",
         },
@@ -98,7 +100,9 @@ async def test_options_snapshot_is_deep_enough_copy(hass: HomeAssistant) -> None
     assert coord._options_snapshot["scan_interval"] == 90
 
 
-async def test_scan_interval_from_options_drives_update_interval(hass: HomeAssistant) -> None:
+async def test_scan_interval_from_options_drives_update_interval(
+    hass: HomeAssistant,
+) -> None:
     """options.scan_interval overrides DEFAULT_OPTIONS."""
     entry = _make_entry(hass, options={"scan_interval": 30})
     coord = BoschCameraCoordinator(hass, entry)
@@ -125,8 +129,12 @@ async def test_monotonic_sentinels_use_negative_infinity(hass: HomeAssistant) ->
     by *intent* — that's the SENTINEL_RULE contract."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
-    assert coord._last_smb_cleanup == -math.inf, "_last_smb_cleanup default must be -inf"
-    assert coord._last_nvr_cleanup == -math.inf, "_last_nvr_cleanup default must be -inf"
+    assert coord._last_smb_cleanup == -math.inf, (
+        "_last_smb_cleanup default must be -inf"
+    )
+    assert coord._last_nvr_cleanup == -math.inf, (
+        "_last_nvr_cleanup default must be -inf"
+    )
 
 
 async def test_per_type_last_fetched_defaults_are_large_negative(
@@ -225,6 +233,7 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._fcm_push_mode == "unknown"
     # Lock has to be an actual threading.Lock so cross-thread writes are safe.
     import threading
+
     assert isinstance(coord._fcm_lock, threading.Lock().__class__)
 
     # ── Misc caches ────────────────────────────────────────────────────
@@ -245,6 +254,7 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._local_creds_cache == {}
     # Refresh lock must be an asyncio.Lock so concurrent refreshes serialize.
     import asyncio as _asyncio
+
     assert isinstance(coord._token_refresh_lock, _asyncio.Lock)
     assert coord._token_refresh_handle is None
     assert coord._bg_tasks == set()
@@ -471,5 +481,3 @@ async def test_two_coordinators_have_independent_state(hass: HomeAssistant) -> N
     # Update intervals differ per entry options.
     assert coord1.update_interval.total_seconds() == 30.0
     assert coord2.update_interval.total_seconds() == 90.0
-
-

@@ -17,16 +17,16 @@ touch Firebase:
   - `_async_persist_fcm_creds` — config entry update wrapper.
   - `_on_fcm_push` — push callback router (gating + scheduling).
 """
+
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from threading import RLock
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -60,9 +60,12 @@ def _stub_coord(**overrides):
 class TestGetAlertServices:
     def test_per_type_value_returned(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_information": "notify.test_user, notify.signal",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_information": "notify.test_user, notify.signal",
+            }
+        )
         out = get_alert_services(coord, "information")
         assert out == ["notify.test_user", "notify.signal"]
 
@@ -71,10 +74,13 @@ class TestGetAlertServices:
         when their per-type field is empty. Pin so a refactor can't drop
         the fallback (would silently disable system alerts)."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_service": "notify.fallback",
-            "alert_notify_system": "",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_service": "notify.fallback",
+                "alert_notify_system": "",
+            }
+        )
         out = get_alert_services(coord, "system")
         assert out == ["notify.fallback"]
 
@@ -83,35 +89,47 @@ class TestGetAlertServices:
         step entirely. Pin so they never silently inherit the
         alert_notify_service value."""
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_service": "notify.fallback",
-            "alert_notify_screenshot": "",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_service": "notify.fallback",
+                "alert_notify_screenshot": "",
+            }
+        )
         out = get_alert_services(coord, "screenshot")
         assert out == []
 
     def test_video_does_not_fall_back(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_service": "notify.fallback",
-            "alert_notify_video": "",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_service": "notify.fallback",
+                "alert_notify_video": "",
+            }
+        )
         out = get_alert_services(coord, "video")
         assert out == []
 
     def test_strips_whitespace_around_entries(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_information": "  notify.a  ,  notify.b , ",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_information": "  notify.a  ,  notify.b , ",
+            }
+        )
         out = get_alert_services(coord, "information")
         assert out == ["notify.a", "notify.b"]
 
     def test_empty_strings_filtered(self):
         from custom_components.bosch_shc_camera.fcm import get_alert_services
-        coord = _stub_coord(options={
-            "alert_notify_information": ",,notify.real,,",
-        })
+
+        coord = _stub_coord(
+            options={
+                "alert_notify_information": ",,notify.real,,",
+            }
+        )
         out = get_alert_services(coord, "information")
         assert out == ["notify.real"]
 
@@ -122,11 +140,13 @@ class TestGetAlertServices:
 class TestBuildNotifyData:
     def test_message_only_no_attachment(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data("notify.test_user", "Hi")
         assert out == {"message": "Hi"}
 
     def test_title_added_when_present(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data("notify.test_user", "Body", title="Title")
         assert out["title"] == "Title"
         assert out["message"] == "Body"
@@ -135,8 +155,10 @@ class TestBuildNotifyData:
         """HA Companion App reads images from /local/ URL — files served
         from /config/www/bosch_alerts/. Must NOT use file path."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data(
-            "notify.mobile_app_iphone", "Bewegung",
+            "notify.mobile_app_iphone",
+            "Bewegung",
             file_path="/config/www/bosch_alerts/snap.jpg",
         )
         assert out["data"]["image"] == "/local/bosch_alerts/snap.jpg"
@@ -145,8 +167,10 @@ class TestBuildNotifyData:
 
     def test_telegram_uses_photo_field(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data(
-            "notify.telegram_bot", "Audio-Alarm",
+            "notify.telegram_bot",
+            "Audio-Alarm",
             file_path="/path/to/clip.mp4",
         )
         assert out["data"]["photo"] == "/path/to/clip.mp4"
@@ -154,8 +178,10 @@ class TestBuildNotifyData:
 
     def test_signal_uses_attachments(self):
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data(
-            "notify.signal_thomas", "Snapshot",
+            "notify.signal_thomas",
+            "Snapshot",
             file_path="/tmp/snap.jpg",
         )
         assert out["data"]["attachments"] == ["/tmp/snap.jpg"]
@@ -163,8 +189,10 @@ class TestBuildNotifyData:
     def test_email_uses_attachments(self):
         """Generic notify provider (email, etc.) → attachments path."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data(
-            "notify.email_admin", "Alert",
+            "notify.email_admin",
+            "Alert",
             file_path="/tmp/alert.jpg",
         )
         assert out["data"]["attachments"] == ["/tmp/alert.jpg"]
@@ -173,8 +201,10 @@ class TestBuildNotifyData:
         """The image URL uses /local/bosch_alerts/{basename} — the file
         path's directory is stripped. Pin so HA can find the file."""
         from custom_components.bosch_shc_camera.fcm import build_notify_data
+
         out = build_notify_data(
-            "notify.mobile_app_xy", "x",
+            "notify.mobile_app_xy",
+            "x",
             file_path="/some/deep/dir/event_2026-05-04.jpg",
         )
         assert out["data"]["image"] == "/local/bosch_alerts/event_2026-05-04.jpg"
@@ -186,12 +216,14 @@ class TestBuildNotifyData:
 class TestWriteFile:
     def test_writes_bytes_to_file(self, tmp_path):
         from custom_components.bosch_shc_camera.fcm import _write_file
+
         target = tmp_path / "snap.jpg"
         _write_file(str(target), b"\xff\xd8DATA\xff\xd9")
         assert target.read_bytes() == b"\xff\xd8DATA\xff\xd9"
 
     def test_overwrites_existing(self, tmp_path):
         from custom_components.bosch_shc_camera.fcm import _write_file
+
         target = tmp_path / "snap.jpg"
         target.write_bytes(b"OLD")
         _write_file(str(target), b"NEW")
@@ -205,6 +237,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         coord = _stub_coord(token="")
         ok = await register_fcm_with_bosch(coord)
         assert ok is False
@@ -212,6 +245,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_no_fcm_token_returns_false(self):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         coord = _stub_coord(_fcm_token="")
         ok = await register_fcm_with_bosch(coord)
         assert ok is False
@@ -262,9 +296,12 @@ class TestRegisterFcmWithBosch:
     async def test_500_logs_response_body(self, caplog):
         """HTTP 500 with unknown error must include the body in the WARNING log."""
         import logging
+
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
 
-        bosch_body = '{"status":500,"error":"sh:unknown.error","message":"Something else."}'
+        bosch_body = (
+            '{"status":500,"error":"sh:unknown.error","message":"Something else."}'
+        )
 
         @asynccontextmanager
         async def _post(*args, **kw):
@@ -280,7 +317,9 @@ class TestRegisterFcmWithBosch:
             "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
             return_value=session,
         ):
-            with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"):
+            with caplog.at_level(
+                logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+            ):
                 ok = await register_fcm_with_bosch(coord)
 
         assert ok is False
@@ -323,7 +362,9 @@ class TestRegisterFcmWithBosch:
         )
         update_call = coord.hass.config_entries.async_update_entry
         update_call.assert_called_once()
-        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[1].get("data", {})
+        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[
+            1
+        ].get("data", {})
         assert saved_data.get("fcm_registered_token") == "fcm-token-xyz", (
             "Token must be saved even on 500 sh:internal.error so the next restart "
             "skips the registration POST entirely"
@@ -332,8 +373,9 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_timeout_returns_false(self):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         session = MagicMock()
-        session.post = MagicMock(side_effect=asyncio.TimeoutError())
+        session.post = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord()
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
@@ -349,6 +391,7 @@ class TestRegisterFcmWithBosch:
     async def test_device_type_picks_android_for_other(self):
         """Anything other than `ios` → ANDROID."""
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         captured = {}
 
         @asynccontextmanager
@@ -382,6 +425,7 @@ class TestRegisterFcmWithBosch:
         both the token and the ANDROID marker are present.
         """
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         post_called = []
 
         @asynccontextmanager
@@ -394,10 +438,12 @@ class TestRegisterFcmWithBosch:
         session = MagicMock()
         session.post = _post
         coord = _stub_coord(
-            _entry=SimpleNamespace(data={
-                "fcm_registered_token": "fcm-token-xyz",
-                "fcm_registered_device_type": "ANDROID",  # both conditions must hold
-            }),
+            _entry=SimpleNamespace(
+                data={
+                    "fcm_registered_token": "fcm-token-xyz",
+                    "fcm_registered_device_type": "ANDROID",  # both conditions must hold
+                }
+            ),
         )
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
@@ -405,12 +451,15 @@ class TestRegisterFcmWithBosch:
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True, "already-registered token must return True"
-        assert not post_called, "POST must be skipped when token is unchanged AND deviceType=ANDROID"
+        assert not post_called, (
+            "POST must be skipped when token is unchanged AND deviceType=ANDROID"
+        )
 
     @pytest.mark.asyncio
     async def test_new_token_triggers_post(self):
         """When no saved token exists (first run), the POST fires normally."""
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+
         post_called = []
 
         @asynccontextmanager
@@ -453,7 +502,9 @@ class TestRegisterFcmWithBosch:
         assert ok is True
         update_call = coord.hass.config_entries.async_update_entry
         update_call.assert_called_once()
-        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[1].get("data", {})
+        saved_data = update_call.call_args.kwargs.get("data") or update_call.call_args[
+            1
+        ].get("data", {})
         assert saved_data.get("fcm_registered_token") == "fcm-token-xyz", (
             "Registered token must be saved to config entry so subsequent "
             "restarts can skip the Bosch POST and avoid HTTP 500"
@@ -467,6 +518,7 @@ class TestAsyncStopFcmPush:
     @pytest.mark.asyncio
     async def test_no_client_no_op(self):
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         coord = _stub_coord(_fcm_client=None, _fcm_running=False)
         # Must NOT raise
         await async_stop_fcm_push(coord)
@@ -474,6 +526,7 @@ class TestAsyncStopFcmPush:
     @pytest.mark.asyncio
     async def test_stops_running_client_and_clears_state(self):
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock()
         client.stop = AsyncMock()
         coord = _stub_coord(_fcm_client=client, _fcm_running=True, _fcm_healthy=True)
@@ -490,6 +543,7 @@ class TestAsyncStopFcmPush:
         """Library may throw on stop (idempotency, race) — must not
         propagate. State must still be cleared."""
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock()
         client.stop = AsyncMock(side_effect=RuntimeError("library bug"))
         coord = _stub_coord(_fcm_client=client, _fcm_running=True)
@@ -501,6 +555,7 @@ class TestAsyncStopFcmPush:
     async def test_cancellation_propagates(self):
         """asyncio.CancelledError must NOT be swallowed (HA shutdown)."""
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock()
         client.stop = AsyncMock(side_effect=asyncio.CancelledError())
         coord = _stub_coord(_fcm_client=client, _fcm_running=True)
@@ -522,6 +577,7 @@ class TestAsyncStopFcmPush:
         Library upstream issue: github.com/sdb9696/firebase-messaging #33.
         """
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock()
         client.stop = AsyncMock()
         ssl_close_done = asyncio.Event()
@@ -542,6 +598,7 @@ class TestAsyncStopFcmPush:
         still return within ~10 s so the user-facing UI toggle doesn't freeze.
         State is cleared even when the gather times out."""
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock()
         client.stop = AsyncMock()
 
@@ -552,8 +609,10 @@ class TestAsyncStopFcmPush:
         client.tasks = [hung]
         coord = _stub_coord(_fcm_client=client, _fcm_running=True)
 
-        with patch("custom_components.bosch_shc_camera.fcm.asyncio.wait_for",
-                   AsyncMock(side_effect=asyncio.TimeoutError())):
+        with patch(
+            "custom_components.bosch_shc_camera.fcm.asyncio.wait_for",
+            AsyncMock(side_effect=TimeoutError()),
+        ):
             await async_stop_fcm_push(coord)
         # State cleared regardless of timeout
         assert coord._fcm_client is None
@@ -565,6 +624,7 @@ class TestAsyncStopFcmPush:
         """Older firebase-messaging versions may not expose ``client.tasks``.
         Stop must work via getattr() default and not raise AttributeError."""
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
         client = MagicMock(spec=["stop"])  # no `tasks` attribute
         client.stop = AsyncMock()
         coord = _stub_coord(_fcm_client=client, _fcm_running=True)
@@ -579,6 +639,7 @@ class TestAsyncPersistFcmCreds:
     @pytest.mark.asyncio
     async def test_writes_creds_to_entry_data(self):
         from custom_components.bosch_shc_camera.fcm import _async_persist_fcm_creds
+
         coord = _stub_coord()
         coord._entry = SimpleNamespace(data={"existing": "value"})
         creds = {"refresh_token": "rfr", "android_id": 12345}
@@ -595,6 +656,7 @@ class TestAsyncPersistFcmCreds:
         """async_update_entry might fire during HA shutdown — must not
         crash the FCM listener."""
         from custom_components.bosch_shc_camera.fcm import _async_persist_fcm_creds
+
         coord = _stub_coord()
         coord.hass.config_entries.async_update_entry = MagicMock(
             side_effect=RuntimeError("entry locked"),
@@ -612,18 +674,21 @@ class TestOnFcmPush:
         client must be dropped — otherwise it'd reschedule on a loop
         that already considers FCM down. Pin the gate."""
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+
         coord = _stub_coord(_fcm_running=False)
         _on_fcm_push(coord, {"from": "x"}, "push-id-1")
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_running_true_schedules_handler(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+
         coord = _stub_coord(_fcm_running=True)
         _on_fcm_push(coord, {"from": "Bosch"}, "push-id-2")
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
 
     def test_marks_fcm_healthy_and_stamps_last_push(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+
         coord = _stub_coord(_fcm_running=True, _fcm_healthy=False)
         before = coord._fcm_last_push
         _on_fcm_push(coord, {"from": "x"}, "push-id-3")
@@ -653,16 +718,22 @@ class TestQuietFcmPushClient:
         """_patch_class() must return a type that is a subclass of FcmPushClient."""
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
+
         from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
-        assert cls is not None, "patch must succeed when firebase_messaging is importable"
-        assert issubclass(cls, FcmPushClient), "patched class must be a subclass of FcmPushClient"
+        assert cls is not None, (
+            "patch must succeed when firebase_messaging is importable"
+        )
+        assert issubclass(cls, FcmPushClient), (
+            "patched class must be a subclass of FcmPushClient"
+        )
 
     def test_patched_class_has_listen_override(self):
         """The patched subclass must define its own _listen so it's not the vanilla one."""
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
+
         from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
@@ -681,9 +752,10 @@ class TestQuietFcmPushClient:
         """_get_fcm_push_client_class() returns a usable class when the library is present."""
         pytest.importorskip("firebase_messaging")
         from custom_components.bosch_shc_camera.fcm import (
-            _QuietFcmPushClient,
             _get_fcm_push_client_class,
+            _QuietFcmPushClient,
         )
+
         # Reset cache so we get a fresh computation
         _QuietFcmPushClient._patched_class = False
         cls = _get_fcm_push_client_class()
@@ -693,9 +765,10 @@ class TestQuietFcmPushClient:
         """Second call must return the same object (no double-computation)."""
         pytest.importorskip("firebase_messaging")
         from custom_components.bosch_shc_camera.fcm import (
-            _QuietFcmPushClient,
             _get_fcm_push_client_class,
+            _QuietFcmPushClient,
         )
+
         _QuietFcmPushClient._patched_class = False
         first = _get_fcm_push_client_class()
         second = _get_fcm_push_client_class()
@@ -706,10 +779,12 @@ class TestQuietFcmPushClient:
         must fall back to vanilla FcmPushClient rather than returning None."""
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
+
         from custom_components.bosch_shc_camera.fcm import (
-            _QuietFcmPushClient,
             _get_fcm_push_client_class,
+            _QuietFcmPushClient,
         )
+
         # Force the cache to None (simulates patch_class() returning None)
         _QuietFcmPushClient._patched_class = None
         cls = _get_fcm_push_client_class()
@@ -741,6 +816,7 @@ class TestQuietFcmPushClient:
         """
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClientRunState
+
         from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
@@ -813,6 +889,7 @@ class TestQuietFcmPushClient:
 
         # Capture _logger.exception calls from our fcm module
         import custom_components.bosch_shc_camera.fcm as fcm_mod
+
         original_exception = fcm_mod._LOGGER.exception
 
         def patched_exception(fmt: str, *args: object, **kwargs: object) -> None:
@@ -903,6 +980,7 @@ class TestQuietFcmPushClient:
         instance._terminate = fake_terminate  # type: ignore[attr-defined]
 
         import logging
+
         fcm_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         exception_records: list[str] = []
 
@@ -917,6 +995,7 @@ class TestQuietFcmPushClient:
         # we're asserting on. Snapshot + remove + restore so this counter-
         # test always sees the raw library output.
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         prev_filters = list(fcm_logger.filters)
         for _f in prev_filters:
             if isinstance(_f, _FCMNoiseFilter):
@@ -959,6 +1038,7 @@ class TestFCMNoiseFilterDualLogger:
     def setup_method(self) -> None:
         """Remove any existing _FCMNoiseFilter from both loggers before each test."""
         import logging
+
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
@@ -966,7 +1046,9 @@ class TestFCMNoiseFilterDualLogger:
         bosch_logger = fcm_mod._LOGGER
 
         for logger in (lib_logger, bosch_logger):
-            logger.filters = [f for f in logger.filters if not isinstance(f, _FCMNoiseFilter)]
+            logger.filters = [
+                f for f in logger.filters if not isinstance(f, _FCMNoiseFilter)
+            ]
 
     def teardown_method(self) -> None:
         """Clean up installed filters after each test."""
@@ -975,6 +1057,7 @@ class TestFCMNoiseFilterDualLogger:
     def test_filter_installed_on_both_loggers(self) -> None:
         """After _install_fcm_noise_filter(), both loggers carry the filter."""
         import logging
+
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import (
             _FCMNoiseFilter,
@@ -987,9 +1070,13 @@ class TestFCMNoiseFilterDualLogger:
         bosch_logger = fcm_mod._LOGGER
 
         lib_filters = [f for f in lib_logger.filters if isinstance(f, _FCMNoiseFilter)]
-        bosch_filters = [f for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter)]
+        bosch_filters = [
+            f for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter)
+        ]
 
-        assert lib_filters, "filter must be installed on firebase_messaging.fcmpushclient"
+        assert lib_filters, (
+            "filter must be installed on firebase_messaging.fcmpushclient"
+        )
         assert bosch_filters, (
             "filter must ALSO be installed on bosch_shc_camera.fcm logger — "
             "_QuietFcmPushClient._listen() logs via _LOGGER, not the library logger"
@@ -998,6 +1085,7 @@ class TestFCMNoiseFilterDualLogger:
     def test_shared_instance_same_object(self) -> None:
         """Both loggers must carry the SAME filter instance so _last_passed is shared."""
         import logging
+
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import (
             _FCMNoiseFilter,
@@ -1010,7 +1098,9 @@ class TestFCMNoiseFilterDualLogger:
         bosch_logger = fcm_mod._LOGGER
 
         lib_f = next(f for f in lib_logger.filters if isinstance(f, _FCMNoiseFilter))
-        bosch_f = next(f for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter))
+        bosch_f = next(
+            f for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter)
+        )
 
         assert lib_f is bosch_f, (
             "Both loggers must share ONE filter instance — if they have separate "
@@ -1027,6 +1117,7 @@ class TestFCMNoiseFilterDualLogger:
         """
         import logging
         import time
+
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import (
             _FCMNoiseFilter,
@@ -1067,6 +1158,7 @@ class TestFCMNoiseFilterDualLogger:
         """Calling _install_fcm_noise_filter() twice must not attach two filter
         instances to either logger (would allow two records through per window)."""
         import logging
+
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import (
             _FCMNoiseFilter,
@@ -1080,7 +1172,11 @@ class TestFCMNoiseFilterDualLogger:
         bosch_logger = fcm_mod._LOGGER
 
         lib_count = sum(1 for f in lib_logger.filters if isinstance(f, _FCMNoiseFilter))
-        bosch_count = sum(1 for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter))
+        bosch_count = sum(
+            1 for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter)
+        )
 
         assert lib_count == 1, f"lib logger must have exactly 1 filter, got {lib_count}"
-        assert bosch_count == 1, f"bosch logger must have exactly 1 filter, got {bosch_count}"
+        assert bosch_count == 1, (
+            f"bosch logger must have exactly 1 filter, got {bosch_count}"
+        )

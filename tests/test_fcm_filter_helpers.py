@@ -51,7 +51,7 @@ class TestErrorCountHelpers:
         now = time.monotonic()
         _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS[:] = [
             now - 200.0,  # in window
-            now - 50.0,   # in window
+            now - 50.0,  # in window
             now - 900.0,  # outside default 300s window
         ]
         assert get_recent_fcm_error_count() == 2
@@ -104,34 +104,45 @@ class TestFailureMarkers:
 
     def _make_record(self, msg: str) -> logging.LogRecord:
         return logging.LogRecord(
-            name="firebase_messaging.fcmregister", level=logging.WARNING,
-            pathname=__file__, lineno=1, msg=msg, args=(), exc_info=None,
+            name="firebase_messaging.fcmregister",
+            level=logging.WARNING,
+            pathname=__file__,
+            lineno=1,
+            msg=msg,
+            args=(),
+            exc_info=None,
         )
 
     def test_phone_registration_error_records_timestamp(self):
         f = _FCMNoiseFilter()
         _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
         # First instance passes through (last_passed = -inf) and records a ts.
-        passed = f.filter(self._make_record(
-            "GCM register request attempt 1 out of 2 has failed with Error=PHONE_REGISTRATION_ERROR"
-        ))
+        passed = f.filter(
+            self._make_record(
+                "GCM register request attempt 1 out of 2 has failed with Error=PHONE_REGISTRATION_ERROR"
+            )
+        )
         assert passed is True
         assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
 
     def test_unable_to_complete_gcm_auth_records_timestamp(self):
         f = _FCMNoiseFilter()
         _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
-        f.filter(self._make_record(
-            "Unable to complete gcm auth request after 2 tries, last error was Error=PHONE_REGISTRATION_ERROR"
-        ))
+        f.filter(
+            self._make_record(
+                "Unable to complete gcm auth request after 2 tries, last error was Error=PHONE_REGISTRATION_ERROR"
+            )
+        )
         assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
 
     def test_unable_to_establish_subscription_records_timestamp(self):
         f = _FCMNoiseFilter()
         _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
-        f.filter(self._make_record(
-            "FCM registration failed: Unable to establish subscription with Google Cloud Messaging."
-        ))
+        f.filter(
+            self._make_record(
+                "FCM registration failed: Unable to establish subscription with Google Cloud Messaging."
+            )
+        )
         assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
 
     def test_unrelated_message_does_not_record_timestamp(self):
@@ -148,6 +159,7 @@ class TestPatchClassImportError:
         # Force the inner `from firebase_messaging import …` to fail.
         # ``builtins.__import__`` is wrapped so only firebase_messaging blows up.
         import builtins as _bi
+
         real = _bi.__import__
 
         def _fake(name, *a, **kw):

@@ -17,11 +17,7 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 
-COMPONENT_DIR = (
-    Path(__file__).parent.parent
-    / "custom_components"
-    / "bosch_shc_camera"
-)
+COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 
 
 @pytest.fixture(scope="module")
@@ -36,26 +32,59 @@ def quality_scale() -> dict:
 
 # Tier rule sets per https://developers.home-assistant.io/docs/core/integration-quality-scale/
 BRONZE_RULES = {
-    "action-setup", "appropriate-polling", "brands", "common-modules",
-    "config-flow", "config-flow-test-coverage", "dependency-transparency",
-    "docs-actions", "docs-high-level-description", "docs-installation-instructions",
-    "docs-removal-instructions", "entity-event-setup", "entity-unique-id",
-    "has-entity-name", "runtime-data", "test-before-configure",
-    "test-before-setup", "unique-config-entry",
+    "action-setup",
+    "appropriate-polling",
+    "brands",
+    "common-modules",
+    "config-flow",
+    "config-flow-test-coverage",
+    "dependency-transparency",
+    "docs-actions",
+    "docs-high-level-description",
+    "docs-installation-instructions",
+    "docs-removal-instructions",
+    "entity-event-setup",
+    "entity-unique-id",
+    "has-entity-name",
+    "runtime-data",
+    "test-before-configure",
+    "test-before-setup",
+    "unique-config-entry",
 }
 SILVER_RULES = {
-    "action-exceptions", "config-entry-unloading", "docs-configuration-parameters",
-    "docs-installation-parameters", "entity-unavailable", "integration-owner",
-    "log-when-unavailable", "parallel-updates", "reauthentication-flow",
+    "action-exceptions",
+    "config-entry-unloading",
+    "docs-configuration-parameters",
+    "docs-installation-parameters",
+    "entity-unavailable",
+    "integration-owner",
+    "log-when-unavailable",
+    "parallel-updates",
+    "reauthentication-flow",
     "test-coverage",
 }
 GOLD_RULES = {
-    "devices", "diagnostics", "discovery", "discovery-update-info",
-    "docs-data-update", "docs-examples", "docs-known-limitations",
-    "docs-supported-devices", "docs-supported-functions", "docs-troubleshooting",
-    "docs-use-cases", "dynamic-devices", "entity-category", "entity-device-class",
-    "entity-disabled-by-default", "entity-translations", "exception-translations",
-    "icon-translations", "reconfiguration-flow", "repair-issues", "stale-devices",
+    "devices",
+    "diagnostics",
+    "discovery",
+    "discovery-update-info",
+    "docs-data-update",
+    "docs-examples",
+    "docs-known-limitations",
+    "docs-supported-devices",
+    "docs-supported-functions",
+    "docs-troubleshooting",
+    "docs-use-cases",
+    "dynamic-devices",
+    "entity-category",
+    "entity-device-class",
+    "entity-disabled-by-default",
+    "entity-translations",
+    "exception-translations",
+    "icon-translations",
+    "reconfiguration-flow",
+    "repair-issues",
+    "stale-devices",
 }
 
 
@@ -78,9 +107,7 @@ def test_quality_scale_yaml_lists_all_known_rules(quality_scale) -> None:
     )
 
 
-def test_manifest_tier_matches_yaml_completeness(
-    manifest, quality_scale
-) -> None:
+def test_manifest_tier_matches_yaml_completeness(manifest, quality_scale) -> None:
     """If manifest declares a tier, quality_scale.yaml must back it up.
 
     Rule: every Bronze + Silver + Gold rule must be `done` (or `exempt`)
@@ -101,10 +128,7 @@ def test_manifest_tier_matches_yaml_completeness(
     else:
         pytest.skip(f"manifest quality_scale={declared_tier!r} — nothing to verify")
 
-    not_done = [
-        rule for rule in required
-        if not _is_done_or_exempt(rules.get(rule))
-    ]
+    not_done = [rule for rule in required if not _is_done_or_exempt(rules.get(rule))]
     # Allow specific known-todo rules even at the claimed tier — these are
     # tracked as `todo` with explicit comment in quality_scale.yaml. Update
     # this allowlist when one is closed.
@@ -124,7 +148,9 @@ def test_no_unknown_rules_in_yaml(quality_scale) -> None:
     """
     listed = set(quality_scale["rules"].keys())
     known = (
-        BRONZE_RULES | SILVER_RULES | GOLD_RULES
+        BRONZE_RULES
+        | SILVER_RULES
+        | GOLD_RULES
         | {"async-dependency", "inject-websession", "strict-typing"}  # Platinum
     )
     unknown = listed - known

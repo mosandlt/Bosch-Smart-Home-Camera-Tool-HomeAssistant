@@ -13,6 +13,7 @@ No HA runtime needed — SimpleNamespace + AsyncMock pattern.
 Source: Thomas (project owner) — intrusion range confirmed via api-findings.md §5/§6.2
 capture 2026-04-28 (distance=8 observed, sensitivity max=7 documented).
 """
+
 from __future__ import annotations
 
 import time
@@ -22,8 +23,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 CAM_ID_GEN2_OUTDOOR = "11111111-1111-1111-1111-111111111111"
-CAM_ID_GEN2_INDOOR  = "22222222-2222-2222-2222-222222222222"
-CAM_ID_GEN1         = "44444444-0000-0000-0000-000000000001"
+CAM_ID_GEN2_INDOOR = "22222222-2222-2222-2222-222222222222"
+CAM_ID_GEN1 = "44444444-0000-0000-0000-000000000001"
 
 _INTRUSION_CFG = {
     "enabled": True,
@@ -67,8 +68,12 @@ def _coord(
         options={},
         _audio_cache=audio_cache if audio_cache is not None else {},
         _intrusion_config_cache=intrusion_cache if intrusion_cache is not None else {},
-        _intrusion_config_set_at=intrusion_set_at if intrusion_set_at is not None else {},
-        _shc_state_cache=shc_state_cache if shc_state_cache is not None else {cam_id: {}},
+        _intrusion_config_set_at=intrusion_set_at
+        if intrusion_set_at is not None
+        else {},
+        _shc_state_cache=shc_state_cache
+        if shc_state_cache is not None
+        else {cam_id: {}},
         async_put_camera=AsyncMock(return_value=put_return),
         is_camera_online=lambda cid: True,
     )
@@ -82,14 +87,14 @@ def _make_entity(cls, coord, cam_id=CAM_ID_GEN2_OUTDOOR):
     """Bypass __init__ safely for entities that call CoordinatorEntity.__init__."""
     ent = cls.__new__(cls)
     ent.coordinator = coord
-    ent._cam_id    = cam_id
-    ent._entry     = _entry()
+    ent._cam_id = cam_id
+    ent._entry = _entry()
     info = coord.data[cam_id]["info"]
-    ent._cam_title  = info["title"]
-    ent._model      = info["hardwareVersion"]
+    ent._cam_title = info["title"]
+    ent._model = info["hardwareVersion"]
     ent._model_name = ent._model
-    ent._fw         = info["firmwareVersion"]
-    ent._mac        = info.get("macAddress", "")
+    ent._fw = info["firmwareVersion"]
+    ent._mac = info.get("macAddress", "")
     ent.async_write_ha_state = MagicMock()
     return ent
 
@@ -104,6 +109,7 @@ class TestBoschSpeakerLevelNumber:
 
     def _make(self, audio_cache=None, cam_id=CAM_ID_GEN2_OUTDOOR, put_return=True):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         coord = _coord(cam_id=cam_id, audio_cache=audio_cache, put_return=put_return)
         ent = _make_entity(BoschSpeakerLevelNumber, coord, cam_id)
         return ent, coord
@@ -203,18 +209,24 @@ class TestBoschSpeakerLevelNumber:
 
     def test_translation_key(self):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         coord = _coord(audio_cache={CAM_ID_GEN2_OUTDOOR: dict(_AUDIO_CFG)})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "speaker_level"
 
     def test_unique_id(self):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         coord = _coord(audio_cache={})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
-        assert ent._attr_unique_id == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_speaker_level"
+        assert (
+            ent._attr_unique_id
+            == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_speaker_level"
+        )
 
     def test_disabled_by_default(self):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         coord = _coord(audio_cache={})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.entity_registry_enabled_default is False
@@ -228,9 +240,18 @@ class TestBoschSpeakerLevelNumber:
 class TestBoschMicrophoneLevelNumber:
     """Smoke + regression tests for mic level — privacy guard and body shape."""
 
-    def _make(self, hw="HOME_Eyes_Outdoor", audio_cache=None, cam_id=CAM_ID_GEN2_OUTDOOR, put_return=True):
+    def _make(
+        self,
+        hw="HOME_Eyes_Outdoor",
+        audio_cache=None,
+        cam_id=CAM_ID_GEN2_OUTDOOR,
+        put_return=True,
+    ):
         from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
-        coord = _coord(cam_id=cam_id, hw=hw, audio_cache=audio_cache, put_return=put_return)
+
+        coord = _coord(
+            cam_id=cam_id, hw=hw, audio_cache=audio_cache, put_return=put_return
+        )
         ent = _make_entity(BoschMicrophoneLevelNumber, coord, cam_id)
         return ent, coord
 
@@ -269,6 +290,7 @@ class TestBoschMicrophoneLevelNumber:
     async def test_privacy_guard_indoor_blocks_write(self):
         """Indoor II with privacy ON must not call async_put_camera."""
         from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+
         coord = _coord(
             cam_id=CAM_ID_GEN2_INDOOR,
             hw="HOME_Eyes_Indoor",
@@ -278,17 +300,24 @@ class TestBoschMicrophoneLevelNumber:
         ent = _make_entity(BoschMicrophoneLevelNumber, coord, CAM_ID_GEN2_INDOOR)
         # Patch switch helpers to simulate privacy ON
         import unittest.mock as mock
-        with mock.patch(
-            "custom_components.bosch_shc_camera.switch._is_gen2_indoor", return_value=True
-        ), mock.patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
-            new_callable=AsyncMock, return_value=True,
+
+        with (
+            mock.patch(
+                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                return_value=True,
+            ),
+            mock.patch(
+                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
         ):
             await ent.async_set_native_value(40.0)
         coord.async_put_camera.assert_not_called()
 
     def test_translation_key(self):
         from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+
         coord = _coord(audio_cache={})
         ent = BoschMicrophoneLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "microphone_level"
@@ -303,8 +332,15 @@ class TestBoschIntrusionSensitivityNumber:
     """PIN_EVERY_MODE: min(0) / max(7) / default(3) / garbage-clamp / PUT body / write-lock."""
 
     def _make(self, cam_id=CAM_ID_GEN2_OUTDOOR, intrusion_cache=None, put_return=True):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
-        ic = {cam_id: dict(_INTRUSION_CFG)} if intrusion_cache is None else intrusion_cache
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
+        ic = (
+            {cam_id: dict(_INTRUSION_CFG)}
+            if intrusion_cache is None
+            else intrusion_cache
+        )
         coord = _coord(cam_id=cam_id, intrusion_cache=ic, put_return=put_return)
         ent = _make_entity(BoschIntrusionSensitivityNumber, coord, cam_id)
         return ent, coord
@@ -316,11 +352,15 @@ class TestBoschIntrusionSensitivityNumber:
         assert ent.native_value == 3.0
 
     def test_native_value_min(self):
-        ent, _ = self._make(intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"sensitivity": 0, "distance": 5}})
+        ent, _ = self._make(
+            intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"sensitivity": 0, "distance": 5}}
+        )
         assert ent.native_value == 0.0
 
     def test_native_value_max(self):
-        ent, _ = self._make(intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"sensitivity": 7, "distance": 5}})
+        ent, _ = self._make(
+            intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"sensitivity": 7, "distance": 5}}
+        )
         assert ent.native_value == 7.0
 
     def test_native_value_none_when_cache_empty(self):
@@ -407,9 +447,14 @@ class TestBoschIntrusionSensitivityNumber:
     @pytest.mark.asyncio
     async def test_no_cache_update_on_failure(self):
         ent, coord = self._make(put_return=False)
-        original_sensitivity = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"]
+        original_sensitivity = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
+            "sensitivity"
+        ]
         await ent.async_set_native_value(7.0)
-        assert coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"] == original_sensitivity
+        assert (
+            coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"]
+            == original_sensitivity
+        )
 
     @pytest.mark.asyncio
     async def test_no_write_lock_on_failure(self):
@@ -428,7 +473,10 @@ class TestBoschIntrusionSensitivityNumber:
     @pytest.mark.asyncio
     async def test_gen1_not_wired_no_cache(self):
         """Gen1 has no intrusionDetectionConfig endpoint — cache stays empty, entity is unavailable."""
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(cam_id=CAM_ID_GEN1, hw="CAMERA_360", intrusion_cache={})
         ent = _make_entity(BoschIntrusionSensitivityNumber, coord, CAM_ID_GEN1)
         assert ent.available is False
@@ -437,26 +485,41 @@ class TestBoschIntrusionSensitivityNumber:
     # --- metadata ---
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionSensitivityNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "intrusion_sensitivity"
 
     def test_unique_id(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionSensitivityNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
-        assert ent._attr_unique_id == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_intrusion_sensitivity"
+        assert (
+            ent._attr_unique_id
+            == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_intrusion_sensitivity"
+        )
 
     def test_range_is_0_to_7(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionSensitivityNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.native_min_value == 0
         assert ent.native_max_value == 7
 
     def test_enabled_by_default(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionSensitivityNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.entity_registry_enabled_default is True
@@ -464,7 +527,10 @@ class TestBoschIntrusionSensitivityNumber:
     # --- Gen2 Indoor II also gets the entity ---
 
     def test_available_gen2_indoor(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionSensitivityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionSensitivityNumber,
+        )
+
         coord = _coord(
             cam_id=CAM_ID_GEN2_INDOOR,
             hw="HOME_Eyes_Indoor",
@@ -484,8 +550,15 @@ class TestBoschIntrusionDistanceNumber:
     """PIN_EVERY_MODE: min(1) / max(10) / default(8 per capture) / garbage-clamp / write-lock."""
 
     def _make(self, cam_id=CAM_ID_GEN2_OUTDOOR, intrusion_cache=None, put_return=True):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
-        ic = {cam_id: dict(_INTRUSION_CFG)} if intrusion_cache is None else intrusion_cache
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
+        ic = (
+            {cam_id: dict(_INTRUSION_CFG)}
+            if intrusion_cache is None
+            else intrusion_cache
+        )
         coord = _coord(cam_id=cam_id, intrusion_cache=ic, put_return=put_return)
         ent = _make_entity(BoschIntrusionDistanceNumber, coord, cam_id)
         return ent, coord
@@ -494,14 +567,20 @@ class TestBoschIntrusionDistanceNumber:
 
     def test_native_value_default(self):
         ent, _ = self._make()
-        assert ent.native_value == 8.0  # from _INTRUSION_CFG distance=8 (capture 2026-04-28)
+        assert (
+            ent.native_value == 8.0
+        )  # from _INTRUSION_CFG distance=8 (capture 2026-04-28)
 
     def test_native_value_min(self):
-        ent, _ = self._make(intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"distance": 1, "sensitivity": 3}})
+        ent, _ = self._make(
+            intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"distance": 1, "sensitivity": 3}}
+        )
         assert ent.native_value == 1.0
 
     def test_native_value_max(self):
-        ent, _ = self._make(intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"distance": 10, "sensitivity": 3}})
+        ent, _ = self._make(
+            intrusion_cache={CAM_ID_GEN2_OUTDOOR: {"distance": 10, "sensitivity": 3}}
+        )
         assert ent.native_value == 10.0
 
     def test_native_value_none_when_cache_empty(self):
@@ -585,9 +664,14 @@ class TestBoschIntrusionDistanceNumber:
     @pytest.mark.asyncio
     async def test_no_cache_update_on_failure(self):
         ent, coord = self._make(put_return=False)
-        original_distance = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
+        original_distance = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
+            "distance"
+        ]
         await ent.async_set_native_value(2.0)
-        assert coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"] == original_distance
+        assert (
+            coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
+            == original_distance
+        )
 
     @pytest.mark.asyncio
     async def test_no_write_lock_on_failure(self):
@@ -604,33 +688,51 @@ class TestBoschIntrusionDistanceNumber:
     # --- metadata ---
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "intrusion_distance"
 
     def test_unique_id(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
-        assert ent._attr_unique_id == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_intrusion_distance"
+        assert (
+            ent._attr_unique_id
+            == f"bosch_shc_camera_{CAM_ID_GEN2_OUTDOOR}_intrusion_distance"
+        )
 
     def test_range_is_1_to_8(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.native_min_value == 1
         assert ent.native_max_value == 8  # API rejects > 8 (HTTP 400, FW 9.40.102)
 
     def test_unit_is_meters(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         # Use private attr — public unit_of_measurement property requires entity platform context
         assert ent._attr_native_unit_of_measurement == "m"
 
     def test_enabled_by_default(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(intrusion_cache={})
         ent = BoschIntrusionDistanceNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.entity_registry_enabled_default is True
@@ -638,7 +740,10 @@ class TestBoschIntrusionDistanceNumber:
     # --- Gen2 Indoor II also gets the entity ---
 
     def test_available_gen2_indoor(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(
             cam_id=CAM_ID_GEN2_INDOOR,
             hw="HOME_Eyes_Indoor",
@@ -651,7 +756,10 @@ class TestBoschIntrusionDistanceNumber:
     # --- Gen1 not wired ---
 
     def test_gen1_no_cache_unavailable(self):
-        from custom_components.bosch_shc_camera.number import BoschIntrusionDistanceNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschIntrusionDistanceNumber,
+        )
+
         coord = _coord(cam_id=CAM_ID_GEN1, hw="CAMERA_EYES", intrusion_cache={})
         ent = _make_entity(BoschIntrusionDistanceNumber, coord, CAM_ID_GEN1)
         assert ent.available is False
@@ -670,8 +778,8 @@ class TestAsyncSetupEntryWiring:
     async def test_gen2_outdoor_gets_intrusion_entities(self):
         """Gen2 Outdoor II must produce BoschIntrusionSensitivityNumber + BoschIntrusionDistanceNumber."""
         from custom_components.bosch_shc_camera.number import (
-            BoschIntrusionSensitivityNumber,
             BoschIntrusionDistanceNumber,
+            BoschIntrusionSensitivityNumber,
             async_setup_entry,
         )
 
@@ -681,7 +789,9 @@ class TestAsyncSetupEntryWiring:
             audio_cache={CAM_ID_GEN2_OUTDOOR: dict(_AUDIO_CFG)},
             intrusion_cache={CAM_ID_GEN2_OUTDOOR: dict(_INTRUSION_CFG)},
         )
-        entry = SimpleNamespace(runtime_data=coord, data={}, options={}, entry_id="01ENTRY")
+        entry = SimpleNamespace(
+            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+        )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
 
@@ -693,8 +803,8 @@ class TestAsyncSetupEntryWiring:
     async def test_gen2_indoor_gets_intrusion_entities(self):
         """Gen2 Indoor II must also produce the intrusion number entities."""
         from custom_components.bosch_shc_camera.number import (
-            BoschIntrusionSensitivityNumber,
             BoschIntrusionDistanceNumber,
+            BoschIntrusionSensitivityNumber,
             async_setup_entry,
         )
 
@@ -704,7 +814,9 @@ class TestAsyncSetupEntryWiring:
             audio_cache={CAM_ID_GEN2_INDOOR: dict(_AUDIO_CFG)},
             intrusion_cache={CAM_ID_GEN2_INDOOR: dict(_INTRUSION_CFG)},
         )
-        entry = SimpleNamespace(runtime_data=coord, data={}, options={}, entry_id="01ENTRY")
+        entry = SimpleNamespace(
+            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+        )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
 
@@ -716,8 +828,8 @@ class TestAsyncSetupEntryWiring:
     async def test_gen1_does_not_get_intrusion_entities(self):
         """Gen1 must NOT get intrusion number entities (no endpoint on Gen1)."""
         from custom_components.bosch_shc_camera.number import (
-            BoschIntrusionSensitivityNumber,
             BoschIntrusionDistanceNumber,
+            BoschIntrusionSensitivityNumber,
             async_setup_entry,
         )
 
@@ -727,7 +839,9 @@ class TestAsyncSetupEntryWiring:
             audio_cache={},
             intrusion_cache={},
         )
-        entry = SimpleNamespace(runtime_data=coord, data={}, options={}, entry_id="01ENTRY")
+        entry = SimpleNamespace(
+            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+        )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
 

@@ -24,7 +24,7 @@ import pytest
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 DISK_JPEG = b"\xff\xd8\xff\xe0" + b"\x01" * 300  # 304 B — looks like a real snapshot
-RAM_JPEG = b"\xff\xd8\xff\xe0" + b"\x02" * 300   # different bytes for RAM path
+RAM_JPEG = b"\xff\xd8\xff\xe0" + b"\x02" * 300  # different bytes for RAM path
 
 
 def _make_hass(tmp_path: Path) -> Any:
@@ -117,10 +117,17 @@ async def test_image_entity_not_created_when_snapshots_disabled(
     added: list[Any] = []
     hass = _make_hass(tmp_path)
 
-    with patch("custom_components.bosch_shc_camera.image.get_options", return_value={"enable_snapshots": False}):
-        await async_setup_entry(hass, entry, lambda entities, **kw: added.extend(entities))
+    with patch(
+        "custom_components.bosch_shc_camera.image.get_options",
+        return_value={"enable_snapshots": False},
+    ):
+        await async_setup_entry(
+            hass, entry, lambda entities, **kw: added.extend(entities)
+        )
 
-    assert added == [], "No image entities should be created when snapshots are disabled"
+    assert added == [], (
+        "No image entities should be created when snapshots are disabled"
+    )
 
 
 @pytest.mark.asyncio
@@ -128,7 +135,10 @@ async def test_image_entity_created_when_snapshots_enabled(
     tmp_path: Path,
 ) -> None:
     """Image entities ARE created when enable_snapshots=True (default)."""
-    from custom_components.bosch_shc_camera.image import async_setup_entry, BoschCameraLastSnapshotImage
+    from custom_components.bosch_shc_camera.image import (
+        BoschCameraLastSnapshotImage,
+        async_setup_entry,
+    )
 
     coordinator = _make_coordinator()
     entry = SimpleNamespace(
@@ -139,13 +149,17 @@ async def test_image_entity_created_when_snapshots_enabled(
     added: list[Any] = []
     hass = _make_hass(tmp_path)
 
-    with patch("custom_components.bosch_shc_camera.image.get_options", return_value={"enable_snapshots": True}):
+    with patch(
+        "custom_components.bosch_shc_camera.image.get_options",
+        return_value={"enable_snapshots": True},
+    ):
         with patch(
             "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
             lambda self, h, verify_ssl=False: None,
         ):
             await async_setup_entry(
-                hass, entry,
+                hass,
+                entry,
                 lambda entities, **kw: added.extend(entities),
             )
 
@@ -304,6 +318,7 @@ async def test_notify_refreshed_called_twice_advances_timestamp(
 ) -> None:
     """Each call to async_notify_refreshed should advance image_last_updated."""
     import asyncio as _asyncio
+
     hass = _make_hass(tmp_path)
     entity = _build_image_entity(hass)
     entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]

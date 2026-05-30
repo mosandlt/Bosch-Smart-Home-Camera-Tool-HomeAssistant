@@ -16,18 +16,19 @@ branch logic executes.
 from __future__ import annotations
 
 import ssl
-import time
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-
 SRC = (
     Path(__file__).parent.parent
-    / "custom_components" / "bosch_shc_camera" / "tls_proxy.py"
+    / "custom_components"
+    / "bosch_shc_camera"
+    / "tls_proxy.py"
 ).read_text()
 
 CAM_ID = "TLS-H-TEST-PROXY"
@@ -77,15 +78,20 @@ class TestCircuitBreaker:
         srv.accept = fake_accept
 
         with (
-            patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=srv),
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+                return_value=srv,
+            ),
             patch(
                 "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
                 side_effect=OSError("Connection refused"),
             ),
         ):
             from custom_components.bosch_shc_camera.tls_proxy import (
-                start_tls_proxy, stop_tls_proxy,
+                start_tls_proxy,
+                stop_tls_proxy,
             )
+
             start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
             # Give the daemon thread time to process all 5 failures
             time.sleep(0.5)
@@ -127,7 +133,9 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_constants_in_source(self):
         """_MAX_BURST and _BURST_WINDOW must be present with documented values."""
-        assert "_MAX_BURST = 5" in SRC, "_MAX_BURST must be 5 (balance: detect offline vs false alarm)"
+        assert "_MAX_BURST = 5" in SRC, (
+            "_MAX_BURST must be 5 (balance: detect offline vs false alarm)"
+        )
         assert "_BURST_WINDOW = 30.0" in SRC, "_BURST_WINDOW must be 30.0s"
 
 
@@ -165,15 +173,20 @@ class TestTlsWrapFailure:
         srv.accept = fake_accept
 
         with (
-            patch("custom_components.bosch_shc_camera.tls_proxy.socket.socket", return_value=srv),
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.socket",
+                return_value=srv,
+            ),
             patch(
                 "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
                 return_value=raw_mock,
             ),
         ):
             from custom_components.bosch_shc_camera.tls_proxy import (
-                start_tls_proxy, stop_tls_proxy,
+                start_tls_proxy,
+                stop_tls_proxy,
             )
+
             start_tls_proxy(ctx, cam_id, "192.0.2.1", 443, cache)
             time.sleep(0.4)
 
@@ -210,7 +223,9 @@ class TestTlsWrapFailure:
         assert "raw.close()  # close raw socket if TLS handshake fails" in SRC
         # The bare 'raise' must follow
         lines = SRC.splitlines()
-        raw_close_lines = [i for i, l in enumerate(lines) if "raw.close()  # close raw socket" in l]
+        raw_close_lines = [
+            i for i, l in enumerate(lines) if "raw.close()  # close raw socket" in l
+        ]
         assert raw_close_lines, "raw.close() comment line not found in source"
         idx = raw_close_lines[0]
         next_lines = [lines[idx + j].strip() for j in range(1, 5)]
@@ -259,6 +274,7 @@ class TestTcpKeepaliveStructural:
     def test_keepidle_value_reasonable(self):
         """TCP_KEEPIDLE=30s: detect dead connections within 30s (not too short to flood)."""
         import re
+
         m = re.search(r"TCP_KEEPIDLE,\s*(\d+)", SRC)
         assert m, "TCP_KEEPIDLE must be set"
         val = int(m.group(1))
@@ -267,6 +283,7 @@ class TestTcpKeepaliveStructural:
     def test_keepcnt_value_reasonable(self):
         """TCP_KEEPCNT=3: 3 unacknowledged probes before declaring dead."""
         import re
+
         m = re.search(r"TCP_KEEPCNT,\s*(\d+)", SRC)
         assert m, "TCP_KEEPCNT must be set"
         val = int(m.group(1))
@@ -298,9 +315,15 @@ class TestPipeStructural:
         assert "src.close()" in SRC, "_pipe finally must close src socket"
         assert "dst.close()" in SRC, "_pipe finally must close dst socket"
         # Both in try/except to handle already-closed sockets
-        close_lines = [l.strip() for l in SRC.splitlines() if ".close()" in l and l.strip().startswith("try:")]
+        close_lines = [
+            l.strip()
+            for l in SRC.splitlines()
+            if ".close()" in l and l.strip().startswith("try:")
+        ]
         # Structural: the finally block has 2 try/except close() pairs
-        finally_idx = SRC.find("finally:\n                    try:\n                        src.close()")
+        finally_idx = SRC.find(
+            "finally:\n                    try:\n                        src.close()"
+        )
         assert finally_idx != -1, (
             "_pipe finally block must use try/except around src.close() — "
             "src may already be closed by the other pipe direction"
@@ -317,7 +340,7 @@ class TestPipeStructural:
 
     def test_debug_logging_gated(self):
         """RTP binary frames must not be logged (data[:1] != b'$' guard)."""
-        assert "data[:1] != b\"$\"" in SRC, (
+        assert 'data[:1] != b"$"' in SRC, (
             "RTP interleaved frames ($) must be excluded from debug logging — "
             "logging binary would corrupt the log and harm performance"
         )

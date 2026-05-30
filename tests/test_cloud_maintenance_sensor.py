@@ -8,7 +8,7 @@ exactly when users check it.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +18,7 @@ from custom_components.bosch_shc_camera.sensor import BoschCloudMaintenanceSenso
 
 
 def _window(*, active: bool = True) -> MaintenanceWindow:
-    ref = datetime(2026, 5, 19, 7, 30, tzinfo=timezone.utc)
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
     start = ref - timedelta(hours=1) if active else ref + timedelta(hours=1)
     end = ref + timedelta(hours=2) if active else ref + timedelta(hours=3)
     return MaintenanceWindow(
@@ -33,7 +33,9 @@ def _window(*, active: bool = True) -> MaintenanceWindow:
     )
 
 
-def _coord(*, cache: MaintenanceWindow | None, last_fetch: float = float("-inf")) -> SimpleNamespace:
+def _coord(
+    *, cache: MaintenanceWindow | None, last_fetch: float = float("-inf")
+) -> SimpleNamespace:
     c = SimpleNamespace()
     c._maintenance_cache = cache
     c._maintenance_last_fetch = last_fetch
@@ -43,7 +45,9 @@ def _coord(*, cache: MaintenanceWindow | None, last_fetch: float = float("-inf")
     return c
 
 
-def _make_sensor(cache: MaintenanceWindow | None, last_fetch: float = float("-inf")) -> BoschCloudMaintenanceSensor:
+def _make_sensor(
+    cache: MaintenanceWindow | None, last_fetch: float = float("-inf")
+) -> BoschCloudMaintenanceSensor:
     return BoschCloudMaintenanceSensor(
         _coord(cache=cache, last_fetch=last_fetch),
         "CAM_ID_X",
@@ -67,7 +71,11 @@ class TestCloudMaintenanceSensorValue:
     def test_native_value_active(self):
         # MaintenanceWindow.state() returns active/scheduled/past/recent/unknown.
         assert _make_sensor(_window(active=True)).native_value in {
-            "active", "scheduled", "past", "recent", "unknown",
+            "active",
+            "scheduled",
+            "past",
+            "recent",
+            "unknown",
         }
 
     def test_extra_attrs_empty_when_no_cache(self):
@@ -78,6 +86,7 @@ class TestCloudMaintenanceSensorValue:
     def test_extra_attrs_with_window(self, monkeypatch):
         mw = _window(active=True)
         import time as _time
+
         monkeypatch.setattr(_time, "monotonic", lambda: 1042.0)
         attrs = _make_sensor(mw, last_fetch=1000.0).extra_state_attributes
         assert attrs.get("title") == mw.title
@@ -88,6 +97,7 @@ class TestCloudMaintenanceSensorValue:
     def test_extra_attrs_skips_last_fetched_when_never(self, monkeypatch):
         mw = _window(active=True)
         import time as _time
+
         monkeypatch.setattr(_time, "monotonic", lambda: 1042.0)
         attrs = _make_sensor(mw, last_fetch=float("-inf")).extra_state_attributes
         assert "last_fetched_seconds_ago" not in attrs

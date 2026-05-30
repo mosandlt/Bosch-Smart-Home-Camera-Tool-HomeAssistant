@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_TITLE = "Terrasse"
 
@@ -55,7 +54,8 @@ def _make_coord(tmp_path=None, *, conn_type: str = "LOCAL"):
             }
         },
         _nvr_processes={},
-        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _nvr_user_intent={CAM_ID: True},
         _nvr_recent_crash={CAM_ID: float("-inf")},
@@ -101,8 +101,8 @@ class TestListPrerollSegmentsNonFile:
     def test_directory_entry_skipped(self, tmp_path):
         """A subdirectory inside cam_dir must be skipped (line 227 continue)."""
         from custom_components.bosch_shc_camera.recorder import (
-            _list_preroll_segments,
             _PREROLL_MIN_SIZE_BYTES,
+            _list_preroll_segments,
         )
 
         cam_dir = tmp_path / "cam"
@@ -126,8 +126,8 @@ class TestListPrerollSegmentsStatError:
     def test_stat_oserror_is_skipped(self, tmp_path):
         """If os.stat raises OSError (file vanished after listdir), skip it."""
         from custom_components.bosch_shc_camera.recorder import (
-            _list_preroll_segments,
             _PREROLL_MIN_SIZE_BYTES,
+            _list_preroll_segments,
         )
 
         cam_dir = tmp_path / "cam"
@@ -346,7 +346,7 @@ class TestStopRecorderKillProcessLookupError:
             except Exception:
                 pass
             call_count_ref[0] += 1
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
         call_count_ref = [0]
 
@@ -382,7 +382,7 @@ class TestStopRecorderDoubleTimeout:
             except Exception:
                 pass
             calls.append(timeout)
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
         with patch("asyncio.wait_for", side_effect=_timeout_twice):
             await recorder.stop_recorder(coord, CAM_ID)
@@ -428,12 +428,15 @@ class TestWatchRecorderGateClosedAfterSleep:
             start_calls.append(cid)
 
         with (
-            patch.object(recorder, "should_record", side_effect=_toggling_should_record),
+            patch.object(
+                recorder, "should_record", side_effect=_toggling_should_record
+            ),
             patch("asyncio.sleep", side_effect=_no_sleep),
             patch.object(recorder, "start_recorder", side_effect=_mock_start),
         ):
             # Need elapsed >= _RESPAWN_WINDOW_SECONDS to skip crash-loop guard
             import time
+
             with patch("time.monotonic", return_value=9999.0):
                 await recorder._watch_recorder(coord, CAM_ID, proc)
 

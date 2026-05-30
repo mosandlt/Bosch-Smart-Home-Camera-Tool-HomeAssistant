@@ -20,7 +20,6 @@ import pytest
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-
 CAM_A = "DEAD-BEEF-AAAA"
 CAM_B = "DEAD-BEEF-BBBB"
 OPCODE_DENIED = "0x0a98"
@@ -34,7 +33,6 @@ def _make_coordinator() -> BoschCameraCoordinator:
 
 
 class TestRcpLanDeniedHelpers:
-
     def test_not_denied_by_default(self) -> None:
         coord = _make_coordinator()
         assert coord._is_rcp_lan_denied(CAM_A, OPCODE_DENIED) is False
@@ -48,7 +46,9 @@ class TestRcpLanDeniedHelpers:
         coord = _make_coordinator()
         ttl = BoschCameraCoordinator._RCP_LAN_DENIED_TTL
         # Set an expired entry manually (in the past beyond TTL)
-        coord._rcp_lan_denied_until[(CAM_A, OPCODE_DENIED)] = time.monotonic() - ttl - 1.0
+        coord._rcp_lan_denied_until[(CAM_A, OPCODE_DENIED)] = (
+            time.monotonic() - ttl - 1.0
+        )
         assert coord._is_rcp_lan_denied(CAM_A, OPCODE_DENIED) is False
 
     def test_denial_independent_per_opcode(self) -> None:

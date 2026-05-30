@@ -30,7 +30,9 @@ class TestRcpReadRemoteSyncNon200:
 
         with patch("urllib.request.urlopen", return_value=fake_resp):
             result = local_rcp.rcp_read_remote_sync(
-                "proxy.example/abc123", "0x0d00", "P_OCTET",
+                "proxy.example/abc123",
+                "0x0d00",
+                "P_OCTET",
             )
         assert result is None
 
@@ -54,7 +56,9 @@ class TestHttpGetChunked:
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
             result = smb._http_get_chunked(
-                "https://example/clip.mp4", "TOKEN42", timeout=30,
+                "https://example/clip.mp4",
+                "TOKEN42",
+                timeout=30,
             )
 
         assert result is sentinel
@@ -73,8 +77,9 @@ class TestRcpUpdateDimmerOutOfRange:
         out-of-spec; the helper must call `_mark_fail("0x0c22")` so the
         skip-counter advances and the command stops being polled.
         Pins rcp.py L493-494."""
-        from custom_components.bosch_shc_camera import rcp
         from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera import rcp
 
         coord = SimpleNamespace()
         coord._rcp_dimmer_cache = {}
@@ -90,15 +95,20 @@ class TestRcpUpdateDimmerOutOfRange:
         # 0x0A0A = 2570 — out of the 0..100 dimmer range.
         bad_bytes = bytes.fromhex("0a0a")
 
-        async def _fake_read(_hass, _base, command, _sid, *, type_=None, num=0, session_cache=None):
+        async def _fake_read(
+            _hass, _base, command, _sid, *, type_=None, num=0, session_cache=None
+        ):
             if command == "0x0c22":
                 return bad_bytes
             return None
 
-        with patch.object(rcp, "get_cached_rcp_session",
-                          new=AsyncMock(return_value="SID-42")), \
-             patch.object(rcp, "rcp_read", new=_fake_read), \
-             patch.object(rcp, "_is_xml_envelope", return_value=False):
+        with (
+            patch.object(
+                rcp, "get_cached_rcp_session", new=AsyncMock(return_value="SID-42")
+            ),
+            patch.object(rcp, "rcp_read", new=_fake_read),
+            patch.object(rcp, "_is_xml_envelope", return_value=False),
+        ):
             await rcp.async_update_rcp_data(coord, "CAM-ID", "proxy.example", "hash123")
 
         # Out-of-range raw → dimmer cache must NOT be populated.

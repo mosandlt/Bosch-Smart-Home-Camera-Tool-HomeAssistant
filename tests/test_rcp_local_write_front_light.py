@@ -39,13 +39,15 @@ class _FakeSession:
     (HTTPS path) instead of passing them via `params=`. The fake parses
     the query string back into `last_params` so assertions keep working.
     """
+
     def __init__(self, resp: _FakeResp):
         self._resp = resp
         self.last_params: dict | None = None
         self.last_url: str | None = None
 
     def get(self, url, **_kwargs):
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
+
         self.last_url = url
         parsed = urlparse(url)
         self.last_params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
@@ -66,7 +68,9 @@ class TestRcpLocalWriteFrontLight:
         resp = _FakeResp(status=200, body=b"<ok/>")
         session = _FakeSession(resp)
         with patch.object(
-            rcp, "async_get_clientsession", return_value=session,
+            rcp,
+            "async_get_clientsession",
+            return_value=session,
         ):
             ok = await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", 100)
         assert ok is True
@@ -81,9 +85,17 @@ class TestRcpLocalWriteFrontLight:
     async def test_brightness_clamped_to_range(self):
         """Out-of-range brightness clamps to 0..100. 250 → 100, -10 → 0."""
         resp = _FakeResp(status=200, body=b"<ok/>")
-        with patch.object(rcp, "async_get_clientsession", return_value=_FakeSession(resp)):
-            assert await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", 250) is True
-            assert await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", -10) is True
+        with patch.object(
+            rcp, "async_get_clientsession", return_value=_FakeSession(resp)
+        ):
+            assert (
+                await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", 250)
+                is True
+            )
+            assert (
+                await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", -10)
+                is True
+            )
 
     async def test_brightness_zero_encodes_0x0000(self):
         resp = _FakeResp(status=200, body=b"<ok/>")
@@ -97,13 +109,17 @@ class TestRcpLocalWriteFrontLight:
         """Camera responding with HTTP 500 → caller must see False so the
         SHC-cloud retry path runs."""
         resp = _FakeResp(status=500, body=b"")
-        with patch.object(rcp, "async_get_clientsession", return_value=_FakeSession(resp)):
+        with patch.object(
+            rcp, "async_get_clientsession", return_value=_FakeSession(resp)
+        ):
             ok = await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", 50)
         assert ok is False
 
     async def test_returns_false_on_rcp_err_envelope(self):
         """`<err>` in response body → write failed even if HTTP 200."""
         resp = _FakeResp(status=200, body=b"<rcp><err>5</err></rcp>")
-        with patch.object(rcp, "async_get_clientsession", return_value=_FakeSession(resp)):
+        with patch.object(
+            rcp, "async_get_clientsession", return_value=_FakeSession(resp)
+        ):
             ok = await rcp.rcp_local_write_front_light(MagicMock(), "1.2.3.4", 50)
         assert ok is False

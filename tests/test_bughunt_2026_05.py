@@ -31,6 +31,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.source_match import assert_in_source
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 SRC = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
@@ -53,9 +54,7 @@ class TestDedupContinueDropsData:
         """Verify the structural bug: `continue` before the data-assignment block."""
         source = (SRC / "__init__.py").read_text()
         # Find the dedup-continue block
-        dedup_block = (
-            '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
-        )
+        dedup_block = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
         assert dedup_block in source, (
             "FCM dedup guard not found — __init__.py structure changed. "
             "Re-check that dedup continue was fixed."
@@ -70,9 +69,9 @@ class TestDedupContinueDropsData:
         """
         source = (SRC / "__init__.py").read_text()
         # Locate the dedup block and data assignment
-        dedup_pattern = '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
+        dedup_pattern = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
         dedup_idx = source.find(dedup_pattern)
-        data_assign_idx = source.find('data[cam_id] = {')
+        data_assign_idx = source.find("data[cam_id] = {")
         assert dedup_idx != -1, "Dedup guard not found"
         assert data_assign_idx != -1, "data[cam_id] assignment not found"
         # The data assignment must come AFTER the dedup block in source
@@ -84,7 +83,7 @@ class TestDedupContinueDropsData:
         # Find the dedup if-block boundaries and check for standalone continue.
         dedup_block_start = source.rfind("\n", 0, dedup_idx)
         # Grab 30 lines around the dedup guard
-        lines = source[dedup_block_start:dedup_block_start + 800].splitlines()
+        lines = source[dedup_block_start : dedup_block_start + 800].splitlines()
         in_dedup_block = False
         standalone_continue_found = False
         for line in lines:
@@ -108,11 +107,12 @@ class TestDedupContinueDropsData:
         source = (SRC / "__init__.py").read_text()
         # The dedup path must update _last_event_ids[cam_id] = newest_id
         # before any early exit
-        dedup_pattern = '_alert_sent_ids.get(newest_id, float("-inf")) > _now_mono - 60.0'
+        dedup_pattern = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
         dedup_idx = source.find(dedup_pattern)
         assert dedup_idx != -1
-        # In the 400 chars after the dedup guard, _last_event_ids must be updated
-        nearby = source[dedup_idx:dedup_idx + 400]
+        # In the chars after the dedup guard, _last_event_ids must be updated
+        # (widened — ruff line-wrapping spreads the block over more lines).
+        nearby = source[dedup_idx : dedup_idx + 700]
         assert "_last_event_ids[cam_id] = newest_id" in nearby, (
             "Dedup path must update _last_event_ids[cam_id] = newest_id "
             "to avoid a re-alert on the next polling tick."
@@ -165,8 +165,10 @@ class TestUnregisterGo2rtcEndpoints:
 
         reg_end = source.find("\n    async def ", reg_start + 1)
         unreg_end = source.find("\n    async def ", unreg_start + 1)
-        reg_body = source[reg_start:reg_end if reg_end != -1 else reg_start + 1500]
-        unreg_body = source[unreg_start:unreg_end if unreg_end != -1 else unreg_start + 1500]
+        reg_body = source[reg_start : reg_end if reg_end != -1 else reg_start + 1500]
+        unreg_body = source[
+            unreg_start : unreg_end if unreg_end != -1 else unreg_start + 1500
+        ]
 
         # Both functions must reference both standard go2rtc ports
         for port in ("11984", "1984"):
@@ -192,19 +194,22 @@ class TestStreamWarmingInit:
     def test_stream_warming_initialised_in_init(self):
         """BoschCameraCoordinator.__init__ must set _stream_warming = set()."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(BoschCameraCoordinator.__init__)
         assert "_stream_warming" in src, (
             "BUG-3: _stream_warming not initialised in __init__. "
             "clear_stream_warming() called before is_stream_warming() silently no-ops."
         )
         # Must be initialised as an empty set, not lazily
-        assert "_stream_warming = set()" in src or "_stream_warming: set" in src, (
-            "_stream_warming must be eagerly initialised to set() in __init__"
+        assert_in_source(
+            src, "_stream_warming = set()", "_stream_warming: set", any_of=True
         )
+        # _stream_warming must be eagerly initialised to set() in __init__
 
     def test_stream_warming_started_initialised_in_init(self):
         """BoschCameraCoordinator.__init__ must set _stream_warming_started = {}."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(BoschCameraCoordinator.__init__)
         assert "_stream_warming_started" in src, (
             "BUG-3: _stream_warming_started not initialised in __init__. "
@@ -215,6 +220,7 @@ class TestStreamWarmingInit:
         """clear_stream_warming must not need a hasattr guard once __init__ sets
         _stream_warming eagerly — the guard is a symptom of the lazy init bug."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(BoschCameraCoordinator.clear_stream_warming)
         # After the fix, clear_stream_warming can call self._stream_warming.discard()
         # directly without `if hasattr(...)` because __init__ guarantees the attribute.
@@ -234,7 +240,7 @@ class TestStreamWarmingInit:
         func_start = source.find("_try_live_connection_inner")
         if func_start == -1:
             pytest.skip("_try_live_connection_inner not found — name may have changed")
-        func_body = source[func_start:func_start + 1500]
+        func_body = source[func_start : func_start + 1500]
         assert 'hasattr(self, "_stream_warming")' not in func_body, (
             "BUG-3: hasattr guard for _stream_warming still in _try_live_connection_inner — "
             "attribute should be eagerly initialised in __init__"
@@ -275,7 +281,9 @@ class TestPrivacySetAtRace:
 
         # Use the full function body (up to the next top-level function)
         next_func = shc_src.find("\nasync def ", func_start + 1)
-        func_body = shc_src[func_start:next_func] if next_func != -1 else shc_src[func_start:]
+        func_body = (
+            shc_src[func_start:next_func] if next_func != -1 else shc_src[func_start:]
+        )
         # Find line indices of both writes
         cache_write = func_body.find("_shc_state_cache")
         lock_write = func_body.find("_privacy_set_at")
@@ -305,7 +313,7 @@ class TestPrivacySetAtRace:
         if fetcher_start == -1:
             fetcher_start = shc_src.find("_shc_state_cache[cam_id]")
         assert fetcher_start != -1, "SHC state fetcher not found"
-        fetcher_body = shc_src[fetcher_start:fetcher_start + 1500]
+        fetcher_body = shc_src[fetcher_start : fetcher_start + 1500]
         assert "_privacy_set_at" in fetcher_body, (
             "BUG-4: SHC state fetcher does not check `_privacy_set_at` write-lock. "
             "A concurrent toggle can be overwritten by the background tick."

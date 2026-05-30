@@ -74,6 +74,7 @@ async def test_oauth_create_entry_redacts_in_diagnostics(
         TO_REDACT,
         async_get_config_entry_diagnostics,
     )
+
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={

@@ -11,13 +11,13 @@ Strategy: patch `_warn_if_privacy_on` directly at import site so we can force
 True (blocked) or False (pass-through) without needing a real coordinator cache.
 For the panic-alarm failed-PUT warning (line 1804): use `async_put_camera=False`.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -26,17 +26,20 @@ CAM_ID = "00000000-0000-0000-0000-000000000001"
 # Shared helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _stub_coord_with_privacy(privacy_on: bool = False, hw: str = "HOME_Eyes_Indoor"):
     """Coordinator stub that _warn_if_privacy_on can actually interrogate."""
     return SimpleNamespace(
-        data={CAM_ID: {
-            "info": {
-                "title": "Innenbereich",
-                "hardwareVersion": hw,
-                "firmwareVersion": "9.40.25",
-                "macAddress": "aa:bb:cc:dd:ee:02",
-            },
-        }},
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": "Innenbereich",
+                    "hardwareVersion": hw,
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "aa:bb:cc:dd:ee:02",
+                },
+            }
+        },
         _shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
         _panic_alarm_cache={},
         _alarm_settings_cache={},
@@ -60,11 +63,13 @@ def _hass_stub():
 # 1. light.py — _BoschRgbLedLight.async_turn_on  (BoschTopLedLight)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestRgbLedLightPrivacyGuard:
     """When privacy is ON the turn_on must abort and NOT call the API."""
 
     def _make_top_led(self, coord):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         entry = SimpleNamespace(data={}, options={})
         entity = BoschTopLedLight.__new__(BoschTopLedLight)
         entity.coordinator = coord
@@ -124,11 +129,13 @@ class TestRgbLedLightPrivacyGuard:
 # 2. light.py — BoschFrontLight.async_turn_on
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestFrontLightPrivacyGuard:
     """When privacy is ON BoschFrontLight.async_turn_on must abort early."""
 
     def _make_front_light(self, coord):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
+
         entry = SimpleNamespace(data={}, options={})
         entity = BoschFrontLight.__new__(BoschFrontLight)
         entity.coordinator = coord
@@ -187,11 +194,13 @@ class TestFrontLightPrivacyGuard:
 # 3. switch.py — BoschPanicAlarmSwitch._set
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPanicAlarmPrivacyGuardAndFailedPut:
     """Covers lines 1793 (return when blocked) and 1804 (warning on failed PUT)."""
 
     def _make_switch(self, coord):
         from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
+
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         entity = BoschPanicAlarmSwitch(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -253,11 +262,13 @@ class TestPanicAlarmPrivacyGuardAndFailedPut:
 # 4. number.py — _BoschAlarmDelayBase.async_set_native_value
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAlarmDelayPrivacyGuard:
     """Line 762: when camera is Gen2 Indoor AND privacy is ON the setter must abort."""
 
     def _make_entity(self, coord, klass_name="BoschAlarmDelayNumber"):
         import importlib
+
         mod = importlib.import_module("custom_components.bosch_shc_camera.number")
         klass = getattr(mod, klass_name)
         entry = SimpleNamespace(data={}, options={})
@@ -292,7 +303,9 @@ class TestAlarmDelayPrivacyGuard:
 
         coord.async_put_camera.assert_not_called()
         # Cache not updated — value must still be the original (10), not the new value (15)
-        assert coord._alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"] == original_delay
+        assert (
+            coord._alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"] == original_delay
+        )
 
     @pytest.mark.asyncio
     async def test_set_value_proceeds_for_gen2_indoor_with_privacy_off(self):

@@ -14,6 +14,7 @@ All tests run without a live HA instance. Coordinator is a SimpleNamespace stub;
 each method is called via the unbound pattern:
     BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -83,7 +84,9 @@ def _heartbeat_resp(status: int):
     """Build a minimal async-context-manager response mock for the heartbeat PUT."""
     resp = MagicMock()
     resp.status = status
-    resp.text = AsyncMock(return_value='{"user":"u","password":"p","urls":["1.2.3.4:443"]}')
+    resp.text = AsyncMock(
+        return_value='{"user":"u","password":"p","urls":["1.2.3.4:443"]}'
+    )
     # Make it usable as an async context manager: `async with session.put(...) as resp`
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
@@ -119,8 +122,9 @@ class TestAutoRenewBreakGuards:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_not_called(), (
-            "try_live_connection must not be called when generation is stale"
+        (
+            coord.try_live_connection.assert_not_called(),
+            ("try_live_connection must not be called when generation is stale"),
         )
 
     @pytest.mark.asyncio
@@ -133,8 +137,9 @@ class TestAutoRenewBreakGuards:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_not_called(), (
-            "try_live_connection must not be called when stream is off"
+        (
+            coord.try_live_connection.assert_not_called(),
+            ("try_live_connection must not be called when stream is off"),
         )
 
     @pytest.mark.asyncio
@@ -142,15 +147,14 @@ class TestAutoRenewBreakGuards:
         """After sleep, _connection_type != 'LOCAL' → loop exits."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord(
-            _live_connections={CAM_A: {"_connection_type": "REMOTE"}}
-        )
+        coord = _make_coord(_live_connections={CAM_A: {"_connection_type": "REMOTE"}})
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_not_called(), (
-            "try_live_connection must not be called when connection is not LOCAL"
+        (
+            coord.try_live_connection.assert_not_called(),
+            ("try_live_connection must not be called when connection is not LOCAL"),
         )
 
     @pytest.mark.asyncio
@@ -201,8 +205,9 @@ class TestAutoRenewFullRenewal:
         with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be called once for the renewal"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            ("try_live_connection must be called once for the renewal"),
         )
 
     @pytest.mark.asyncio
@@ -236,8 +241,9 @@ class TestAutoRenewFullRenewal:
         with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited once on renewal failure path"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            ("try_live_connection must be awaited once on renewal failure path"),
         )
 
     @pytest.mark.asyncio
@@ -254,8 +260,9 @@ class TestAutoRenewFullRenewal:
             # Must not raise — exception is caught internally
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited even when it raises"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            ("try_live_connection must be awaited even when it raises"),
         )
 
     @pytest.mark.asyncio
@@ -335,19 +342,24 @@ class TestAutoRenewHeartbeat:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
         )
 
         put_cm = _heartbeat_resp(200)
         session_cm, _ = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord._refresh_local_creds_from_heartbeat.assert_called_once(), (
-            "_refresh_local_creds_from_heartbeat must be called on heartbeat 200"
+        (
+            coord._refresh_local_creds_from_heartbeat.assert_called_once(),
+            ("_refresh_local_creds_from_heartbeat must be called on heartbeat 200"),
         )
 
     @pytest.mark.asyncio
@@ -357,19 +369,24 @@ class TestAutoRenewHeartbeat:
 
         coord = _make_coord(
             token=None,
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
         )
 
         put_cm = _heartbeat_resp(200)
         session_cm, session = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord._refresh_local_creds_from_heartbeat.assert_not_called(), (
-            "No heartbeat PUT must be sent when token is None"
+        (
+            coord._refresh_local_creds_from_heartbeat.assert_not_called(),
+            ("No heartbeat PUT must be sent when token is None"),
         )
 
     @pytest.mark.asyncio
@@ -378,45 +395,62 @@ class TestAutoRenewHeartbeat:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
         )
 
         put_cm = _heartbeat_resp(500)
         session_cm, _ = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord._refresh_local_creds_from_heartbeat.assert_not_called(), (
-            "_refresh_local_creds_from_heartbeat must NOT be called on non-200 heartbeat"
+        (
+            coord._refresh_local_creds_from_heartbeat.assert_not_called(),
+            (
+                "_refresh_local_creds_from_heartbeat must NOT be called on non-200 heartbeat"
+            ),
         )
 
     @pytest.mark.asyncio
     async def test_heartbeat_exception_increments_fails(self):
         """aiohttp raises during heartbeat → exception caught, loop continues."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import aiohttp as _aiohttp
 
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
         )
 
         bad_session = MagicMock()
-        bad_session.put = MagicMock(side_effect=_aiohttp.ClientConnectionError("refused"))
+        bad_session.put = MagicMock(
+            side_effect=_aiohttp.ClientConnectionError("refused")
+        )
         bad_session_cm = MagicMock()
         bad_session_cm.__aenter__ = AsyncMock(return_value=bad_session)
         bad_session_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=bad_session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=bad_session_cm),
+        ):
             # Must not propagate the ClientConnectionError
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord._refresh_local_creds_from_heartbeat.assert_not_called(), (
-            "_refresh_local_creds_from_heartbeat must not be called after heartbeat exception"
+        (
+            coord._refresh_local_creds_from_heartbeat.assert_not_called(),
+            (
+                "_refresh_local_creds_from_heartbeat must not be called after heartbeat exception"
+            ),
         )
 
 
@@ -444,20 +478,27 @@ class TestAutoRenewForceRenewal:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
             try_live_connection=AsyncMock(return_value={"_connection_type": "LOCAL"}),
         )
 
         put_cm = _heartbeat_resp(500)
         session_cm, _ = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited(), (
-            "try_live_connection must be called after 3 consecutive heartbeat failures"
+        (
+            coord.try_live_connection.assert_awaited(),
+            (
+                "try_live_connection must be called after 3 consecutive heartbeat failures"
+            ),
         )
 
     @pytest.mark.asyncio
@@ -466,21 +507,26 @@ class TestAutoRenewForceRenewal:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
             try_live_connection=AsyncMock(return_value=None),
         )
 
         put_cm = _heartbeat_resp(500)
         session_cm, _ = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             # Must not raise — renewal failure is handled gracefully
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited(), (
-            "try_live_connection must be called even when it returns None"
+        (
+            coord.try_live_connection.assert_awaited(),
+            ("try_live_connection must be called even when it returns None"),
         )
 
     @pytest.mark.asyncio
@@ -489,21 +535,28 @@ class TestAutoRenewForceRenewal:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(renewal_interval=9999999)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(renewal_interval=9999999)
+            ),
             try_live_connection=AsyncMock(side_effect=OSError("network gone")),
         )
 
         put_cm = _heartbeat_resp(500)
         session_cm, _ = _make_aiohttp_session_mock(put_cm)
 
-        with patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             # Must not propagate the OSError
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
-        coord.try_live_connection.assert_awaited(), (
-            "try_live_connection must be awaited even when it raises after 3 heartbeat fails"
+        (
+            coord.try_live_connection.assert_awaited(),
+            (
+                "try_live_connection must be awaited even when it raises after 3 heartbeat fails"
+            ),
         )
 
 
@@ -556,8 +609,9 @@ class TestPromoteToLocal:
 
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_not_called(), (
-            "try_live_connection must not be called when there is no live connection"
+        (
+            coord.try_live_connection.assert_not_called(),
+            ("try_live_connection must not be called when there is no live connection"),
         )
 
     @pytest.mark.asyncio
@@ -565,14 +619,13 @@ class TestPromoteToLocal:
         """_connection_type = 'LOCAL' → return immediately (only REMOTE gets promoted)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord(
-            _live_connections={CAM_A: {"_connection_type": "LOCAL"}}
-        )
+        coord = _make_coord(_live_connections={CAM_A: {"_connection_type": "LOCAL"}})
 
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_not_called(), (
-            "try_live_connection must not be called when connection is already LOCAL"
+        (
+            coord.try_live_connection.assert_not_called(),
+            ("try_live_connection must not be called when connection is already LOCAL"),
         )
 
     @pytest.mark.asyncio
@@ -587,8 +640,9 @@ class TestPromoteToLocal:
 
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited on REMOTE → LOCAL promotion attempt"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            ("try_live_connection must be awaited on REMOTE → LOCAL promotion attempt"),
         )
 
     @pytest.mark.asyncio
@@ -603,8 +657,11 @@ class TestPromoteToLocal:
 
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited on successful REMOTE→LOCAL promotion"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            (
+                "try_live_connection must be awaited on successful REMOTE→LOCAL promotion"
+            ),
         )
 
     @pytest.mark.asyncio
@@ -619,8 +676,11 @@ class TestPromoteToLocal:
 
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited even when LAN promotion does not stick"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            (
+                "try_live_connection must be awaited even when LAN promotion does not stick"
+            ),
         )
 
     @pytest.mark.asyncio
@@ -630,14 +690,17 @@ class TestPromoteToLocal:
 
         coord = _make_coord(
             _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
-            try_live_connection=AsyncMock(side_effect=RuntimeError("connection refused")),
+            try_live_connection=AsyncMock(
+                side_effect=RuntimeError("connection refused")
+            ),
         )
 
         # Must not raise
         await BoschCameraCoordinator._promote_to_local(coord, CAM_A)
 
-        coord.try_live_connection.assert_awaited_once(), (
-            "try_live_connection must be awaited even when it raises"
+        (
+            coord.try_live_connection.assert_awaited_once(),
+            ("try_live_connection must be awaited even when it raises"),
         )
 
 
@@ -660,8 +723,9 @@ class TestRemoteSessionTerminator:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
-        coord._tear_down_live_stream.assert_not_called(), (
-            "_tear_down_live_stream must not be called when generation is stale"
+        (
+            coord._tear_down_live_stream.assert_not_called(),
+            ("_tear_down_live_stream must not be called when generation is stale"),
         )
 
     @pytest.mark.asyncio
@@ -676,8 +740,9 @@ class TestRemoteSessionTerminator:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
-        coord._tear_down_live_stream.assert_not_called(), (
-            "_tear_down_live_stream must not be called when stream is already off"
+        (
+            coord._tear_down_live_stream.assert_not_called(),
+            ("_tear_down_live_stream must not be called when stream is already off"),
         )
 
     @pytest.mark.asyncio
@@ -692,8 +757,11 @@ class TestRemoteSessionTerminator:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
-        coord._tear_down_live_stream.assert_not_called(), (
-            "_tear_down_live_stream must not be called when connection is LOCAL, not REMOTE"
+        (
+            coord._tear_down_live_stream.assert_not_called(),
+            (
+                "_tear_down_live_stream must not be called when connection is LOCAL, not REMOTE"
+            ),
         )
 
     @pytest.mark.asyncio
@@ -708,8 +776,11 @@ class TestRemoteSessionTerminator:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
-        coord._tear_down_live_stream.assert_awaited_once_with(CAM_A), (
-            "_tear_down_live_stream must be called with cam_id when REMOTE session expires"
+        (
+            coord._tear_down_live_stream.assert_awaited_once_with(CAM_A),
+            (
+                "_tear_down_live_stream must be called with cam_id when REMOTE session expires"
+            ),
         )
         assert len(coord.hass._create_task_calls) == 1, (
             "hass.async_create_task must be called exactly once to schedule async_request_refresh"
@@ -721,7 +792,9 @@ class TestRemoteSessionTerminator:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(max_session_duration=120)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(max_session_duration=120)
+            ),
             _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
         )
 
@@ -734,9 +807,7 @@ class TestRemoteSessionTerminator:
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
         assert sleep_calls, "asyncio.sleep must be called at least once"
-        assert sleep_calls[0] == 60, (
-            f"Expected delay=60 (120-60), got {sleep_calls[0]}"
-        )
+        assert sleep_calls[0] == 60, f"Expected delay=60 (120-60), got {sleep_calls[0]}"
 
     @pytest.mark.asyncio
     async def test_terminator_min_delay_is_one_second(self):
@@ -744,7 +815,9 @@ class TestRemoteSessionTerminator:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            get_model_config=MagicMock(return_value=_model_cfg(max_session_duration=30)),
+            get_model_config=MagicMock(
+                return_value=_model_cfg(max_session_duration=30)
+            ),
             _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
         )
 
@@ -779,8 +852,9 @@ class TestRemoteSessionTerminator:
         except asyncio.CancelledError:
             pass
 
-        coord._tear_down_live_stream.assert_not_called(), (
-            "_tear_down_live_stream must not be called when task is cancelled"
+        (
+            coord._tear_down_live_stream.assert_not_called(),
+            ("_tear_down_live_stream must not be called when task is cancelled"),
         )
 
     @pytest.mark.asyncio

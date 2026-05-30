@@ -1,0 +1,23 @@
+# Local dev hooks. CI runs the same checks (quality.yml + frontend-checks.yml).
+# Install: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+        additional_dependencies: [tomli]
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict (custom_components)
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

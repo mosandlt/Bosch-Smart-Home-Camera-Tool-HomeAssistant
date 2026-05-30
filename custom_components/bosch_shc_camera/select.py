@@ -8,6 +8,7 @@ Provides:
     Writes via PUT /v11/video_inputs/{id}/motion.
     Disabled by default.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,14 +17,13 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.restore_state import RestoreEntity
-
-from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN
 from . import BoschCameraCoordinator, get_options
+from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,14 @@ STREAM_MODE_OPTIONS = ["auto", "local", "remote"]
 
 QUALITY_OPTIONS = ["auto", "high", "low"]
 
-MOTION_SENSITIVITY_OPTIONS = ["super_high", "high", "medium_high", "medium_low", "low", "off"]
+MOTION_SENSITIVITY_OPTIONS = [
+    "super_high",
+    "high",
+    "medium_high",
+    "medium_low",
+    "low",
+    "off",
+]
 SENSITIVITY_TO_API = {k: k.upper() for k in MOTION_SENSITIVITY_OPTIONS}
 
 DETECTION_MODE_OPTIONS = ["all_motions", "only_humans", "zones"]
@@ -45,11 +52,11 @@ FCM_PUSH_MODE_OPTIONS = ["auto", "polling"]
 # Available only for cameras with panLimit > 0 (CAMERA_360 indoor).
 PAN_PRESET_OPTIONS = ["home", "left", "right", "back_left", "back_right"]
 PAN_PRESET_ANGLES: dict[str, int] = {
-    "home":       0,
-    "left":     -60,
-    "right":     60,
-    "back_left":  -120,
-    "back_right":  120,
+    "home": 0,
+    "left": -60,
+    "right": 60,
+    "back_left": -120,
+    "back_right": 120,
 }
 
 
@@ -67,6 +74,7 @@ async def async_setup_entry(
         cam_info = coordinator.data[cam_id].get("info", {})
         hw = cam_info.get("hardwareVersion", "CAMERA")
         from .models import get_model_config
+
         if get_model_config(hw).generation >= 2:
             entities.append(BoschDetectionModeSelect(coordinator, cam_id, config_entry))
         # PTZ preset select — only for cameras with panLimit > 0 (CAMERA_360 indoor)
@@ -74,7 +82,9 @@ async def async_setup_entry(
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         ptz_enabled = config_entry.options.get(CONF_ENABLE_PTZ_CONTROLS, False)
         if pan_limit and ptz_enabled:
-            entities.append(BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit))
+            entities.append(
+                BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit)
+            )
     # Integration-level selects (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -102,8 +112,8 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
         self._entry = entry
-        self._attr_name            = "Video Quality"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_video_quality"
+        self._attr_name = "Video Quality"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_video_quality"
         self._attr_translation_key = "video_quality"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -114,8 +124,14 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         if last_state:
             saved = last_state.state
             # Backward compat: old states were display text like "Auto"
-            _LEGACY_MAP = {"Auto": "auto", "Hoch (30 Mbps)": "high", "Niedrig (1.9 Mbps)": "low"}
-            quality_key = _LEGACY_MAP.get(saved, saved if saved in QUALITY_OPTIONS else None)
+            _LEGACY_MAP = {
+                "Auto": "auto",
+                "Hoch (30 Mbps)": "high",
+                "Niedrig (1.9 Mbps)": "low",
+            }
+            quality_key = _LEGACY_MAP.get(
+                saved, saved if saved in QUALITY_OPTIONS else None
+            )
             if quality_key:
                 self.coordinator.set_quality(self._cam_id, quality_key)
                 _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
@@ -151,7 +167,7 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
                     await self.coordinator._register_go2rtc_stream(
                         self._cam_id, new_live.get("rtspsUrl", "")
                     )
-            except Exception:
+            except Exception:  # noqa: S110 # best-effort go2rtc re-registration on live-URL change, failure non-actionable
                 pass
         self.async_write_ha_state()
 
@@ -166,7 +182,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
     Disabled by default — enable in Settings → Entities.
     """
 
-    _attr_icon    = "mdi:motion-sensor"
+    _attr_icon = "mdi:motion-sensor"
     _attr_options = MOTION_SENSITIVITY_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_registry_enabled_default = False
@@ -179,14 +195,14 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
     ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
 
         cam_data = coordinator.data.get(cam_id, {})
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
 
-        self._attr_name            = "Motion Sensitivity"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_motion_sensitivity_select"
+        self._attr_name = "Motion Sensitivity"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_sensitivity_select"
         self._attr_translation_key = "motion_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -196,10 +212,10 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
         cam_info = cam_data.get("info", {})
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
-            "name":        f"Bosch {self._cam_title}",
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":       cam_info.get("hardwareVersion", "Smart Home Camera"),
-            "sw_version":  cam_info.get("firmwareVersion", ""),
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
     @property
@@ -216,9 +232,8 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
     @property
     def available(self) -> bool:
         """Available only when motion settings have been fetched (slow tier)."""
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator.motion_settings(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator.motion_settings(self._cam_id)
         )
 
     async def async_select_option(self, option: str) -> None:
@@ -227,12 +242,15 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             _LOGGER.warning("Invalid motion sensitivity option: %s", option)
             return
         from .switch import _is_gen2_indoor, _warn_if_privacy_on
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Bewegungsempfindlichkeit"):
+
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(
+            self, "Bewegungsempfindlichkeit"
+        ):
             return
         api_value = SENSITIVITY_TO_API[option]
         settings = self.coordinator.motion_settings(self._cam_id)
-        enabled  = settings.get("enabled", True)
-        success  = await self.coordinator.async_put_camera(
+        enabled = settings.get("enabled", True)
+        success = await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
             {"enabled": enabled, "motionAlarmConfiguration": api_value},
@@ -242,7 +260,9 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             motion_data["motionAlarmConfiguration"] = api_value
             if self._cam_id in self.coordinator.data:
                 self.coordinator.data[self._cam_id]["motion"] = motion_data
-            _LOGGER.debug("Motion sensitivity set to %s for %s", api_value, self._cam_id)
+            _LOGGER.debug(
+                "Motion sensitivity set to %s for %s", api_value, self._cam_id
+            )
         else:
             _LOGGER.warning("Failed to set motion sensitivity for %s", self._cam_id)
         self.async_write_ha_state()
@@ -258,7 +278,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
     One per integration (not per camera).
     """
 
-    _attr_icon    = "mdi:cellphone-arrow-down"
+    _attr_icon = "mdi:cellphone-arrow-down"
     _attr_options = FCM_PUSH_MODE_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
@@ -271,9 +291,9 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
     ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
-        self._attr_name            = "FCM Push Mode"
-        self._attr_unique_id       = "bosch_shc_camera_fcm_push_mode"
+        self._entry = entry
+        self._attr_name = "FCM Push Mode"
+        self._attr_unique_id = "bosch_shc_camera_fcm_push_mode"
         self._attr_translation_key = "fcm_push_mode"
 
     @property
@@ -309,7 +329,8 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
         new_options = dict(self._entry.options)
         new_options["fcm_push_mode"] = option
         self.hass.config_entries.async_update_entry(
-            self._entry, options=new_options,
+            self._entry,
+            options=new_options,
         )
         # Restart FCM with new mode
         await self.coordinator.async_stop_fcm_push()
@@ -333,10 +354,10 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
     One per integration (not per camera).
     """
 
-    _attr_icon             = "mdi:home-network"
-    _attr_options          = STREAM_MODE_OPTIONS
-    _attr_has_entity_name  = True
-    _attr_entity_category  = EntityCategory.CONFIG
+    _attr_icon = "mdi:home-network"
+    _attr_options = STREAM_MODE_OPTIONS
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -346,11 +367,11 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
     ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name            = "Stream Modus"
-        self._attr_unique_id       = "bosch_shc_camera_stream_mode"
+        self._attr_name = "Stream Modus"
+        self._attr_unique_id = "bosch_shc_camera_stream_mode"
         self._attr_translation_key = "stream_mode"
 
     @property
@@ -359,10 +380,10 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         cam_info = cam_data.get("info", {})
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
-            "name":        f"Bosch {self._cam_title}",
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":       cam_info.get("hardwareVersion", "Smart Home Camera"),
-            "sw_version":  cam_info.get("firmwareVersion", ""),
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
     @property
@@ -390,7 +411,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig.
     """
 
-    _attr_icon    = "mdi:shield-home-outline"
+    _attr_icon = "mdi:shield-home-outline"
     _attr_options = DETECTION_MODE_OPTIONS
     _attr_has_entity_name = True
 
@@ -402,12 +423,12 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     ) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
         cam_data = coordinator.data.get(cam_id, {})
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name            = "Erkennungsmodus"
-        self._attr_unique_id       = f"bosch_shc_camera_{cam_id}_detection_mode"
+        self._attr_name = "Erkennungsmodus"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_detection_mode"
         self._attr_translation_key = "detection_mode"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -417,10 +438,10 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         cam_info = cam_data.get("info", {})
         return {
             "identifiers": {(DOMAIN, self._cam_id)},
-            "name":        f"Bosch {self._cam_title}",
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":       cam_info.get("hardwareVersion", "Smart Home Camera"),
-            "sw_version":  cam_info.get("firmwareVersion", ""),
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
     @property
@@ -435,15 +456,15 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._intrusion_config_cache.get(self._cam_id)
         )
 
     async def async_select_option(self, option: str) -> None:
         if option not in DETECTION_MODE_OPTIONS:
             return
         from .switch import _warn_if_privacy_on
+
         if await _warn_if_privacy_on(self, "Erkennungsmodus"):
             return
         api_value = DETECTION_TO_API[option]
@@ -456,7 +477,9 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         )
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
-            _LOGGER.debug("Detection mode set to %s for %s", api_value, self._cam_id[:8])
+            _LOGGER.debug(
+                "Detection mode set to %s for %s", api_value, self._cam_id[:8]
+            )
         else:
             _LOGGER.warning("Failed to set detection mode for %s", self._cam_id[:8])
         self.async_write_ha_state()
@@ -519,7 +542,11 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
         if raw is None:
             return None
         # Invert sign for ceiling-mounted cameras (mirrors BoschPanNumber logic)
-        pos = -int(raw) if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id) else int(raw)
+        pos = (
+            -int(raw)
+            if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
+            else int(raw)
+        )
         for name, angle in PAN_PRESET_ANGLES.items():
             if pos == angle:
                 return name
@@ -547,7 +574,11 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
         success = await self.coordinator.async_cloud_set_pan(self._cam_id, actual)
         if success:
             self.coordinator._pan_cache[self._cam_id] = actual
-            _LOGGER.debug("Pan preset %s → %d° for %s", option, actual, self._cam_id[:8])
+            _LOGGER.debug(
+                "Pan preset %s → %d° for %s", option, actual, self._cam_id[:8]
+            )
         else:
-            _LOGGER.warning("Failed to apply pan preset %s for %s", option, self._cam_id[:8])
+            _LOGGER.warning(
+                "Failed to apply pan preset %s for %s", option, self._cam_id[:8]
+            )
         self.async_write_ha_state()

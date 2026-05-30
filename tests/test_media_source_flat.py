@@ -28,6 +28,7 @@ Covers ALL remaining missing lines from the coverage report:
   1131-1133 _stream_smb_fobj — invalid Range header (ValueError)
   1154     _stream_smb_fobj — finally block: fobj.close() called even on write failure
 """
+
 from __future__ import annotations
 
 import sys
@@ -36,24 +37,25 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components.media_source.error import Unresolvable
 
 from custom_components.bosch_shc_camera.media_source import (
-    _LocalBackend,
-    _NvrBackend,
-    _SmbBackend,
-    _safe_join,
     BoschCameraMediaSource,
     BoschCameraMediaView,
     _enabled_sources,
     _find_source,
+    _LocalBackend,
+    _NvrBackend,
+    _safe_join,
+    _SmbBackend,
 )
-from homeassistant.components.media_source.error import Unresolvable
 
 MODULE = "custom_components.bosch_shc_camera.media_source"
 
 # ---------------------------------------------------------------------------
 # SMB test helpers (reused from round2 pattern)
 # ---------------------------------------------------------------------------
+
 
 def _fake_smbclient(entries=None, stat_size=0, fobj=None):
     """Build a fake smbclient module for sys.modules injection."""
@@ -79,6 +81,7 @@ def _dir_entry(name, is_dir=True, is_file=False):
 
 def _make_smb_backend(**opts):
     from custom_components.bosch_shc_camera.media_source import _SmbBackend
+
     hass = MagicMock()
     hass.data = {}
     base = {
@@ -92,11 +95,16 @@ def _make_smb_backend(**opts):
     return _SmbBackend(hass, base)
 
 
-def _hass_stub(entry_id: str = "entry1", opts: dict | None = None, tmp_path: Path | None = None):
+def _hass_stub(
+    entry_id: str = "entry1", opts: dict | None = None, tmp_path: Path | None = None
+):
     hass = MagicMock()
     hass.data = {}
     hass.http = MagicMock()
-    opts = opts or {"download_path": str(tmp_path or "/tmp"), "media_browser_source": "local"}
+    opts = opts or {
+        "download_path": str(tmp_path or "/tmp"),
+        "media_browser_source": "local",
+    }
     coord = SimpleNamespace(options=opts)
     entry = MagicMock()
     entry.entry_id = entry_id
@@ -107,6 +115,7 @@ def _hass_stub(entry_id: str = "entry1", opts: dict | None = None, tmp_path: Pat
 
     async def _exec(fn, *args):
         return fn(*args)
+
     hass.async_add_executor_job = _exec
     return hass
 
@@ -114,6 +123,7 @@ def _hass_stub(entry_id: str = "entry1", opts: dict | None = None, tmp_path: Pat
 # ---------------------------------------------------------------------------
 # Lines 72-73: _safe_join — path traversal via symlink (escaping base)
 # ---------------------------------------------------------------------------
+
 
 class TestSafeJoinTraversal:
     def test_symlink_escaping_base_returns_none(self, tmp_path):
@@ -143,6 +153,7 @@ class TestSafeJoinTraversal:
 # Line 135: _LocalBackend.list_years — cam_dir is a file, not a dir
 # ---------------------------------------------------------------------------
 
+
 class TestLocalListYears:
     def test_cam_path_is_file_not_dir_returns_empty(self, tmp_path):
         # Create "Terrasse" as a file, not a dir
@@ -158,6 +169,7 @@ class TestLocalListYears:
 # ---------------------------------------------------------------------------
 # Lines 142-148: _LocalBackend.list_months — cam_dir None / year_dir None / not-dir
 # ---------------------------------------------------------------------------
+
 
 class TestLocalListMonths:
     def test_cam_dir_none_path_traversal_returns_empty(self, tmp_path):
@@ -200,6 +212,7 @@ class TestLocalListMonths:
 # Lines 154-163: _LocalBackend.list_days — various None paths
 # ---------------------------------------------------------------------------
 
+
 class TestLocalListDays:
     def test_cam_dir_none_returns_empty(self, tmp_path):
         nested = tmp_path / "base"
@@ -239,6 +252,7 @@ class TestLocalListDays:
 # Lines 172, 175: _LocalBackend.list_events_dated — cam_dir None, day_dir not dir
 # ---------------------------------------------------------------------------
 
+
 class TestLocalListEventsDated:
     def test_cam_dir_none_returns_empty(self, tmp_path):
         nested = tmp_path / "base"
@@ -264,6 +278,7 @@ class TestLocalListEventsDated:
 # Lines 215, 218: _LocalBackend._collect_events — junk + unparseable skips
 # ---------------------------------------------------------------------------
 
+
 class TestLocalCollectEvents:
     def test_macos_junk_skipped_in_collect(self, tmp_path):
         day_dir = tmp_path / "Cam" / "2026" / "05" / "07"
@@ -287,6 +302,7 @@ class TestLocalCollectEvents:
 # ---------------------------------------------------------------------------
 # Lines 361-369: _SmbBackend.list_flat_dates — success + OSError
 # ---------------------------------------------------------------------------
+
 
 class TestSmbListFlatDates:
     def test_flat_dates_extracted_from_files(self):
@@ -337,6 +353,7 @@ class TestSmbListFlatDates:
 # ---------------------------------------------------------------------------
 # Lines 373-392: _SmbBackend.list_flat_events — success + OSError
 # ---------------------------------------------------------------------------
+
 
 class TestSmbListFlatEvents:
     def test_flat_events_filtered_by_date(self):
@@ -392,6 +409,7 @@ class TestSmbListFlatEvents:
 # Lines 396-404: _SmbBackend.open_flat_file — traversal/junk/invalid/valid
 # ---------------------------------------------------------------------------
 
+
 class TestSmbOpenFlatFile:
     def test_slash_in_filename_raises(self):
         b = _make_smb_backend()
@@ -443,6 +461,7 @@ class TestSmbOpenFlatFile:
 # Line 440: _NvrBackend.list_segments — cam_dir None (path traversal)
 # ---------------------------------------------------------------------------
 
+
 class TestNvrListSegmentsCamDirNone:
     def test_path_traversal_cam_returns_empty(self, tmp_path):
         nested = tmp_path / "base"
@@ -454,6 +473,7 @@ class TestNvrListSegmentsCamDirNone:
 # ---------------------------------------------------------------------------
 # Line 475: _enabled_sources — entry with no runtime_data → continue
 # ---------------------------------------------------------------------------
+
 
 class TestEnabledSourcesNoRuntimeData:
     def test_entry_without_runtime_data_skipped(self):
@@ -483,6 +503,7 @@ class TestEnabledSourcesNoRuntimeData:
 # Line 475 (original): _find_source returns None
 # ---------------------------------------------------------------------------
 
+
 class TestFindSourceNone:
     def test_find_source_unknown_kind_returns_none(self, tmp_path):
         hass = _hass_stub("entry1", tmp_path=tmp_path)
@@ -494,20 +515,25 @@ class TestFindSourceNone:
 # Lines 491-492: _enabled_sources — OSError creating local backend path
 # ---------------------------------------------------------------------------
 
+
 class TestEnabledSourcesOSError:
     def test_local_oserror_skipped(self):
         """OSError when creating download dir → source is silently skipped."""
         entry = MagicMock()
         entry.entry_id = "e1"
-        entry.runtime_data = SimpleNamespace(options={"download_path": "/no/such/deeply/nested/path"})
+        entry.runtime_data = SimpleNamespace(
+            options={"download_path": "/no/such/deeply/nested/path"}
+        )
         hass = MagicMock()
         hass.config_entries.async_loaded_entries.return_value = [entry]
         hass.data = {}
         # Path.mkdir will raise PermissionError (subclass of OSError) for impossible paths
         # on systems where /no doesn't exist and we can't create it.
         # We patch Path.mkdir to raise OSError to ensure the except branch fires.
-        with patch("custom_components.bosch_shc_camera.media_source.Path.mkdir",
-                   side_effect=OSError("permission denied")):
+        with patch(
+            "custom_components.bosch_shc_camera.media_source.Path.mkdir",
+            side_effect=OSError("permission denied"),
+        ):
             sources = _enabled_sources(hass)
         # Local source should be skipped due to OSError
         kinds = [s.kind for s, _ in sources]
@@ -517,22 +543,26 @@ class TestEnabledSourcesOSError:
         """OSError when accessing NVR path → source is silently skipped."""
         entry = MagicMock()
         entry.entry_id = "e1"
-        entry.runtime_data = SimpleNamespace(options={
-            "download_path": "",
-            "enable_nvr": True,
-            "nvr_base_path": str(tmp_path / "nvr"),
-        })
+        entry.runtime_data = SimpleNamespace(
+            options={
+                "download_path": "",
+                "enable_nvr": True,
+                "nvr_base_path": str(tmp_path / "nvr"),
+            }
+        )
         hass = MagicMock()
         hass.config_entries.async_loaded_entries.return_value = [entry]
         hass.data = {}
         # Patch Path.is_dir to raise OSError for the NVR path check
         original_is_dir = Path.is_dir
         call_count = [0]
+
         def mock_is_dir(self):
             call_count[0] += 1
             if "nvr" in str(self):
                 raise OSError("nvr inaccessible")
             return original_is_dir(self)
+
         with patch.object(Path, "is_dir", mock_is_dir):
             sources = _enabled_sources(hass)
         kinds = [s.kind for s, _ in sources]
@@ -543,8 +573,8 @@ class TestEnabledSourcesOSError:
 # Lines 698, 701-722: _browse_local camera_first flat dates + flat events
 # ---------------------------------------------------------------------------
 
-class TestBrowseLocalCameraFirstFlat:
 
+class TestBrowseLocalCameraFirstFlat:
     def _setup(self, tmp_path):
         """Create a backend with files directly in camera/ (flat layout within camera_first mode)."""
         cam_dir = tmp_path / "Terrasse"
@@ -616,10 +646,12 @@ class TestBrowseLocalCameraFirstFlat:
 # Lines 703-707: _browse_local camera_first — months level (len(rest)==2, 4-digit year)
 # ---------------------------------------------------------------------------
 
+
 class TestBrowseLocalMonthsLevel:
     def test_year_level_lists_months(self, tmp_path):
         """camera_first, len(rest)==2 with 4-digit year → lists months."""
         from tests.test_media_source_browse import _seed_local_event
+
         _seed_local_event(tmp_path, "Terrasse", "2026-05-07")
         _seed_local_event(tmp_path, "Terrasse", "2026-04-15")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -644,10 +676,12 @@ class TestBrowseLocalMonthsLevel:
 # Lines 728-733: _browse_local camera_first — days level (len(rest)==3)
 # ---------------------------------------------------------------------------
 
+
 class TestBrowseLocalDaysLevel:
     def test_year_month_level_lists_days(self, tmp_path):
         """camera_first, len(rest)==3 → lists days."""
         from tests.test_media_source_browse import _seed_local_event
+
         _seed_local_event(tmp_path, "Terrasse", "2026-05-07")
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -665,8 +699,8 @@ class TestBrowseLocalDaysLevel:
 # Lines 755-774: _browse_local legacy flat (camera_first=False)
 # ---------------------------------------------------------------------------
 
-class TestBrowseLocalLegacyFlat:
 
+class TestBrowseLocalLegacyFlat:
     def _hass_with_legacy_backend(self, tmp_path):
         """Build hass with camera_first=False (flat) local backend."""
         cam_dir = tmp_path / "Terrasse"
@@ -686,6 +720,7 @@ class TestBrowseLocalLegacyFlat:
             title="Flat Backend",
         )
         from unittest.mock import MagicMock
+
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
                 async_loaded_entries=MagicMock(return_value=[entry]),
@@ -754,13 +789,15 @@ class TestBrowseLocalLegacyFlat:
 # Line 864: _browse_smb camera_first — flat dates at camera level
 # ---------------------------------------------------------------------------
 
-class TestBrowseSmbCameraFirstFlatDates:
 
+class TestBrowseSmbCameraFirstFlatDates:
     def _browse_smb(self, identifier, cameras=None, years=None, flat_dates=None):
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = True
@@ -803,23 +840,36 @@ class TestBrowseSmbCameraFirstFlatDates:
 # Lines 875-888: _browse_smb camera_first — flat events branch (non-year rest[1])
 # ---------------------------------------------------------------------------
 
-class TestBrowseSmbCameraFirstFlatEvents:
 
+class TestBrowseSmbCameraFirstFlatEvents:
     def _browse_smb_flat(self, identifier, flat_events=None, image_present=True):
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         stem = "Cam_2026-05-07_10-00-00_MOVEMENT_AABBCCDD"
         image = f"{stem}.jpg" if image_present else None
-        default_events = [(f"{stem}.mp4", image,
-                           {"camera": "Cam", "date": "2026-05-07",
-                            "time": "10-00-00", "etype": "MOVEMENT"})]
+        default_events = [
+            (
+                f"{stem}.mp4",
+                image,
+                {
+                    "camera": "Cam",
+                    "date": "2026-05-07",
+                    "time": "10-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = True
-        backend.list_flat_events.return_value = flat_events if flat_events is not None else default_events
+        backend.list_flat_events.return_value = (
+            flat_events if flat_events is not None else default_events
+        )
 
         src = _Source(entry_id="01ENT", kind="S", label="NAS")
         hass = MagicMock()
@@ -841,9 +891,18 @@ class TestBrowseSmbCameraFirstFlatEvents:
 
     def test_flat_event_no_thumbnail_when_image_none(self):
         stem = "Cam_2026-05-07_10-00-00_MOVEMENT_AABBCCDD"
-        events_no_image = [(f"{stem}.mp4", None,
-                            {"camera": "Cam", "date": "2026-05-07",
-                             "time": "10-00-00", "etype": "MOVEMENT"})]
+        events_no_image = [
+            (
+                f"{stem}.mp4",
+                None,
+                {
+                    "camera": "Cam",
+                    "date": "2026-05-07",
+                    "time": "10-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
         out = self._browse_smb_flat("01ENT/Cam/2026-05-07", flat_events=events_no_image)
         assert out.children[0].thumbnail is None
 
@@ -852,23 +911,36 @@ class TestBrowseSmbCameraFirstFlatEvents:
 # Lines 932-953: _browse_smb date-first — events at len(rest)==3
 # ---------------------------------------------------------------------------
 
-class TestBrowseSmbDateFirstEvents:
 
+class TestBrowseSmbDateFirstEvents:
     def _browse_smb_date_first(self, identifier, events=None, image_present=True):
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
         image = f"{stem}.jpg" if image_present else None
-        default_events = [(f"{stem}.mp4", image,
-                           {"camera": "Terrasse", "date": "2026-05-07",
-                            "time": "10-00-00", "etype": "MOVEMENT"})]
+        default_events = [
+            (
+                f"{stem}.mp4",
+                image,
+                {
+                    "camera": "Terrasse",
+                    "date": "2026-05-07",
+                    "time": "10-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
-        backend.list_events.return_value = events if events is not None else default_events
+        backend.list_events.return_value = (
+            events if events is not None else default_events
+        )
 
         src = _Source(entry_id="01ENT", kind="S", label="NAS")
         hass = MagicMock()
@@ -889,18 +961,29 @@ class TestBrowseSmbDateFirstEvents:
 
     def test_date_first_event_no_thumbnail_when_image_none(self):
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
-        events_no_img = [(f"{stem}.mp4", None,
-                          {"camera": "Terrasse", "date": "2026-05-07",
-                           "time": "10-00-00", "etype": "MOVEMENT"})]
+        events_no_img = [
+            (
+                f"{stem}.mp4",
+                None,
+                {
+                    "camera": "Terrasse",
+                    "date": "2026-05-07",
+                    "time": "10-00-00",
+                    "etype": "MOVEMENT",
+                },
+            )
+        ]
         out = self._browse_smb_date_first("01ENT/2026/05/07", events=events_no_img)
         assert out.children[0].thumbnail is None
 
     def test_date_first_days_level(self):
         """date-first, len(rest)==2 (year/month) → days returned (lines 933-938)."""
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -918,10 +1001,13 @@ class TestBrowseSmbDateFirstEvents:
 
     def test_date_first_too_deep_raises_unresolvable(self):
         from homeassistant.components.media_source.error import Unresolvable
-        from custom_components.bosch_shc_camera.media_source import (
-            BoschCameraMediaSource, _Source, _SmbBackend,
-        )
+
         from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import (
+            BoschCameraMediaSource,
+            _SmbBackend,
+            _Source,
+        )
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -938,6 +1024,7 @@ class TestBrowseSmbDateFirstEvents:
 # ---------------------------------------------------------------------------
 # Lines 990-1004: BoschCameraMediaView.get() — SMB single-source routing heuristics
 # ---------------------------------------------------------------------------
+
 
 def _smb_hass_for_view(entry_id="entry1"):
     """Build hass stub with an SMB backend."""
@@ -964,6 +1051,7 @@ def _smb_hass_for_view(entry_id="entry1"):
 
     async def _exec(fn, *args):
         return fn(*args)
+
     hass.async_add_executor_job = _exec
     return hass
 
@@ -993,8 +1081,9 @@ class TestMediaViewSmbRouting:
         real_response.write = AsyncMock()
         real_response.write_eof = AsyncMock()
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", f"2026/05/07/{stem}.mp4")
         assert resp is real_response
@@ -1021,11 +1110,13 @@ class TestMediaViewSmbRouting:
         real_response.write = AsyncMock()
         real_response.write_eof = AsyncMock()
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
-                resp = await view.get(request, "entry1",
-                                      f"Terrasse/2026/05/07/{stem}.mp4")
+                resp = await view.get(
+                    request, "entry1", f"Terrasse/2026/05/07/{stem}.mp4"
+                )
         assert resp is real_response
 
     @pytest.mark.asyncio
@@ -1050,6 +1141,7 @@ class TestMediaViewSmbRouting:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
@@ -1062,6 +1154,7 @@ class TestMediaViewSmbRouting:
         # Note: len(tail)=2 is valid for local serve
         resp = await view.get(request, "entry1", f"Cam/{stem}.mp4")
         from aiohttp.web import FileResponse
+
         assert isinstance(resp, FileResponse)
 
     @pytest.mark.asyncio
@@ -1088,6 +1181,7 @@ class TestMediaViewSmbRouting:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
@@ -1102,8 +1196,8 @@ class TestMediaViewSmbRouting:
 # Lines 1024-1033: get() — SMB len(tail)==2 flat path
 # ---------------------------------------------------------------------------
 
-class TestMediaViewSmbFlatPath:
 
+class TestMediaViewSmbFlatPath:
     @pytest.mark.asyncio
     async def test_tail_len_2_calls_serve_smb_flat(self):
         """S head + 2-part tail → _serve_smb_flat invoked."""
@@ -1126,8 +1220,9 @@ class TestMediaViewSmbFlatPath:
         real_response.write = AsyncMock()
         real_response.write_eof = AsyncMock()
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
         assert resp is real_response
@@ -1143,8 +1238,9 @@ class TestMediaViewSmbFlatPath:
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):  # web.HTTPNotFound
                 await view.get(request, "entry1", "S/a/b/c")
 
@@ -1153,8 +1249,8 @@ class TestMediaViewSmbFlatPath:
 # Lines 1047-1050: _serve_local — bad mime type check
 # ---------------------------------------------------------------------------
 
-class TestServeLocalBadMime:
 
+class TestServeLocalBadMime:
     @pytest.mark.asyncio
     async def test_bad_mime_raises_404(self, tmp_path):
         """File exists and filename parses, but mime is not image/jpeg or video/mp4."""
@@ -1181,14 +1277,17 @@ class TestServeLocalBadMime:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
         request = MagicMock()
         request.headers = {}
 
-        with patch("custom_components.bosch_shc_camera.media_source.mimetypes.guess_type",
-                   return_value=("application/octet-stream", None)):
+        with patch(
+            "custom_components.bosch_shc_camera.media_source.mimetypes.guess_type",
+            return_value=("application/octet-stream", None),
+        ):
             with pytest.raises(Exception):  # web.HTTPNotFound
                 await view.get(request, "entry1", f"L/Cam/{stem}.jpg")
 
@@ -1197,8 +1296,8 @@ class TestServeLocalBadMime:
 # Line 1064: _serve_nvr — returns FileResponse (happy path)
 # ---------------------------------------------------------------------------
 
-class TestServeNvrHappyPath:
 
+class TestServeNvrHappyPath:
     @pytest.mark.asyncio
     async def test_nvr_serve_valid_file_returns_file_response(self, tmp_path):
         """_serve_nvr with valid date + segment → returns web.FileResponse."""
@@ -1223,6 +1322,7 @@ class TestServeNvrHappyPath:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
@@ -1232,6 +1332,7 @@ class TestServeNvrHappyPath:
         resp = await view.get(request, "entry1", "N/Terrasse/2026-05-07/10-00.mp4")
         # Should return web.FileResponse (not raise)
         from aiohttp.web import FileResponse
+
         assert isinstance(resp, FileResponse)
 
 
@@ -1239,8 +1340,8 @@ class TestServeNvrHappyPath:
 # Line 1050: _serve_local — happy path returns web.FileResponse
 # ---------------------------------------------------------------------------
 
-class TestServeLocalHappyPath:
 
+class TestServeLocalHappyPath:
     @pytest.mark.asyncio
     async def test_serve_local_returns_file_response(self, tmp_path):
         """_serve_local with valid file + correct mime → web.FileResponse (line 1050)."""
@@ -1263,6 +1364,7 @@ class TestServeLocalHappyPath:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
@@ -1271,6 +1373,7 @@ class TestServeLocalHappyPath:
 
         resp = await view.get(request, "entry1", f"L/Cam/{stem}.mp4")
         from aiohttp.web import FileResponse
+
         assert isinstance(resp, FileResponse)
 
     @pytest.mark.asyncio
@@ -1295,6 +1398,7 @@ class TestServeLocalHappyPath:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         view = BoschCameraMediaView(hass)
@@ -1303,6 +1407,7 @@ class TestServeLocalHappyPath:
 
         resp = await view.get(request, "entry1", f"L/Cam/{stem}.jpg")
         from aiohttp.web import FileResponse
+
         assert isinstance(resp, FileResponse)
 
 
@@ -1310,8 +1415,8 @@ class TestServeLocalHappyPath:
 # Lines 1097-1108: _serve_smb_flat — full path (parse, open, stream)
 # ---------------------------------------------------------------------------
 
-class TestServeSmFlatFull:
 
+class TestServeSmFlatFull:
     @pytest.mark.asyncio
     async def test_serve_smb_flat_happy_path(self):
         """_serve_smb_flat: valid filename → open_flat_file → stream."""
@@ -1337,10 +1442,12 @@ class TestServeSmFlatFull:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
         assert resp is real_response
@@ -1356,8 +1463,9 @@ class TestServeSmFlatFull:
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):
                 await view.get(request, "entry1", "S/Cam/invalid_filename.mp4")
 
@@ -1374,8 +1482,9 @@ class TestServeSmFlatFull:
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):
                 await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
 
@@ -1392,8 +1501,9 @@ class TestServeSmFlatFull:
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with pytest.raises(Exception):
                 await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
 
@@ -1402,8 +1512,8 @@ class TestServeSmFlatFull:
 # Lines 1131-1133: _stream_smb_fobj — invalid Range header (ValueError)
 # ---------------------------------------------------------------------------
 
-class TestStreamSmbFobjRangeErrors:
 
+class TestStreamSmbFobjRangeErrors:
     def _make_smb_view_with_mock_fobj(self, payload: bytes, range_header: str):
         hass = _smb_hass_for_view()
         view = BoschCameraMediaView(hass)
@@ -1426,8 +1536,9 @@ class TestStreamSmbFobjRangeErrors:
     async def test_invalid_range_header_falls_back_to_200(self):
         """Range: bytes=notanumber → ValueError caught → full 200 response."""
         payload = b"X" * 100
-        hass, view, stem, backend_mock, fake_fobj, request = \
+        hass, view, stem, backend_mock, fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=notanumber-")
+        )
 
         real_response = MagicMock()
         real_response.prepare = AsyncMock()
@@ -1440,8 +1551,9 @@ class TestStreamSmbFobjRangeErrors:
             created_statuses.append(kwargs.get("status", 200))
             return real_response
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", side_effect=_make_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
         assert resp is real_response
@@ -1452,16 +1564,18 @@ class TestStreamSmbFobjRangeErrors:
     async def test_range_end_only_no_start(self):
         """Range: bytes=-500 (end only, no start) → treated as full 200."""
         payload = b"Y" * 200
-        hass, view, stem, backend_mock, fake_fobj, request = \
+        hass, view, stem, backend_mock, fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=-500")
+        )
 
         real_response = MagicMock()
         real_response.prepare = AsyncMock()
         real_response.write = AsyncMock()
         real_response.write_eof = AsyncMock()
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
         assert resp is real_response
@@ -1470,8 +1584,9 @@ class TestStreamSmbFobjRangeErrors:
     async def test_range_start_beyond_size_falls_back_to_200(self):
         """Range where start > size → invalid range → falls back to 200."""
         payload = b"Z" * 50
-        hass, view, stem, backend_mock, fake_fobj, request = \
+        hass, view, stem, backend_mock, fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=9999-99999")
+        )
 
         real_response = MagicMock()
         real_response.prepare = AsyncMock()
@@ -1479,12 +1594,14 @@ class TestStreamSmbFobjRangeErrors:
         real_response.write_eof = AsyncMock()
 
         created_statuses = []
+
         def _make_response(*args, **kwargs):
             created_statuses.append(kwargs.get("status", 200))
             return real_response
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", side_effect=_make_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
         assert resp is real_response
@@ -1496,8 +1613,8 @@ class TestStreamSmbFobjRangeErrors:
 # Line 1154: _stream_smb_fobj — finally block: fobj.close() called on write failure
 # ---------------------------------------------------------------------------
 
-class TestStreamSmbFobjFinally:
 
+class TestStreamSmbFobjFinally:
     @pytest.mark.asyncio
     async def test_fobj_closed_even_when_write_raises(self):
         """Finally block: fobj.close() called even if response.write() raises."""
@@ -1521,13 +1638,15 @@ class TestStreamSmbFobjFinally:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 with pytest.raises(ConnectionResetError):
                     await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
@@ -1557,13 +1676,15 @@ class TestStreamSmbFobjFinally:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
 
@@ -1592,13 +1713,15 @@ class TestStreamSmbFobjFinally:
 
         async def _exec(fn, *args):
             return fn(*args)
+
         hass.async_add_executor_job = _exec
 
         request = MagicMock()
         request.headers = {}
 
-        with patch(f"{MODULE}._find_source",
-                   return_value=(MagicMock(kind="S"), backend_mock)):
+        with patch(
+            f"{MODULE}._find_source", return_value=(MagicMock(kind="S"), backend_mock)
+        ):
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", f"S/Cam/{stem}.mp4")
 
@@ -1612,6 +1735,7 @@ class TestStreamSmbFobjFinally:
 # ---------------------------------------------------------------------------
 # Helper import for tests that reuse _hass_with_local_dir
 # ---------------------------------------------------------------------------
+
 
 def _hass_with_local_dir(tmp_path: Path, options: dict | None = None):
     """Minimal hass with one local backend pointed at tmp_path."""
@@ -1637,4 +1761,4 @@ def _hass_with_local_dir(tmp_path: Path, options: dict | None = None):
     return hass, entry
 
 
-from unittest.mock import MagicMock  # noqa: E402 (already imported at top)
+from unittest.mock import MagicMock

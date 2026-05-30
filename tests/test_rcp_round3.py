@@ -28,6 +28,7 @@ Target lines:
 
 Helpers: SimpleNamespace coordinator stub, async mock for _read results.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -110,8 +111,12 @@ class TestRcpReadNumParam:
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=mock_session):
             result = await rcp_read(
-                hass, "https://proxy/hash/rcp.xml", "0x0c22",
-                "sess123", type_="T_WORD", num=1,
+                hass,
+                "https://proxy/hash/rcp.xml",
+                "0x0c22",
+                "sess123",
+                type_="T_WORD",
+                num=1,
             )
 
         assert captured_params.get("num") == "1"
@@ -169,8 +174,11 @@ class TestRcpReadDropSessionNone:
 
         with patch(f"{MODULE}.async_get_clientsession", return_value=mock_session):
             result = await rcp_read(
-                hass, "https://proxy/hash/rcp.xml", "0x0d00",
-                "sess123", session_cache=None,
+                hass,
+                "https://proxy/hash/rcp.xml",
+                "0x0d00",
+                "sess123",
+                session_cache=None,
             )
 
         assert result is None
@@ -192,8 +200,10 @@ class TestDimmerExceptionPath:
         async def mock_rcp_read_raises(*args, **kwargs):
             raise RuntimeError("network boom")
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read_raises):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read_raises),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_dimmer_cache
@@ -219,8 +229,10 @@ class TestPrivacyExceptionPath:
                 return None  # dimmer → None → _mark_fail
             raise RuntimeError("privacy boom")
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_privacy_cache
@@ -242,16 +254,18 @@ class TestClockOutOfRange:
         bad_clock = struct.pack(">HBBBBBB", 2026, 0, 1, 12, 0, 0, 0)
 
         read_results = {
-            "0x0c22": None,    # dimmer → None
-            "0x0d00": None,    # privacy → None
+            "0x0c22": None,  # dimmer → None
+            "0x0d00": None,  # privacy → None
             "0x0a0f": bad_clock,  # clock → out of range
         }
 
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_results.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_clock_offset_cache
@@ -275,8 +289,10 @@ class TestClockRawNone:
         async def mock_rcp_read(*args, **kwargs):
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         # Clock was None → fail counter incremented
@@ -299,8 +315,10 @@ class TestLanIpRawNone:
         async def mock_rcp_read(*args, **kwargs):
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_lan_ip_cache
@@ -328,8 +346,10 @@ class TestProductNameXmlWrapped:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_product_name_cache
@@ -352,8 +372,10 @@ class TestProductNameRawNone:
         async def mock_rcp_read(*args, **kwargs):
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0aea", 0) >= 1
@@ -379,8 +401,10 @@ class TestBitrateOutOfRange:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_bitrate_cache
@@ -405,8 +429,10 @@ class TestAlarmCatalogException:
                 raise call_map[command]
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_alarm_catalog_cache
@@ -428,8 +454,10 @@ class TestMotionZonesNone:
         async def mock_rcp_read(*args, **kwargs):
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0c00", 0) >= 1
@@ -453,8 +481,10 @@ class TestMotionZonesException:
                 raise RuntimeError("zones boom")
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_motion_zones_cache
@@ -473,15 +503,19 @@ class TestMotionCoordsRead:
 
         coord = _make_coord()
         # Two zones × 8 bytes each
-        raw_coords = struct.pack(">HHHH", 0, 0, 10000, 10000) + struct.pack(">HHHH", 2500, 2500, 7500, 7500)
+        raw_coords = struct.pack(">HHHH", 0, 0, 10000, 10000) + struct.pack(
+            ">HHHH", 2500, 2500, 7500, 7500
+        )
 
         read_map = {"0x0c0a": raw_coords}
 
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_motion_coords_cache
@@ -512,8 +546,10 @@ class TestTlsCertPaths:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_tls_cert_cache
@@ -529,8 +565,10 @@ class TestTlsCertPaths:
         async def mock_rcp_read(*args, **kwargs):
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0b91", 0) >= 1
@@ -555,8 +593,10 @@ class TestNetworkServicesXmlWrapped:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_network_services_cache
@@ -584,8 +624,10 @@ class TestIvaCatalogCached:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_iva_catalog_cache
@@ -608,6 +650,7 @@ class TestParseAlarmCatalog:
     def test_flame_type(self):
         """Name containing 'flame' → type='flame'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Flame Detector"])
         result = _parse_alarm_catalog(raw)
         types = {a["type"] for a in result}
@@ -616,6 +659,7 @@ class TestParseAlarmCatalog:
     def test_smoke_type(self):
         """Name containing 'smoke' → type='smoke'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Smoke Detector"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "smoke" for a in result)
@@ -623,6 +667,7 @@ class TestParseAlarmCatalog:
     def test_audio_type(self):
         """Name containing 'audio' → type='audio'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Audio Detection"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "audio" for a in result)
@@ -630,6 +675,7 @@ class TestParseAlarmCatalog:
     def test_signal_loss_type(self):
         """Name containing 'signal' → type='signal'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Video Signal Loss"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "signal" for a in result)
@@ -637,6 +683,7 @@ class TestParseAlarmCatalog:
     def test_storage_type(self):
         """Name containing 'storage' → type='storage'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Storage Failure"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "storage" for a in result)
@@ -644,6 +691,7 @@ class TestParseAlarmCatalog:
     def test_motion_type(self):
         """Name containing 'motion' → type='motion'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Motion Detection"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "motion" for a in result)
@@ -651,6 +699,7 @@ class TestParseAlarmCatalog:
     def test_reference_type(self):
         """Name containing 'reference' → type='reference'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Reference Image Changed"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "reference" for a in result)
@@ -658,6 +707,7 @@ class TestParseAlarmCatalog:
     def test_config_type(self):
         """Name containing 'config' → type='config'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Config Changed"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "config" for a in result)
@@ -665,6 +715,7 @@ class TestParseAlarmCatalog:
     def test_global_change_type(self):
         """Name containing 'global' → type='global_change'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Global Change Alarm"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "global_change" for a in result)
@@ -672,6 +723,7 @@ class TestParseAlarmCatalog:
     def test_task_type(self):
         """Name containing 'task' → type='task'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Scheduled Task"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "task" for a in result)
@@ -679,6 +731,7 @@ class TestParseAlarmCatalog:
     def test_unknown_type_fallback(self):
         """Name not matching any keyword → type='unknown'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Unrecognized Alarm Type"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "unknown" for a in result)
@@ -686,6 +739,7 @@ class TestParseAlarmCatalog:
     def test_virtual_alarm_type(self):
         """Name containing 'Virtual Alarm' → type='virtual'."""
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
+
         raw = self._names_to_raw(["Virtual Alarm 0"])
         result = _parse_alarm_catalog(raw)
         assert any(a["type"] == "virtual" for a in result)
@@ -700,6 +754,7 @@ class TestParseMotionZones:
     def test_parses_two_zones(self):
         """28*2 bytes → 2 zones returned."""
         from custom_components.bosch_shc_camera.rcp import _parse_motion_zones
+
         raw = bytes(28 * 2)
         zones = _parse_motion_zones(raw)
         assert len(zones) == 2
@@ -710,6 +765,7 @@ class TestParseMotionZones:
     def test_short_raw_returns_empty(self):
         """Fewer than 28 bytes → no zones parsed."""
         from custom_components.bosch_shc_camera.rcp import _parse_motion_zones
+
         assert _parse_motion_zones(b"\x00" * 10) == []
 
 
@@ -722,6 +778,7 @@ class TestParseMotionCoords:
     def test_single_zone_converts_to_percent(self):
         """One zone: x1=0 y1=0 x2=10000 y2=10000 → 0.0/0.0/100.0/100.0 percent."""
         from custom_components.bosch_shc_camera.rcp import _parse_motion_coords
+
         raw = struct.pack(">HHHH", 0, 0, 10000, 10000)
         zones = _parse_motion_coords(raw)
         assert len(zones) == 1
@@ -730,6 +787,7 @@ class TestParseMotionCoords:
     def test_partial_zone_skipped(self):
         """7 bytes (< 8) → no zone returned."""
         from custom_components.bosch_shc_camera.rcp import _parse_motion_coords
+
         assert _parse_motion_coords(b"\x00" * 7) == []
 
 
@@ -744,7 +802,9 @@ class TestParseTlsCert:
         from custom_components.bosch_shc_camera.rcp import _parse_tls_cert
 
         fake_cert_bytes = b"\x30" + b"\xff" * 50
-        with patch.dict("sys.modules", {"cryptography": None, "cryptography.x509": None}):
+        with patch.dict(
+            "sys.modules", {"cryptography": None, "cryptography.x509": None}
+        ):
             info = _parse_tls_cert(fake_cert_bytes)
 
         assert "raw_size" in info
@@ -772,6 +832,7 @@ class TestParseNetworkServices:
     def test_parses_service_names(self):
         """ASCII blob with null separators → list of service strings."""
         from custom_components.bosch_shc_camera.rcp import _parse_network_services
+
         raw = b"HTTP\x00RTSP\x00HTTPS\x00"
         services = _parse_network_services(raw)
         assert "HTTP" in services
@@ -781,6 +842,7 @@ class TestParseNetworkServices:
     def test_empty_parts_filtered(self):
         """Multiple consecutive nulls → empty strings filtered out."""
         from custom_components.bosch_shc_camera.rcp import _parse_network_services
+
         raw = b"\x00\x00HTTP\x00\x00"
         services = _parse_network_services(raw)
         assert "" not in services
@@ -795,6 +857,7 @@ class TestParseIvaCatalog:
     def test_zero_module_id_skipped(self):
         """Entry with module_id=0 → not included in output."""
         from custom_components.bosch_shc_camera.rcp import _parse_iva_catalog
+
         # module_id=0, version=1, flags=1
         entry_zero = struct.pack(">HHH", 0, 1, 1)
         # module_id=5, version=2, flags=0
@@ -808,6 +871,7 @@ class TestParseIvaCatalog:
     def test_active_flag_parsed(self):
         """flags & 0x01 == 1 → active=True."""
         from custom_components.bosch_shc_camera.rcp import _parse_iva_catalog
+
         entry = struct.pack(">HHH", 7, 0x0100, 0x0001)
         modules = _parse_iva_catalog(entry)
         assert len(modules) == 1

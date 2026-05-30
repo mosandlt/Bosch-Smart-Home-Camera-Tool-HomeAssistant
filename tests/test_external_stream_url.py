@@ -15,13 +15,13 @@ These tests pin the contracts so a future refactor can't:
   - leak the URL through the sensor when the switch is OFF
   - forget the inst=N → inst=2 rewrite on the sub sensor
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"  # Terrasse Gen2 (Eyes Outdoor II)
 
@@ -40,14 +40,16 @@ REMOTE_RTSP_URL = (
 
 def _make_coord(rtsps_url: str | None = LOCAL_RTSP_URL) -> SimpleNamespace:
     return SimpleNamespace(
-        data={CAM_ID: {
-            "info": {
-                "title": "Terrasse",
-                "hardwareVersion": "HOME_Eyes_Outdoor",
-                "firmwareVersion": "9.40.25",
-                "macAddress": "00:00:00:00:00:01",
-            },
-        }},
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": "Terrasse",
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "00:00:00:00:00:01",
+                },
+            }
+        },
         _external_stream_enabled={},
         _live_connections=({CAM_ID: {"rtspsUrl": rtsps_url}} if rtsps_url else {}),
         last_update_success=True,
@@ -61,6 +63,7 @@ def stub_entry() -> SimpleNamespace:
 
 
 # ── _swap_inst helper ────────────────────────────────────────────────────────
+
 
 def test_swap_inst_rewrites_inst_query_param() -> None:
     """The only place that knows the inst=N → inst=K substitution. Stay tiny."""
@@ -88,6 +91,7 @@ def test_swap_inst_only_touches_first_match() -> None:
 
 
 # ── BoschExternalStreamSwitch ────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_switch_default_off(stub_entry) -> None:
@@ -144,10 +148,12 @@ async def test_switch_restores_on_state_from_previous_session(stub_entry) -> Non
     # parent. The mixin reads it via async_get_last_state().
     last = SimpleNamespace(state="on")
     entity.async_get_last_state = AsyncMock(return_value=last)
+
     # Skip the real super().async_added_to_hass to keep the test focused on
     # the restore-logic only — the parent does HA-internal wiring.
     async def _noop(self: object) -> None:
         return None
+
     entity.__class__.__mro__[1].async_added_to_hass = _noop  # type: ignore[method-assign]
 
     await entity.async_added_to_hass()
@@ -163,8 +169,10 @@ async def test_switch_restore_off_does_not_set_flag(stub_entry) -> None:
     coord = _make_coord()
     entity = BoschExternalStreamSwitch(coord, CAM_ID, stub_entry)
     entity.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="off"))
+
     async def _noop(self: object) -> None:
         return None
+
     entity.__class__.__mro__[1].async_added_to_hass = _noop  # type: ignore[method-assign]
 
     await entity.async_added_to_hass()
@@ -173,6 +181,7 @@ async def test_switch_restore_off_does_not_set_flag(stub_entry) -> None:
 
 
 # ── BoschStreamUrlSensor (main, inst=1) ──────────────────────────────────────
+
 
 def test_main_sensor_returns_none_when_switch_off(stub_entry) -> None:
     """When the switch is OFF the sensor MUST NOT leak the URL — pin so a
@@ -206,6 +215,7 @@ def test_main_sensor_returns_none_when_no_session_open(stub_entry) -> None:
 
 
 # ── BoschStreamUrlSubSensor (sub, inst=2) ────────────────────────────────────
+
 
 def test_sub_sensor_returns_none_when_switch_off(stub_entry) -> None:
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSubSensor
@@ -251,5 +261,15 @@ def test_both_sensors_disabled_by_default(stub_entry) -> None:
     )
 
     coord = _make_coord()
-    assert BoschStreamUrlSensor(coord, CAM_ID, stub_entry)._attr_entity_registry_enabled_default is False
-    assert BoschStreamUrlSubSensor(coord, CAM_ID, stub_entry)._attr_entity_registry_enabled_default is False
+    assert (
+        BoschStreamUrlSensor(
+            coord, CAM_ID, stub_entry
+        )._attr_entity_registry_enabled_default
+        is False
+    )
+    assert (
+        BoschStreamUrlSubSensor(
+            coord, CAM_ID, stub_entry
+        )._attr_entity_registry_enabled_default
+        is False
+    )

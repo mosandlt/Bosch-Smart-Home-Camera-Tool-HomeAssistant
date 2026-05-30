@@ -32,18 +32,19 @@ OPT-OUT = behavior is intentional but user-controllable (option flow flag)
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.source_match import assert_in_source
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 # ── Issue #1, #2: Motion-detection settings revert (KNOWN limitation) ──
@@ -65,11 +66,10 @@ class TestIssue1_MotionRevert:
         """The known-limitation note must stay in api-reference.md so users
         understand why their motion-sensitivity changes don't stick."""
         from pathlib import Path
-        api_ref = (
-            Path(__file__).parent.parent.parent / "docs" / "api-reference.md"
-        )
+
+        api_ref = Path(__file__).parent.parent.parent / "docs" / "api-reference.md"
         if not api_ref.exists():
-            pytest.skip(f"docs/api-reference.md not in repo (workspace-only)")
+            pytest.skip("docs/api-reference.md not in repo (workspace-only)")
         text = api_ref.read_text()
         assert "Motion Revert" in text or "motion revert" in text.lower(), (
             "Motion-revert limitation must stay documented in api-reference.md"
@@ -105,8 +105,10 @@ class TestIssue5_BinarySensorMissesEvents:
     def test_window_covers_60s_polling_lag(self):
         """Event 60s old (max polling lag) must still trigger the sensor."""
         from custom_components.bosch_shc_camera.binary_sensor import (
-            BoschMotionBinarySensor, EVENT_ACTIVE_WINDOW,
+            EVENT_ACTIVE_WINDOW,
+            BoschMotionBinarySensor,
         )
+
         assert EVENT_ACTIVE_WINDOW >= 90, (
             "Window must cover the 60s scan_interval + margin; lowering "
             "below 90s reintroduces the geotie missed-trigger bug."
@@ -117,25 +119,28 @@ class TestIssue5_BinarySensorMissesEvents:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
-        coord = SimpleNamespace(data={
-            CAM_ID: {
-                "info": {
-                    "title": "Terrasse",
-                    "hardwareVersion": "HOME_Eyes_Outdoor",
-                    "firmwareVersion": "9.40.25",
-                    "macAddress": "x",
-                },
-                "events": [
-                    {
-                        "eventType": "MOVEMENT",
-                        "id": "e1",
-                        "timestamp": (
-                            datetime.now(timezone.utc) - timedelta(seconds=60)
-                        ).strftime("%Y-%m-%dT%H:%M:%S"),
-                    }
-                ],
+
+        coord = SimpleNamespace(
+            data={
+                CAM_ID: {
+                    "info": {
+                        "title": "Terrasse",
+                        "hardwareVersion": "HOME_Eyes_Outdoor",
+                        "firmwareVersion": "9.40.25",
+                        "macAddress": "x",
+                    },
+                    "events": [
+                        {
+                            "eventType": "MOVEMENT",
+                            "id": "e1",
+                            "timestamp": (
+                                datetime.now(UTC) - timedelta(seconds=60)
+                            ).strftime("%Y-%m-%dT%H:%M:%S"),
+                        }
+                    ],
+                }
             }
-        })
+        )
         entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
         s = BoschMotionBinarySensor(coord, CAM_ID, entry)
         s.hass = self._make_hass()
@@ -150,16 +155,17 @@ class TestIssue5_BinarySensorMissesEvents:
         and the alert-chain elif was never reached. Result: motion
         automations never fired in polling-only mode after a restart.
         """
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         # Read the current source to confirm the seed is in place; if
         # someone removes it, this assertion fails loudly.
         import inspect
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(BoschCameraCoordinator._async_update_data)
         # The fix line: after the prev_id-is-None mark-as-read block,
         # we set self._last_event_ids[cam_id] = newest_id.
-        assert "self._last_event_ids[cam_id] = newest_id" in src, (
-            "_last_event_ids bootstrap missing in _async_update_data — "
-            "polling-only mode will stop firing alerts after restart"
+        assert_in_source(  # _last_event_ids bootstrap missing in _async_update_data — polling-only mode will stop firing alerts after restart
+            src, "self._last_event_ids[cam_id] = newest_id"
         )
 
 
@@ -182,6 +188,7 @@ class TestIssue7_MarkEventsReadOptOut:
 
     def test_mark_events_read_option_is_documented(self):
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         # Either default to False or be absent (treated as False on .get).
         assert DEFAULT_OPTIONS.get("mark_events_read", False) is False, (
             "mark_events_read must default to False so the user controls "
@@ -191,12 +198,10 @@ class TestIssue7_MarkEventsReadOptOut:
 
     def test_option_present_in_strings(self):
         """The option must appear in strings.json so users can find + toggle it."""
-        from pathlib import Path
         import json
-        comp = (
-            Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera"
-        )
+        from pathlib import Path
+
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
         strings = json.loads((comp / "strings.json").read_text())
         # Labels now live under sections.<section>.data, not flat data.
         sections = (
@@ -234,17 +239,22 @@ class TestIssue8_MediaBrowserEmpty:
         """v11.0.1 fix — the regression guard that closes the user-visible
         'Media Browser bleibt leer' issue."""
         from custom_components.bosch_shc_camera.media_source import _enabled_sources
+
         new_dir = tmp_path / "fresh_install"
         assert not new_dir.exists()
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
-                async_loaded_entries=lambda d: [SimpleNamespace(
-                    entry_id="01ENTRY",
-                    runtime_data=SimpleNamespace(options={
-                        "download_path": str(new_dir),
-                        "media_browser_source": "auto",
-                    }),
-                )],
+                async_loaded_entries=lambda d: [
+                    SimpleNamespace(
+                        entry_id="01ENTRY",
+                        runtime_data=SimpleNamespace(
+                            options={
+                                "download_path": str(new_dir),
+                                "media_browser_source": "auto",
+                            }
+                        ),
+                    )
+                ],
             ),
         )
         _enabled_sources(hass)
@@ -262,9 +272,8 @@ class TestIssue8_MediaBrowserEmpty:
         document the Configure path so users can find it.
         """
         from pathlib import Path
-        readme = (
-            Path(__file__).parent.parent / "README.md"
-        )
+
+        readme = Path(__file__).parent.parent / "README.md"
         text = readme.read_text()
         # The field that controls local saving (filling it in = enable)
         assert "Local save folder" in text or "download_path" in text, (
@@ -294,9 +303,11 @@ class TestMeta:
         # share class with 1/5; 3/4 are docs/feature, no code test
         # possible). The count below is the floor — adding more is fine.
         from pathlib import Path
+
         text = Path(__file__).read_text()
         # `class TestIssue` followed by digits
         import re
+
         classes = re.findall(r"^class TestIssue\d+_", text, re.MULTILINE)
         assert len(classes) >= 4, (
             "test_forum_issues.py must have at least 4 TestIssue<N>_ "

@@ -5,12 +5,20 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.4.0"
+CARD_VERSION = "13.4.1"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
-    "binary_sensor", "camera", "image", "sensor", "button",
-    "switch", "number", "select", "update", "light",
+    "binary_sensor",
+    "camera",
+    "image",
+    "sensor",
+    "button",
+    "switch",
+    "number",
+    "select",
+    "update",
+    "light",
 ]
 
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
@@ -20,8 +28,8 @@ LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
 # integration and match the Python CLI (bosch_camera.py). Other endpoints
 # still use inline literals — only the hot paths below were previously
 # inconsistent (CLI 5/15s vs. integration 10s).
-TIMEOUT_SNAP = 10             # GET on signed image / imageUrl
-TIMEOUT_PUT_CONNECTION = 10   # PUT /v11/video_inputs/{id}/connection
+TIMEOUT_SNAP = 10  # GET on signed image / imageUrl
+TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
 
 # Subprocess-lifecycle timeouts (recorder.py). Grace = SIGTERM→SIGKILL window;
 # kill_wait = post-SIGKILL wait_for; stderr_drain = drain pipe before close;
@@ -38,23 +46,23 @@ TIMEOUT_TLS_PROXY_RTSP_READ = 5
 # SHC local-API fallback retry policy. Used by shc.py's circuit breaker
 # (offline mode). Centralized so the values are not buried as instance
 # attributes inside the coordinator.
-SHC_MAX_FAILS = 3             # mark SHC offline after this many consecutive failures
-SHC_RETRY_INTERVAL = 120      # seconds — retry SHC after this long while offline
+SHC_MAX_FAILS = 3  # mark SHC offline after this many consecutive failures
+SHC_RETRY_INTERVAL = 120  # seconds — retry SHC after this long while offline
 
 DEFAULT_MOTION_ACTIVE_WINDOW = 90  # seconds — see binary_sensor.py for rationale
-MOTION_ACTIVE_WINDOW_MIN = 10      # seconds
-MOTION_ACTIVE_WINDOW_MAX = 300     # seconds
+MOTION_ACTIVE_WINDOW_MIN = 10  # seconds
+MOTION_ACTIVE_WINDOW_MAX = 300  # seconds
 
 DEFAULT_OPTIONS = {
-    "scan_interval":      60,
-    "interval_status":   300,
-    "interval_events":   300,
+    "scan_interval": 60,
+    "interval_status": 300,
+    "interval_events": 300,
     "snapshot_interval": 1800,
-    "enable_snapshots":       True,
-    "enable_sensors":         True,
+    "enable_snapshots": True,
+    "enable_sensors": True,
     "enable_snapshot_button": True,
-    "enable_local_save":      False,
-    "download_path":          "/config/bosch_events",
+    "enable_local_save": False,
+    "download_path": "/config/bosch_events",
     "stream_connection_type": "local",
     # HLS player buffer profile applied by the Lovelace card (hls.js).
     # "latency"  → small buffer, ~4-6s lag, may stutter on Wi-Fi jitter
@@ -104,7 +112,7 @@ DEFAULT_OPTIONS = {
     "nvr_quality": "auto",
     # Phase 4: pre-roll buffer — 0 = disabled; 10-60 s = keep rolling cache in tmpfs
     "nvr_preroll_seconds": 0,
-    "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
+    "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",  # noqa: S108 # default tmpfs cache dir, overridable via config options
     "enable_go2rtc": True,
     "enable_webhook_delivery": False,
     "webhook_url": "",

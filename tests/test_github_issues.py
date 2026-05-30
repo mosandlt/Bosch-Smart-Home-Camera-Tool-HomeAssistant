@@ -25,7 +25,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -48,10 +47,7 @@ class TestGH1_MotionRevert:
         present so users can manage schedule-based motion rules instead
         of relying on the auto-reverted /motion endpoint.
         """
-        comp = (
-            Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera"
-        )
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
         services = (comp / "services.yaml").read_text()
         for svc in ("create_rule", "update_rule", "delete_rule"):
             assert svc in services, (
@@ -72,6 +68,7 @@ class TestGH2_TokenRefresh:
         """Coordinator must schedule + run a proactive refresh 5 min
         before token expiry."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert hasattr(BoschCameraCoordinator, "_proactive_refresh")
         assert hasattr(BoschCameraCoordinator, "_schedule_token_refresh")
         assert hasattr(BoschCameraCoordinator, "_ensure_valid_token")
@@ -80,10 +77,7 @@ class TestGH2_TokenRefresh:
         """In v11.0.0, persistent_notification was replaced by
         ir.async_create_issue('token_expired'). Verifies the strings
         bundle includes the issue translation key."""
-        comp = (
-            Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera"
-        )
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
         strings = json.loads((comp / "strings.json").read_text())
         assert "token_expired" in strings.get("issues", {}), (
             "v11.0.0 surfaces token_expired as a Repairs entry; the "
@@ -103,6 +97,7 @@ class TestGH3_Gen2Light:
     def test_gen2_outdoor_has_front_light_switch_class(self):
         """`BoschFrontLightSwitch` must exist for Gen2 outdoor."""
         from custom_components.bosch_shc_camera import switch as switch_mod
+
         assert hasattr(switch_mod, "BoschFrontLightSwitch"), (
             "GH#3 fix removed: Gen2 Outdoor needs its own front-light "
             "switch separate from the wallwasher"
@@ -110,6 +105,7 @@ class TestGH3_Gen2Light:
 
     def test_gen2_outdoor_has_wallwasher_switch(self):
         from custom_components.bosch_shc_camera import switch as switch_mod
+
         assert hasattr(switch_mod, "BoschWallwasherSwitch"), (
             "Wallwasher (top + bottom LEDs combined) must have its own "
             "switch entity for Gen2 Outdoor"
@@ -118,6 +114,7 @@ class TestGH3_Gen2Light:
     def test_gen2_outdoor_has_rgb_light_classes(self):
         """RGB color picker for top + bottom LEDs."""
         from custom_components.bosch_shc_camera import light as light_mod
+
         assert hasattr(light_mod, "BoschTopLedLight")
         assert hasattr(light_mod, "BoschBottomLedLight")
         assert hasattr(light_mod, "BoschFrontLight")
@@ -125,6 +122,7 @@ class TestGH3_Gen2Light:
     def test_gen2_model_config_exists(self):
         """Ensure Gen2 Outdoor hardware version resolves to a real config."""
         from custom_components.bosch_shc_camera.models import get_model_config
+
         cfg = get_model_config("HOME_Eyes_Outdoor")
         assert cfg.generation == 2
 
@@ -140,10 +138,7 @@ class TestGH4_CardFrontend:
 
     def test_card_javascript_exists(self):
         """The bundled card must be present in custom_components/.../www/."""
-        comp = (
-            Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera"
-        )
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
         card = comp / "www" / "bosch-camera-card.js"
         assert card.exists(), (
             "Card auto-registration relies on the bundled JS at "
@@ -158,6 +153,7 @@ class TestGH4_CardFrontend:
         invalidation depends on the version match.
         """
         from custom_components.bosch_shc_camera.const import CARD_VERSION
+
         assert isinstance(CARD_VERSION, str)
         assert len(CARD_VERSION) > 0
 
@@ -177,6 +173,7 @@ class TestGH5_ReauthFlow:
         from custom_components.bosch_shc_camera.config_flow import (
             BoschCameraConfigFlow,
         )
+
         assert hasattr(BoschCameraConfigFlow, "async_step_reauth")
         assert hasattr(BoschCameraConfigFlow, "async_step_reauth_confirm")
 
@@ -185,6 +182,7 @@ class TestGH5_ReauthFlow:
         from custom_components.bosch_shc_camera.config_flow import (
             BoschCameraConfigFlow,
         )
+
         assert hasattr(BoschCameraConfigFlow, "async_step_reconfigure"), (
             "v11.0.0 added explicit 'Reconfigure' menu item to fix "
             "the dziko83 404 issue — the flow must keep existing"
@@ -192,10 +190,7 @@ class TestGH5_ReauthFlow:
 
     def test_reauth_string_exists(self):
         """The user must see a clear 'Re-authenticate' confirmation."""
-        comp = (
-            Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera"
-        )
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
         strings = json.loads((comp / "strings.json").read_text())
         assert "reauth_confirm" in strings.get("config", {}).get("step", {})
 
@@ -220,6 +215,7 @@ class TestGH6_StreamPipeline:
 
     def test_live_stream_switch_class_exists(self):
         from custom_components.bosch_shc_camera import switch as switch_mod
+
         assert hasattr(switch_mod, "BoschLiveStreamSwitch")
 
     def test_live_connections_dict_drives_supported_features(self):
@@ -229,11 +225,22 @@ class TestGH6_StreamPipeline:
         registration time; toggling it dynamically would cause the entity to
         deregister and re-register on every stream start/stop.)"""
         from types import SimpleNamespace as _SN
-        from custom_components.bosch_shc_camera.camera import BoschCamera
+
         from homeassistant.components.camera import CameraEntityFeature
+
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
         coord = _SN(
-            data={CAM_ID: {"info": {"title": "x", "hardwareVersion": "X",
-                                     "firmwareVersion": "x", "macAddress": "x"}}},
+            data={
+                CAM_ID: {
+                    "info": {
+                        "title": "x",
+                        "hardwareVersion": "X",
+                        "firmwareVersion": "x",
+                        "macAddress": "x",
+                    }
+                }
+            },
             _live_connections={},
             _camera_entities={},
             last_update_success=True,
@@ -253,11 +260,21 @@ class TestGH6_StreamPipeline:
         """When `_session_stale` is set for a cam, the live_stream switch
         becomes unavailable so users don't see a frozen stream as healthy."""
         from types import SimpleNamespace as _SN
+
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         coord = _SN(
-            data={CAM_ID: {"info": {"title": "x", "hardwareVersion": "X",
-                                     "firmwareVersion": "x", "macAddress": "x"},
-                            "status": "ONLINE"}},
+            data={
+                CAM_ID: {
+                    "info": {
+                        "title": "x",
+                        "hardwareVersion": "X",
+                        "firmwareVersion": "x",
+                        "macAddress": "x",
+                    },
+                    "status": "ONLINE",
+                }
+            },
             _live_connections={},
             _shc_state_cache={CAM_ID: {"privacy_mode": False}},
             _session_stale={CAM_ID: True},  # keepalive given up
@@ -284,6 +301,7 @@ class TestMeta:
     def test_each_codetestable_gh_issue_has_test_class(self):
         text = Path(__file__).read_text()
         import re
+
         classes = re.findall(r"^class TestGH\d+_", text, re.MULTILINE)
         # 6 of 7 closed issues have code-testable surfaces; #7 was
         # positive feedback only.

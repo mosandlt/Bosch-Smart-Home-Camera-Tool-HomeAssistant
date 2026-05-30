@@ -36,6 +36,7 @@ def _make(stub_coord, stub_entry):
     from custom_components.bosch_shc_camera.binary_sensor import (
         BoschLanReachableBinarySensor,
     )
+
     return BoschLanReachableBinarySensor(stub_coord, CAM_ID, stub_entry)
 
 
@@ -47,7 +48,9 @@ class TestAvailable:
         assert s.available is True
 
     def test_available_even_when_coordinator_last_update_success_false(
-        self, stub_coord, stub_entry,
+        self,
+        stub_coord,
+        stub_entry,
     ):
         stub_coord.last_update_success = False
         s = _make(stub_coord, stub_entry)
@@ -108,7 +111,9 @@ class TestExtraStateAttributes:
             attrs = s.extra_state_attributes
         assert "write_grace_seconds_left" not in attrs
 
-    def test_no_grace_when_coordinator_lacks_local_write_at(self, stub_coord, stub_entry):
+    def test_no_grace_when_coordinator_lacks_local_write_at(
+        self, stub_coord, stub_entry
+    ):
         """Belt-and-braces guard for stub coordinators in legacy tests."""
         del stub_coord._local_write_at
         s = _make(stub_coord, stub_entry)

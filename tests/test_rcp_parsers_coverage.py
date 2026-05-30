@@ -88,8 +88,10 @@ class TestClockInvalidDateComponents:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return read_map.get(command)
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_clock_offset_cache
@@ -106,8 +108,10 @@ class TestClockInvalidDateComponents:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_clock if command == "0x0a0f" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_clock_offset_cache
@@ -124,8 +128,10 @@ class TestClockInvalidDateComponents:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_clock if command == "0x0a0f" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_clock_offset_cache
@@ -147,8 +153,10 @@ class TestClockInvalidDateComponents:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return raw_clock if command == "0x0a0f" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_clock_offset_cache
@@ -221,9 +229,9 @@ class TestParseTlsCertImportError:
 class TestMotionZonesEdgeCases:
     """Pin two branches that protect the motion-zones cache:
 
-      a) `raw and len(raw) >= 28` is False AND raw is not None
-         → neither cache write nor `_mark_fail` (zones cache empty).
-      b) `_read` raises Exception → debug log only, cache empty.
+    a) `raw and len(raw) >= 28` is False AND raw is not None
+       → neither cache write nor `_mark_fail` (zones cache empty).
+    b) `_read` raises Exception → debug log only, cache empty.
     """
 
     @pytest.mark.asyncio
@@ -245,8 +253,10 @@ class TestMotionZonesEdgeCases:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return short_raw if command == "0x0c00" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         # Cache must NOT have an entry — truncated data is unusable.
@@ -273,8 +283,10 @@ class TestMotionZonesEdgeCases:
                 raise RuntimeError("transport boom")
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             # Must not raise
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
@@ -296,8 +308,10 @@ class TestMotionZonesEdgeCases:
         async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
             return one_zone if command == "0x0c00" else None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_motion_zones_cache

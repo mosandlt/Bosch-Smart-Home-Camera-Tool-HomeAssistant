@@ -25,8 +25,13 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 PROXY_URL = "proxy-01.live.cbs.boschsecurity.com:42090/abc123hash"
 
 
-def _resp_cm(status: int, text: str = "", body: bytes = b"",
-             headers: dict | None = None, json_data=None):
+def _resp_cm(
+    status: int,
+    text: str = "",
+    body: bytes = b"",
+    headers: dict | None = None,
+    json_data=None,
+):
     resp = MagicMock()
     resp.status = status
     resp.text = AsyncMock(return_value=text)
@@ -42,13 +47,14 @@ def _resp_cm(status: int, text: str = "", body: bytes = b"",
 
 def _timeout_cm():
     cm = MagicMock()
-    cm.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+    cm.__aenter__ = AsyncMock(side_effect=TimeoutError())
     cm.__aexit__ = AsyncMock(return_value=None)
     return cm
 
 
 def _client_error_cm():
     import aiohttp
+
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("conn error"))
     cm.__aexit__ = AsyncMock(return_value=None)
@@ -95,6 +101,7 @@ def _stub_coord(**kwargs):
 class TestCleanupStaleDevices:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._cleanup_stale_devices = types.MethodType(
             BoschCameraCoordinator._cleanup_stale_devices, coord
         )
@@ -103,9 +110,15 @@ class TestCleanupStaleDevices:
     def test_no_devices_nothing_removed(self):
         coord = self._bind(_stub_coord())
         dev_reg = MagicMock()
-        with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[]):
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[],
+            ),
+        ):
             coord._cleanup_stale_devices({"cam1"})
         dev_reg.async_remove_device.assert_not_called()
 
@@ -115,9 +128,15 @@ class TestCleanupStaleDevices:
         stale = MagicMock()
         stale.identifiers = {("bosch_shc_camera", "STALE_CAM")}
         stale.id = "dev-stale"
-        with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[stale]):
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[stale],
+            ),
+        ):
             coord._cleanup_stale_devices({"OTHER_CAM"})
         dev_reg.async_remove_device.assert_called_once_with("dev-stale")
 
@@ -126,9 +145,15 @@ class TestCleanupStaleDevices:
         dev_reg = MagicMock()
         active = MagicMock()
         active.identifiers = {("bosch_shc_camera", CAM_ID)}
-        with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[active]):
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[active],
+            ),
+        ):
             coord._cleanup_stale_devices({CAM_ID})
         dev_reg.async_remove_device.assert_not_called()
 
@@ -137,9 +162,15 @@ class TestCleanupStaleDevices:
         dev_reg = MagicMock()
         other = MagicMock()
         other.identifiers = {("other_domain", "some_id")}
-        with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[other]):
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[other],
+            ),
+        ):
             coord._cleanup_stale_devices(set())
         dev_reg.async_remove_device.assert_not_called()
 
@@ -151,9 +182,15 @@ class TestCleanupStaleDevices:
         stale = MagicMock()
         stale.identifiers = {("bosch_shc_camera", "STALE")}
         stale.id = "stale-id"
-        with patch("homeassistant.helpers.device_registry.async_get", return_value=dev_reg), \
-             patch("homeassistant.helpers.device_registry.async_entries_for_config_entry",
-                   return_value=[active, stale]):
+        with (
+            patch(
+                "homeassistant.helpers.device_registry.async_get", return_value=dev_reg
+            ),
+            patch(
+                "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+                return_value=[active, stale],
+            ),
+        ):
             coord._cleanup_stale_devices({CAM_ID})
         dev_reg.async_remove_device.assert_called_once_with("stale-id")
 
@@ -164,6 +201,7 @@ class TestCleanupStaleDevices:
 class TestFetchLiveSnapshotImpl:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._async_fetch_live_snapshot_impl = types.MethodType(
             BoschCameraCoordinator._async_fetch_live_snapshot_impl, coord
         )
@@ -176,9 +214,9 @@ class TestFetchLiveSnapshotImpl:
 
     @pytest.mark.asyncio
     async def test_privacy_mode_on_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _shc_state_cache={CAM_ID: {"privacy_mode": True}}
-        ))
+        coord = self._bind(
+            _stub_coord(_shc_state_cache={CAM_ID: {"privacy_mode": True}})
+        )
         assert await coord._async_fetch_live_snapshot_impl(CAM_ID) is None
 
     @pytest.mark.asyncio
@@ -186,8 +224,10 @@ class TestFetchLiveSnapshotImpl:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_resp_cm(403))
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
@@ -196,8 +236,10 @@ class TestFetchLiveSnapshotImpl:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_resp_cm(200, text='{"urls": []}'))
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
@@ -209,11 +251,16 @@ class TestFetchLiveSnapshotImpl:
             return_value=_resp_cm(200, text=f'{{"urls": ["{PROXY_URL}"]}}')
         )
         session.get = MagicMock(
-            return_value=_resp_cm(200, body=b"\xff\xd8\xff\xe0" + b"\x00" * 40,
-                                  headers={"Content-Type": "image/jpeg"})
+            return_value=_resp_cm(
+                200,
+                body=b"\xff\xd8\xff\xe0" + b"\x00" * 40,
+                headers={"Content-Type": "image/jpeg"},
+            )
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
 
@@ -227,8 +274,10 @@ class TestFetchLiveSnapshotImpl:
         session.get = MagicMock(
             return_value=_resp_cm(200, body=b"", headers={"Content-Type": "image/jpeg"})
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
@@ -240,26 +289,33 @@ class TestFetchLiveSnapshotImpl:
             return_value=_resp_cm(200, text=f'{{"urls": ["{PROXY_URL}"]}}')
         )
         session.get = MagicMock(
-            return_value=_resp_cm(200, body=b"<html/>", headers={"Content-Type": "text/html"})
+            return_value=_resp_cm(
+                200, body=b"<html/>", headers={"Content-Type": "text/html"}
+            )
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_proxy_cache_hit_skips_put(self):
         """Cached proxy URL → PUT /connection not called."""
-        coord = self._bind(_stub_coord(
-            _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)}
-        ))
+        coord = self._bind(
+            _stub_coord(_proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)})
+        )
         connector, session = _aiohttp_mocks()
         session.get = MagicMock(
-            return_value=_resp_cm(200, body=b"\xff\xd8\xff\xe0",
-                                  headers={"Content-Type": "image/jpeg"})
+            return_value=_resp_cm(
+                200, body=b"\xff\xd8\xff\xe0", headers={"Content-Type": "image/jpeg"}
+            )
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.put.assert_not_called()
         assert result == b"\xff\xd8\xff\xe0"
@@ -267,14 +323,18 @@ class TestFetchLiveSnapshotImpl:
     @pytest.mark.asyncio
     async def test_rcp_jpeg_returned_directly(self):
         """RCP 0x099e returns a JPEG → snap.jpg fetch is skipped."""
-        coord = self._bind(_stub_coord(
-            _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
+            )
+        )
         coord._get_cached_rcp_session = AsyncMock(return_value="0xSESSION")
         coord._rcp_read = AsyncMock(return_value=b"\xff\xd8\xff\xe0" + b"\x00" * 20)
         connector, session = _aiohttp_mocks()
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.get.assert_not_called()
         assert result is not None and result[:2] == b"\xff\xd8"
@@ -282,18 +342,23 @@ class TestFetchLiveSnapshotImpl:
     @pytest.mark.asyncio
     async def test_rcp_non_jpeg_falls_through_to_snap(self):
         """RCP 0x099e returns non-JPEG (e.g. error response) → fall through to snap.jpg."""
-        coord = self._bind(_stub_coord(
-            _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
+            )
+        )
         coord._get_cached_rcp_session = AsyncMock(return_value="0xSESSION")
         coord._rcp_read = AsyncMock(return_value=b"\x00\x00\x00\x00")  # not JPEG
         connector, session = _aiohttp_mocks()
         session.get = MagicMock(
-            return_value=_resp_cm(200, body=b"\xff\xd8\xff\xe0",
-                                  headers={"Content-Type": "image/jpeg"})
+            return_value=_resp_cm(
+                200, body=b"\xff\xd8\xff\xe0", headers={"Content-Type": "image/jpeg"}
+            )
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.get.assert_called()
         assert result is not None
@@ -319,14 +384,17 @@ class TestFetchLiveSnapshotImpl:
         put_cm2.__aexit__ = AsyncMock(return_value=None)
 
         snap_404 = _resp_cm(404)
-        snap_ok = _resp_cm(200, body=b"\xff\xd8\xff\xe0",
-                           headers={"Content-Type": "image/jpeg"})
+        snap_ok = _resp_cm(
+            200, body=b"\xff\xd8\xff\xe0", headers={"Content-Type": "image/jpeg"}
+        )
 
         session.put = MagicMock(side_effect=[put_cm1, put_cm2])
         session.get = MagicMock(side_effect=[snap_404, snap_ok])
 
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
 
@@ -335,8 +403,10 @@ class TestFetchLiveSnapshotImpl:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_timeout_cm())
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
@@ -345,8 +415,10 @@ class TestFetchLiveSnapshotImpl:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_client_error_cm())
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
 
@@ -357,6 +429,7 @@ class TestFetchLiveSnapshotImpl:
 class TestFetchFreshEventSnapshot:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.async_fetch_fresh_event_snapshot = types.MethodType(
             BoschCameraCoordinator.async_fetch_fresh_event_snapshot, coord
         )
@@ -403,7 +476,9 @@ class TestFetchFreshEventSnapshot:
         coord = self._bind(_stub_coord())
         session = MagicMock()
         session.get = MagicMock(
-            return_value=_resp_cm(200, text='[{"imageUrl": "https://evil.com/snap.jpg"}]')
+            return_value=_resp_cm(
+                200, text='[{"imageUrl": "https://evil.com/snap.jpg"}]'
+            )
         )
         with patch(self._PATCH, return_value=session):
             result = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
@@ -507,7 +582,9 @@ class TestFetchFreshEventSnapshot:
         with patch(self._PATCH, return_value=session):
             result = await coord.async_fetch_fresh_event_snapshot(CAM_ID)
 
-        assert result == img_bytes, "expired cache entry must trigger a fresh network fetch"
+        assert result == img_bytes, (
+            "expired cache entry must trigger a fresh network fetch"
+        )
         assert session.get.call_count == 2
 
     @pytest.mark.asyncio
@@ -545,7 +622,9 @@ class TestFetchFreshEventSnapshot:
                 coord.async_fetch_fresh_event_snapshot(CAM_ID),
             )
 
-        assert all(r == img_bytes for r in results), "all callers must receive the same bytes"
+        assert all(r == img_bytes for r in results), (
+            "all callers must receive the same bytes"
+        )
         assert len(request_count) == 2, (
             f"expected exactly 2 network requests (events API + image), got {len(request_count)}; "
             "concurrent callers must be coalesced by the per-camera lock"
@@ -558,6 +637,7 @@ class TestFetchFreshEventSnapshot:
 class TestFetchLiveSnapshotLocal:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.async_fetch_live_snapshot_local = types.MethodType(
             BoschCameraCoordinator.async_fetch_live_snapshot_local, coord
         )
@@ -570,9 +650,9 @@ class TestFetchLiveSnapshotLocal:
 
     @pytest.mark.asyncio
     async def test_privacy_mode_on_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _shc_state_cache={CAM_ID: {"privacy_mode": True}}
-        ))
+        coord = self._bind(
+            _stub_coord(_shc_state_cache={CAM_ID: {"privacy_mode": True}})
+        )
         assert await coord.async_fetch_live_snapshot_local(CAM_ID) is None
 
     @pytest.mark.asyncio
@@ -580,8 +660,10 @@ class TestFetchLiveSnapshotLocal:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_resp_cm(403))
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 
@@ -590,8 +672,10 @@ class TestFetchLiveSnapshotLocal:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.put = MagicMock(return_value=_timeout_cm())
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 
@@ -601,10 +685,14 @@ class TestFetchLiveSnapshotLocal:
         connector, session = _aiohttp_mocks()
         # No "user" key in result
         session.put = MagicMock(
-            return_value=_resp_cm(200, text='{"password":"p","urls":["192.0.2.149:443"]}')
+            return_value=_resp_cm(
+                200, text='{"password":"p","urls":["192.0.2.149:443"]}'
+            )
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 
@@ -615,8 +703,10 @@ class TestFetchLiveSnapshotLocal:
         session.put = MagicMock(
             return_value=_resp_cm(200, text='{"user":"u","password":"p","urls":[]}')
         )
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 
@@ -641,11 +731,17 @@ class TestFetchLiveSnapshotLocal:
         snap_cm.__aexit__ = AsyncMock(return_value=None)
         client_session = MagicMock()
 
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch(f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)
+            ),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result == jpeg
 
@@ -669,11 +765,17 @@ class TestFetchLiveSnapshotLocal:
         snap_cm.__aexit__ = AsyncMock(return_value=None)
         client_session = MagicMock()
 
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session), \
-             patch("homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                   return_value=client_session), \
-             patch(f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+            patch(
+                f"{MODULE}.async_digest_request", new=AsyncMock(return_value=snap_cm)
+            ),
+        ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
 
@@ -684,6 +786,7 @@ class TestFetchLiveSnapshotLocal:
 class TestRcpReadActive:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._rcp_read_active = types.MethodType(
             BoschCameraCoordinator._rcp_read_active, coord
         )
@@ -696,45 +799,57 @@ class TestRcpReadActive:
 
     @pytest.mark.asyncio
     async def test_unknown_connection_type_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {"_connection_type": "TUNNEL"}}
-        ))
+        coord = self._bind(
+            _stub_coord(_live_connections={CAM_ID: {"_connection_type": "TUNNEL"}})
+        )
         assert await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD") is None
 
     @pytest.mark.asyncio
     async def test_local_missing_creds_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {
-                "_connection_type": "LOCAL",
-                "_local_user": "",
-                "_local_password": "p",
-                "urls": ["192.0.2.149:443"],
-            }}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _live_connections={
+                    CAM_ID: {
+                        "_connection_type": "LOCAL",
+                        "_local_user": "",
+                        "_local_password": "p",
+                        "urls": ["192.0.2.149:443"],
+                    }
+                }
+            )
+        )
         assert await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD") is None
 
     @pytest.mark.asyncio
     async def test_local_missing_urls_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {
-                "_connection_type": "LOCAL",
-                "_local_user": "u",
-                "_local_password": "p",
-                "urls": [],
-            }}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _live_connections={
+                    CAM_ID: {
+                        "_connection_type": "LOCAL",
+                        "_local_user": "u",
+                        "_local_password": "p",
+                        "urls": [],
+                    }
+                }
+            )
+        )
         assert await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD") is None
 
     @pytest.mark.asyncio
     async def test_local_dispatches_to_executor(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {
-                "_connection_type": "LOCAL",
-                "_local_user": "user",
-                "_local_password": "pass",
-                "urls": ["192.0.2.149:443"],
-            }}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _live_connections={
+                    CAM_ID: {
+                        "_connection_type": "LOCAL",
+                        "_local_user": "user",
+                        "_local_password": "pass",
+                        "urls": ["192.0.2.149:443"],
+                    }
+                }
+            )
+        )
         coord.hass.async_add_executor_job = AsyncMock(return_value=b"\x01\x02")
         result = await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD")
         assert result == b"\x01\x02"
@@ -742,19 +857,25 @@ class TestRcpReadActive:
 
     @pytest.mark.asyncio
     async def test_remote_missing_urls_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {"_connection_type": "REMOTE", "urls": []}}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _live_connections={CAM_ID: {"_connection_type": "REMOTE", "urls": []}}
+            )
+        )
         assert await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD") is None
 
     @pytest.mark.asyncio
     async def test_remote_dispatches_to_executor(self):
-        coord = self._bind(_stub_coord(
-            _live_connections={CAM_ID: {
-                "_connection_type": "REMOTE",
-                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hash123"],
-            }}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _live_connections={
+                    CAM_ID: {
+                        "_connection_type": "REMOTE",
+                        "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hash123"],
+                    }
+                }
+            )
+        )
         coord.hass.async_add_executor_job = AsyncMock(return_value=b"\xab\xcd")
         result = await coord._rcp_read_active(CAM_ID, "0x0c22", "T_WORD")
         assert result == b"\xab\xcd"
@@ -767,15 +888,18 @@ class TestRcpReadActive:
 class TestInvalidateRcpSession:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._invalidate_rcp_session = types.MethodType(
             BoschCameraCoordinator._invalidate_rcp_session, coord
         )
         return coord
 
     def test_present_entry_removed(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
+            )
+        )
         coord._invalidate_rcp_session("abc123")
         assert "abc123" not in coord._rcp_session_cache
 
@@ -787,6 +911,7 @@ class TestInvalidateRcpSession:
 class TestGetCachedRcpSession:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._get_cached_rcp_session = types.MethodType(
             BoschCameraCoordinator._get_cached_rcp_session, coord
         )
@@ -795,9 +920,9 @@ class TestGetCachedRcpSession:
     @pytest.mark.asyncio
     async def test_cache_hit_returns_cached_id(self):
         expires = time.monotonic() + 200
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0xCAFEBABE", expires)}
-        ))
+        coord = self._bind(
+            _stub_coord(_rcp_session_cache={"abc123": ("0xCAFEBABE", expires)})
+        )
         coord._rcp_session = AsyncMock(return_value="0xNEW")
         result = await coord._get_cached_rcp_session("proxy-01:42090", "abc123")
         assert result == "0xCAFEBABE"
@@ -805,9 +930,9 @@ class TestGetCachedRcpSession:
 
     @pytest.mark.asyncio
     async def test_cache_expired_calls_rcp_session(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0xOLD", time.monotonic() - 1)}
-        ))
+        coord = self._bind(
+            _stub_coord(_rcp_session_cache={"abc123": ("0xOLD", time.monotonic() - 1)})
+        )
         coord._rcp_session = AsyncMock(return_value="0xFRESH")
         result = await coord._get_cached_rcp_session("proxy-01:42090", "abc123")
         assert result == "0xFRESH"
@@ -835,6 +960,7 @@ class TestCoordRcpSession:
 
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._rcp_session = types.MethodType(
             BoschCameraCoordinator._rcp_session, coord
         )
@@ -851,8 +977,10 @@ class TestCoordRcpSession:
         step1 = _resp_cm(200, text="<sessionid>0x12345678</sessionid>")
         step2 = _resp_cm(200)
         connector, session = self._make_session(step1, step2)
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0x12345678"
 
@@ -860,17 +988,23 @@ class TestCoordRcpSession:
     async def test_step1_non200_returns_none(self):
         coord = self._bind(_stub_coord())
         connector, session = self._make_session(_resp_cm(403))
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_no_sessionid_in_response_returns_none(self):
         coord = self._bind(_stub_coord())
-        connector, session = self._make_session(_resp_cm(200, text="<result>ok</result>"))
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        connector, session = self._make_session(
+            _resp_cm(200, text="<result>ok</result>")
+        )
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
 
@@ -879,8 +1013,10 @@ class TestCoordRcpSession:
         coord = self._bind(_stub_coord())
         connector, session = _aiohttp_mocks()
         session.get = MagicMock(return_value=_timeout_cm())
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
 
@@ -891,8 +1027,10 @@ class TestCoordRcpSession:
         step1 = _resp_cm(200, text="<sessionid>0xABCDEF01</sessionid>")
         connector, session = _aiohttp_mocks()
         session.get = MagicMock(side_effect=[step1, _timeout_cm()])
-        with patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector), \
-             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session):
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0xABCDEF01"
 
@@ -906,8 +1044,11 @@ RCP_BASE = "https://proxy-01.live.cbs.boschsecurity.com:42090/abc123/rcp.xml"
 class TestRcpRead:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord._rcp_read = types.MethodType(BoschCameraCoordinator._rcp_read, coord)
-        coord._proxy_hash_from_rcp_base = BoschCameraCoordinator._proxy_hash_from_rcp_base
+        coord._proxy_hash_from_rcp_base = (
+            BoschCameraCoordinator._proxy_hash_from_rcp_base
+        )
         coord._invalidate_rcp_session = types.MethodType(
             BoschCameraCoordinator._invalidate_rcp_session, coord
         )
@@ -925,9 +1066,11 @@ class TestRcpRead:
 
     @pytest.mark.asyncio
     async def test_401_invalidates_session_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
+            )
+        )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(401))
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
@@ -937,9 +1080,11 @@ class TestRcpRead:
 
     @pytest.mark.asyncio
     async def test_403_invalidates_session_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
+            )
+        )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(403))
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
@@ -949,13 +1094,13 @@ class TestRcpRead:
 
     @pytest.mark.asyncio
     async def test_session_closed_0x0c0d_invalidates_returns_none(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
-        ))
-        session = MagicMock()
-        session.get = MagicMock(
-            return_value=_resp_cm(200, body=b"<err>0x0c0d</err>")
+        coord = self._bind(
+            _stub_coord(
+                _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
+            )
         )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(200, body=b"<err>0x0c0d</err>"))
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
@@ -963,9 +1108,11 @@ class TestRcpRead:
 
     @pytest.mark.asyncio
     async def test_500_returns_none_no_invalidate(self):
-        coord = self._bind(_stub_coord(
-            _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _rcp_session_cache={"abc123": ("0x12345678", time.monotonic() + 300)}
+            )
+        )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
@@ -994,6 +1141,7 @@ class TestRcpRead:
 
     def test_proxy_hash_from_rcp_base_extracts_hash(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         h = BoschCameraCoordinator._proxy_hash_from_rcp_base(
             "https://proxy-01:42090/abc123hash/rcp.xml"
         )
@@ -1001,4 +1149,7 @@ class TestRcpRead:
 
     def test_proxy_hash_from_rcp_base_invalid_returns_none(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        assert BoschCameraCoordinator._proxy_hash_from_rcp_base("https://nohash") is None
+
+        assert (
+            BoschCameraCoordinator._proxy_hash_from_rcp_base("https://nohash") is None
+        )

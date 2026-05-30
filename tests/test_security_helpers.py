@@ -27,37 +27,43 @@ from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 class TestSSRFGuard:
     """`_is_safe_bosch_url` SSRF allowlist — only HTTPS + Bosch domains pass."""
 
-    @pytest.mark.parametrize("url", [
-        "https://residential.cbs.boschsecurity.com/v11/video_inputs",
-        "https://proxy-37.live.cbs.boschsecurity.com/abc/snap.jpg",
-        "https://smarthome.authz.bosch.com/auth/realms/home_auth_provider/protocol/openid-connect/token",
-        "https://www.bosch.com/boschcam?code=abc",
-        "https://media.boschsecurity.com/rcpplus-over-cgi.pdf",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://residential.cbs.boschsecurity.com/v11/video_inputs",
+            "https://proxy-37.live.cbs.boschsecurity.com/abc/snap.jpg",
+            "https://smarthome.authz.bosch.com/auth/realms/home_auth_provider/protocol/openid-connect/token",
+            "https://www.bosch.com/boschcam?code=abc",
+            "https://media.boschsecurity.com/rcpplus-over-cgi.pdf",
+        ],
+    )
     def test_legitimate_bosch_urls_allowed(self, url: str) -> None:
         assert _is_safe_bosch_url(url) is True, f"Legit Bosch URL rejected: {url}"
 
-    @pytest.mark.parametrize("url", [
-        # Wrong domain
-        "https://attacker.example.com/abc",
-        "https://evil.com/snap.jpg",
-        "https://boschsecurity.com.attacker.com/snap.jpg",  # subdomain attack
-        # Non-HTTPS
-        "http://residential.cbs.boschsecurity.com/v11/video_inputs",
-        "ftp://residential.cbs.boschsecurity.com/file",
-        # Internal IPs (SSRF target)
-        "https://127.0.0.1/snap.jpg",
-        "https://192.168.1.1/admin",
-        "https://169.254.169.254/latest/meta-data/",  # AWS metadata
-        "https://10.0.0.1/admin",
-        # Localhost variants
-        "https://localhost/admin",
-        # Empty / malformed
-        "",
-        "not-a-url",
-        "javascript:alert(1)",
-        "file:///etc/passwd",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # Wrong domain
+            "https://attacker.example.com/abc",
+            "https://evil.com/snap.jpg",
+            "https://boschsecurity.com.attacker.com/snap.jpg",  # subdomain attack
+            # Non-HTTPS
+            "http://residential.cbs.boschsecurity.com/v11/video_inputs",
+            "ftp://residential.cbs.boschsecurity.com/file",
+            # Internal IPs (SSRF target)
+            "https://127.0.0.1/snap.jpg",
+            "https://192.168.1.1/admin",
+            "https://169.254.169.254/latest/meta-data/",  # AWS metadata
+            "https://10.0.0.1/admin",
+            # Localhost variants
+            "https://localhost/admin",
+            # Empty / malformed
+            "",
+            "not-a-url",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+        ],
+    )
     def test_unsafe_urls_rejected(self, url: str) -> None:
         assert _is_safe_bosch_url(url) is False, f"Unsafe URL accepted: {url}"
 
@@ -97,11 +103,13 @@ class TestRedactCreds:
         assert out["password"] == 12345
 
     def test_other_fields_unchanged(self) -> None:
-        out = _redact_creds({
-            "rtspsUrl": "rtsps://...",
-            "expires": 3600,
-            "type": "REMOTE",
-        })
+        out = _redact_creds(
+            {
+                "rtspsUrl": "rtsps://...",
+                "expires": 3600,
+                "type": "REMOTE",
+            }
+        )
         assert out["rtspsUrl"] == "rtsps://..."
         assert out["expires"] == 3600
         assert out["type"] == "REMOTE"
@@ -117,7 +125,9 @@ class TestGetOptions:
 
     def test_defaults_only_when_options_empty(self) -> None:
         from pytest_homeassistant_custom_component.common import MockConfigEntry
+
         from custom_components.bosch_shc_camera.const import DOMAIN
+
         entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
         opts = get_options(entry)
         for key, val in DEFAULT_OPTIONS.items():
@@ -125,7 +135,9 @@ class TestGetOptions:
 
     def test_user_options_override_defaults(self) -> None:
         from pytest_homeassistant_custom_component.common import MockConfigEntry
+
         from custom_components.bosch_shc_camera.const import DOMAIN
+
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={},
@@ -140,9 +152,12 @@ class TestGetOptions:
     def test_unknown_option_passes_through(self) -> None:
         """Unknown options aren't filtered out — kept as-is for forward compat."""
         from pytest_homeassistant_custom_component.common import MockConfigEntry
+
         from custom_components.bosch_shc_camera.const import DOMAIN
+
         entry = MockConfigEntry(
-            domain=DOMAIN, data={},
+            domain=DOMAIN,
+            data={},
             options={"some_future_option": "future_value"},
         )
         opts = get_options(entry)

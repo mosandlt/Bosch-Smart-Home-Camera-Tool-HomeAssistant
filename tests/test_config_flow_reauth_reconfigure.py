@@ -7,6 +7,7 @@ Strategy: bypass the HA framework entirely by calling the methods directly on
 a lightweight stub instance that only stubs out the HA-layer calls needed by
 the specific method under test.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

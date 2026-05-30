@@ -11,6 +11,7 @@ Pins:
 Source: user-reported confusion "camera shown offline during Bosch app parallel use",
 root cause HTTP 444 treated as OFFLINE in HA integration.
 """
+
 from __future__ import annotations
 
 import time
@@ -162,7 +163,11 @@ class TestSessionQuotaNotification:
         assert call_args[0][1] == "create"
         payload = call_args[0][2]
         assert "session_quota" in payload["notification_id"]
-        assert "444" in payload["message"] or "Session" in payload["message"] or "Sitzungslimit" in payload["message"]
+        assert (
+            "444" in payload["message"]
+            or "Session" in payload["message"]
+            or "Sitzungslimit" in payload["message"]
+        )
 
     async def test_hits_outside_window_dont_count(self) -> None:
         coord = _make_coord()
@@ -199,7 +204,9 @@ class TestSessionLimitOfflineSince:
         """The status == 'SESSION_LIMIT' branch does NOT add to _offline_since."""
         # We test the logic inline — if status is SESSION_LIMIT it falls into the
         # `else` branch (not in OFFLINE/UPDATING) so _offline_since.pop() is called.
-        offline_since: dict[str, float] = {CAM_A: 12345.0}  # simulate pre-existing entry
+        offline_since: dict[str, float] = {
+            CAM_A: 12345.0
+        }  # simulate pre-existing entry
         status = "SESSION_LIMIT"
         if status in ("OFFLINE", "UPDATING"):
             if CAM_A not in offline_since:

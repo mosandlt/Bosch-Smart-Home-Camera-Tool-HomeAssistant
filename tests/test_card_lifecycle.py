@@ -11,14 +11,9 @@ from pathlib import Path
 
 import pytest
 
-CARD_SRC = (
-    Path(__file__).parent.parent / "src" / "bosch-camera-card.js"
-)
+CARD_SRC = Path(__file__).parent.parent / "src" / "bosch-camera-card.js"
 CONST_PY = (
-    Path(__file__).parent.parent
-    / "custom_components"
-    / "bosch_shc_camera"
-    / "const.py"
+    Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera" / "const.py"
 )
 
 
@@ -272,6 +267,4 @@ def test_card_version_matches_const_py() -> None:
     assert len(const_match) == 1
     src_ver = src_match[0].split('"')[1]
     const_ver = const_match[0].split('"')[1]
-    assert src_ver == const_ver, (
-        f"CARD_VERSION drift: src={src_ver}, const={const_ver}"
-    )
+    assert src_ver == const_ver, f"CARD_VERSION drift: src={src_ver}, const={const_ver}"

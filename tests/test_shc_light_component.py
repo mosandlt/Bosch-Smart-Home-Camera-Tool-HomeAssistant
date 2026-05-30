@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -59,9 +58,21 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True):
         _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
         _lighting_switch_cache={
             CAM_ID: {
-                "frontLightSettings": {"brightness": 50, "color": None, "whiteBalance": -1.0},
-                "topLedLightSettings": {"brightness": 80, "color": None, "whiteBalance": -1.0},
-                "bottomLedLightSettings": {"brightness": 80, "color": None, "whiteBalance": -1.0},
+                "frontLightSettings": {
+                    "brightness": 50,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
+                "topLedLightSettings": {
+                    "brightness": 80,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
+                "bottomLedLightSettings": {
+                    "brightness": 80,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
             }
         },
         _last_topdown_brightness={},
@@ -83,11 +94,13 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True):
 class TestIsGen2:
     def test_gen2_outdoor(self):
         from custom_components.bosch_shc_camera.shc import _is_gen2
+
         coord = _stub_coord(gen2=True)
         assert _is_gen2(coord, CAM_ID) is True
 
     def test_gen1_outdoor(self):
         from custom_components.bosch_shc_camera.shc import _is_gen2
+
         coord = _stub_coord(gen2=False)
         coord._hw_version[CAM_ID] = "CAMERA_EYES"  # Gen1 outdoor
         assert _is_gen2(coord, CAM_ID) is False
@@ -97,6 +110,7 @@ class TestIsGen2:
         Important: a misclassification as Gen2 would route lighting
         through wrong endpoints and silently no-op."""
         from custom_components.bosch_shc_camera.shc import _is_gen2
+
         coord = _stub_coord()
         coord._hw_version.pop(CAM_ID, None)  # unknown
         assert _is_gen2(coord, CAM_ID) is False
@@ -117,7 +131,10 @@ class TestSetLightComponentGen1:
 
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
+
         coord = _stub_coord(with_token=False)
         ok = await async_cloud_set_light_component(coord, CAM_ID, "front", True)
         assert ok is False
@@ -129,6 +146,7 @@ class TestSetLightComponentGen1:
         coord._shc_state_cache[CAM_ID]["front_light_intensity"] = 0.75
 
         from custom_components.bosch_shc_camera import shc
+
         captured_body = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -161,6 +179,7 @@ class TestSetLightComponentGen1:
         coord._shc_state_cache[CAM_ID]["front_light"] = True
 
         from custom_components.bosch_shc_camera import shc
+
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -171,7 +190,9 @@ class TestSetLightComponentGen1:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", False)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "front", False
+            )
 
         assert ok is True
         body = captured["body"]
@@ -189,6 +210,7 @@ class TestSetLightComponentGen1:
         coord._shc_state_cache[CAM_ID]["wallwasher"] = False
 
         from custom_components.bosch_shc_camera import shc
+
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -200,7 +222,9 @@ class TestSetLightComponentGen1:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "wallwasher", True)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "wallwasher", True
+            )
 
         assert ok is True
         assert captured["url"].endswith("/lighting_override")
@@ -213,6 +237,7 @@ class TestSetLightComponentGen1:
         coord._shc_state_cache[CAM_ID]["front_light"] = True  # so intensity is allowed
 
         from custom_components.bosch_shc_camera import shc
+
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -223,7 +248,9 @@ class TestSetLightComponentGen1:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "intensity", 0.42)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 0.42
+            )
 
         assert ok is True
         assert captured["body"]["frontLightIntensity"] == 0.42
@@ -233,6 +260,7 @@ class TestSetLightComponentGen1:
         """Failed PUT must NOT optimistically update the state cache."""
         coord = _stub_coord(gen2=False)
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(500))
@@ -253,7 +281,7 @@ class TestSetLightComponentGen1:
 
         def _raise_timeout(*args, **kwargs):
             ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+            ctx.__aenter__ = AsyncMock(side_effect=TimeoutError())
             ctx.__aexit__ = AsyncMock(return_value=None)
             return ctx
 
@@ -273,11 +301,14 @@ class TestSetLightComponentGen1:
         # reflects cache. Test just ensures no crash.
         coord = _stub_coord(gen2=False)
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "snake_oil", True)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "snake_oil", True
+            )
         # Whatever the result — must not raise
         assert ok in (True, False)
 
@@ -295,6 +326,7 @@ class TestSetLightComponentGen2:
     async def test_front_uses_front_endpoint(self):
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
+
         captured_urls = []
 
         def _capture_put(url, json=None, headers=None):
@@ -319,6 +351,7 @@ class TestSetLightComponentGen2:
         must be auto-scaled by ×100."""
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
+
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -330,7 +363,9 @@ class TestSetLightComponentGen2:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "intensity", 0.42)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 0.42
+            )
 
         assert ok is True
         # 0.42 must scale to int 42, not stay as 0.42
@@ -344,6 +379,7 @@ class TestSetLightComponentGen2:
         """Int values stay int — only floats ≤1.0 get auto-scaled."""
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
+
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
@@ -354,7 +390,9 @@ class TestSetLightComponentGen2:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "intensity", 75)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 75
+            )
 
         assert ok is True
         assert captured["body"]["frontLightSettings"]["brightness"] == 75
@@ -368,6 +406,7 @@ class TestSetLightComponentGen2:
         coord._last_topdown_brightness[CAM_ID] = {"top": 80, "bottom": 60}
 
         from custom_components.bosch_shc_camera import shc
+
         captured = []
 
         def _capture_put(url, json=None, headers=None):
@@ -378,7 +417,9 @@ class TestSetLightComponentGen2:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "wallwasher", True)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "wallwasher", True
+            )
 
         assert ok is True
         # Two requests: lighting/switch (brightness) + topdown (toggle)
@@ -400,9 +441,12 @@ class TestSetLightComponentGen2:
         coord = _stub_coord(gen2=True)
         # Currently top=80, bottom=80 in the cache
         coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"] = 80
-        coord._lighting_switch_cache[CAM_ID]["bottomLedLightSettings"]["brightness"] = 60
+        coord._lighting_switch_cache[CAM_ID]["bottomLedLightSettings"]["brightness"] = (
+            60
+        )
 
         from custom_components.bosch_shc_camera import shc
+
         captured = []
 
         def _capture_put(url, json=None, headers=None):
@@ -413,7 +457,9 @@ class TestSetLightComponentGen2:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "wallwasher", False)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "wallwasher", False
+            )
 
         assert ok is True
         # Must have saved the pre-OFF brightness for next ON
@@ -430,11 +476,14 @@ class TestSetLightComponentGen2:
         making any HTTP calls."""
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
             session_factory.return_value = session
-            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "garbage", True)
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "garbage", True
+            )
         assert ok is False
         session.put.assert_not_called()
 
@@ -450,6 +499,7 @@ class TestSetPanExtras:
         """Pan API HTTP 500 → return False, don't update _pan_cache."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(500))
@@ -465,7 +515,7 @@ class TestSetPanExtras:
 
         def _raise_timeout(*args, **kwargs):
             ctx = MagicMock()
-            ctx.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+            ctx.__aenter__ = AsyncMock(side_effect=TimeoutError())
             ctx.__aexit__ = AsyncMock(return_value=None)
             return ctx
 
@@ -483,12 +533,18 @@ class TestSetPanExtras:
         camera's confirmed position, not the desired one."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
-            session.put = MagicMock(return_value=_mock_response(
-                200,
-                json_data={"currentAbsolutePosition": 87, "estimatedTimeToCompletion": 2500},
-            ))
+            session.put = MagicMock(
+                return_value=_mock_response(
+                    200,
+                    json_data={
+                        "currentAbsolutePosition": 87,
+                        "estimatedTimeToCompletion": 2500,
+                    },
+                )
+            )
             session_factory.return_value = session
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is True
@@ -502,6 +558,7 @@ class TestSetPanExtras:
         position."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
@@ -524,12 +581,17 @@ class TestSchedulePrivacyOffSnapshot:
 
     def test_outdoor_uses_short_delay(self):
         """Outdoor (HOME_Eyes_Outdoor / CAMERA_EYES) → 0.5 s delay."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
+
         coord = _stub_coord()
         coord._hw_version[CAM_ID] = "HOME_Eyes_Outdoor"
         # Capture the delay passed to async_call_later
         captured_delay = []
-        coord.hass.loop = SimpleNamespace(call_later=lambda d, fn: captured_delay.append(d))
+        coord.hass.loop = SimpleNamespace(
+            call_later=lambda d, fn: captured_delay.append(d)
+        )
         # The fn schedules an entity refresh — we don't care about the body,
         # just the delay. Function should not raise.
         try:
@@ -541,7 +603,10 @@ class TestSchedulePrivacyOffSnapshot:
     def test_indoor_uses_long_delay(self):
         """Indoor (CAMERA_360 / HOME_Eyes_Indoor) → 5.0 s delay so the
         shutter has time to open before snap.jpg fetch."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
+
         coord = _stub_coord()
         coord._hw_version[CAM_ID] = "HOME_Eyes_Indoor"
         # No assertion on internals — just smoke that it doesn't raise.

@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # Tested helpers (all sync, all read-only):
 #   is_camera_online(cam_id)
 #   is_session_stale(cam_id)
@@ -55,9 +54,10 @@ def _make_coord(**overrides) -> _StubCoord:
 def bind_helpers():
     """Return functions that emulate the bound methods on a stub coord."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     return {
-        "is_camera_online":  BoschCameraCoordinator.is_camera_online,
-        "is_session_stale":  BoschCameraCoordinator.is_session_stale,
+        "is_camera_online": BoschCameraCoordinator.is_camera_online,
+        "is_session_stale": BoschCameraCoordinator.is_session_stale,
     }
 
 
@@ -117,6 +117,7 @@ def test_is_session_stale_false_when_explicit_false(bind_helpers) -> None:
 def test_token_property_returns_entry_data() -> None:
     """coord.token reads bearer_token from entry.data when no in-memory override."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = _make_coord()
     assert BoschCameraCoordinator.token.fget(coord) == "tok-AAA"
 
@@ -124,6 +125,7 @@ def test_token_property_returns_entry_data() -> None:
 def test_token_property_prefers_in_memory_refresh() -> None:
     """If a fresh token was just minted, use it instead of stale entry.data."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = _make_coord(_refreshed_token="tok-FRESH")
     assert BoschCameraCoordinator.token.fget(coord) == "tok-FRESH"
 
@@ -131,6 +133,7 @@ def test_token_property_prefers_in_memory_refresh() -> None:
 def test_token_property_falls_back_when_in_memory_empty() -> None:
     """Empty/None _refreshed_token must NOT shadow entry.data."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = _make_coord(_refreshed_token=None)
     assert BoschCameraCoordinator.token.fget(coord) == "tok-AAA"
     coord2 = _make_coord(_refreshed_token="")
@@ -139,12 +142,14 @@ def test_token_property_falls_back_when_in_memory_empty() -> None:
 
 def test_refresh_token_property_returns_entry_data() -> None:
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = _make_coord()
     assert BoschCameraCoordinator.refresh_token.fget(coord) == "rfr-BBB"
 
 
 def test_refresh_token_in_memory_override() -> None:
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     coord = _make_coord(_refreshed_refresh="rfr-FRESH")
     assert BoschCameraCoordinator.refresh_token.fget(coord) == "rfr-FRESH"
 
@@ -156,6 +161,7 @@ def test_options_property_merges_defaults() -> None:
     """coord.options returns DEFAULT_OPTIONS overlaid by entry.options."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
     from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
     coord = _make_coord()
     coord._entry.options = {"interval_status": 999}
     opts = BoschCameraCoordinator.options.fget(coord)
@@ -163,5 +169,3 @@ def test_options_property_merges_defaults() -> None:
     # Default keys must still be present
     for key in DEFAULT_OPTIONS:
         assert key in opts
-
-

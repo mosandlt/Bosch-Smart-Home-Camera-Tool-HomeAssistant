@@ -28,7 +28,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import DOMAIN, get_options, BoschCameraCoordinator  # type: ignore[attr-defined]
+from . import DOMAIN, BoschCameraCoordinator, get_options  # type: ignore[attr-defined]
 from .models import get_display_name
 from .snapshot_store import load_snapshot
 
@@ -56,7 +56,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschCameraLastSnapshotImage(ImageEntity):
+class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA base class is untyped (no py.typed) → Any
     """Image entity exposing the last persisted snapshot for a Bosch camera.
 
     On each successful background refresh the camera entity calls
@@ -133,7 +133,7 @@ class BoschCameraLastSnapshotImage(ImageEntity):
             cached = cam._cached_image
             # Don't serve the 1×1 placeholder as a real snapshot image.
             if cached and len(cached) > 200:
-                return cached
+                return cached  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
         return None
 
     async def async_notify_refreshed(self) -> None:

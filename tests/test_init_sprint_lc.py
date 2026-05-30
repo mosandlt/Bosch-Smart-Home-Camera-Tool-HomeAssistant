@@ -7,13 +7,14 @@ Coverage targets:
 All tests run without a live HA instance.  Coordinator is a SimpleNamespace stub;
 methods are called via BoschCameraCoordinator.<method>(coord, ...) (unbound pattern).
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time as time_mod
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -43,7 +44,9 @@ def _make_session_fn(url_routes: dict):
     List values pop from front (sequences); non-list values are reused.
     Patterns are sorted by length descending so specific paths beat generic ones.
     """
-    state: dict = {k: (list(v) if isinstance(v, list) else [v]) for k, v in url_routes.items()}
+    state: dict = {
+        k: (list(v) if isinstance(v, list) else [v]) for k, v in url_routes.items()
+    }
     # Sort by pattern length descending — longer (more specific) patterns match first.
     sorted_patterns = sorted(state.keys(), key=len, reverse=True)
 
@@ -84,7 +87,7 @@ CAM_GEN2_INDOOR = {
     "hardwareVersion": "HOME_Eyes_Indoor",
     "featureSupport": {"light": False, "panLimit": 0},
     "featureStatus": {},
-    "privacyMode": "ON",   # skip RCP path to avoid real socket
+    "privacyMode": "ON",  # skip RCP path to avoid real socket
 }
 
 # Gen1 camera (CAMERA_360) — supports motion_sensitive_areas + privacy_masks
@@ -93,7 +96,7 @@ CAM_GEN1 = {
     "hardwareVersion": "CAMERA_360",
     "featureSupport": {"light": False, "panLimit": 0},
     "featureStatus": {},
-    "privacyMode": "ON",   # skip RCP path
+    "privacyMode": "ON",  # skip RCP path
 }
 
 # Gen2 Outdoor with light support — supports lighting_options
@@ -102,7 +105,7 @@ CAM_GEN2_OUTDOOR = {
     "hardwareVersion": "HOME_Eyes_Outdoor",
     "featureSupport": {"light": True, "panLimit": 0},
     "featureStatus": {},
-    "privacyMode": "ON",   # skip RCP path
+    "privacyMode": "ON",  # skip RCP path
 }
 
 # Gen2 camera with pan support — supports autofollow
@@ -111,11 +114,12 @@ CAM_GEN2_PAN = {
     "hardwareVersion": "HOME_Eyes_Outdoor",
     "featureSupport": {"light": False, "panLimit": 1},
     "featureStatus": {},
-    "privacyMode": "ON",   # skip RCP path
+    "privacyMode": "ON",  # skip RCP path
 }
 
 
 # ── Group A coordinator stub ───────────────────────────────────────────────────
+
 
 def _make_coord_for_update_data(**overrides):
     """
@@ -124,6 +128,7 @@ def _make_coord_for_update_data(**overrides):
     _last_slow=float("-inf") → ancient → do_slow=True (300s interval elapsed)
     _first_tick_done=True → second tick, so events+slow are not suppressed
     """
+
     def _create_task(coro, **kwargs):
         try:
             if hasattr(coro, "close"):
@@ -145,7 +150,7 @@ def _make_coord_for_update_data(**overrides):
         # Make slow tier trigger
         _last_status=float("-inf"),
         _last_events=float("-inf"),
-        _last_slow=float("-inf"),            # ancient → do_slow=True
+        _last_slow=float("-inf"),  # ancient → do_slow=True
         _last_smb_cleanup=time_mod.monotonic(),
         _last_nvr_cleanup=time_mod.monotonic(),
         # FCM
@@ -155,7 +160,7 @@ def _make_coord_for_update_data(**overrides):
         _fcm_client=None,
         # Camera data caches
         _hw_version={},
-        _cached_status={CAM_A: "ONLINE"},   # pre-cached so status check returns ONLINE
+        _cached_status={CAM_A: "ONLINE"},  # pre-cached so status check returns ONLINE
         _cached_events={},
         _last_event_ids={},
         _alert_sent_ids={},
@@ -209,14 +214,14 @@ def _make_coord_for_update_data(**overrides):
         _ledlights_set_at={},
         _arming_set_at={},
         # Feature / protocol
-        _feature_flags={"dummy": True},   # already populated → skip FF fetch
-        _protocol_checked=True,           # already checked → skip protocol fetch
+        _feature_flags={"dummy": True},  # already populated → skip FF fetch
+        _protocol_checked=True,  # already checked → skip protocol fetch
         _integration_version="11.0.10",
         _OFFLINE_EXTENDED_INTERVAL=900,
         # Stubs for called methods
         _ensure_valid_token=AsyncMock(return_value="fresh-tok"),
         _async_local_tcp_ping=AsyncMock(return_value=False),
-        _should_check_status=MagicMock(return_value=False),   # skip cloud status check
+        _should_check_status=MagicMock(return_value=False),  # skip cloud status check
         _cleanup_stale_devices=MagicMock(),
         _async_update_shc_states=AsyncMock(),
         _async_update_rcp_data=AsyncMock(),
@@ -261,7 +266,9 @@ def _build_slow_tier_routes(cam_info: dict, extra_routes: dict | None = None) ->
         f"{cid}/ping": _make_resp(200, {}, text_data="ONLINE"),
         # Slow-tier endpoints with sane defaults
         f"{cid}/wifiinfo": _make_resp(200, {"rssiValueDb": -60, "signalStrength": 80}),
-        f"{cid}/ambient_light_sensor_level": _make_resp(200, {"ambientLightSensorLevel": 500}),
+        f"{cid}/ambient_light_sensor_level": _make_resp(
+            200, {"ambientLightSensorLevel": 500}
+        ),
         f"{cid}/motion": _make_resp(200, {"sensitivity": "LOW"}),
         f"{cid}/audioAlarm": _make_resp(200, {"sensitivity": 50}),
         f"{cid}/firmware": _make_resp(200, {"version": "9.40.25"}),
@@ -284,7 +291,9 @@ def _build_slow_tier_routes(cam_info: dict, extra_routes: dict | None = None) ->
         f"{cid}/lighting": _make_resp(200, {}),
         f"{cid}/intrusionDetectionConfig": _make_resp(200, {}),
         f"{cid}/alarm_settings": _make_resp(200, {}),
-        f"{cid}/alarmStatus": _make_resp(200, {"alarmType": "NONE", "intrusionSystem": "INACTIVE"}),
+        f"{cid}/alarmStatus": _make_resp(
+            200, {"alarmType": "NONE", "intrusionSystem": "INACTIVE"}
+        ),
         f"{cid}/iconLedBrightness": _make_resp(200, {"value": 0}),
         f"{cid}/zones": _make_resp(200, []),
         f"{cid}/privateAreas": _make_resp(200, []),
@@ -340,6 +349,7 @@ class TestSlowTierFetchException:
     async def test_slow_tier_fetch_exception_returns_zero_status(self):
         """When one endpoint raises ClientError, _fetch returns (ep, 0, None) — no crash."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
@@ -352,7 +362,9 @@ class TestSlowTierFetchException:
 
         error_resp = MagicMock()
         error_resp.status = 200
-        error_resp.__aenter__ = AsyncMock(side_effect=_aiohttp.ClientConnectionError("conn refused"))
+        error_resp.__aenter__ = AsyncMock(
+            side_effect=_aiohttp.ClientConnectionError("conn refused")
+        )
         error_resp.__aexit__ = AsyncMock(return_value=None)
         # Override firmware route with one that raises on __aenter__
         routes[f"{CAM_A}/firmware"] = error_resp
@@ -363,8 +375,12 @@ class TestSlowTierFetchException:
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         # Other caches must still be populated — exception on firmware is swallowed
-        assert isinstance(result, dict), "Must return a dict even when one endpoint raises"
-        assert CAM_A in coord._wifiinfo_cache, "wifiinfo must still be cached despite firmware exception"
+        assert isinstance(result, dict), (
+            "Must return a dict even when one endpoint raises"
+        )
+        assert CAM_A in coord._wifiinfo_cache, (
+            "wifiinfo must still be cached despite firmware exception"
+        )
 
 
 class TestSlowTierAutofollow:
@@ -795,7 +811,7 @@ class TestCleanupStaleDevices:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
-            _last_slow=time_mod.monotonic(),   # not stale → skip slow tier
+            _last_slow=time_mod.monotonic(),  # not stale → skip slow tier
             _cached_status={CAM_A: "ONLINE"},
         )
         cleanup_mock = MagicMock()
@@ -812,9 +828,14 @@ class TestCleanupStaleDevices:
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert CAM_A in result, "Camera must appear in result"
-        cleanup_mock.assert_called_once(), "cleanup_stale_devices must be called on second tick"
+        (
+            cleanup_mock.assert_called_once(),
+            "cleanup_stale_devices must be called on second tick",
+        )
         call_args = cleanup_mock.call_args
-        assert CAM_A in call_args.args[0], "cam_id must appear in cleanup_stale_devices argument"
+        assert CAM_A in call_args.args[0], (
+            "cam_id must appear in cleanup_stale_devices argument"
+        )
 
 
 class TestNvrCleanupTriggeredDaily:
@@ -827,8 +848,8 @@ class TestNvrCleanupTriggeredDaily:
 
         nvr_opts = {"enable_nvr": True, "nvr_retention_days": 3}
         coord = _make_coord_for_update_data(
-            _last_slow=time_mod.monotonic(),   # skip slow tier
-            _last_nvr_cleanup=float("-inf"),             # ancient → interval elapsed
+            _last_slow=time_mod.monotonic(),  # skip slow tier
+            _last_nvr_cleanup=float("-inf"),  # ancient → interval elapsed
             _cached_status={CAM_A: "ONLINE"},
         )
         # get_options(self._entry) reads entry.options
@@ -856,7 +877,6 @@ class TestNvrCleanupTriggeredDaily:
         assert "nvr_cleanup" in all_call_str, (
             f"NVR cleanup task name must appear in background task calls, got: {all_call_str}"
         )
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -890,6 +910,7 @@ def _make_coord_live(**overrides):
 
     def _create_task(coro, **kwargs):
         import inspect
+
         if inspect.iscoroutine(coro):
             coro.close()
         return task_mock
@@ -946,10 +967,12 @@ def _make_coord_live(**overrides):
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
+
     def _replace_renewal_task(cam_id, coro):
         t = coord.hass.async_create_task(coro)
         coord._renewal_tasks[cam_id] = t
         return t
+
     coord._replace_renewal_task = _replace_renewal_task
     return coord
 
@@ -971,23 +994,27 @@ class TestRemoteInst4Reduced:
             get_quality_params=MagicMock(return_value=(True, 4)),
         )
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         # Method should succeed (no 400 because inst was reduced to 2)
-        assert result is not None, (
-            "REMOTE with inst=4→2 reduction must succeed"
-        )
+        assert result is not None, "REMOTE with inst=4→2 reduction must succeed"
         # PUT must have been called
         assert session_mock.put.called, "PUT must be called"
 
@@ -1026,21 +1053,29 @@ class TestLocalCredsCacheSplitException:
         # Simplest approach: test with a URL that has a non-numeric port.
         # The try block catches the int() error; line 2491's split also fails but
         # that propagates outside — we wrap the whole call in try/except to confirm.
-        local_body = json.dumps({
-            "user": "u-local",
-            "password": "p-local",
-            "urls": ["192.168.1.1:NOTAPORT"],   # port non-numeric → int() fails in try block
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": [
+                    "192.168.1.1:NOTAPORT"
+                ],  # port non-numeric → int() fails in try block
+                "bufferingTime": 500,
+            }
+        )
         resp = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             # int("NOTAPORT") at line 2491 (outside try) raises ValueError which
             # propagates — catch it here to verify the cache was NOT set before the raise.
             try:
@@ -1064,7 +1099,7 @@ class TestStaleStreamStopTimeout:
 
         # Create a stale stream whose stop() hangs
         stale_stream = MagicMock()
-        stale_stream.stop = AsyncMock(side_effect=asyncio.TimeoutError())
+        stale_stream.stop = AsyncMock(side_effect=TimeoutError())
         cam_ent = SimpleNamespace(stream=stale_stream)
 
         coord = _make_coord_live(
@@ -1080,22 +1115,28 @@ class TestStaleStreamStopTimeout:
             _camera_entities={CAM_A: cam_ent},
         )
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         resp = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
@@ -1128,12 +1169,14 @@ class TestStaleStreamStopException:
             _camera_entities={CAM_A: cam_ent},
         )
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         resp = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
@@ -1143,11 +1186,15 @@ class TestStaleStreamStopException:
             """Let asyncio.wait_for run normally so RuntimeError propagates as generic exception."""
             return await coro
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("asyncio.wait_for", side_effect=_wait_for_passthrough), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch("asyncio.wait_for", side_effect=_wait_for_passthrough),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
@@ -1171,20 +1218,24 @@ class TestNoProxyPortPrewarmFalse:
             _rcp_lan_ip_cache={},
             _local_creds_cache={},
             _get_cam_lan_ip=MagicMock(return_value=None),
-            _tls_proxy_ports={},   # empty → no proxy port → prewarm_ok=False
-            _start_tls_proxy=AsyncMock(return_value=None),  # returns None → no port in dict
+            _tls_proxy_ports={},  # empty → no proxy port → prewarm_ok=False
+            _start_tls_proxy=AsyncMock(
+                return_value=None
+            ),  # returns None → no port in dict
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
                 options={"stream_connection_type": "local"},
             ),
         )
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         resp_local = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
@@ -1196,11 +1247,17 @@ class TestNoProxyPortPrewarmFalse:
             prewarm_called.append(True)
             return True
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   side_effect=_prewarm_spy):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                side_effect=_prewarm_spy,
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         # pre_warm_rtsp must NOT be called (no proxy port → prewarm_ok=False directly)
         assert not prewarm_called, (
@@ -1218,7 +1275,9 @@ class TestLocalPrewarmFailedFallsBackToRemote:
 
         coord = _make_coord_live(
             _stream_error_count={},
-            _wifiinfo_cache={CAM_A: {"signalStrength": 80}},   # → LOCAL+REMOTE candidates
+            _wifiinfo_cache={
+                CAM_A: {"signalStrength": 80}
+            },  # → LOCAL+REMOTE candidates
             _async_local_tcp_ping=AsyncMock(return_value=True),  # TCP ok → LOCAL kept
             _lan_tcp_reachable={},
             _rcp_lan_ip_cache={},
@@ -1228,16 +1287,20 @@ class TestLocalPrewarmFailedFallsBackToRemote:
             _stop_tls_proxy=AsyncMock(),
         )
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp_local = _put_resp(200, local_body)
         resp_remote = _put_resp(200, remote_body)
 
@@ -1245,11 +1308,17 @@ class TestLocalPrewarmFailedFallsBackToRemote:
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(side_effect=[resp_local, resp_remote])
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=False)):   # pre-warm FAILS
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=False),
+            ),
+        ):  # pre-warm FAILS
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         # REMOTE fallback must succeed
         assert result is not None, (
@@ -1285,12 +1354,14 @@ class TestMinWaitSleepCalled:
             get_model_config=MagicMock(return_value=_model_cfg(min_total_wait=5)),
         )
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         resp = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
@@ -1301,11 +1372,15 @@ class TestMinWaitSleepCalled:
         async def _fake_sleep(duration):
             sleep_calls.append(duration)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("asyncio.sleep", side_effect=_fake_sleep), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # At least one sleep call must have been for the min_wait remaining time
@@ -1336,17 +1411,21 @@ class TestStreamUpdateSourceException:
             _camera_entities={CAM_A: cam_ent},
         )
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
@@ -1373,18 +1452,24 @@ class TestStreamUpdateSourceNoExistingStream:
             _camera_entities={CAM_A: cam_ent},
         )
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None, "Method must return a result dict"
         assert cam_ent.stream is None, (
@@ -1404,6 +1489,7 @@ class TestNvrSidecarLocal:
 
         def _create_task(coro, **kwargs):
             import inspect
+
             if inspect.iscoroutine(coro):
                 coro.close()
             task_calls.append(kwargs.get("name", ""))
@@ -1428,21 +1514,27 @@ class TestNvrSidecarLocal:
         )
         coord._replace_renewal_task = lambda cam_id, coro: _create_task(coro)
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         resp = _put_resp(200, local_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         nvr_start_calls = [n for n in task_calls if "nvr_start" in n]
@@ -1463,6 +1555,7 @@ class TestNvrSidecarRemote:
 
         def _create_task(coro, **kwargs):
             import inspect
+
             if inspect.iscoroutine(coro):
                 coro.close()
             task_calls.append(kwargs.get("name", ""))
@@ -1474,8 +1567,8 @@ class TestNvrSidecarRemote:
                 options={"stream_connection_type": "remote"},
             ),
             _start_tls_proxy=AsyncMock(return_value=54321),
-            _nvr_user_intent={CAM_A: True},        # NVR intent set
-            _nvr_processes={CAM_A: MagicMock()},   # recorder currently running
+            _nvr_user_intent={CAM_A: True},  # NVR intent set
+            _nvr_processes={CAM_A: MagicMock()},  # recorder currently running
         )
         coord.hass = SimpleNamespace(
             async_create_task=_create_task,
@@ -1484,17 +1577,21 @@ class TestNvrSidecarRemote:
         )
         coord._replace_renewal_task = lambda cam_id, coro: _create_task(coro)
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         nvr_stop_calls = [n for n in task_calls if "nvr_stop" in n]

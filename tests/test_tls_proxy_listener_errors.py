@@ -18,6 +18,7 @@ patching `socket.setsockopt` (via a custom socket subclass), patching
 inner select/recv path raise — verified by behaviour (proxy thread exits
 cleanly, no exception propagates to test).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -93,7 +94,8 @@ def _join_new_threads(threads_before, timeout=3.0):
     while time.monotonic() < deadline:
         new = frozenset(threading.enumerate()) - threads_before
         alive = [
-            t for t in new
+            t
+            for t in new
             if t.is_alive()
             and not isinstance(t, threading._DummyThread)
             and not t.name.startswith("waitpid-")
@@ -123,8 +125,12 @@ class _KeepidleRaisingSocket:
         self._real = real_sock
 
     def setsockopt(self, level, optname, value):
-        if level == socket.IPPROTO_TCP and optname == getattr(socket, "TCP_KEEPIDLE", -1):
-            raise OSError(errno.ENOPROTOOPT, "TCP_KEEPIDLE not supported on this socket")
+        if level == socket.IPPROTO_TCP and optname == getattr(
+            socket, "TCP_KEEPIDLE", -1
+        ):
+            raise OSError(
+                errno.ENOPROTOOPT, "TCP_KEEPIDLE not supported on this socket"
+            )
         return self._real.setsockopt(level, optname, value)
 
     def __getattr__(self, name):
@@ -244,14 +250,16 @@ class TestRawKeepidleSetsockoptRaises:
         def _wrap_create_connection(addr, timeout=10):
             return real_create_connection(addr, timeout=timeout)
 
-        with patch.object(socket, "TCP_KEEPIDLE", 256, create=True), \
-             patch.object(socket, "TCP_KEEPINTVL", 257, create=True), \
-             patch.object(socket, "TCP_KEEPCNT", 258, create=True), \
-             patch.object(socket.socket, "setsockopt", _accept_keepalives), \
-             patch(
-                 "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
-                 side_effect=_wrap_create_connection,
-             ):
+        with (
+            patch.object(socket, "TCP_KEEPIDLE", 256, create=True),
+            patch.object(socket, "TCP_KEEPINTVL", 257, create=True),
+            patch.object(socket, "TCP_KEEPCNT", 258, create=True),
+            patch.object(socket.socket, "setsockopt", _accept_keepalives),
+            patch(
+                "custom_components.bosch_shc_camera.tls_proxy.socket.create_connection",
+                side_effect=_wrap_create_connection,
+            ),
+        ):
             port = start_tls_proxy(ctx, cam_id, "127.0.0.1", up_port, port_cache)
 
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -304,9 +312,7 @@ class TestClientKeepidleSetsockoptRaises:
 
         with patch.object(socket, "TCP_KEEPIDLE", keepidle_sentinel, create=True):
             with patch.object(socket.socket, "setsockopt", _patched_setsockopt):
-                port = start_tls_proxy(
-                    ctx, cam_id, "127.0.0.1", up_port, port_cache
-                )
+                port = start_tls_proxy(ctx, cam_id, "127.0.0.1", up_port, port_cache)
                 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     client.settimeout(2)
@@ -368,8 +374,11 @@ class TestCircuitBreakerSrvCloseRaises:
 
                 # Snapshot proxy thread for join later
                 proxy_thread = next(
-                    (t for t in frozenset(threading.enumerate()) - threads_before
-                     if t.name.startswith("tls_proxy_")),
+                    (
+                        t
+                        for t in frozenset(threading.enumerate()) - threads_before
+                        if t.name.startswith("tls_proxy_")
+                    ),
                     None,
                 )
 
@@ -393,9 +402,7 @@ class TestCircuitBreakerSrvCloseRaises:
                     # srv.close() raising — lines 127-128 swallow the exception.
                     if proxy_thread is not None:
                         proxy_thread.join(timeout=5.0)
-                    assert (
-                        proxy_thread is None or not proxy_thread.is_alive()
-                    ), (
+                    assert proxy_thread is None or not proxy_thread.is_alive(), (
                         "circuit breaker must break out of loop even if srv.close() raises "
                         "(lines 127-128 swallow the exception)"
                     )
@@ -501,10 +508,10 @@ class TestPipeDebugLogAndCloseException:
             "custom_components.bosch_shc_camera.tls_proxy._select.select",
             side_effect=_flaky_select,
         ):
-            with caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.tls_proxy"):
-                port = start_tls_proxy(
-                    ctx, cam_id, "127.0.0.1", up_port, port_cache
-                )
+            with caplog.at_level(
+                "DEBUG", logger="custom_components.bosch_shc_camera.tls_proxy"
+            ):
+                port = start_tls_proxy(ctx, cam_id, "127.0.0.1", up_port, port_cache)
                 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     client.settimeout(2)
@@ -566,12 +573,15 @@ class TestPreWarmExceptionWaitClosedRaises:
             # Patch wait_for inside the body to raise → outer except fires →
             # writer cleanup runs → wait_closed raises → lines 460-461 swallow.
             with patch("asyncio.open_connection", side_effect=_patched_open):
-                with patch(
-                    "asyncio.wait_for", side_effect=asyncio.TimeoutError()
-                ):
+                with patch("asyncio.wait_for", side_effect=TimeoutError()):
                     result = await pre_warm_rtsp(
-                        proxy_port, "u", "p", "127.0.0.1",
-                        max_attempts=1, retry_wait=0, post_success_wait=0,
+                        proxy_port,
+                        "u",
+                        "p",
+                        "127.0.0.1",
+                        max_attempts=1,
+                        retry_wait=0,
+                        post_success_wait=0,
                         describe_timeout=1,
                     )
         finally:
@@ -589,6 +599,7 @@ class TestPreWarmExceptionWaitClosedRaises:
         """Sibling: writer.close() itself raises (not wait_closed). Same
         try/except wraps both calls — must still return False cleanly.
         """
+
         async def _handle(reader, writer):
             try:
                 writer.close()
@@ -611,12 +622,15 @@ class TestPreWarmExceptionWaitClosedRaises:
 
         try:
             with patch("asyncio.open_connection", side_effect=_patched_open):
-                with patch(
-                    "asyncio.wait_for", side_effect=asyncio.TimeoutError()
-                ):
+                with patch("asyncio.wait_for", side_effect=TimeoutError()):
                     result = await pre_warm_rtsp(
-                        proxy_port, "u", "p", "127.0.0.1",
-                        max_attempts=1, retry_wait=0, post_success_wait=0,
+                        proxy_port,
+                        "u",
+                        "p",
+                        "127.0.0.1",
+                        max_attempts=1,
+                        retry_wait=0,
+                        post_success_wait=0,
                         describe_timeout=1,
                     )
         finally:

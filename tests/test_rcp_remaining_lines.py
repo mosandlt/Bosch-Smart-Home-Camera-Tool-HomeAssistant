@@ -72,8 +72,10 @@ class TestNetworkServicesCached:
                 return network_raw
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID in coord._rcp_network_services_cache
@@ -97,8 +99,10 @@ class TestNetworkServicesCached:
                 return xml_raw
             return None
 
-        with patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"), \
-             patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read):
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_network_services_cache
@@ -134,7 +138,7 @@ class TestParseAlarmCatalogExcept:
 
         # Simplest: monkey-patch the raw.decode to raise
         class BadBytes(bytes):
-            def decode(self, *args, **kwargs):  # noqa: D102
+            def decode(self, *args, **kwargs):
                 raise RuntimeError("forced decode error")
 
         result = _parse_alarm_catalog(BadBytes(b"\x00\x01\x00\x02"))
@@ -166,8 +170,12 @@ class TestParseTlsCertHappyPath:
         mock_cert.issuer.rfc4514_string.return_value = "CN=Bosch CA,O=Bosch"
         mock_cert.subject.rfc4514_string.return_value = "CN=cam-01,O=Bosch"
         mock_cert.serial_number = 0xDEADBEEF
-        mock_cert.not_valid_before_utc.isoformat.return_value = "2024-01-01T00:00:00+00:00"
-        mock_cert.not_valid_after_utc.isoformat.return_value = "2026-01-01T00:00:00+00:00"
+        mock_cert.not_valid_before_utc.isoformat.return_value = (
+            "2024-01-01T00:00:00+00:00"
+        )
+        mock_cert.not_valid_after_utc.isoformat.return_value = (
+            "2026-01-01T00:00:00+00:00"
+        )
         mock_cert.public_key.return_value.key_size = 2048
         mock_cert.signature_algorithm_oid.dotted_string = "1.2.840.113549.1.1.11"
 
@@ -177,12 +185,12 @@ class TestParseTlsCertHappyPath:
         ):
             info = _parse_tls_cert(fake_der)
 
-        assert info["issuer"] == "CN=Bosch CA,O=Bosch"           # line 765
-        assert info["subject"] == "CN=cam-01,O=Bosch"            # line 766
-        assert info["serial"] == "deadbeef"                       # line 767
-        assert info["not_before"] == "2024-01-01T00:00:00+00:00" # line 768
+        assert info["issuer"] == "CN=Bosch CA,O=Bosch"  # line 765
+        assert info["subject"] == "CN=cam-01,O=Bosch"  # line 766
+        assert info["serial"] == "deadbeef"  # line 767
+        assert info["not_before"] == "2024-01-01T00:00:00+00:00"  # line 768
         assert info["not_after"] == "2026-01-01T00:00:00+00:00"  # line 769
-        assert info["key_size"] == 2048                           # line 770
+        assert info["key_size"] == 2048  # line 770
         assert info["signature_algorithm"] == "1.2.840.113549.1.1.11"  # line 771
         assert info["raw_size"] == len(fake_der)
         assert "raw_hex" not in info  # happy path: no fallback
@@ -200,7 +208,7 @@ class TestParseNetworkServicesExcept:
         from custom_components.bosch_shc_camera.rcp import _parse_network_services
 
         class BadBytes(bytes):
-            def decode(self, *args, **kwargs):  # noqa: D102
+            def decode(self, *args, **kwargs):
                 raise RuntimeError("forced decode failure")
 
         result = _parse_network_services(BadBytes(b"HTTP\x00HTTPS"))
@@ -254,6 +262,7 @@ class TestParseIvaCatalogShortChunk:
         # Actually we need the loop to reach i where chunk is short.
         # Trick: use a BadBytes subclass that returns short data for slice.
         raw_full = entry1 + entry2 + extra  # 13 bytes, n=2 → line 811 NOT hit
+
         # To hit line 811: we need n > actual_chunks.
         # Build 12 bytes (2 full entries) but report n=3 via a mock.
         # Simplest: build 18 bytes where last 6 are zeros (module_id=0, skipped
@@ -265,6 +274,7 @@ class TestParseIvaCatalogShortChunk:
         # The only way is to subclass bytes so that len() returns more than actual.
         class PaddedBytes(bytes):
             """Bytes that lie about their length to force a short chunk."""
+
             def __len__(self):
                 # Report 18 bytes (n=3) but actual slice at i=2 returns 1 byte
                 return 18

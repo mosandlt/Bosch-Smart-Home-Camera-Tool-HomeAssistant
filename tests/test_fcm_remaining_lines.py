@@ -9,6 +9,7 @@ Target lines:
 Strategy: invoke async_start_fcm_push with a mock FcmPushClient that captures the
 callbacks passed to it, then call those callbacks directly to reach the inner closures.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
+
 
 def _resp_cm(status: int, body: bytes = b"", json_data=None):
     resp = MagicMock()
@@ -102,6 +104,7 @@ def _make_alert_coord(options=None):
 
 # ── Lines 213-217 and 221: closures inside async_start_fcm_push ──────────────
 
+
 class TestAsyncStartFcmPushClosures:
     """Capture the callbacks passed to FcmPushClient and invoke them directly.
 
@@ -120,7 +123,9 @@ class TestAsyncStartFcmPushClosures:
         class CapturingClient:
             def __init__(self, **kwargs):
                 captured.update(kwargs)
-                self.checkin_or_register = AsyncMock(return_value="fake-fcm-token-abc123")
+                self.checkin_or_register = AsyncMock(
+                    return_value="fake-fcm-token-abc123"
+                )
                 self.start = AsyncMock()
 
         coord = _make_start_coord(push_mode=push_mode)
@@ -131,10 +136,13 @@ class TestAsyncStartFcmPushClosures:
         mock_fm.FcmPushClient = CapturingClient
 
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+
         with patch.dict(sys.modules, {"firebase_messaging": mock_fm}):
             with patch(f"{MODULE}._install_fcm_noise_filter"):
-                with patch(f"{MODULE}.register_fcm_with_bosch",
-                           new_callable=lambda: AsyncMock(return_value=True)):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new_callable=lambda: AsyncMock(return_value=True),
+                ):
                     await async_start_fcm_push(coord)
 
         return coord, captured
@@ -176,7 +184,9 @@ class TestAsyncStartFcmPushClosures:
         coord.hass.loop.call_soon_threadsafe = _capture_threadsafe
         creds_cb(fake_creds)
 
-        assert persist_fn is not None, "_persist must have been passed to call_soon_threadsafe"
+        assert persist_fn is not None, (
+            "_persist must have been passed to call_soon_threadsafe"
+        )
 
         # Now call _persist() directly — this exercises lines 214-215
         coord.hass.async_create_task = MagicMock()
@@ -225,6 +235,7 @@ class TestAsyncStartFcmPushClosures:
 
 
 # ── Lines 583-584: exception in mark_events_read inside async_handle_fcm_push ─
+
 
 class TestHandleFcmPushMarkEventsReadException:
     """Lines 583-584: when mark_events_read raises inside async_handle_fcm_push,
@@ -276,6 +287,7 @@ class TestHandleFcmPushMarkEventsReadException:
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             with patch(f"{MODULE}.async_mark_events_read", side_effect=_raising_mark):
                 from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
                 # Must complete without raising
                 await async_handle_fcm_push(coord)
 
@@ -309,12 +321,16 @@ class TestHandleFcmPushMarkEventsReadException:
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             with patch(f"{MODULE}.async_mark_events_read", side_effect=_track_mark):
                 from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
                 await async_handle_fcm_push(coord)
 
-        assert mark_calls == [], "mark_events_read must not be called when option is off"
+        assert mark_calls == [], (
+            "mark_events_read must not be called when option is off"
+        )
 
 
 # ── Lines 955-958: local save asyncio.TimeoutError + generic Exception ─────────
+
 
 class TestLocalSaveExceptionBranches:
     """Lines 955-958: exceptions from async_send_alert's local save block.
@@ -325,26 +341,34 @@ class TestLocalSaveExceptionBranches:
 
     def _run_alert_with_wait_for(self, wait_for_side_effect):
         """Helper: run async_send_alert with local save enabled and a controlled wait_for."""
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_remaining",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_remaining",
+            }
+        )
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
         async def _run():
             from custom_components.bosch_shc_camera.fcm import async_send_alert
+
             with patch(f"{MODULE}.async_get_clientsession", return_value=session):
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            with patch(f"{MODULE}.asyncio.wait_for",
-                                       side_effect=wait_for_side_effect):
+                            with patch(
+                                f"{MODULE}.asyncio.wait_for",
+                                side_effect=wait_for_side_effect,
+                            ):
                                 await async_send_alert(
-                                    coord, "Terrasse", "MOVEMENT",
-                                    "2026-05-12T10:00:00.000Z", "",
+                                    coord,
+                                    "Terrasse",
+                                    "MOVEMENT",
+                                    "2026-05-12T10:00:00.000Z",
+                                    "",
                                 )
 
         asyncio.get_event_loop().run_until_complete(_run())
@@ -356,31 +380,40 @@ class TestLocalSaveExceptionBranches:
 
         async def _timeout_wait_for(coro, timeout=None):
             raised.append("timeout")
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_remaining",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_remaining",
+            }
+        )
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
         from custom_components.bosch_shc_camera.fcm import async_send_alert
+
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        with patch(f"{MODULE}.asyncio.wait_for",
-                                   side_effect=_timeout_wait_for):
+                        with patch(
+                            f"{MODULE}.asyncio.wait_for", side_effect=_timeout_wait_for
+                        ):
                             # Must not raise
                             await async_send_alert(
-                                coord, "Terrasse", "MOVEMENT",
-                                "2026-05-12T10:00:00.000Z", "",
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-12T10:00:00.000Z",
+                                "",
                             )
 
-        assert raised, "wait_for must have been called (proving local save path was reached)"
+        assert raised, (
+            "wait_for must have been called (proving local save path was reached)"
+        )
 
     @pytest.mark.asyncio
     async def test_local_save_generic_exception_does_not_propagate(self):
@@ -391,62 +424,84 @@ class TestLocalSaveExceptionBranches:
             raised.append("error")
             raise RuntimeError("disk full")
 
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_remaining",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_remaining",
+            }
+        )
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
         from custom_components.bosch_shc_camera.fcm import async_send_alert
+
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        with patch(f"{MODULE}.asyncio.wait_for",
-                                   side_effect=_error_wait_for):
+                        with patch(
+                            f"{MODULE}.asyncio.wait_for", side_effect=_error_wait_for
+                        ):
                             # Must not raise
                             await async_send_alert(
-                                coord, "Terrasse", "MOVEMENT",
-                                "2026-05-12T10:00:00.000Z", "",
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-12T10:00:00.000Z",
+                                "",
                             )
 
-        assert raised, "wait_for must have been called (proving local save path was reached)"
+        assert raised, (
+            "wait_for must have been called (proving local save path was reached)"
+        )
 
     @pytest.mark.asyncio
     async def test_local_save_timeout_logged_as_warning(self, caplog):
         """Lines 955-956: TimeoutError path logs a warning with cam_name."""
         import logging
 
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_remaining",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_remaining",
+            }
+        )
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
         async def _timeout_wait_for(coro, timeout=None):
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         from custom_components.bosch_shc_camera.fcm import async_send_alert
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"):
+
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+        ):
             with patch(f"{MODULE}.async_get_clientsession", return_value=session):
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            with patch(f"{MODULE}.asyncio.wait_for",
-                                       side_effect=_timeout_wait_for):
+                            with patch(
+                                f"{MODULE}.asyncio.wait_for",
+                                side_effect=_timeout_wait_for,
+                            ):
                                 await async_send_alert(
-                                    coord, "Terrasse", "MOVEMENT",
-                                    "2026-05-12T10:00:00.000Z", "",
+                                    coord,
+                                    "Terrasse",
+                                    "MOVEMENT",
+                                    "2026-05-12T10:00:00.000Z",
+                                    "",
                                 )
 
-        timeout_msgs = [r for r in caplog.records
-                        if "local save timed out" in r.message and r.levelno == logging.WARNING]
+        timeout_msgs = [
+            r
+            for r in caplog.records
+            if "local save timed out" in r.message and r.levelno == logging.WARNING
+        ]
         assert timeout_msgs, "A WARNING about 'local save timed out' must be emitted"
         assert "Terrasse" in timeout_msgs[0].message
 
@@ -455,11 +510,13 @@ class TestLocalSaveExceptionBranches:
         """Lines 957-958: generic Exception path logs a warning with cam_name and error."""
         import logging
 
-        coord = _make_alert_coord(options={
-            "alert_notify_service": "notify.test",
-            "enable_local_save": True,
-            "download_path": "/tmp/bosch_test_remaining",
-        })
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "enable_local_save": True,
+                "download_path": "/tmp/bosch_test_remaining",
+            }
+        )
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
@@ -468,19 +525,30 @@ class TestLocalSaveExceptionBranches:
             raise OSError("no space left on device")
 
         from custom_components.bosch_shc_camera.fcm import async_send_alert
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"):
+
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+        ):
             with patch(f"{MODULE}.async_get_clientsession", return_value=session):
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            with patch(f"{MODULE}.asyncio.wait_for",
-                                       side_effect=_error_wait_for):
+                            with patch(
+                                f"{MODULE}.asyncio.wait_for",
+                                side_effect=_error_wait_for,
+                            ):
                                 await async_send_alert(
-                                    coord, "Terrasse", "MOVEMENT",
-                                    "2026-05-12T10:00:00.000Z", "",
+                                    coord,
+                                    "Terrasse",
+                                    "MOVEMENT",
+                                    "2026-05-12T10:00:00.000Z",
+                                    "",
                                 )
 
-        err_msgs = [r for r in caplog.records
-                    if "local save failed" in r.message and r.levelno == logging.WARNING]
+        err_msgs = [
+            r
+            for r in caplog.records
+            if "local save failed" in r.message and r.levelno == logging.WARNING
+        ]
         assert err_msgs, "A WARNING about 'local save failed' must be emitted"
         assert "Terrasse" in err_msgs[0].message

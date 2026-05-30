@@ -6,20 +6,20 @@ No HA runtime needed — uses SimpleNamespace stubs.
 Feature: diagnostic sensors (entity_category=DIAGNOSTIC, wifi signal %, firmware string).
 Source: /v11/video_inputs/{id}/wifiinfo (signalStrength 0-100%) + info.firmwareVersion.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from homeassistant.helpers.entity import EntityCategory
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_coord(
     firmware: str = "9.40.25",
@@ -65,6 +65,7 @@ class TestWifiSignalSensor:
 
     def _make(self, coord: Any | None = None) -> Any:
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
+
         c = coord if coord is not None else _make_coord()
         return BoschWifiSignalSensor(c, CAM_ID, _make_entry())
 
@@ -92,17 +93,44 @@ class TestWifiSignalSensor:
 
     # native_value: valid typical signal (mid-range)
     def test_native_value_typical_signal(self) -> None:
-        s = self._make(_make_coord(wifiinfo={"signalStrength": 67, "ssid": "HOME", "ipAddress": "192.168.1.2", "macAddress": "aa:bb"}))
+        s = self._make(
+            _make_coord(
+                wifiinfo={
+                    "signalStrength": 67,
+                    "ssid": "HOME",
+                    "ipAddress": "192.168.1.2",
+                    "macAddress": "aa:bb",
+                }
+            )
+        )
         assert s.native_value == 67
 
     # native_value: minimum boundary (0)
     def test_native_value_zero_signal(self) -> None:
-        s = self._make(_make_coord(wifiinfo={"signalStrength": 0, "ssid": "X", "ipAddress": "", "macAddress": ""}))
+        s = self._make(
+            _make_coord(
+                wifiinfo={
+                    "signalStrength": 0,
+                    "ssid": "X",
+                    "ipAddress": "",
+                    "macAddress": "",
+                }
+            )
+        )
         assert s.native_value == 0
 
     # native_value: maximum boundary (100)
     def test_native_value_full_signal(self) -> None:
-        s = self._make(_make_coord(wifiinfo={"signalStrength": 100, "ssid": "X", "ipAddress": "", "macAddress": ""}))
+        s = self._make(
+            _make_coord(
+                wifiinfo={
+                    "signalStrength": 100,
+                    "ssid": "X",
+                    "ipAddress": "",
+                    "macAddress": "",
+                }
+            )
+        )
         assert s.native_value == 100
 
     # native_value: signalStrength key missing (garbage/partial response)
@@ -123,7 +151,12 @@ class TestWifiSignalSensor:
     # available: False when coordinator update failed
     def test_available_false_when_update_failed(self) -> None:
         c = _make_coord(
-            wifiinfo={"signalStrength": 75, "ssid": "X", "ipAddress": "", "macAddress": ""},
+            wifiinfo={
+                "signalStrength": 75,
+                "ssid": "X",
+                "ipAddress": "",
+                "macAddress": "",
+            },
             last_update_success=False,
         )
         s = self._make(c)
@@ -132,14 +165,26 @@ class TestWifiSignalSensor:
     # available: True when cache has data + update succeeded
     def test_available_true_when_data_present(self) -> None:
         c = _make_coord(
-            wifiinfo={"signalStrength": 80, "ssid": "HOME", "ipAddress": "192.168.1.1", "macAddress": "cc:dd"},
+            wifiinfo={
+                "signalStrength": 80,
+                "ssid": "HOME",
+                "ipAddress": "192.168.1.1",
+                "macAddress": "cc:dd",
+            },
         )
         s = self._make(c)
         assert s.available is True
 
     # extra_state_attributes: basic keys always present
     def test_extra_attrs_basic_keys(self) -> None:
-        c = _make_coord(wifiinfo={"signalStrength": 70, "ssid": "MYNET", "ipAddress": "10.0.0.5", "macAddress": "aa:bb:cc"})
+        c = _make_coord(
+            wifiinfo={
+                "signalStrength": 70,
+                "ssid": "MYNET",
+                "ipAddress": "10.0.0.5",
+                "macAddress": "aa:bb:cc",
+            }
+        )
         s = self._make(c)
         attrs = s.extra_state_attributes
         assert attrs["ssid"] == "MYNET"
@@ -149,21 +194,38 @@ class TestWifiSignalSensor:
     # extra_state_attributes: lan_ip_rcp only present when rcp returns a value
     def test_extra_attrs_rcp_lan_ip_included(self) -> None:
         c = _make_coord(
-            wifiinfo={"signalStrength": 60, "ssid": "X", "ipAddress": "", "macAddress": ""},
+            wifiinfo={
+                "signalStrength": 60,
+                "ssid": "X",
+                "ipAddress": "",
+                "macAddress": "",
+            },
             rcp_lan_ip="192.0.2.149",
         )
         s = self._make(c)
         assert s.extra_state_attributes["lan_ip_rcp"] == "192.0.2.149"
 
     def test_extra_attrs_rcp_lan_ip_absent_when_none(self) -> None:
-        c = _make_coord(wifiinfo={"signalStrength": 60, "ssid": "X", "ipAddress": "", "macAddress": ""})
+        c = _make_coord(
+            wifiinfo={
+                "signalStrength": 60,
+                "ssid": "X",
+                "ipAddress": "",
+                "macAddress": "",
+            }
+        )
         s = self._make(c)
         assert "lan_ip_rcp" not in s.extra_state_attributes
 
     # extra_state_attributes: bitrate ladder included when rcp returns ladder
     def test_extra_attrs_bitrate_ladder_included(self) -> None:
         c = _make_coord(
-            wifiinfo={"signalStrength": 55, "ssid": "Y", "ipAddress": "", "macAddress": ""},
+            wifiinfo={
+                "signalStrength": 55,
+                "ssid": "Y",
+                "ipAddress": "",
+                "macAddress": "",
+            },
             rcp_bitrate_ladder=[500, 1000, 2000],
         )
         s = self._make(c)
@@ -172,7 +234,14 @@ class TestWifiSignalSensor:
         assert attrs["max_bitrate_kbps"] == 2000
 
     def test_extra_attrs_bitrate_ladder_absent_when_none(self) -> None:
-        c = _make_coord(wifiinfo={"signalStrength": 55, "ssid": "Y", "ipAddress": "", "macAddress": ""})
+        c = _make_coord(
+            wifiinfo={
+                "signalStrength": 55,
+                "ssid": "Y",
+                "ipAddress": "",
+                "macAddress": "",
+            }
+        )
         s = self._make(c)
         attrs = s.extra_state_attributes
         assert "bitrate_ladder_kbps" not in attrs
@@ -196,6 +265,7 @@ class TestFirmwareVersionSensor:
 
     def _make(self, coord: Any | None = None) -> Any:
         from custom_components.bosch_shc_camera.sensor import BoschFirmwareVersionSensor
+
         c = coord if coord is not None else _make_coord()
         return BoschFirmwareVersionSensor(c, CAM_ID, _make_entry())
 
@@ -277,14 +347,20 @@ class TestFirmwareVersionSensor:
 
     # extra_state_attributes: hardware_version always present
     def test_extra_attrs_hardware_version(self) -> None:
-        s = self._make(_make_coord(firmware="9.40.25", hardware_version="HOME_Eyes_Outdoor"))
+        s = self._make(
+            _make_coord(firmware="9.40.25", hardware_version="HOME_Eyes_Outdoor")
+        )
         assert s.extra_state_attributes["hardware_version"] == "HOME_Eyes_Outdoor"
 
     # extra_state_attributes: product_name_rcp included when rcp returns value
     def test_extra_attrs_product_name_included(self) -> None:
-        c = _make_coord(firmware="9.40.25", rcp_product_name="FLEXIDOME IP outdoor 4000i")
+        c = _make_coord(
+            firmware="9.40.25", rcp_product_name="FLEXIDOME IP outdoor 4000i"
+        )
         s = self._make(c)
-        assert s.extra_state_attributes["product_name_rcp"] == "FLEXIDOME IP outdoor 4000i"
+        assert (
+            s.extra_state_attributes["product_name_rcp"] == "FLEXIDOME IP outdoor 4000i"
+        )
 
     def test_extra_attrs_product_name_absent_when_none(self) -> None:
         s = self._make(_make_coord(firmware="9.40.25"))

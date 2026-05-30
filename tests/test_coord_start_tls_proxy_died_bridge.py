@@ -41,8 +41,16 @@ class TestDiedCallbackBridge:
         `_on_tls_proxy_died(cam_id)`. Pins L4245-4246."""
         captured = {}
 
-        def _fake_start(ssl_ctx, cam_id, cam_host, cam_port, ports,
-                        *, is_renewal=False, on_proxy_died=None):
+        def _fake_start(
+            ssl_ctx,
+            cam_id,
+            cam_host,
+            cam_port,
+            ports,
+            *,
+            is_renewal=False,
+            on_proxy_died=None,
+        ):
             captured["cb"] = on_proxy_died
             return 50000
 
@@ -52,7 +60,10 @@ class TestDiedCallbackBridge:
             side_effect=_fake_start,
         ):
             port = await BoschCameraCoordinator._start_tls_proxy(
-                coord, "CAM-A", "1.2.3.4", 443,
+                coord,
+                "CAM-A",
+                "1.2.3.4",
+                443,
             )
         assert port == 50000
         # Invoke the captured callback as if the proxy thread fired it.
@@ -66,8 +77,16 @@ class TestDiedCallbackBridge:
         silently so the proxy thread does not crash. Pins L4251-4252."""
         captured = {}
 
-        def _fake_start(ssl_ctx, cam_id, cam_host, cam_port, ports,
-                        *, is_renewal=False, on_proxy_died=None):
+        def _fake_start(
+            ssl_ctx,
+            cam_id,
+            cam_host,
+            cam_port,
+            ports,
+            *,
+            is_renewal=False,
+            on_proxy_died=None,
+        ):
             captured["cb"] = on_proxy_died
             return 50001
 
@@ -80,7 +99,10 @@ class TestDiedCallbackBridge:
             side_effect=_fake_start,
         ):
             await BoschCameraCoordinator._start_tls_proxy(
-                coord, "CAM-A", "1.2.3.4", 443,
+                coord,
+                "CAM-A",
+                "1.2.3.4",
+                443,
             )
         # Must NOT raise.
         captured["cb"]()

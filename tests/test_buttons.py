@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -42,6 +41,7 @@ def stub_entry():
 def test_refresh_button_construction(stub_coord, stub_entry):
     """Refresh button instantiates with the expected unique_id + name."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     assert btn._attr_unique_id.startswith("bosch_shc_refresh_")
     assert btn._attr_translation_key == "refresh_snapshot"
@@ -54,6 +54,7 @@ def test_refresh_button_construction(stub_coord, stub_entry):
 def test_refresh_button_device_info(stub_coord, stub_entry):
     """device_info propagates model name + firmware + mac."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     info = btn.device_info
     assert info["manufacturer"] == "Bosch"
@@ -68,11 +69,11 @@ def test_refresh_button_device_info(stub_coord, stub_entry):
 def test_device_info_no_mac_skipped(stub_coord, stub_entry):
     """Empty mac → device_info connections is an empty set."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
     stub_coord.data[CAM_ID]["info"]["macAddress"] = ""
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     info = btn.device_info
     assert info["connections"] == set()
-
 
     assert info["sw_version"] == "9.40.25"
 
@@ -85,7 +86,9 @@ class TestRefreshSnapshotPress:
     async def test_press_schedules_coordinator_refresh(self, stub_coord, stub_entry):
         """async_press must schedule coordinator.async_request_refresh via hass.async_create_task."""
         from unittest.mock import MagicMock
+
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
         tasks_created = []
         fake_hass = MagicMock()
@@ -95,10 +98,14 @@ class TestRefreshSnapshotPress:
         assert len(tasks_created) >= 1
 
     @pytest.mark.asyncio
-    async def test_press_also_triggers_image_refresh_when_cam_entity_present(self, stub_coord, stub_entry):
+    async def test_press_also_triggers_image_refresh_when_cam_entity_present(
+        self, stub_coord, stub_entry
+    ):
         """When a camera entity is registered, async_press also schedules its image refresh."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import AsyncMock, MagicMock
+
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
         fake_cam = MagicMock()
         fake_cam._async_trigger_image_refresh = AsyncMock(return_value=None)
         stub_coord._camera_entities[CAM_ID] = fake_cam
@@ -125,24 +132,35 @@ class TestSetupEntry:
         Gen2 cameras use BoschPanicAlarmSwitch via /panic_alarm in switch.py.
         """
         from custom_components.bosch_shc_camera.button import (
-            async_setup_entry, BoschRefreshSnapshotButton,
+            BoschRefreshSnapshotButton,
+            async_setup_entry,
         )
+
         stub_entry.runtime_data = stub_coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=stub_entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=stub_entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         types_ = {type(e) for e in captured}
         assert BoschRefreshSnapshotButton in types_
         assert len(captured) == 1
 
     @pytest.mark.asyncio
-    async def test_skips_all_buttons_when_disabled_in_options(self, stub_coord, stub_entry):
+    async def test_skips_all_buttons_when_disabled_in_options(
+        self, stub_coord, stub_entry
+    ):
         """enable_snapshot_button=False → setup_entry returns early, no entities created."""
         from custom_components.bosch_shc_camera.button import async_setup_entry
+
         stub_entry.options = {"enable_snapshot_button": False}
         stub_entry.data = {}
         stub_entry.runtime_data = stub_coord
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=stub_entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=stub_entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         assert captured == []

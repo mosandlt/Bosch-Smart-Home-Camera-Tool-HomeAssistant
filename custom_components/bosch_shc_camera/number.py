@@ -28,7 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, CLOUD_API  # type: ignore[attr-defined]
+from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,35 +46,60 @@ async def async_setup_entry(
         cam_info = coordinator.data[cam_id].get("info", {})
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
-            entities.append(BoschPanNumber(coordinator, cam_id, config_entry, pan_limit))
+            entities.append(
+                BoschPanNumber(coordinator, cam_id, config_entry, pan_limit)
+            )
         entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
-            entities.append(BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry)
+            )
         # Gen2-only entities
         from .models import get_model_config
+
         hw = cam_info.get("hardwareVersion", "CAMERA")
         if get_model_config(hw).generation >= 2:
             # lens_elevation works on both Indoor II and Outdoor II
             # (Indoor II slow-tier returns 200 on this endpoint, confirmed 2026-04-11)
             entities.append(BoschLensElevationNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry)
+            )
             # Intrusion detection tuning — available on both Indoor II and Outdoor II.
-            entities.append(BoschIntrusionSensitivityNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschIntrusionDistanceNumber(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschIntrusionSensitivityNumber(coordinator, cam_id, config_entry)
+            )
+            entities.append(
+                BoschIntrusionDistanceNumber(coordinator, cam_id, config_entry)
+            )
             # Light-related entities only for cameras that actually expose Gen2 lighting
             # (Indoor II has no RGB/wallwasher lights — only Power-LED via iconLedBrightness).
             if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                entities.append(BoschWhiteBalanceNumber(coordinator, cam_id, config_entry))
-                entities.append(BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry))
-                entities.append(BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry))
-                entities.append(BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry))
-                entities.append(BoschDarknessThresholdNumber(coordinator, cam_id, config_entry))
+                entities.append(
+                    BoschWhiteBalanceNumber(coordinator, cam_id, config_entry)
+                )
+                entities.append(
+                    BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry)
+                )
+                entities.append(
+                    BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry)
+                )
+                entities.append(
+                    BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry)
+                )
+                entities.append(
+                    BoschDarknessThresholdNumber(coordinator, cam_id, config_entry)
+                )
         # Gen2 Indoor II — alarm delays + power-LED brightness
         if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-            entities.append(BoschPowerLedBrightnessNumber(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschPowerLedBrightnessNumber(coordinator, cam_id, config_entry)
+            )
             entities.append(BoschAlarmDelayNumber(coordinator, cam_id, config_entry))
-            entities.append(BoschAlarmActivationDelayNumber(coordinator, cam_id, config_entry))
+            entities.append(
+                BoschAlarmActivationDelayNumber(coordinator, cam_id, config_entry)
+            )
             entities.append(BoschPreAlarmDelayNumber(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
@@ -84,40 +109,43 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry, pan_limit: int) -> None:
+    def __init__(
+        self, coordinator: Any, cam_id: str, entry: ConfigEntry, pan_limit: int
+    ) -> None:
         super().__init__(coordinator)
-        self._cam_id    = cam_id
-        self._entry     = entry
+        self._cam_id = cam_id
+        self._entry = entry
         self._pan_limit = pan_limit
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
-        self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
 
-        self._attr_name             = "Pan Position"
-        self._attr_unique_id        = f"bosch_shc_pan_{cam_id.lower()}"
+        self._model_name = get_display_name(self._model)
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
+
+        self._attr_name = "Pan Position"
+        self._attr_unique_id = f"bosch_shc_pan_{cam_id.lower()}"
         self._attr_native_min_value = -pan_limit
-        self._attr_native_max_value =  pan_limit
-        self._attr_native_step      = 1
-        self._attr_mode             = NumberMode.SLIDER
+        self._attr_native_max_value = pan_limit
+        self._attr_native_step = 1
+        self._attr_mode = NumberMode.SLIDER
         self._attr_native_unit_of_measurement = "°"
-        self._attr_icon             = "mdi:pan-horizontal"
-        self._attr_translation_key  = "pan_position"
-        self._attr_entity_category  = EntityCategory.CONFIG
+        self._attr_icon = "mdi:pan-horizontal"
+        self._attr_translation_key = "pan_position"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
         }
 
     def _rotation_180(self) -> bool:
@@ -161,29 +189,30 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
     Disabled by default — enable in Settings -> Entities.
     """
 
-    _attr_icon                        = "mdi:volume-medium"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "%"
-    _attr_has_entity_name             = True
+    _attr_icon = "mdi:volume-medium"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
+    _attr_has_entity_name = True
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
-        self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
 
-        self._attr_name      = "Speaker Level"
+        self._model_name = get_display_name(self._model)
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
+
+        self._attr_name = "Speaker Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_speaker_level"
         self._attr_translation_key = "speaker_level"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -191,12 +220,12 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
         }
 
     @property
@@ -208,9 +237,8 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._audio_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._audio_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -223,14 +251,14 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
         level = int(round(value))
         audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
         audio["speakerLevel"] = level
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "audio", audio
-        )
+        success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
         if success:
             self.coordinator._audio_cache[self._cam_id] = audio
             _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
         else:
-            _LOGGER.warning("Failed to set speaker level for %s: HTTP error", self._cam_id)
+            _LOGGER.warning(
+                "Failed to set speaker level for %s: HTTP error", self._cam_id
+            )
         self.async_write_ha_state()
 
 
@@ -243,27 +271,29 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: 
     Disabled by default — enable in Settings → Entities.
     """
 
-    _attr_icon                        = "mdi:brightness-6"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 5
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "%"
-    _attr_has_entity_name             = True
+    _attr_icon = "mdi:brightness-6"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
+    _attr_has_entity_name = True
+
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
-        self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
 
-        self._attr_name      = "Front Light Intensity"
+        self._model_name = get_display_name(self._model)
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
+
+        self._attr_name = "Front Light Intensity"
         self._attr_unique_id = f"bosch_shc_front_light_intensity_{cam_id.lower()}"
         self._attr_translation_key = "front_light_intensity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -271,17 +301,19 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
         }
 
     @property
     def native_value(self) -> float | None:
-        val = self.coordinator._shc_state_cache.get(self._cam_id, {}).get("front_light_intensity")
+        val = self.coordinator._shc_state_cache.get(self._cam_id, {}).get(
+            "front_light_intensity"
+        )
         if val is not None:
             return float(round(float(val) * 100))
         return None
@@ -308,24 +340,25 @@ class _BoschGen2NumberBase(CoordinatorEntity, NumberEntity):  # type: ignore[mis
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._cam_id = cam_id
-        self._entry  = entry
+        self._entry = entry
         info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = info.get("title", cam_id)
-        self._model     = info.get("hardwareVersion", "CAMERA")
+        self._model = info.get("hardwareVersion", "CAMERA")
         from .models import get_display_name
+
         self._model_name = get_display_name(self._model)
-        self._fw        = info.get("firmwareVersion", "")
-        self._mac       = info.get("macAddress", "")
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers":  {(DOMAIN, self._cam_id)},
-            "name":         f"Bosch {self._cam_title}",
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model":        self._model_name,
-            "sw_version":   self._fw,
-            "connections":  {("mac", self._mac)} if self._mac else set(),
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
         }
 
 
@@ -337,16 +370,16 @@ class BoschLensElevationNumber(_BoschGen2NumberBase):
     Used by camera for perspective correction in person detection.
     """
 
-    _attr_icon                        = "mdi:arrow-up-down"
-    _attr_native_min_value            = 0.5
-    _attr_native_max_value            = 5.0
-    _attr_native_step                 = 0.05
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "m"
+    _attr_icon = "mdi:arrow-up-down"
+    _attr_native_min_value = 0.5
+    _attr_native_max_value = 5.0
+    _attr_native_step = 0.05
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "m"
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Lens Elevation"
+        self._attr_name = "Lens Elevation"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lens_elevation"
         self._attr_translation_key = "lens_elevation"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -378,16 +411,16 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
     Writes via PUT /v11/video_inputs/{id}/audio → full body with updated microphoneLevel.
     """
 
-    _attr_icon                        = "mdi:microphone"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 5
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "%"
+    _attr_icon = "mdi:microphone"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Microphone Level"
+        self._attr_name = "Microphone Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_mic_level"
         self._attr_translation_key = "microphone_level"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -400,14 +433,16 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._audio_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._audio_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
         from .switch import _is_gen2_indoor, _warn_if_privacy_on
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Mikrofon-Lautstärke"):
+
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(
+            self, "Mikrofon-Lautstärke"
+        ):
             return
         audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
         audio["microphoneLevel"] = int(round(value))
@@ -425,15 +460,15 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
     Writes via PUT /lighting/switch with frontLightSettings only.
     """
 
-    _attr_icon                        = "mdi:thermometer-lines"
-    _attr_native_min_value            = -1.0
-    _attr_native_max_value            = 1.0
-    _attr_native_step                 = 0.05
-    _attr_mode                        = NumberMode.SLIDER
+    _attr_icon = "mdi:thermometer-lines"
+    _attr_native_min_value = -1.0
+    _attr_native_max_value = 1.0
+    _attr_native_step = 0.05
+    _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Farbtemperatur Frontlicht"
+        self._attr_name = "Farbtemperatur Frontlicht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_white_balance"
         self._wb_value: float | None = None
         self._attr_translation_key = "white_balance"
@@ -455,14 +490,28 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
     async def async_set_native_value(self, value: float) -> None:
         """Set white balance for front light — sends FULL body (API requirement)."""
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
         wb = round(value, 2)
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         body = {
-            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "frontLightSettings": cached.get(
+                "frontLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
+            "topLedLightSettings": cached.get(
+                "topLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
+            "bottomLedLightSettings": cached.get(
+                "bottomLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
         }
-        body["frontLightSettings"] = {**body["frontLightSettings"], "whiteBalance": wb, "color": None}
+        body["frontLightSettings"] = {
+            **body["frontLightSettings"],
+            "whiteBalance": wb,
+            "color": None,
+        }
         session = async_get_clientsession(self.hass, verify_ssl=False)
         headers = {
             "Authorization": f"Bearer {self.coordinator.token}",
@@ -472,17 +521,26 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
             async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers, json=body,
+                    headers=headers,
+                    json=body,
                 ) as resp:
                     if resp.status in (200, 201, 204):
                         self._wb_value = wb
                         try:
-                            self.coordinator._lighting_switch_cache[self._cam_id] = await resp.json()
-                        except Exception:
+                            self.coordinator._lighting_switch_cache[
+                                self._cam_id
+                            ] = await resp.json()
+                        except Exception:  # noqa: S110 # best-effort cache refresh after white-balance write, failure non-actionable
                             pass
-                        _LOGGER.debug("White balance set to %.2f for %s", wb, self._cam_id[:8])
+                        _LOGGER.debug(
+                            "White balance set to %.2f for %s", wb, self._cam_id[:8]
+                        )
                     else:
-                        _LOGGER.warning("White balance HTTP %d for %s", resp.status, self._cam_id[:8])
+                        _LOGGER.warning(
+                            "White balance HTTP %d for %s",
+                            resp.status,
+                            self._cam_id[:8],
+                        )
         except Exception as err:
             _LOGGER.warning("White balance error for %s: %s", self._cam_id[:8], err)
         self.async_write_ha_state()
@@ -491,14 +549,14 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
 class _BoschLedBrightnessBase(_BoschGen2NumberBase):
     """Base for Top/Bottom LED brightness (0-100%, Gen2 only)."""
 
-    _attr_icon                        = "mdi:brightness-6"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 5
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "%"
+    _attr_icon = "mdi:brightness-6"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
     _led_key: str = ""  # override in subclass
-    _brightness: float | None        # declared here so mypy sees it before property use
+    _brightness: float | None  # declared here so mypy sees it before property use
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
@@ -520,13 +578,23 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
     async def async_set_native_value(self, value: float) -> None:
         """Set brightness — sends FULL body with all 3 groups (API requirement)."""
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
         brightness = int(round(value))
         # Read current state from cache, update only our group
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         body = {
-            "frontLightSettings": cached.get("frontLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "topLedLightSettings": cached.get("topLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
-            "bottomLedLightSettings": cached.get("bottomLedLightSettings", {"brightness": 0, "color": None, "whiteBalance": 0.0}),
+            "frontLightSettings": cached.get(
+                "frontLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
+            "topLedLightSettings": cached.get(
+                "topLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
+            "bottomLedLightSettings": cached.get(
+                "bottomLedLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": 0.0},
+            ),
         }
         body[self._led_key] = {**body[self._led_key], "brightness": brightness}
         session = async_get_clientsession(self.hass, verify_ssl=False)
@@ -538,44 +606,61 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
             async with asyncio.timeout(10):
                 async with session.put(
                     f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers, json=body,
+                    headers=headers,
+                    json=body,
                 ) as resp:
                     if resp.status in (200, 201, 204):
                         self._brightness = float(brightness)
                         try:
-                            self.coordinator._lighting_switch_cache[self._cam_id] = await resp.json()
-                        except Exception:
+                            self.coordinator._lighting_switch_cache[
+                                self._cam_id
+                            ] = await resp.json()
+                        except Exception:  # noqa: S110 # best-effort cache refresh after brightness write, failure non-actionable
                             pass
-                        _LOGGER.debug("%s brightness set to %d for %s", self._led_key, brightness, self._cam_id[:8])
+                        _LOGGER.debug(
+                            "%s brightness set to %d for %s",
+                            self._led_key,
+                            brightness,
+                            self._cam_id[:8],
+                        )
                     else:
-                        _LOGGER.warning("%s brightness HTTP %d for %s", self._led_key, resp.status, self._cam_id[:8])
+                        _LOGGER.warning(
+                            "%s brightness HTTP %d for %s",
+                            self._led_key,
+                            resp.status,
+                            self._cam_id[:8],
+                        )
         except Exception as err:
-            _LOGGER.warning("%s brightness error for %s: %s", self._led_key, self._cam_id[:8], err)
+            _LOGGER.warning(
+                "%s brightness error for %s: %s", self._led_key, self._cam_id[:8], err
+            )
         self.async_write_ha_state()
 
 
 class BoschTopLedBrightnessNumber(_BoschLedBrightnessBase):
     """Number entity: top LED brightness 0-100% (Gen2, oberes Licht)."""
+
     _led_key = "topLedLightSettings"
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Helligkeit Oberes Licht"
+        self._attr_name = "Helligkeit Oberes Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_brightness"
-        self._attr_icon      = "mdi:arrow-up-bold"
+        self._attr_icon = "mdi:arrow-up-bold"
         self._attr_translation_key = "top_led_brightness"
         self._attr_entity_category = EntityCategory.CONFIG
 
 
 class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
     """Number entity: bottom LED brightness 0-100% (Gen2, unteres Licht)."""
+
     _led_key = "bottomLedLightSettings"
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Helligkeit Unteres Licht"
+        self._attr_name = "Helligkeit Unteres Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
-        self._attr_icon      = "mdi:arrow-down-bold"
+        self._attr_icon = "mdi:arrow-down-bold"
         self._attr_translation_key = "bottom_led_brightness"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -588,15 +673,15 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
     1 = low sensitivity, 5 = high sensitivity.
     """
 
-    _attr_icon                        = "mdi:motion-sensor"
-    _attr_native_min_value            = 1
-    _attr_native_max_value            = 5
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
+    _attr_icon = "mdi:motion-sensor"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 5
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Bewegungslicht Empfindlichkeit"
+        self._attr_name = "Bewegungslicht Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light_sensitivity"
         self._attr_translation_key = "motion_light_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -609,9 +694,8 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._motion_light_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._motion_light_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -636,17 +720,17 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
     Writes via PUT /v11/video_inputs/{id}/lighting with full body.
     """
 
-    _attr_icon                        = "mdi:weather-night"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 100
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "%"
-    _attr_entity_category             = EntityCategory.CONFIG
+    _attr_icon = "mdi:weather-night"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Dunkelheitsschwelle"
+        self._attr_name = "Dunkelheitsschwelle"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_darkness_threshold"
         self._attr_translation_key = "darkness_threshold"
 
@@ -658,15 +742,17 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._global_lighting_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._global_lighting_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
         cache = self.coordinator._global_lighting_cache.get(self._cam_id, {})
         soft_fading = cache.get("softLightFading", True)
-        body = {"darknessThreshold": round(value / 100, 4), "softLightFading": soft_fading}
+        body = {
+            "darknessThreshold": round(value / 100, 4),
+            "softLightFading": soft_fading,
+        }
         success = await self.coordinator.async_put_camera(
             self._cam_id, "lighting", body
         )
@@ -689,16 +775,16 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
     slider but internally maps to 5 discrete positions (0 = off, 4 = max).
     """
 
-    _attr_icon                        = "mdi:led-on"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 4
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_entity_category             = EntityCategory.CONFIG
+    _attr_icon = "mdi:led-on"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 4
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Power-LED"
+        self._attr_name = "Power-LED"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_power_led_brightness"
         self._attr_translation_key = "power_led_brightness"
 
@@ -711,7 +797,8 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
     def available(self) -> bool:
         return (
             bool(self.coordinator.last_update_success)
-            and self.coordinator._icon_led_brightness_cache.get(self._cam_id) is not None
+            and self.coordinator._icon_led_brightness_cache.get(self._cam_id)
+            is not None
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -728,10 +815,10 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
     """Shared base for alarm_settings integer fields."""
 
     _field: str = ""
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.BOX
-    _attr_native_unit_of_measurement  = "s"
-    _attr_entity_category             = EntityCategory.CONFIG
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_native_unit_of_measurement = "s"
+    _attr_entity_category = EntityCategory.CONFIG
 
     @property
     def _settings(self) -> dict[str, Any]:
@@ -744,10 +831,7 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self._settings)
-        )
+        return self.coordinator.last_update_success and bool(self._settings)
 
     async def async_set_native_value(self, value: float) -> None:
         cfg = dict(self._settings)
@@ -757,7 +841,10 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
         # Without this guard the write silently fails — the cache isn't updated, so
         # native_value re-reads the old value and HA's verify-timeout fires.
         from .switch import _is_gen2_indoor, _warn_if_privacy_on  # local to avoid cycle
-        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Sirenen-/Alarm-Einstellung"):
+
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(
+            self, "Sirenen-/Alarm-Einstellung"
+        ):
             return
         cfg[self._field] = int(round(value))
         success = await self.coordinator.async_put_camera(
@@ -775,14 +862,14 @@ class BoschAlarmDelayNumber(_BoschAlarmDelayBase):
     Observed range from capture: 52–76s.
     """
 
-    _field                  = "alarmDelayInSeconds"
-    _attr_icon              = "mdi:timer-alert"
-    _attr_native_min_value  = 10
-    _attr_native_max_value  = 300
+    _field = "alarmDelayInSeconds"
+    _attr_icon = "mdi:timer-alert"
+    _attr_native_min_value = 10
+    _attr_native_max_value = 300
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Sirenen-Dauer"
+        self._attr_name = "Sirenen-Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_delay"
         self._attr_translation_key = "alarm_delay"
 
@@ -793,14 +880,14 @@ class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
     Time between detection and siren activation. Observed: 1–180s.
     """
 
-    _field                  = "alarmActivationDelaySeconds"
-    _attr_icon              = "mdi:timer-sand"
-    _attr_native_min_value  = 0
-    _attr_native_max_value  = 600
+    _field = "alarmActivationDelaySeconds"
+    _attr_icon = "mdi:timer-sand"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 600
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Alarm-Verzögerung"
+        self._attr_name = "Alarm-Verzögerung"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_activation_delay"
         self._attr_translation_key = "alarm_activation_delay"
 
@@ -812,14 +899,14 @@ class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
     Observed: 30–38s.
     """
 
-    _field                  = "preAlarmDelayInSeconds"
-    _attr_icon              = "mdi:led-on"
-    _attr_native_min_value  = 0
-    _attr_native_max_value  = 300
+    _field = "preAlarmDelayInSeconds"
+    _attr_icon = "mdi:led-on"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 300
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Pre-Alarm Dauer"
+        self._attr_name = "Pre-Alarm Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm_delay"
         self._attr_translation_key = "pre_alarm_delay"
 
@@ -843,15 +930,15 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
     (HOME_Eyes_Outdoor) — intrusion detection is present on both hardware variants.
     """
 
-    _attr_icon                        = "mdi:shield-alert"
-    _attr_native_min_value            = 0
-    _attr_native_max_value            = 7
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
+    _attr_icon = "mdi:shield-alert"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 7
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Einbruch-Empfindlichkeit"
+        self._attr_name = "Einbruch-Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_sensitivity"
         self._attr_translation_key = "intrusion_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -864,9 +951,8 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._intrusion_config_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -880,13 +966,17 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
             import time as _time
+
             self.coordinator._intrusion_config_set_at[self._cam_id] = _time.monotonic()
             _LOGGER.debug(
                 "Intrusion sensitivity set to %d for %s",
-                cfg["sensitivity"], self._cam_id[:8],
+                cfg["sensitivity"],
+                self._cam_id[:8],
             )
         else:
-            _LOGGER.warning("Failed to set intrusion sensitivity for %s", self._cam_id[:8])
+            _LOGGER.warning(
+                "Failed to set intrusion sensitivity for %s", self._cam_id[:8]
+            )
         self.async_write_ha_state()
 
 
@@ -901,16 +991,16 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
     as BoschIntrusionSensitivityNumber and BoschDetectionModeSelect).
     """
 
-    _attr_icon                        = "mdi:map-marker-distance"
-    _attr_native_min_value            = 1
-    _attr_native_max_value            = 8
-    _attr_native_step                 = 1
-    _attr_mode                        = NumberMode.SLIDER
-    _attr_native_unit_of_measurement  = "m"
+    _attr_icon = "mdi:map-marker-distance"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 8
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "m"
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name      = "Einbruch-Erkennungsreichweite"
+        self._attr_name = "Einbruch-Erkennungsreichweite"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_distance"
         self._attr_translation_key = "intrusion_distance"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -923,26 +1013,29 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and bool(self.coordinator._intrusion_config_cache.get(self._cam_id))
+        return self.coordinator.last_update_success and bool(
+            self.coordinator._intrusion_config_cache.get(self._cam_id)
         )
 
     async def async_set_native_value(self, value: float) -> None:
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
-        cfg["distance"] = int(round(max(1, min(8, value))))  # API rejects > 8 (HTTP 400)
+        cfg["distance"] = int(
+            round(max(1, min(8, value)))
+        )  # API rejects > 8 (HTTP 400)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "intrusionDetectionConfig", cfg
         )
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
             import time as _time
+
             self.coordinator._intrusion_config_set_at[self._cam_id] = _time.monotonic()
             _LOGGER.debug(
                 "Intrusion distance set to %d m for %s",
-                cfg["distance"], self._cam_id[:8],
+                cfg["distance"],
+                self._cam_id[:8],
             )
         else:
             _LOGGER.warning("Failed to set intrusion distance for %s", self._cam_id[:8])

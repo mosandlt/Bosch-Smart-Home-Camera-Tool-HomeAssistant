@@ -19,6 +19,7 @@ Targets:
 
 No HA runtime — SimpleNamespace + AsyncMock only.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -82,22 +82,38 @@ def _coord(
         _live_connections=live_connections if live_connections is not None else {},
         _audio_enabled={},
         options={},
-        _privacy_sound_cache=privacy_sound_cache if privacy_sound_cache is not None else {},
+        _privacy_sound_cache=privacy_sound_cache
+        if privacy_sound_cache is not None
+        else {},
         _timestamp_cache=timestamp_cache if timestamp_cache is not None else {},
         _timestamp_set_at={},
         _ledlights_cache=ledlights_cache if ledlights_cache is not None else {},
         _ledlights_set_at={},
-        _motion_light_cache=motion_light_cache if motion_light_cache is not None else {},
-        _ambient_lighting_cache=ambient_lighting_cache if ambient_lighting_cache is not None else {},
-        _global_lighting_cache=global_lighting_cache if global_lighting_cache is not None else {},
-        _intrusion_config_cache=intrusion_config if intrusion_config is not None else {},
+        _motion_light_cache=motion_light_cache
+        if motion_light_cache is not None
+        else {},
+        _ambient_lighting_cache=ambient_lighting_cache
+        if ambient_lighting_cache is not None
+        else {},
+        _global_lighting_cache=global_lighting_cache
+        if global_lighting_cache is not None
+        else {},
+        _intrusion_config_cache=intrusion_config
+        if intrusion_config is not None
+        else {},
         _intrusion_config_set_at={},
-        _notifications_cache=notifications_cache if notifications_cache is not None else {},
-        _alarm_settings_cache=alarm_settings_cache if alarm_settings_cache is not None else {},
+        _notifications_cache=notifications_cache
+        if notifications_cache is not None
+        else {},
+        _alarm_settings_cache=alarm_settings_cache
+        if alarm_settings_cache is not None
+        else {},
         _alarm_status_cache={},
         _arming_cache=arming_cache if arming_cache is not None else {},
         _arming_set_at={},
-        _image_rotation_180=image_rotation_180 if image_rotation_180 is not None else {},
+        _image_rotation_180=image_rotation_180
+        if image_rotation_180 is not None
+        else {},
         _nvr_user_intent=nvr_user_intent if nvr_user_intent is not None else {},
         _nvr_processes={},
         _nvr_preroll_processes={},
@@ -144,7 +160,12 @@ def _entry():
 def _make_motion_switch(hw="HOME_Eyes_Outdoor", privacy_on=False, settings=None):
     from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
 
-    coord = _coord(hw=hw, privacy_on=privacy_on, motion_settings=settings or {"enabled": True, "motionAlarmConfiguration": "HIGH"})
+    coord = _coord(
+        hw=hw,
+        privacy_on=privacy_on,
+        motion_settings=settings
+        or {"enabled": True, "motionAlarmConfiguration": "HIGH"},
+    )
     sw = BoschMotionEnabledSwitch.__new__(BoschMotionEnabledSwitch)
     sw.coordinator = coord
     sw._cam_id = CAM_ID
@@ -664,7 +685,9 @@ def test_intrusion_extra_attrs():
 
 @pytest.mark.asyncio
 async def test_intrusion_turn_on_privacy_blocked():
-    sw = _make_intrusion_switch(config={"enabled": False, "sensitivity": 3}, privacy_on=True)
+    sw = _make_intrusion_switch(
+        config={"enabled": False, "sensitivity": 3}, privacy_on=True
+    )
     await sw.async_turn_on()
     sw.coordinator.async_put_camera.assert_not_awaited()
 
@@ -801,7 +824,9 @@ async def test_alarm_arm_turn_off():
 def _make_alarm_mode_switch(settings=None):
     from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
-    coord = _coord(alarm_settings_cache={CAM_ID: settings} if settings is not None else {})
+    coord = _coord(
+        alarm_settings_cache={CAM_ID: settings} if settings is not None else {}
+    )
     sw = BoschAlarmModeSwitch.__new__(BoschAlarmModeSwitch)
     sw.coordinator = coord
     sw._cam_id = CAM_ID

@@ -36,7 +36,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_TITLE = "Terrasse"
 
@@ -68,7 +67,8 @@ def _make_coord(tmp_path, *, conn_type: str = "LOCAL"):
             }
         },
         _nvr_processes={},
-        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _nvr_user_intent={CAM_ID: True},
         # SENTINEL_RULE: float('-inf') so monotonic-window checks pass on
@@ -148,10 +148,15 @@ class TestWatchPrerollRecorder:
             sleep_count["n"] += 1
             return None
 
-        with patch.object(recorder, "prune_preroll_cache", _fake_prune), \
-             patch("asyncio.sleep", _fake_sleep):
+        with (
+            patch.object(recorder, "prune_preroll_cache", _fake_prune),
+            patch("asyncio.sleep", _fake_sleep),
+        ):
             await recorder._watch_preroll_recorder(
-                coord, CAM_ID, str(tmp_path / "cam"), max_segs=4,
+                coord,
+                CAM_ID,
+                str(tmp_path / "cam"),
+                max_segs=4,
             )
 
         # prune must have been invoked at least once (line 296-298)
@@ -175,10 +180,15 @@ class TestWatchPrerollRecorder:
         async def _fake_sleep(_secs):
             return None
 
-        with patch.object(recorder, "prune_preroll_cache") as prune, \
-             patch("asyncio.sleep", _fake_sleep):
+        with (
+            patch.object(recorder, "prune_preroll_cache") as prune,
+            patch("asyncio.sleep", _fake_sleep),
+        ):
             await recorder._watch_preroll_recorder(
-                coord, CAM_ID, str(tmp_path / "cam"), max_segs=4,
+                coord,
+                CAM_ID,
+                str(tmp_path / "cam"),
+                max_segs=4,
             )
 
         # No prune attempted because we bailed before line 296.
@@ -208,11 +218,16 @@ class TestWatchPrerollRecorder:
         async def _fake_sleep(_secs):
             return None
 
-        with patch.object(recorder, "prune_preroll_cache", _bad_prune), \
-             patch("asyncio.sleep", _fake_sleep):
+        with (
+            patch.object(recorder, "prune_preroll_cache", _bad_prune),
+            patch("asyncio.sleep", _fake_sleep),
+        ):
             # Must NOT raise — exception path 299-300 swallows.
             await recorder._watch_preroll_recorder(
-                coord, CAM_ID, str(tmp_path / "cam"), max_segs=4,
+                coord,
+                CAM_ID,
+                str(tmp_path / "cam"),
+                max_segs=4,
             )
 
         assert call_count["n"] >= 1
@@ -240,8 +255,10 @@ class TestWatchRecorderDrainTimeout:
         # patch `asyncio.wait_for` to raise TimeoutError so we don't
         # actually block.
         stderr = MagicMock()
+
         async def _hang(_n):
             await asyncio.sleep(3600)  # would block; wait_for short-circuits
+
         stderr.read = _hang
 
         proc = _mock_proc(returncode=1, stderr=stderr)
@@ -263,14 +280,16 @@ class TestWatchRecorderDrainTimeout:
             # Coroutine cleanup: close so we don't warn.
             if asyncio.iscoroutine(coro):
                 coro.close()
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         async def _fake_sleep(_secs):
             return None
 
-        with patch.object(recorder, "start_recorder", _fake_start), \
-             patch("asyncio.wait_for", _fake_wait_for), \
-             patch("asyncio.sleep", _fake_sleep):
+        with (
+            patch.object(recorder, "start_recorder", _fake_start),
+            patch("asyncio.wait_for", _fake_wait_for),
+            patch("asyncio.sleep", _fake_sleep),
+        ):
             # Must NOT raise. Drain TimeoutError caught at line 706,
             # rest of watcher runs to completion (respawn path).
             await recorder._watch_recorder(coord, CAM_ID, proc)
@@ -296,8 +315,10 @@ class TestWatchRecorderDrainTimeout:
         async def _fake_sleep(_secs):
             return None
 
-        with patch.object(recorder, "start_recorder", _fake_start), \
-             patch("asyncio.sleep", _fake_sleep):
+        with (
+            patch.object(recorder, "start_recorder", _fake_start),
+            patch("asyncio.sleep", _fake_sleep),
+        ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
         # No assertion needed beyond "did not raise".
 
@@ -351,8 +372,10 @@ class TestStartPrerollRecorder:
             prune_calls.append((cam_dir, max_segs))
             return 0
 
-        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn), \
-             patch.object(recorder, "prune_preroll_cache", _fake_prune):
+        with (
+            patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn),
+            patch.object(recorder, "prune_preroll_cache", _fake_prune),
+        ):
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
         # Process registered
@@ -376,7 +399,8 @@ class TestStartPrerollRecorder:
 
         coord = _make_coord(tmp_path)
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=FileNotFoundError("ffmpeg not on PATH"),
         ):
             # Must not raise.
@@ -394,7 +418,8 @@ class TestStartPrerollRecorder:
 
         coord = _make_coord(tmp_path)
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=OSError("EAGAIN — fork limit"),
         ):
             await recorder.start_preroll_recorder(coord, CAM_ID)
@@ -406,8 +431,9 @@ class TestStartPrerollRecorder:
     async def test_makedirs_failure_aborts(self, tmp_path):
         """OSError during cache_dir creation (line 324-326) → return,
         no spawn. Read-only fs / permission denied / NFS hiccup."""
-        from custom_components.bosch_shc_camera import recorder
         import os as _os
+
+        from custom_components.bosch_shc_camera import recorder
 
         coord = _make_coord(tmp_path)
 

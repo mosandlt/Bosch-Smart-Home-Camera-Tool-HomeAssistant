@@ -41,6 +41,7 @@ def _is_xml_envelope(raw: bytes | None) -> bool:
     stripped = raw.lstrip(b"\n\r\t ")
     return not stripped or stripped.startswith(b"<")
 
+
 # ── Session management ───────────────────────────────────────────────────────
 
 
@@ -62,7 +63,9 @@ async def get_cached_rcp_session(
             return session_id
         del session_cache[proxy_hash]
 
-    new_session_id: str | None = await rcp_session(session_cache, proxy_host, proxy_hash)
+    new_session_id: str | None = await rcp_session(
+        session_cache, proxy_host, proxy_hash
+    )
     if new_session_id:
         session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
     return new_session_id
@@ -83,9 +86,7 @@ async def rcp_session(
     The proxy_host should be in the form "proxy-NN.live.cbs.boschsecurity.com:42090".
     """
     base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
-    init_payload = (
-        "0x0102004000000000040000000000000000010000000000000001000000000000"
-    )
+    init_payload = "0x0102004000000000040000000000000000010000000000000001000000000000"
 
     connector = aiohttp.TCPConnector(ssl=False)
     try:
@@ -108,10 +109,8 @@ async def rcp_session(
                             )
                             return None
                         text = await resp.text()
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug(
-                    "rcp_session: step1 error for %s: %s", proxy_host, err
-                )
+            except (TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.debug("rcp_session: step1 error for %s: %s", proxy_host, err)
                 return None
 
             # Parse <sessionid> from XML response
@@ -149,10 +148,8 @@ async def rcp_session(
                             proxy_host,
                             session_id,
                         )
-            except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug(
-                    "rcp_session: step2 error for %s: %s", proxy_host, err
-                )
+            except (TimeoutError, aiohttp.ClientError) as err:
+                _LOGGER.debug("rcp_session: step2 error for %s: %s", proxy_host, err)
 
             return session_id
     finally:
@@ -168,7 +165,7 @@ async def rcp_session(
 
 
 async def rcp_local_read(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     cam_ip: str,
     command: str,
     type_: str = "P_OCTET",
@@ -182,9 +179,9 @@ async def rcp_local_read(
     """
     base = f"http://{cam_ip}/rcp.xml"
     params: dict[str, str] = {
-        "command":   command,
+        "command": command,
         "direction": "READ",
-        "type":      type_,
+        "type": type_,
     }
     if num:
         params["num"] = str(num)
@@ -194,7 +191,10 @@ async def rcp_local_read(
             async with session.get(base, params=params) as resp:
                 if resp.status != 200:
                     _LOGGER.debug(
-                        "rcp_local_read: %s@%s HTTP %d", command, cam_ip, resp.status,
+                        "rcp_local_read: %s@%s HTTP %d",
+                        command,
+                        cam_ip,
+                        resp.status,
                     )
                     return None
                 raw = await resp.read()
@@ -202,25 +202,27 @@ async def rcp_local_read(
                 if err_m:
                     _LOGGER.debug(
                         "rcp_local_read: %s@%s err=%s",
-                        command, cam_ip,
+                        command,
+                        cam_ip,
                         err_m.group(1).decode("ascii", errors="replace"),
                     )
                     return None
-                payload_m = (
-                    _re.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE)
-                    or _re.search(rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE)
+                payload_m = _re.search(
+                    rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE
+                ) or _re.search(
+                    rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE
                 )
                 if payload_m:
                     return bytes.fromhex(payload_m.group(1).decode("ascii"))
                 if raw and not raw.startswith(b"<"):
                     return bytes(raw)
-    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+    except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.debug("rcp_local_read: %s@%s %s", command, cam_ip, err)
     return None
 
 
 async def rcp_local_write(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     cam_ip: str,
     command: str,
     payload_hex: str,
@@ -249,37 +251,47 @@ async def rcp_local_write(
     if not payload_hex.lower().startswith("0x"):
         payload_hex = "0x" + payload_hex
     params: dict[str, str] = {
-        "command":   command,
+        "command": command,
         "direction": "WRITE",
-        "type":      type_,
-        "payload":   payload_hex,
+        "type": type_,
+        "payload": payload_hex,
     }
     if num:
         params["num"] = str(num)
     # aiohttp serialises params into the query string when added to a GET URL.
     # async_digest_request takes the full URL so we build it explicitly.
     from urllib.parse import urlencode
+
     url = f"{base}?{urlencode(params)}"
     session = async_get_clientsession(hass, verify_ssl=False)
     try:
         if user and password:
             from .auth_utils import async_digest_request
+
             async with await async_digest_request(
-                session, "GET", url, user, password,
-                timeout=5.0, ssl=False,
+                session,
+                "GET",
+                url,
+                user,
+                password,
+                timeout=5.0,
+                ssl=False,
             ) as resp:
                 status = resp.status
                 if status != 200:
                     _LOGGER.debug(
                         "rcp_local_write: %s@%s HTTPS %d (Digest)",
-                        command, cam_ip, status,
+                        command,
+                        cam_ip,
+                        status,
                     )
                     return False
                 raw = await resp.read()
                 if b"<err>" in raw.lower():
                     _LOGGER.debug(
                         "rcp_local_write: %s@%s RCP error in response",
-                        command, cam_ip,
+                        command,
+                        cam_ip,
                     )
                     return False
                 return True
@@ -291,24 +303,28 @@ async def rcp_local_write(
                 if resp.status != 200:
                     _LOGGER.debug(
                         "rcp_local_write: %s@%s HTTPS %d (no auth)",
-                        command, cam_ip, resp.status,
+                        command,
+                        cam_ip,
+                        resp.status,
                     )
                     return False
                 raw = await resp.read()
                 if b"<err>" in raw.lower():
                     _LOGGER.debug(
                         "rcp_local_write: %s@%s RCP error in response",
-                        command, cam_ip,
+                        command,
+                        cam_ip,
                     )
                     return False
                 return True
-    except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as err:
+    except (TimeoutError, aiohttp.ClientError, ValueError) as err:
         _LOGGER.debug("rcp_local_write: %s@%s %s", command, cam_ip, err)
     return False
 
 
 async def rcp_local_read_privacy(
-    hass: "HomeAssistant", cam_ip: str,
+    hass: HomeAssistant,
+    cam_ip: str,
 ) -> bool | None:
     """Read privacy-mode state via direct LOCAL RCP (Gen2, no auth).
 
@@ -322,7 +338,7 @@ async def rcp_local_read_privacy(
 
 
 async def rcp_local_write_privacy(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     cam_ip: str,
     enabled: bool,
     *,
@@ -340,13 +356,18 @@ async def rcp_local_write_privacy(
     # remaining bytes zero so we don't stamp over other mask fields.
     payload = "00010000" if enabled else "00000000"
     return await rcp_local_write(
-        hass, cam_ip, "0x0d00", payload, "P_OCTET",
-        user=user, password=password,
+        hass,
+        cam_ip,
+        "0x0d00",
+        payload,
+        "P_OCTET",
+        user=user,
+        password=password,
     )
 
 
 async def rcp_local_write_front_light(
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     cam_ip: str,
     brightness: int,
     *,
@@ -364,8 +385,14 @@ async def rcp_local_write_front_light(
     val = max(0, min(100, int(brightness)))
     payload = f"{val:04x}"
     return await rcp_local_write(
-        hass, cam_ip, "0x0c22", payload, "T_WORD", num=1,
-        user=user, password=password,
+        hass,
+        cam_ip,
+        "0x0c22",
+        payload,
+        "T_WORD",
+        num=1,
+        user=user,
+        password=password,
     )
 
 
@@ -418,9 +445,7 @@ async def rcp_read(
         async with asyncio.timeout(8):
             async with session.get(rcp_base, params=params) as resp:
                 if resp.status != 200:
-                    _LOGGER.debug(
-                        "rcp_read: command=%s HTTP %d", command, resp.status
-                    )
+                    _LOGGER.debug("rcp_read: command=%s HTTP %d", command, resp.status)
                     if resp.status in (401, 403):
                         _drop_cached_session()
                     return None
@@ -434,7 +459,9 @@ async def rcp_read(
                 if err_m:
                     err_code = err_m.group(1).decode("ascii", errors="replace")
                     _LOGGER.debug(
-                        "rcp_read: command=%s error=%s", command, err_code,
+                        "rcp_read: command=%s error=%s",
+                        command,
+                        err_code,
                     )
                     # 0x0c0d = session closed → drop the cached ID so the next
                     # call reopens the handshake instead of replaying a dead one.
@@ -444,9 +471,10 @@ async def rcp_read(
 
                 # Extract hex payload from XML — Bosch uses <str> or <payload> tag
                 # depending on firmware version / request context
-                payload_m = (
-                    _re.search(rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE)
-                    or _re.search(rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE)
+                payload_m = _re.search(
+                    rb"<str>([0-9a-fA-F]+)</str>", raw, _re.IGNORECASE
+                ) or _re.search(
+                    rb"<payload>([0-9a-fA-F]+)</payload>", raw, _re.IGNORECASE
                 )
                 if payload_m:
                     return bytes.fromhex(payload_m.group(1).decode("ascii"))
@@ -457,10 +485,12 @@ async def rcp_read(
 
                 _LOGGER.debug(
                     "rcp_read: command=%s no payload in response (%d bytes): %.100s",
-                    command, len(raw), raw[:100],
+                    command,
+                    len(raw),
+                    raw[:100],
                 )
                 return None
-    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+    except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.debug("rcp_read: command=%s error: %s", command, err)
         return None
 
@@ -501,12 +531,17 @@ async def async_update_rcp_data(
 
     rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
     hass = coordinator.hass
+
     # Alias that forwards session_cache so any 401/403/0x0c0d response
     # drops the cached session ID and forces a fresh handshake next call.
     async def _read(command: str, type_: str = "P_OCTET", num: int = 0) -> bytes | None:
         return await rcp_read(
-            hass, rcp_base, command, session_id,
-            type_=type_, num=num,
+            hass,
+            rcp_base,
+            command,
+            session_id,
+            type_=type_,
+            num=num,
             session_cache=coordinator._rcp_session_cache,
         )
 
@@ -522,7 +557,8 @@ async def async_update_rcp_data(
         if _failures[cmd] == 3:
             _LOGGER.debug(
                 "RCP command %s: 3 consecutive failures for %s — skipping for this session",
-                cmd, cam_id[:8],
+                cmd,
+                cam_id[:8],
             )
 
     def _mark_ok(cmd: str) -> None:
@@ -548,7 +584,8 @@ async def async_update_rcp_data(
                     _mark_fail("0x0c22")
                     _LOGGER.debug(
                         "RCP LED dimmer for %s: out-of-range raw=%d — cache skipped",
-                        cam_id, dimmer_val,
+                        cam_id,
+                        dimmer_val,
                     )
             elif raw is None:
                 _mark_fail("0x0c22")
@@ -560,9 +597,7 @@ async def async_update_rcp_data(
         raw = await _read("0x0d00", type_="P_OCTET")
         if raw and len(raw) >= 2:
             coordinator._rcp_privacy_cache[cam_id] = int(raw[1])
-            _LOGGER.debug(
-                "RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1]
-            )
+            _LOGGER.debug("RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1])
     except Exception as err:
         _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
 
@@ -589,9 +624,9 @@ async def async_update_rcp_data(
                     and 0 <= second <= 59
                 ):
                     cam_dt = _dt.datetime(
-                        year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc
+                        year, month, day, hour, minute, second, tzinfo=_dt.UTC
                     )
-                    server_dt = _dt.datetime.now(_dt.timezone.utc)
+                    server_dt = _dt.datetime.now(_dt.UTC)
                     offset = (cam_dt - server_dt).total_seconds()
                     coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
                     _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
@@ -601,7 +636,13 @@ async def async_update_rcp_data(
                     _LOGGER.debug(
                         "RCP clock for %s: unexpected layout "
                         "(Y=%d M=%d D=%d h=%d m=%d s=%d) — cache skipped",
-                        cam_id, year, month, day, hour, minute, second,
+                        cam_id,
+                        year,
+                        month,
+                        day,
+                        hour,
+                        minute,
+                        second,
                     )
             elif raw is None:
                 _mark_fail("0x0a0f")
@@ -619,8 +660,10 @@ async def async_update_rcp_data(
                 if len(raw) == 4:
                     ip_str = ".".join(str(b) for b in raw)
                 else:
-                    ip_str = raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
-                if ip_str and ip_str != "0.0.0.0" and not ip_str.startswith("<"):
+                    ip_str = (
+                        raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+                    )
+                if ip_str and ip_str != "0.0.0.0" and not ip_str.startswith("<"):  # noqa: S104 # string comparison to filter unusable RCP payload, not a bind address
                     coordinator._rcp_lan_ip_cache[cam_id] = ip_str
                     _LOGGER.debug("RCP LAN IP for %s: %s", cam_id, ip_str)
                     _mark_ok("0x0a36")
@@ -628,7 +671,8 @@ async def async_update_rcp_data(
                     _mark_fail("0x0a36")
                     _LOGGER.debug(
                         "RCP LAN IP for %s: unusable payload (%r) — cache skipped",
-                        cam_id, ip_str[:40],
+                        cam_id,
+                        ip_str[:40],
                     )
             elif raw is None:
                 _mark_fail("0x0a36")
@@ -650,7 +694,8 @@ async def async_update_rcp_data(
                     _mark_fail("0x0aea")
                     _LOGGER.debug(
                         "RCP product name for %s: unusable payload (%r) — cache skipped",
-                        cam_id, name_str[:40],
+                        cam_id,
+                        name_str[:40],
                     )
             elif raw is None:
                 _mark_fail("0x0aea")
@@ -668,7 +713,9 @@ async def async_update_rcp_data(
                 _mark_fail("0x0c81")
             elif raw and len(raw) >= 4:
                 n = len(raw) // 4
-                ladder = [struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)]
+                ladder = [
+                    struct.unpack(">I", raw[i * 4 : (i + 1) * 4])[0] for i in range(n)
+                ]
                 # Sanity-check: valid bitrate values are 100 – 50000 kbps
                 if all(100 <= v <= 50_000 for v in ladder):
                     coordinator._rcp_bitrate_cache[cam_id] = ladder
@@ -678,7 +725,8 @@ async def async_update_rcp_data(
                     _mark_fail("0x0c81")
                     _LOGGER.debug(
                         "RCP bitrate for %s: out-of-range values %s — cache skipped",
-                        cam_id, ladder[:4],
+                        cam_id,
+                        ladder[:4],
                     )
             elif raw is None:
                 _mark_fail("0x0c81")
@@ -745,7 +793,9 @@ async def async_update_rcp_data(
         if raw and len(raw) > 10 and not raw.startswith(b"<"):
             services = _parse_network_services(raw)
             coordinator._rcp_network_services_cache[cam_id] = services
-            _LOGGER.debug("RCP network services for %s: %d services", cam_id, len(services))
+            _LOGGER.debug(
+                "RCP network services for %s: %d services", cam_id, len(services)
+            )
     except Exception as err:
         _LOGGER.debug("RCP network services read error for %s: %s", cam_id, err)
 
@@ -794,7 +844,11 @@ def _parse_alarm_catalog(raw: bytes) -> list[dict[str, Any]]:
                     alarm_type = "signal"
                 elif "storage" in name_lower or "disk" in name_lower:
                     alarm_type = "storage"
-                elif "motion" in name_lower or "resilmotion" in name_lower or "resimotion" in name_lower:
+                elif (
+                    "motion" in name_lower
+                    or "resilmotion" in name_lower
+                    or "resimotion" in name_lower
+                ):
                     alarm_type = "motion"
                 elif "reference" in name_lower:
                     alarm_type = "reference"
@@ -824,11 +878,13 @@ def _parse_motion_zones(raw: bytes) -> list[dict[str, Any]]:
             break
         # First bytes contain zone config, exact struct is camera-specific
         # Expose raw hex for diagnostics, plus zone index
-        zones.append({
-            "zone_id": i,
-            "raw_hex": chunk.hex(),
-            "size": len(chunk),
-        })
+        zones.append(
+            {
+                "zone_id": i,
+                "raw_hex": chunk.hex(),
+                "size": len(chunk),
+            }
+        )
     return zones
 
 
@@ -850,12 +906,14 @@ def _parse_motion_coords(raw: bytes) -> list[dict[str, float]]:
         x2 = struct.unpack(">H", chunk[4:6])[0]
         y2 = struct.unpack(">H", chunk[6:8])[0]
         # Convert 0-10000 to 0-100 percent
-        zones.append({
-            "x1": round(x1 / 100, 1),
-            "y1": round(y1 / 100, 1),
-            "x2": round(x2 / 100, 1),
-            "y2": round(y2 / 100, 1),
-        })
+        zones.append(
+            {
+                "x1": round(x1 / 100, 1),
+                "y1": round(y1 / 100, 1),
+                "x2": round(x2 / 100, 1),
+                "y2": round(y2 / 100, 1),
+            }
+        )
     return zones
 
 
@@ -867,6 +925,7 @@ def _parse_tls_cert(raw: bytes) -> dict[str, Any]:
     info: dict[str, Any] = {"raw_size": len(raw)}
     try:
         from cryptography import x509
+
         cert = x509.load_der_x509_certificate(raw)
         info["issuer"] = cert.issuer.rfc4514_string()
         info["subject"] = cert.subject.rfc4514_string()
@@ -920,10 +979,12 @@ def _parse_iva_catalog(raw: bytes) -> list[dict[str, Any]]:
         version = struct.unpack(">H", chunk[2:4])[0]
         flags = struct.unpack(">H", chunk[4:6])[0]
         if module_id > 0:  # skip empty entries
-            modules.append({
-                "module_id": module_id,
-                "version": version,
-                "flags": flags,
-                "active": bool(flags & 0x01),
-            })
+            modules.append(
+                {
+                    "module_id": module_id,
+                    "version": version,
+                    "flags": flags,
+                    "active": bool(flags & 0x01),
+                }
+            )
     return modules

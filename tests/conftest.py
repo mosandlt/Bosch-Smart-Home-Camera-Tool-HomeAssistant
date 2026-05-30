@@ -61,15 +61,17 @@ def mock_cloud_api_video_inputs() -> Generator[MagicMock, None, None]:
     ) as session:
         resp = MagicMock()
         resp.status = 200
-        resp.json = AsyncMock(return_value=[
-            {
-                "id": "11111111-2222-3333-4444-555555555555",
-                "title": "Test Cam",
-                "hardwareVersion": "HOME_Eyes_Outdoor",
-                "firmwareVersion": "9.40.25",
-                "privacyMode": "OFF",
-            }
-        ])
+        resp.json = AsyncMock(
+            return_value=[
+                {
+                    "id": "11111111-2222-3333-4444-555555555555",
+                    "title": "Test Cam",
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                    "privacyMode": "OFF",
+                }
+            ]
+        )
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=resp)
         ctx.__aexit__ = AsyncMock(return_value=None)

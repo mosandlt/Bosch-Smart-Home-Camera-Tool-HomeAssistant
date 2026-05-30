@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -60,6 +59,7 @@ def stub_entry():
 class TestCameraConstruction:
     def test_unique_id_lowercased(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam._attr_unique_id == f"bosch_shc_cam_{CAM_ID.lower()}"
 
@@ -68,6 +68,7 @@ class TestCameraConstruction:
         when HA proxies the first image before any real snapshot has
         been fetched."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam._cached_image is not None
         # JFIF marker = JPEG signature
@@ -76,6 +77,7 @@ class TestCameraConstruction:
     def test_resolves_display_name(self, stub_coord, stub_entry):
         """`_model_name` resolves through models.get_display_name (Außenkamera II)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert "Außenkamera" in cam._model_name
 
@@ -86,17 +88,21 @@ class TestCameraConstruction:
 class TestIsStreaming:
     def test_false_when_no_live_session(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.is_streaming is False
 
     def test_true_when_live_session_present(self, stub_coord, stub_entry):
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.is_streaming is True
 
     def test_supported_features_always_advertises_stream(
-        self, stub_coord, stub_entry,
+        self,
+        stub_coord,
+        stub_entry,
     ):
         """STREAM must always be advertised regardless of live-session state.
         Previously STREAM was hidden when the switch was OFF, causing HA-Core
@@ -105,8 +111,10 @@ class TestIsStreaming:
         at 20:46 2026-05-05). Fix: _attr_supported_features = STREAM always;
         stream_source() returns None when no session is active, which HA
         handles gracefully."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
         from homeassistant.components.camera import CameraEntityFeature
+
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         # No live session → STREAM still advertised (stream_source returns None)
         assert cam.supported_features == CameraEntityFeature.STREAM
@@ -123,6 +131,7 @@ class TestFrameInterval:
         """`_force_image_refresh = True` → 0.1s so HA's next proxy
         request fetches immediately."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         cam._force_image_refresh = True
         assert cam.frame_interval == 0.1
@@ -132,12 +141,14 @@ class TestFrameInterval:
         cache aliasing)."""
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.frame_interval == 1.0
 
     def test_idle_uses_long_interval(self, stub_coord, stub_entry):
         """Idle (not streaming, no force-refresh) → IDLE_FRAME_INTERVAL (60s)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.frame_interval == 60.0  # IDLE_FRAME_INTERVAL
 
@@ -148,23 +159,28 @@ class TestFrameInterval:
 class TestMotionDetectionEnabled:
     def test_false_when_no_motion_settings(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         # stub_coord.motion_settings returns {} → False
         assert cam.motion_detection_enabled is False
 
     def test_true_when_enabled(self, stub_coord, stub_entry):
         stub_coord.motion_settings = lambda cam_id: {
-            "enabled": True, "motionAlarmConfiguration": "MEDIUM",
+            "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.motion_detection_enabled is True
 
     def test_false_when_disabled(self, stub_coord, stub_entry):
         stub_coord.motion_settings = lambda cam_id: {
-            "enabled": False, "motionAlarmConfiguration": "OFF",
+            "enabled": False,
+            "motionAlarmConfiguration": "OFF",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.motion_detection_enabled is False
 
@@ -175,16 +191,19 @@ class TestMotionDetectionEnabled:
 class TestMetadata:
     def test_brand_is_bosch(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.brand == "Bosch"
 
     def test_model_returns_hardware_version(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.model == "HOME_Eyes_Outdoor"
 
     def test_available_follows_coordinator(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.available is True
         stub_coord.last_update_success = False
@@ -192,6 +211,7 @@ class TestMetadata:
 
     def test_device_info_has_mac_connection(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         info = cam.device_info
         assert info["manufacturer"] == "Bosch"
@@ -202,6 +222,7 @@ class TestMetadata:
         """No mac in info dict → connections is empty set, not None."""
         stub_coord.data[CAM_ID]["info"]["macAddress"] = ""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.device_info["connections"] == set()
 
@@ -213,19 +234,23 @@ class TestRotateJpeg180:
     def test_invalid_jpeg_returns_original(self):
         """Garbled bytes → return as-is (graceful degradation, no exception)."""
         from custom_components.bosch_shc_camera.camera import _rotate_jpeg_180
+
         result = _rotate_jpeg_180(b"not-a-jpeg")
         assert result == b"not-a-jpeg"
 
     def test_empty_bytes_returns_original(self):
         from custom_components.bosch_shc_camera.camera import _rotate_jpeg_180
+
         result = _rotate_jpeg_180(b"")
         assert result == b""
 
     def test_real_jpeg_rotates_without_error(self):
         """A real (tiny) JPEG must rotate without raising."""
         from custom_components.bosch_shc_camera.camera import (
-            BoschCamera, _rotate_jpeg_180,
+            BoschCamera,
+            _rotate_jpeg_180,
         )
+
         # Use the placeholder JPEG (1×1 black) as input — known good
         original = BoschCamera._PLACEHOLDER_JPEG
         rotated = _rotate_jpeg_180(original)
@@ -241,6 +266,7 @@ class TestRotateJpeg180:
 class TestExtraStateAttributes:
     def test_no_events_no_live(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         # camera_id must always be present even with no events/live
@@ -253,6 +279,7 @@ class TestExtraStateAttributes:
             "_connection_type": "LOCAL",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         # rtsps_url should populate (different name in attrs)
@@ -263,6 +290,7 @@ class TestExtraStateAttributes:
             {"id": "e1", "createdAt": "2026-05-05T10:00:00Z", "eventType": "MOVEMENT"},
         ]
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         # last_event / event_type should reflect the latest

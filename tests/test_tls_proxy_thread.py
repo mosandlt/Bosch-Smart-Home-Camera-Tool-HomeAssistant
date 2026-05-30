@@ -20,6 +20,7 @@ Thread-cleanup contract:
   Helper echo servers use asyncio (started/stopped inside async tests) to
   avoid spawning additional OS threads.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,6 +48,7 @@ def _enable_loopback_sockets(socket_enabled):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 class _FakeTlsSocket:
     """Thin wrapper that makes a plain TCP socket look like an SSL socket.
@@ -108,11 +110,14 @@ def _join_new_threads(threads_before: frozenset, timeout: float = 3.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         new_threads = frozenset(threading.enumerate()) - threads_before
-        alive = [t for t in new_threads
-                 if t.is_alive()
-                 and not isinstance(t, threading._DummyThread)
-                 and not t.name.startswith("waitpid-")
-                 and "_run_safe_shutdown_loop" not in t.name]
+        alive = [
+            t
+            for t in new_threads
+            if t.is_alive()
+            and not isinstance(t, threading._DummyThread)
+            and not t.name.startswith("waitpid-")
+            and "_run_safe_shutdown_loop" not in t.name
+        ]
         if not alive:
             break
         for t in alive:
@@ -133,6 +138,7 @@ def _start_proxy(cam_id, cam_host, cam_port):
 
 # ── FakeRtsp (asyncio-based, single-use per connection) ──────────────────────
 
+
 class FakeRtsp:
     """Asyncio loopback server that mimics camera RTSP responses."""
 
@@ -142,7 +148,7 @@ class FakeRtsp:
         self._server: asyncio.AbstractServer | None = None
         self.requests: list[bytes] = []
 
-    async def __aenter__(self) -> "FakeRtsp":
+    async def __aenter__(self) -> FakeRtsp:
         self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
@@ -169,7 +175,7 @@ class FakeRtsp:
                     return
                 writer.write(resp)
                 await writer.drain()
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass
         finally:
             try:
@@ -214,14 +220,20 @@ class TestProxyThreadLifecycle:
 
         try:
             assert port > 0, "Must return a valid port number"
-            assert port_cache.get(cam_id) == port, "Port must be written into port_cache"
+            assert port_cache.get(cam_id) == port, (
+                "Port must be written into port_cache"
+            )
             assert cam_id in _proxy_servers, "Server socket must be in _proxy_servers"
         finally:
             stop_tls_proxy(cam_id, port_cache)
             _join_new_threads(threads_before)
 
-        assert cam_id not in port_cache, "cam_id must be removed from port_cache after stop"
-        assert cam_id not in _proxy_servers, "cam_id must be removed from _proxy_servers after stop"
+        assert cam_id not in port_cache, (
+            "cam_id must be removed from port_cache after stop"
+        )
+        assert cam_id not in _proxy_servers, (
+            "cam_id must be removed from _proxy_servers after stop"
+        )
 
     def test_proxy_exits_cleanly_when_server_closed(self):
         """Start proxy then immediately stop it; thread must exit without errors."""
@@ -317,8 +329,11 @@ class TestCircuitBreaker:
 
             # Snapshot the proxy thread so we can join it directly
             proxy_thread = next(
-                (t for t in frozenset(threading.enumerate()) - threads_before
-                 if t.name.startswith("tls_proxy_")),
+                (
+                    t
+                    for t in frozenset(threading.enumerate()) - threads_before
+                    if t.name.startswith("tls_proxy_")
+                ),
                 None,
             )
 
@@ -359,8 +374,11 @@ class TestCircuitBreaker:
 
             # Snapshot the proxy thread
             proxy_thread = next(
-                (t for t in frozenset(threading.enumerate()) - threads_before
-                 if t.name.startswith("tls_proxy_")),
+                (
+                    t
+                    for t in frozenset(threading.enumerate()) - threads_before
+                    if t.name.startswith("tls_proxy_")
+                ),
                 None,
             )
 
@@ -481,7 +499,7 @@ class TestPipeRelay:
                     if not chunk:
                         break
                     reply += chunk
-            except socket.timeout:
+            except TimeoutError:
                 pass
             except OSError:
                 pass
@@ -512,7 +530,7 @@ class TestPipeRelay:
                         if not chunk:
                             break
                         buf += chunk
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         break
                 if buf:
                     captured_by_cam.append(buf)
@@ -595,7 +613,9 @@ class TestPipeRelay:
         port, port_cache, _ = _start_proxy(cam_id, "127.0.0.1", echo_port)
         try:
             await asyncio.sleep(0.05)
-            with caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera.tls_proxy"):
+            with caplog.at_level(
+                logging.DEBUG, logger="custom_components.bosch_shc_camera.tls_proxy"
+            ):
                 c = socket.create_connection(("127.0.0.1", port), timeout=2)
                 c.sendall(b"DEBUG_DATA\r\n\r\n")
                 await asyncio.sleep(0.3)
@@ -650,8 +670,13 @@ class TestPreWarmGaps:
             # max_attempts=2, retry_wait=0 → line 386 (sleep) hit on attempt 1,
             # then attempt 2 also fails → returns False
             result = await pre_warm_rtsp(
-                proxy_port, "u", "p", "127.0.0.1",
-                max_attempts=2, retry_wait=0, post_success_wait=0,
+                proxy_port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=2,
+                retry_wait=0,
+                post_success_wait=0,
                 describe_timeout=1,
             )
             assert result is False, (
@@ -668,6 +693,7 @@ class TestPreWarmGaps:
         """writer.wait_closed() raising ConnectionResetError is swallowed by
         the except-pass block at lines 415-416. Function must still return got_ok.
         """
+
         def _responder(req: bytes, step: int) -> bytes | None:
             if step == 0:
                 return (
@@ -699,8 +725,13 @@ class TestPreWarmGaps:
 
             with patch("asyncio.open_connection", side_effect=_patched_open):
                 result = await pre_warm_rtsp(
-                    server.port, "u", "p", "127.0.0.1",
-                    max_attempts=1, retry_wait=0, post_success_wait=0,
+                    server.port,
+                    "u",
+                    "p",
+                    "127.0.0.1",
+                    max_attempts=1,
+                    retry_wait=0,
+                    post_success_wait=0,
                 )
 
             # ConnectionResetError in wait_closed must be swallowed (lines 415-416)
@@ -717,6 +748,7 @@ class TestPreWarmGaps:
         Bug 12 fix: the no-nonce retry path now calls await writer.wait_closed();
         if that raises, it must be suppressed so the retry loop continues.
         """
+
         async def _handle(reader, writer):
             try:
                 data = b""
@@ -753,8 +785,13 @@ class TestPreWarmGaps:
         try:
             with patch("asyncio.open_connection", side_effect=_patched_open):
                 result = await pre_warm_rtsp(
-                    proxy_port, "u", "p", "127.0.0.1",
-                    max_attempts=1, retry_wait=0, post_success_wait=0,
+                    proxy_port,
+                    "u",
+                    "p",
+                    "127.0.0.1",
+                    max_attempts=1,
+                    retry_wait=0,
+                    post_success_wait=0,
                     describe_timeout=1,
                 )
         finally:
@@ -792,10 +829,15 @@ class TestPreWarmGaps:
 
         try:
             with patch("asyncio.open_connection", side_effect=_patched_open):
-                with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+                with patch("asyncio.wait_for", side_effect=TimeoutError()):
                     result = await pre_warm_rtsp(
-                        proxy_port, "u", "p", "127.0.0.1",
-                        max_attempts=1, retry_wait=0, post_success_wait=0,
+                        proxy_port,
+                        "u",
+                        "p",
+                        "127.0.0.1",
+                        max_attempts=1,
+                        retry_wait=0,
+                        post_success_wait=0,
                         describe_timeout=1,
                     )
         finally:

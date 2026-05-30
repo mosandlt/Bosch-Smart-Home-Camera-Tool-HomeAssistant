@@ -26,6 +26,7 @@ heavier units that the existing tests skipped:
   - `_BoschRgbLedLight.async_turn_on` — preconfigure-while-off + RGB
     body assembly + last-color restore.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -67,6 +67,7 @@ def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
     the HA framework's CoordinatorEntity setup chain."""
     if klass is None:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         klass = BoschTopLedLight
     coord = coord or _stub_coord()
     light = klass.__new__(klass)
@@ -102,6 +103,7 @@ class TestExtraStateAttributes:
 
     def test_warm_white_default_when_no_color(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         attrs = light.extra_state_attributes
         # Warm-white display default
@@ -109,6 +111,7 @@ class TestExtraStateAttributes:
 
     def test_returns_decoded_color_when_set(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._last_color_hex = "#FF8800"
         attrs = light.extra_state_attributes
@@ -116,6 +119,7 @@ class TestExtraStateAttributes:
 
     def test_invalid_hex_skipped_silently(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._last_color_hex = "#NOTAHEX"
         attrs = light.extra_state_attributes
@@ -124,6 +128,7 @@ class TestExtraStateAttributes:
 
     def test_includes_last_brightness_pct(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._last_brightness = 75
         assert light.extra_state_attributes["last_brightness_pct"] == 75
@@ -132,6 +137,7 @@ class TestExtraStateAttributes:
         """`if self._last_brightness:` gates the field — zero is excluded
         so the card doesn't restore to 0."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._last_brightness = 0
         attrs = light.extra_state_attributes
@@ -139,6 +145,7 @@ class TestExtraStateAttributes:
 
     def test_includes_last_white_balance_when_set(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._last_white_balance = 0.42
         assert light.extra_state_attributes["last_white_balance"] == 0.42
@@ -155,22 +162,29 @@ class TestAsyncAddedToHassRestore:
     @pytest.mark.asyncio
     async def test_restores_color_and_brightness_and_wb(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
-        last_state = SimpleNamespace(attributes={
-            "last_rgb_color": [255, 100, 50],
-            "last_brightness_pct": 60,
-            "last_white_balance": 0.3,
-        })
+        last_state = SimpleNamespace(
+            attributes={
+                "last_rgb_color": [255, 100, 50],
+                "last_brightness_pct": 60,
+                "last_white_balance": 0.3,
+            }
+        )
         light.async_get_last_state = AsyncMock(return_value=last_state)
-        with patch(
-            "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
-            new=AsyncMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
         ):
             await BoschTopLedLight.async_added_to_hass(light)
         assert light._last_color_hex == "#FF6432"
@@ -180,17 +194,22 @@ class TestAsyncAddedToHassRestore:
     @pytest.mark.asyncio
     async def test_no_last_state_returns_silently(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light.async_get_last_state = AsyncMock(return_value=None)
-        with patch(
-            "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
-            new=AsyncMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
         ):
             # Must NOT raise
             await BoschTopLedLight.async_added_to_hass(light)
@@ -201,20 +220,27 @@ class TestAsyncAddedToHassRestore:
         """Corrupt RestoreState (e.g. user mucked with .storage) must
         not crash entity setup."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
-        last_state = SimpleNamespace(attributes={
-            "last_rgb_color": ["not", "ints", "here"],
-        })
+        last_state = SimpleNamespace(
+            attributes={
+                "last_rgb_color": ["not", "ints", "here"],
+            }
+        )
         light.async_get_last_state = AsyncMock(return_value=last_state)
-        with patch(
-            "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
-            new=AsyncMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
         ):
             await BoschTopLedLight.async_added_to_hass(light)
         # Field stayed at default
@@ -223,20 +249,27 @@ class TestAsyncAddedToHassRestore:
     @pytest.mark.asyncio
     async def test_brightness_out_of_range_skipped(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
-        last_state = SimpleNamespace(attributes={
-            "last_brightness_pct": 200,  # > 100
-        })
+        last_state = SimpleNamespace(
+            attributes={
+                "last_brightness_pct": 200,  # > 100
+            }
+        )
         light.async_get_last_state = AsyncMock(return_value=last_state)
-        with patch(
-            "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
-            new=AsyncMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
-            new=AsyncMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
         ):
             await BoschTopLedLight.async_added_to_hass(light)
         # _last_brightness stayed at default 100
@@ -249,9 +282,12 @@ class TestAsyncAddedToHassRestore:
 class TestLoadStateFromCache:
     def test_off_when_brightness_zero(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {"topLedLightSettings": {"brightness": 0, "color": None}},
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {"topLedLightSettings": {"brightness": 0, "color": None}},
+            }
+        )
         light = _make_light(coord)
         light._load_state_from_cache()
         assert light._is_on is False
@@ -259,9 +295,12 @@ class TestLoadStateFromCache:
 
     def test_on_when_brightness_positive(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {"topLedLightSettings": {"brightness": 75, "color": "#FF00FF"}},
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {"topLedLightSettings": {"brightness": 75, "color": "#FF00FF"}},
+            }
+        )
         light = _make_light(coord)
         light._load_state_from_cache()
         assert light._is_on is True
@@ -275,20 +314,30 @@ class TestLoadStateFromCache:
         """Last non-zero brightness saved for restore-on-turn-on so the
         slider position survives an off cycle."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {"topLedLightSettings": {"brightness": 60, "color": None}},
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {"topLedLightSettings": {"brightness": 60, "color": None}},
+            }
+        )
         light = _make_light(coord)
         light._load_state_from_cache()
         assert light._last_brightness == 60
 
     def test_white_balance_replaces_color(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {"topLedLightSettings": {
-                "brightness": 50, "color": None, "whiteBalance": 0.6,
-            }},
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "topLedLightSettings": {
+                        "brightness": 50,
+                        "color": None,
+                        "whiteBalance": 0.6,
+                    }
+                },
+            }
+        )
         light = _make_light(coord)
         light._color_hex = "#stale"
         light._load_state_from_cache()
@@ -297,6 +346,7 @@ class TestLoadStateFromCache:
 
     def test_empty_cache_returns_silently(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()  # default cache empty
         # Must NOT raise; state untouched
         light._load_state_from_cache()
@@ -309,6 +359,7 @@ class TestLoadStateFromCache:
 class TestGetCurrentState:
     def test_returns_defaults_when_cache_empty(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         state = light._get_current_state()
         assert "frontLightSettings" in state
@@ -320,12 +371,19 @@ class TestGetCurrentState:
 
     def test_uses_cached_values_when_present(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "topLedLightSettings": {"brightness": 40, "color": "#FF0000"},
-                "frontLightSettings": {"brightness": 80, "color": None, "whiteBalance": 0.5},
-            },
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "topLedLightSettings": {"brightness": 40, "color": "#FF0000"},
+                    "frontLightSettings": {
+                        "brightness": 80,
+                        "color": None,
+                        "whiteBalance": 0.5,
+                    },
+                },
+            }
+        )
         light = _make_light(coord)
         state = light._get_current_state()
         assert state["topLedLightSettings"]["brightness"] == 40
@@ -342,10 +400,12 @@ class TestPutLightingSwitch:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         coord = _stub_coord(token="")
         light = _make_light(coord)
         ok = await BoschTopLedLight._put_lighting_switch(
-            light, {"topLedLightSettings": {"brightness": 50}},
+            light,
+            {"topLedLightSettings": {"brightness": 50}},
         )
         assert ok is False
 
@@ -369,7 +429,8 @@ class TestPutLightingSwitch:
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"topLedLightSettings": {"brightness": 50}},
+                light,
+                {"topLedLightSettings": {"brightness": 50}},
             )
         assert ok is True
         # Cache replaced with response body
@@ -395,15 +456,17 @@ class TestPutLightingSwitch:
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"topLedLightSettings": {"brightness": 50}},
+                light,
+                {"topLedLightSettings": {"brightness": 50}},
             )
         assert ok is False
 
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         session = MagicMock()
-        session.put = MagicMock(side_effect=asyncio.TimeoutError())
+        session.put = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
@@ -411,7 +474,8 @@ class TestPutLightingSwitch:
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"topLedLightSettings": {"brightness": 50}},
+                light,
+                {"topLedLightSettings": {"brightness": 50}},
             )
         assert ok is False
 
@@ -421,6 +485,7 @@ class TestPutLightingSwitch:
         refactor doesn't accidentally send a partial body that the
         camera would reject as 400."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         captured = {}
 
         @asynccontextmanager
@@ -440,7 +505,8 @@ class TestPutLightingSwitch:
             return_value=session,
         ):
             await BoschTopLedLight._put_lighting_switch(
-                light, {"topLedLightSettings": {"brightness": 80}},
+                light,
+                {"topLedLightSettings": {"brightness": 80}},
             )
         body = captured["json"]
         assert "frontLightSettings" in body
@@ -478,6 +544,7 @@ class TestPutSwitchEndpoint:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         coord = _stub_coord(token="")
         light = _make_light(coord)
         ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
@@ -486,6 +553,7 @@ class TestPutSwitchEndpoint:
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         session = MagicMock()
         session.put = MagicMock(side_effect=RuntimeError("network"))
         coord = _stub_coord()
@@ -504,26 +572,32 @@ class TestPutSwitchEndpoint:
 class TestSyncWallwasherCache:
     def test_top_or_bottom_on_marks_wallwasher_on(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "topLedLightSettings": {"brightness": 50},
-                "bottomLedLightSettings": {"brightness": 0},
-                "frontLightSettings": {"brightness": 0},
-            },
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "topLedLightSettings": {"brightness": 50},
+                    "bottomLedLightSettings": {"brightness": 0},
+                    "frontLightSettings": {"brightness": 0},
+                },
+            }
+        )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
         assert coord._shc_state_cache[CAM_ID]["wallwasher"] is True
 
     def test_only_front_on_does_not_mark_wallwasher(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "topLedLightSettings": {"brightness": 0},
-                "bottomLedLightSettings": {"brightness": 0},
-                "frontLightSettings": {"brightness": 80},
-            },
-        })
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "topLedLightSettings": {"brightness": 0},
+                    "bottomLedLightSettings": {"brightness": 0},
+                    "frontLightSettings": {"brightness": 80},
+                },
+            }
+        )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
         assert coord._shc_state_cache[CAM_ID]["wallwasher"] is False
@@ -532,11 +606,16 @@ class TestSyncWallwasherCache:
 
     def test_all_off_marks_camera_light_off(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
-        coord = _stub_coord(_lighting_switch_cache={CAM_ID: {
-            "topLedLightSettings": {"brightness": 0},
-            "bottomLedLightSettings": {"brightness": 0},
-            "frontLightSettings": {"brightness": 0},
-        }})
+
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "topLedLightSettings": {"brightness": 0},
+                    "bottomLedLightSettings": {"brightness": 0},
+                    "frontLightSettings": {"brightness": 0},
+                }
+            }
+        )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
         assert coord._shc_state_cache[CAM_ID]["camera_light"] is False
@@ -546,6 +625,7 @@ class TestSyncWallwasherCache:
         _light_set_at being stamped here. Pin so a refactor can't drop
         this and reintroduce the brightness-revert-after-toggle bug."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         coord = _stub_coord()
         light = _make_light(coord)
         light._sync_wallwasher_cache()
@@ -559,6 +639,7 @@ class TestSyncWallwasherCache:
 class TestRgbColor:
     def test_returns_tuple_when_color_set(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._color_hex = "#10ABFF"
         rgb = light.rgb_color
@@ -566,6 +647,7 @@ class TestRgbColor:
 
     def test_returns_warm_white_default_when_no_color(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         # Default warm white display value
         assert light.rgb_color == (255, 180, 100)
@@ -574,6 +656,7 @@ class TestRgbColor:
         """After turn_off the cache may have color=None, but the saved
         last_color_hex should still surface for the card."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         light = _make_light()
         light._color_hex = None
         light._last_color_hex = "#22DD44"
@@ -610,24 +693,48 @@ class TestPutLightingSwitch204NoCacheUpdate:
 
         session = MagicMock()
         session.put = _put_204
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "topLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "bottomLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                }
             }
-        })
+        )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_clientsession",
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+                light,
+                {
+                    "frontLightSettings": {
+                        "brightness": 100,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    }
+                },
             )
         assert ok is True
         # Cache must be updated from the body we sent — brightness 100, NOT 0
-        assert coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] == 100
+        assert (
+            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"]
+            == 100
+        )
 
     @pytest.mark.asyncio
     async def test_204_no_content_is_on_reads_true_after_turn_on(self):
@@ -644,13 +751,27 @@ class TestPutLightingSwitch204NoCacheUpdate:
 
         session = MagicMock()
         session.put = _put_204
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "topLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "bottomLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                }
             }
-        })
+        )
         light = _make_light(coord, led_key="frontLightSettings")
 
         with patch(
@@ -658,7 +779,14 @@ class TestPutLightingSwitch204NoCacheUpdate:
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+                light,
+                {
+                    "frontLightSettings": {
+                        "brightness": 100,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    }
+                },
             )
         assert ok is True
         # After the PUT, is_on must read True (not False)
@@ -671,9 +799,21 @@ class TestPutLightingSwitch204NoCacheUpdate:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         server_response = {
-            "frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0},
-            "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-            "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            "frontLightSettings": {
+                "brightness": 100,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
+            "topLedLightSettings": {
+                "brightness": 0,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
+            "bottomLedLightSettings": {
+                "brightness": 0,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
         }
 
         @asynccontextmanager
@@ -685,20 +825,41 @@ class TestPutLightingSwitch204NoCacheUpdate:
 
         session = MagicMock()
         session.put = _put_200
-        coord = _stub_coord(_lighting_switch_cache={
-            CAM_ID: {
-                "frontLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "topLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "bottomLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                }
             }
-        })
+        )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_clientsession",
             return_value=session,
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
-                light, {"frontLightSettings": {"brightness": 100, "color": None, "whiteBalance": -1.0}},
+                light,
+                {
+                    "frontLightSettings": {
+                        "brightness": 100,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    }
+                },
             )
         assert ok is True
         # Cache must be the server response object (not a copy of sent body)

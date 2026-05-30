@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
@@ -62,20 +61,34 @@ def parse_day_from_mtime(mtime: float) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--apply", action="store_true",
-                    help="Tatsächlich verschieben. Ohne diesen Flag nur Trockendurchlauf.")
-    ap.add_argument("--config-dir", default="/config",
-                    help="HA-Config-Verzeichnis (default: /config)")
+    ap.add_argument(
+        "--apply",
+        action="store_true",
+        help="Tatsächlich verschieben. Ohne diesen Flag nur Trockendurchlauf.",
+    )
+    ap.add_argument(
+        "--config-dir",
+        default="/config",
+        help="HA-Config-Verzeichnis (default: /config)",
+    )
     args = ap.parse_args()
 
     try:
         from smbclient import (
-            register_session, scandir, rename, mkdir, stat as smb_stat,
+            mkdir,
+            register_session,
+            rename,
+            scandir,
+        )
+        from smbclient import (
+            stat as smb_stat,
         )
     except ImportError:
-        sys.exit("smbprotocol/smbclient not installed in this Python env. "
-                 "On HA Core: 'pip install smbprotocol' inside the HA venv, "
-                 "or run from a Python env that has it.")
+        sys.exit(
+            "smbprotocol/smbclient not installed in this Python env. "
+            "On HA Core: 'pip install smbprotocol' inside the HA venv, "
+            "or run from a Python env that has it."
+        )
 
     opts = load_smb_options(Path(args.config_dir))
     server = opts["smb_server"].strip()
@@ -106,7 +119,9 @@ def main() -> int:
             files_in_month = [e for e in scandir(month_path) if not e.is_dir()]
             if not files_in_month:
                 continue
-            print(f"[.] {year_entry.name}/{month_entry.name}: {len(files_in_month)} file(s)")
+            print(
+                f"[.] {year_entry.name}/{month_entry.name}: {len(files_in_month)} file(s)"
+            )
 
             for f in files_in_month:
                 day = parse_day_from_filename(f.name)
@@ -154,8 +169,10 @@ def main() -> int:
 
             time.sleep(0.05)  # polite to the share
 
-    summary = (f"[=] {'moved' if args.apply else 'would move'}: {moved}, "
-               f"skipped: {skipped}, errors: {errors}")
+    summary = (
+        f"[=] {'moved' if args.apply else 'would move'}: {moved}, "
+        f"skipped: {skipped}, errors: {errors}"
+    )
     print(summary)
     return 0 if errors == 0 else 2
 

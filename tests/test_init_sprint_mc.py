@@ -16,6 +16,7 @@ Coverage targets in __init__.py:
 All tests use unbound-method pattern: BoschCameraCoordinator.method(coord, ...).
 No live HA runtime required.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,7 +46,9 @@ def _make_resp(status: int, json_data=None, text_data: str = ""):
 
 def _make_session_fn(url_routes: dict):
     """Route session.get() by URL substring (longest match first)."""
-    state: dict = {k: (list(v) if isinstance(v, list) else [v]) for k, v in url_routes.items()}
+    state: dict = {
+        k: (list(v) if isinstance(v, list) else [v]) for k, v in url_routes.items()
+    }
     sorted_patterns = sorted(state.keys(), key=len, reverse=True)
 
     def _get(url, **kwargs):
@@ -118,7 +121,7 @@ def _make_coord_for_update_data(**overrides):
         _last_status=float("-inf"),
         _last_events=float("-inf"),
         _last_slow=float("-inf"),
-        _last_smb_cleanup=time_mod.monotonic(),    # not stale by default
+        _last_smb_cleanup=time_mod.monotonic(),  # not stale by default
         _last_nvr_cleanup=time_mod.monotonic(),
         _fcm_lock=__import__("threading").Lock(),
         _fcm_running=False,
@@ -219,7 +222,9 @@ def _build_slow_tier_routes(cam_info: dict, extra_routes: dict | None = None) ->
         "v11/video_inputs": _make_resp(200, [cam_info]),
         f"{cid}/ping": _make_resp(200, {}, text_data="ONLINE"),
         f"{cid}/wifiinfo": _make_resp(200, {"rssiValueDb": -60, "signalStrength": 80}),
-        f"{cid}/ambient_light_sensor_level": _make_resp(200, {"ambientLightSensorLevel": 500}),
+        f"{cid}/ambient_light_sensor_level": _make_resp(
+            200, {"ambientLightSensorLevel": 500}
+        ),
         f"{cid}/motion": _make_resp(200, {"sensitivity": "LOW"}),
         f"{cid}/audioAlarm": _make_resp(200, {"sensitivity": 50}),
         f"{cid}/firmware": _make_resp(200, {"version": "9.40.25"}),
@@ -240,7 +245,9 @@ def _build_slow_tier_routes(cam_info: dict, extra_routes: dict | None = None) ->
         f"{cid}/lighting": _make_resp(200, {}),
         f"{cid}/intrusionDetectionConfig": _make_resp(200, {}),
         f"{cid}/alarm_settings": _make_resp(200, {}),
-        f"{cid}/alarmStatus": _make_resp(200, {"alarmType": "NONE", "intrusionSystem": "INACTIVE"}),
+        f"{cid}/alarmStatus": _make_resp(
+            200, {"alarmType": "NONE", "intrusionSystem": "INACTIVE"}
+        ),
         f"{cid}/iconLedBrightness": _make_resp(200, {"value": 0}),
         f"{cid}/zones": _make_resp(200, []),
         f"{cid}/privateAreas": _make_resp(200, []),
@@ -318,14 +325,18 @@ class TestGatherExceptionContinue:
             """Run gather normally but inject one Exception at the start of results."""
             real_results = await original_gather(*coros, **kwargs)
             # Prepend a bare Exception so isinstance(result, Exception) is True on first item
-            return [RuntimeError("injected")] + list(real_results)
+            return [RuntimeError("injected"), *list(real_results)]
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("asyncio.gather", side_effect=_gather_with_exception):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch("asyncio.gather", side_effect=_gather_with_exception),
+        ):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         # Method must not crash and must return a dict
-        assert isinstance(result, dict), "Must return dict even when gather result has Exception"
+        assert isinstance(result, dict), (
+            "Must return dict even when gather result has Exception"
+        )
         # wifiinfo should still be cached (from the real results)
         assert CAM_A in coord._wifiinfo_cache, (
             "_wifiinfo_cache must be populated from normal gather results after Exception is skipped"
@@ -357,15 +368,18 @@ class TestMotionLightForLoopBody:
         }
 
         routes = _build_slow_tier_routes(CAM_GEN2_INDOOR_PRIV_ON)
-        routes[f"{CAM_A}/lighting/motion"] = _make_resp(200, {"trigger": "motion", "enabled": True})
+        routes[f"{CAM_A}/lighting/motion"] = _make_resp(
+            200, {"trigger": "motion", "enabled": True}
+        )
         session = _make_session_fn(routes)
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._motion_light_cache.get(CAM_A) == {"trigger": "motion", "enabled": True}, (
-            "_motion_light_cache must be populated from lighting/motion endpoint"
-        )
+        assert coord._motion_light_cache.get(CAM_A) == {
+            "trigger": "motion",
+            "enabled": True,
+        }, "_motion_light_cache must be populated from lighting/motion endpoint"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -390,7 +404,9 @@ class TestIconLedBrightnessTypeError:
         # Return a dict with a non-integer "value" → int(ep_data.get("value", 0)) fails
         # Actually ep_data.get("value", 0) returns "not-a-number", then int("not-a-number")
         # raises ValueError — hits line 2042 (the except branch)
-        routes[f"{CAM_A}/iconLedBrightness"] = _make_resp(200, {"value": "not-a-number"})
+        routes[f"{CAM_A}/iconLedBrightness"] = _make_resp(
+            200, {"value": "not-a-number"}
+        )
         session = _make_session_fn(routes)
 
         with patch(_PATCH_SESSION, return_value=session):
@@ -435,6 +451,7 @@ class TestRcpViaCloudPut200:
     async def test_rcp_put_200_calls_async_update_rcp_data(self):
         """PUT /connection returns 200 with urls → _async_update_rcp_data called."""
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
@@ -447,10 +464,12 @@ class TestRcpViaCloudPut200:
         main_session = _make_session_fn(routes)
 
         # RCP session mock: PUT returns 200 with proxy URL
-        rcp_put_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123hash"],
-            "bufferingTime": 1000,
-        })
+        rcp_put_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123hash"],
+                "bufferingTime": 1000,
+            }
+        )
         rcp_put_resp = _put_resp(200, rcp_put_body)
         rcp_session_mock = MagicMock()
         rcp_session_mock.__aenter__ = AsyncMock(return_value=rcp_session_mock)
@@ -459,9 +478,11 @@ class TestRcpViaCloudPut200:
 
         rcp_connector_mock = MagicMock()
 
-        with patch(_PATCH_SESSION, return_value=main_session), \
-             patch("aiohttp.TCPConnector", return_value=rcp_connector_mock), \
-             patch("aiohttp.ClientSession", return_value=rcp_session_mock):
+        with (
+            patch(_PATCH_SESSION, return_value=main_session),
+            patch("aiohttp.TCPConnector", return_value=rcp_connector_mock),
+            patch("aiohttp.ClientSession", return_value=rcp_session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_update_rcp_data.assert_awaited_once()
@@ -474,7 +495,9 @@ class TestRcpViaCloudPut200:
     async def test_rcp_put_non200_logs_debug(self, caplog):
         """PUT /connection returns 403 → else branch (line 2098) → debug logged, no crash."""
         import logging
+
         import aiohttp as _aiohttp
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
@@ -491,17 +514,19 @@ class TestRcpViaCloudPut200:
         rcp_session_mock.__aexit__ = AsyncMock(return_value=None)
         rcp_session_mock.put = MagicMock(return_value=rcp_put_resp)
 
-        with patch(_PATCH_SESSION, return_value=main_session), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=rcp_session_mock), \
-             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with (
+            patch(_PATCH_SESSION, return_value=main_session),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=rcp_session_mock),
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_update_rcp_data.assert_not_awaited()
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("RCP proxy connection HTTP 403" in m or "HTTP 403" in m for m in debug_msgs), (
-            f"DEBUG about RCP 403 must be logged, got: {debug_msgs}"
-        )
+        assert any(
+            "RCP proxy connection HTTP 403" in m or "HTTP 403" in m for m in debug_msgs
+        ), f"DEBUG about RCP 403 must be logged, got: {debug_msgs}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -516,6 +541,7 @@ class TestRcpConnectError:
     async def test_rcp_timeout_error_caught(self, caplog):
         """asyncio.timeout fires during PUT /connection → TimeoutError caught at line 2103."""
         import logging
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
@@ -531,14 +557,16 @@ class TestRcpConnectError:
         rcp_session_mock.__aexit__ = AsyncMock(return_value=None)
         # Make put raise asyncio.TimeoutError
         rcp_put_resp = MagicMock()
-        rcp_put_resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        rcp_put_resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
         rcp_put_resp.__aexit__ = AsyncMock(return_value=None)
         rcp_session_mock.put = MagicMock(return_value=rcp_put_resp)
 
-        with patch(_PATCH_SESSION, return_value=main_session), \
-             patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=rcp_session_mock), \
-             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with (
+            patch(_PATCH_SESSION, return_value=main_session),
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=rcp_session_mock),
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
+        ):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), "Must return dict after RCP TimeoutError"
@@ -562,7 +590,7 @@ class TestShcReadyStatesUpdate:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
-            _last_slow=time_mod.monotonic(),   # skip slow tier
+            _last_slow=time_mod.monotonic(),  # skip slow tier
             _cached_status={CAM_A: "ONLINE"},
             shc_ready=True,
         )
@@ -583,6 +611,7 @@ class TestShcReadyStatesUpdate:
     async def test_shc_states_exception_caught(self, caplog):
         """shc_ready=True, _async_update_shc_states raises → exception caught, debug logged."""
         import logging
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_for_update_data(
@@ -601,8 +630,10 @@ class TestShcReadyStatesUpdate:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
+        ):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), "Must return dict even when SHC update raises"
@@ -631,8 +662,8 @@ class TestSmbCleanupBackgroundTask:
             "smb_retention_days": 30,
         }
         coord = _make_coord_for_update_data(
-            _last_slow=time_mod.monotonic(),          # skip slow tier
-            _last_smb_cleanup=float("-inf"),          # ancient → interval elapsed
+            _last_slow=time_mod.monotonic(),  # skip slow tier
+            _last_smb_cleanup=float("-inf"),  # ancient → interval elapsed
             _cached_status={CAM_A: "ONLINE"},
         )
         coord._entry.options = smb_opts
@@ -690,6 +721,7 @@ def _make_coord_live(**overrides):
 
     def _create_task(coro, **kwargs):
         import inspect
+
         if inspect.iscoroutine(coro):
             coro.close()
         return task_mock
@@ -761,6 +793,7 @@ class TestStreamUpdateSourceSuccess:
     async def test_stream_update_source_success_logs_debug(self, caplog):
         """cam_ent.stream.update_source() succeeds → debug logged for 'Stream.update_source()'."""
         import logging
+
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         stream_mock = MagicMock()
@@ -776,19 +809,25 @@ class TestStreamUpdateSourceSuccess:
             _camera_entities={CAM_A: cam_ent},
         )
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         stream_mock.update_source.assert_called_once()
         assert result is not None
@@ -838,7 +877,10 @@ class TestFetchLiveSnapshotRcpUnavailable:
         coord = _make_snapshot_coord(
             # Pre-populate cache so PUT /connection is skipped
             _proxy_url_cache={
-                CAM_A: ("proxy-01.example.com:42090/testhash", time_mod.monotonic() + 50)
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
             },
             # session_id returned → RCP path entered; raw = b"\x00\x01" (not JPEG)
             _get_cached_rcp_session=AsyncMock(return_value="sess-123"),
@@ -858,8 +900,10 @@ class TestFetchLiveSnapshotRcpUnavailable:
         session_mock.get = MagicMock(return_value=snap_resp)
         session_mock.put = MagicMock()
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
             )
@@ -880,7 +924,10 @@ class TestFetchLiveSnapshotRcpException:
 
         coord = _make_snapshot_coord(
             _proxy_url_cache={
-                CAM_A: ("proxy-01.example.com:42090/testhash", time_mod.monotonic() + 50)
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
             },
             _get_cached_rcp_session=AsyncMock(return_value="sess-123"),
             _rcp_read=AsyncMock(side_effect=RuntimeError("RCP timeout")),
@@ -899,8 +946,10 @@ class TestFetchLiveSnapshotRcpException:
         session_mock.get = MagicMock(return_value=snap_resp)
         session_mock.put = MagicMock()
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
             )
@@ -925,7 +974,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
 
         coord = _make_snapshot_coord(
             _proxy_url_cache={
-                CAM_A: ("proxy-01.example.com:42090/testhash", time_mod.monotonic() + 50)
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
             },
             _get_cached_rcp_session=AsyncMock(return_value=None),
         )
@@ -950,8 +1002,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         session_mock.get = MagicMock(return_value=snap_404_resp)
         session_mock.put = MagicMock(return_value=put_resp_no_urls)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
             )
@@ -967,7 +1021,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
 
         coord = _make_snapshot_coord(
             _proxy_url_cache={
-                CAM_A: ("proxy-01.example.com:42090/testhash", time_mod.monotonic() + 50)
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
             },
             _get_cached_rcp_session=AsyncMock(return_value=None),
         )
@@ -1010,8 +1067,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         session_mock.get = MagicMock(side_effect=_get_side_effect)
         session_mock.put = MagicMock(return_value=put_resp_fresh)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
             )

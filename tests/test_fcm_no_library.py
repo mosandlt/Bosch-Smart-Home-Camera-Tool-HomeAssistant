@@ -21,6 +21,7 @@ class TestGetFcmPushClientClassImportError:
         """Forces _QuietFcmPushClient._patch_class() to return None and the
         fallback import to fail — exercises the bare `return None` on L333."""
         import builtins as _bi
+
         real = _bi.__import__
 
         def _fake(name, *a, **kw):
@@ -33,6 +34,7 @@ class TestGetFcmPushClientClassImportError:
         from custom_components.bosch_shc_camera.fcm import (
             _get_fcm_push_client_class,
         )
+
         with patch("builtins.__import__", side_effect=_fake):
             assert _get_fcm_push_client_class() is None
 
@@ -52,6 +54,7 @@ class TestAsyncStartFcmPushNoLib:
         # bypassed — we want execution to land on the FcmPushClient check.
         # Then force the class lookup to None.
         from custom_components.bosch_shc_camera import fcm
+
         with patch.object(fcm, "_get_fcm_push_client_class", return_value=None):
             # FcmRegisterConfig import is inside the function; patch builtins
             # so the helper finishes the import successfully before the

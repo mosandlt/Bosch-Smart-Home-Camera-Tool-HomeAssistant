@@ -35,13 +35,13 @@ Pins the remaining `sensor.py` lines that no other test file covers:
   - L1168-1175 : Per-light-group attribute expansion (frontLightSettings,
                 topLedLightSettings, bottomLedLightSettings).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -99,7 +99,7 @@ def _stub_coord(**overrides):
         motion_settings=lambda cid: {},
         clock_offset=lambda cid: None,
         # FCM monotonic sentinel — use float('-inf') per SENTINEL_RULE
-        _fcm_last_push=float('-inf'),
+        _fcm_last_push=float("-inf"),
         _fcm_push_mode="auto",
     )
     base.update(overrides)
@@ -125,6 +125,7 @@ class TestSensorBaseDeviceInfo:
 
     def test_device_info_contains_model_and_fw(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
+
         s = BoschCameraStatusSensor(stub_coord, CAM_ID, stub_entry)
         info = s.device_info
         assert isinstance(info, dict)
@@ -141,8 +142,11 @@ class TestFirmwareVersionSensorUpToDateFallback:
     """If `info["upToDate"]` is missing, fall through to
     `info["featureSupport"]["upToDate"]` (line 335-336)."""
 
-    def test_uptodate_read_from_feature_support_when_top_level_missing(self, stub_coord, stub_entry):
+    def test_uptodate_read_from_feature_support_when_top_level_missing(
+        self, stub_coord, stub_entry
+    ):
         from custom_components.bosch_shc_camera.sensor import BoschFirmwareVersionSensor
+
         # Top-level upToDate absent — only featureSupport carries it
         info = stub_coord.data[CAM_ID]["info"]
         info.pop("upToDate", None)
@@ -157,13 +161,19 @@ class TestFirmwareVersionSensorUpToDateFallback:
 
 class TestMotionSensitivityNameAndUid:
     def test_name(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschMotionSensitivitySensor,
+        )
+
         s = BoschMotionSensitivitySensor(stub_coord, CAM_ID, stub_entry)
         assert "Terrasse" in s.name
         assert "Motion Sensitivity" in s.name
 
     def test_unique_id(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschMotionSensitivitySensor,
+        )
+
         s = BoschMotionSensitivitySensor(stub_coord, CAM_ID, stub_entry)
         assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_motion_sensitivity"
 
@@ -176,7 +186,10 @@ class TestMotionSensitivityEmptyAttributes:
     return an empty dict (not raise KeyError)."""
 
     def test_empty_settings_returns_empty_dict(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschMotionSensitivitySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschMotionSensitivitySensor,
+        )
+
         stub_coord.motion_settings = lambda cid: {}
         s = BoschMotionSensitivitySensor(stub_coord, CAM_ID, stub_entry)
         assert s.extra_state_attributes == {}
@@ -188,17 +201,20 @@ class TestMotionSensitivityEmptyAttributes:
 class TestLastEventTypeSensor:
     def test_name(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
+
         s = BoschLastEventTypeSensor(stub_coord, CAM_ID, stub_entry)
         assert "Last Event Type" in s.name
 
     def test_unique_id(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
+
         s = BoschLastEventTypeSensor(stub_coord, CAM_ID, stub_entry)
         assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_last_event_type"
 
     def test_extra_attrs_with_events(self, stub_coord, stub_entry):
         """When events present, attrs dict carries event_type/timestamp/id."""
         from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
+
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "PERSON", "timestamp": "2026-05-10T10:00:00Z", "id": "EVT123"}
         ]
@@ -214,12 +230,18 @@ class TestLastEventTypeSensor:
 
 class TestMovementEventsTodayNameAndUid:
     def test_name(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschMovementEventsTodaySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschMovementEventsTodaySensor,
+        )
+
         s = BoschMovementEventsTodaySensor(stub_coord, CAM_ID, stub_entry)
         assert "Movement Events Today" in s.name
 
     def test_unique_id(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschMovementEventsTodaySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschMovementEventsTodaySensor,
+        )
+
         s = BoschMovementEventsTodaySensor(stub_coord, CAM_ID, stub_entry)
         assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_movement_events_today"
 
@@ -229,12 +251,18 @@ class TestMovementEventsTodayNameAndUid:
 
 class TestAudioEventsTodayNameAndUid:
     def test_name(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioEventsTodaySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAudioEventsTodaySensor,
+        )
+
         s = BoschAudioEventsTodaySensor(stub_coord, CAM_ID, stub_entry)
         assert "Audio Events Today" in s.name
 
     def test_unique_id(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.sensor import BoschAudioEventsTodaySensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAudioEventsTodaySensor,
+        )
+
         s = BoschAudioEventsTodaySensor(stub_coord, CAM_ID, stub_entry)
         assert s.unique_id == f"bosch_shc_camera_{CAM_ID}_audio_events_today"
 
@@ -245,12 +273,14 @@ class TestAudioEventsTodayNameAndUid:
 class TestFcmPushStatusNameAndUid:
     def test_name(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
+
         s = BoschFcmPushStatusSensor(stub_coord, CAM_ID, stub_entry)
         # FCM sensor is global (not per-cam), name reflects that
         assert "FCM Push Status" in s.name
 
     def test_unique_id(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
+
         s = BoschFcmPushStatusSensor(stub_coord, CAM_ID, stub_entry)
         assert s.unique_id == "bosch_shc_camera_fcm_push_status"
 
@@ -264,6 +294,7 @@ class TestCommissionedSensorEmptyCache:
 
     def test_empty_cache_returns_empty_dict(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
+
         # Cache empty (default)
         s = BoschCommissionedSensor(stub_coord, CAM_ID, stub_entry)
         assert s.extra_state_attributes == {}
@@ -278,21 +309,25 @@ class TestNativeUnitProperties:
 
     def test_motion_zones_unit(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
         s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
         assert s.native_unit_of_measurement == "zones"
 
     def test_network_services_unit(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschNetworkServicesSensor
+
         s = BoschNetworkServicesSensor(stub_coord, CAM_ID, stub_entry)
         assert s.native_unit_of_measurement == "services"
 
     def test_iva_catalog_unit(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschIvaCatalogSensor
+
         s = BoschIvaCatalogSensor(stub_coord, CAM_ID, stub_entry)
         assert s.native_unit_of_measurement == "modules"
 
     def test_private_areas_unit(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
+
         s = BoschPrivateAreasSensor(stub_coord, CAM_ID, stub_entry)
         assert s.native_unit_of_measurement == "masks"
 
@@ -306,14 +341,20 @@ class TestAmbientLightScheduleAttributes:
 
     def test_empty_cache_returns_empty_dict(self, stub_coord, stub_entry):
         """Line 1142: `if not cache: return {}`."""
-        from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAmbientLightScheduleSensor,
+        )
+
         # cache empty
         s = BoschAmbientLightScheduleSensor(stub_coord, CAM_ID, stub_entry)
         assert s.extra_state_attributes == {}
 
     def test_string_schedule_takes_else_branch(self, stub_coord, stub_entry):
         """Line 1147: `schedule_str = schedule` when schedule isn't a dict."""
-        from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAmbientLightScheduleSensor,
+        )
+
         stub_coord._ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "ENVIRONMENT",  # plain string, not dict
@@ -325,7 +366,10 @@ class TestAmbientLightScheduleAttributes:
 
     def test_manual_start_end_time_attrs(self, stub_coord, stub_entry):
         """Lines 1161, 1163: manual_start_time / manual_end_time both set."""
-        from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAmbientLightScheduleSensor,
+        )
+
         stub_coord._ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "MANUAL",
@@ -337,16 +381,33 @@ class TestAmbientLightScheduleAttributes:
         assert attrs["manual_start_time"] == "20:00"
         assert attrs["manual_end_time"] == "06:30"
 
-    def test_per_light_group_brightness_color_wb_expansion(self, stub_coord, stub_entry):
+    def test_per_light_group_brightness_color_wb_expansion(
+        self, stub_coord, stub_entry
+    ):
         """Lines 1168-1175: each lighting group's brightness/whiteBalance/color
         gets a prefixed attribute key."""
-        from custom_components.bosch_shc_camera.sensor import BoschAmbientLightScheduleSensor
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschAmbientLightScheduleSensor,
+        )
+
         stub_coord._ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "ENVIRONMENT",
-            "frontLightSettings":  {"brightness": 80, "whiteBalance": 0.3, "color": None},
-            "topLedLightSettings": {"brightness": 50, "whiteBalance": None, "color": "#FF0080"},
-            "bottomLedLightSettings": {"brightness": 0,  "whiteBalance": -1.0, "color": None},
+            "frontLightSettings": {
+                "brightness": 80,
+                "whiteBalance": 0.3,
+                "color": None,
+            },
+            "topLedLightSettings": {
+                "brightness": 50,
+                "whiteBalance": None,
+                "color": "#FF0080",
+            },
+            "bottomLedLightSettings": {
+                "brightness": 0,
+                "whiteBalance": -1.0,
+                "color": None,
+            },
         }
         s = BoschAmbientLightScheduleSensor(stub_coord, CAM_ID, stub_entry)
         attrs = s.extra_state_attributes

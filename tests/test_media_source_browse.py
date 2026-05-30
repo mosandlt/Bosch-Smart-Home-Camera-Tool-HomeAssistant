@@ -17,6 +17,7 @@ controlled fixtures, then exercise each identifier-path shape:
   - Unknown entry → Unresolvable
   - Too-deep path → Unresolvable
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -71,6 +72,7 @@ class TestBrowseEmpty:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         # hass with no loaded entries
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
@@ -92,6 +94,7 @@ class TestBrowseSingleEntrySingleBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
         _seed_local_event(tmp_path, "Garten", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -107,6 +110,7 @@ class TestBrowseSingleEntrySingleBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
         _seed_local_event(tmp_path, "Terrasse", "2026-05-03")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -120,6 +124,7 @@ class TestBrowseSingleEntrySingleBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         mp4, jpg = _seed_local_event(tmp_path, "Terrasse", "2026-05-04", "10-30-00")
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -136,10 +141,12 @@ class TestBrowseSingleEntrySingleBackend:
 
     def test_too_deep_path_raises_unresolvable(self, tmp_path):
         """Camera-first tree: 6 rest segments (beyond year/month/day/events) → Unresolvable."""
+        from homeassistant.components.media_source.error import Unresolvable
+
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
-        from homeassistant.components.media_source.error import Unresolvable
+
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -157,6 +164,7 @@ class TestBrowseMultipleEntries:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         # Set up two entries each with their own download dir
         dir_a = tmp_path / "entry_a"
         dir_b = tmp_path / "entry_b"
@@ -165,25 +173,35 @@ class TestBrowseMultipleEntries:
         _seed_local_event(dir_a, "CamA", "2026-05-04")
         _seed_local_event(dir_b, "CamB", "2026-05-04")
 
-        coord_a = SimpleNamespace(options={
-            "enable_auto_download": True,
-            "download_path": str(dir_a),
-            "media_browser_source": "auto",
-        })
-        coord_b = SimpleNamespace(options={
-            "enable_auto_download": True,
-            "download_path": str(dir_b),
-            "media_browser_source": "auto",
-        })
+        coord_a = SimpleNamespace(
+            options={
+                "enable_auto_download": True,
+                "download_path": str(dir_a),
+                "media_browser_source": "auto",
+            }
+        )
+        coord_b = SimpleNamespace(
+            options={
+                "enable_auto_download": True,
+                "download_path": str(dir_b),
+                "media_browser_source": "auto",
+            }
+        )
         entry_a = SimpleNamespace(
-            entry_id="01ENT_A", runtime_data=coord_a, title="Account A",
+            entry_id="01ENT_A",
+            runtime_data=coord_a,
+            title="Account A",
         )
         entry_b = SimpleNamespace(
-            entry_id="01ENT_B", runtime_data=coord_b, title="Account B",
+            entry_id="01ENT_B",
+            runtime_data=coord_b,
+            title="Account B",
         )
 
         def _get_entry(eid):
-            return entry_a if eid == "01ENT_A" else entry_b if eid == "01ENT_B" else None
+            return (
+                entry_a if eid == "01ENT_A" else entry_b if eid == "01ENT_B" else None
+            )
 
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
@@ -199,10 +217,12 @@ class TestBrowseMultipleEntries:
         assert "Account B" in titles
 
     def test_unknown_entry_raises_unresolvable(self, tmp_path):
+        from homeassistant.components.media_source.error import Unresolvable
+
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
-        from homeassistant.components.media_source.error import Unresolvable
+
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -223,14 +243,18 @@ class TestBrowseNvrBackend:
         (seg_dir / "10-30.mp4").write_text("x")
         (seg_dir / "11-00.mp4").write_text("x")
         # NVR-only (auto-download disabled, NVR enabled)
-        coord = SimpleNamespace(options={
-            "enable_auto_download": False,
-            "enable_nvr": True,
-            "nvr_base_path": str(nvr_base),
-            "media_browser_source": "auto",
-        })
+        coord = SimpleNamespace(
+            options={
+                "enable_auto_download": False,
+                "enable_nvr": True,
+                "nvr_base_path": str(nvr_base),
+                "media_browser_source": "auto",
+            }
+        )
         entry = SimpleNamespace(
-            entry_id="01NVRONLY", runtime_data=coord, title="NVR-Only",
+            entry_id="01NVRONLY",
+            runtime_data=coord,
+            title="NVR-Only",
         )
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
@@ -245,6 +269,7 @@ class TestBrowseNvrBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         root = src._browse("")
@@ -255,6 +280,7 @@ class TestBrowseNvrBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01NVRONLY/Cam")
@@ -265,6 +291,7 @@ class TestBrowseNvrBackend:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01NVRONLY/Cam/2026-05-04")
@@ -277,10 +304,12 @@ class TestBrowseNvrBackend:
         assert all(not c.can_expand for c in out.children)
 
     def test_nvr_too_deep_raises_unresolvable(self, tmp_path):
+        from homeassistant.components.media_source.error import Unresolvable
+
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
-        from homeassistant.components.media_source.error import Unresolvable
+
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
@@ -302,15 +331,19 @@ class TestMultiSourceSingleEntry:
         (nvr_dir / "Cam" / "2026-05-04").mkdir(parents=True)
         (nvr_dir / "Cam" / "2026-05-04" / "10-30.mp4").write_text("x")
 
-        coord = SimpleNamespace(options={
-            "enable_auto_download": True,
-            "download_path": str(local_dir),
-            "enable_nvr": True,
-            "nvr_base_path": str(nvr_dir),
-            "media_browser_source": "auto",
-        })
+        coord = SimpleNamespace(
+            options={
+                "enable_auto_download": True,
+                "download_path": str(local_dir),
+                "enable_nvr": True,
+                "nvr_base_path": str(nvr_dir),
+                "media_browser_source": "auto",
+            }
+        )
         entry = SimpleNamespace(
-            entry_id="01MULTI", runtime_data=coord, title="Multi-Source",
+            entry_id="01MULTI",
+            runtime_data=coord,
+            title="Multi-Source",
         )
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
@@ -325,6 +358,7 @@ class TestMultiSourceSingleEntry:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         root = src._browse("")
@@ -339,6 +373,7 @@ class TestMultiSourceSingleEntry:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01MULTI/L")
@@ -349,6 +384,7 @@ class TestMultiSourceSingleEntry:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01MULTI/N")
@@ -356,10 +392,12 @@ class TestMultiSourceSingleEntry:
         assert "Cam" in titles
 
     def test_unknown_kind_raises(self, tmp_path):
+        from homeassistant.components.media_source.error import Unresolvable
+
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
-        from homeassistant.components.media_source.error import Unresolvable
+
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
@@ -372,14 +410,18 @@ class TestMultiSourceSingleEntry:
 class TestAsyncBrowseMedia:
     @pytest.mark.asyncio
     async def test_unresolvable_becomes_browse_error(self, tmp_path):
+        from homeassistant.components.media_player.errors import BrowseError
+
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
-        from homeassistant.components.media_player.errors import BrowseError
+
         hass, _ = _hass_with_local_dir(tmp_path)
+
         # Run executor jobs synchronously for the test
         async def _run_executor(func, *args, **kw):
             return func(*args, **kw)
+
         hass.async_add_executor_job = _run_executor
         src = BoschCameraMediaSource(hass)
         item = SimpleNamespace(identifier="01UNKNOWN")
@@ -391,10 +433,13 @@ class TestAsyncBrowseMedia:
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
         )
+
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
+
         async def _run_executor(func, *args, **kw):
             return func(*args, **kw)
+
         hass.async_add_executor_job = _run_executor
         src = BoschCameraMediaSource(hass)
         item = SimpleNamespace(identifier="")

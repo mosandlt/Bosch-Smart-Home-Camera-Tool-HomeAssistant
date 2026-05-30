@@ -15,6 +15,7 @@ Critical paths pinned:
   - delete: file_path traversal attack rejected, by-camera + by-date filter,
     empty-dir cleanup, persistent_notification fires with deleted count.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -85,7 +86,13 @@ class TestHandleMigrateFlatEvents:
         await handler(MagicMock(data={}))
 
         assert not flat.exists(), "flat file must be moved away"
-        moved = cam / "2026" / "04" / "15" / "terrasse_2026-04-15_18-30-22_MOTION_F00DCAFE.mp4"
+        moved = (
+            cam
+            / "2026"
+            / "04"
+            / "15"
+            / "terrasse_2026-04-15_18-30-22_MOTION_F00DCAFE.mp4"
+        )
         assert moved.is_file(), f"file must land at {moved}"
 
     @pytest.mark.asyncio

@@ -23,7 +23,6 @@ import pytest
 
 from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
-
 CAM_A = "AAAA-CAM-A"
 CAM_B = "BBBB-CAM-B"
 
@@ -43,7 +42,6 @@ def _make_minimal_coord(active_cam_ids: list[str]) -> SimpleNamespace:
 
 
 class TestUnloadTearsDownLiveStreams:
-
     @pytest.mark.asyncio
     async def test_tear_down_called_for_each_active_cam(self) -> None:
         """Every cam_id present in `_live_connections` at unload time MUST
@@ -53,6 +51,7 @@ class TestUnloadTearsDownLiveStreams:
         # Patch the module-level helpers that the function calls so we don't
         # need the real NVR / TLS subsystems.
         from custom_components import bosch_shc_camera as bsc_mod
+
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
         bsc_mod.stop_all_proxies = MagicMock()
@@ -73,6 +72,7 @@ class TestUnloadTearsDownLiveStreams:
         coord = _make_minimal_coord([])
 
         from custom_components import bosch_shc_camera as bsc_mod
+
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
         bsc_mod.stop_all_proxies = MagicMock()
@@ -93,6 +93,7 @@ class TestUnloadTearsDownLiveStreams:
         coord._tear_down_live_stream = AsyncMock(side_effect=RuntimeError("boom"))
 
         from custom_components import bosch_shc_camera as bsc_mod
+
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
         stop_all_mock = MagicMock()
@@ -124,6 +125,7 @@ class TestUnloadTearsDownLiveStreams:
         )
 
         from custom_components import bosch_shc_camera as bsc_mod
+
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
         bsc_mod.stop_all_proxies = MagicMock(

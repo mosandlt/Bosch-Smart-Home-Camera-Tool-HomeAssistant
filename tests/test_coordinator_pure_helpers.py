@@ -30,7 +30,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 CAM_A = "11111111-1111-1111-1111-111111111111"
 CAM_B = "22222222-2222-2222-2222-222222222222"
 
@@ -85,48 +84,78 @@ class TestIsWriteLocked:
 
     def test_no_write_yet_returns_false(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         # No timestamp recorded → not locked
-        assert BoschCameraCoordinator._is_write_locked(
-            coord, CAM_A, coord._privacy_set_at,
-        ) is False
+        assert (
+            BoschCameraCoordinator._is_write_locked(
+                coord,
+                CAM_A,
+                coord._privacy_set_at,
+            )
+            is False
+        )
 
     def test_recent_write_locks(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._privacy_set_at[CAM_A] = time.monotonic()  # just now
-        assert BoschCameraCoordinator._is_write_locked(
-            coord, CAM_A, coord._privacy_set_at,
-        ) is True
+        assert (
+            BoschCameraCoordinator._is_write_locked(
+                coord,
+                CAM_A,
+                coord._privacy_set_at,
+            )
+            is True
+        )
 
     def test_old_write_unlocked(self):
         """A write older than _WRITE_LOCK_SECS no longer holds the lock —
         the cloud has had enough time to settle."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._privacy_set_at[CAM_A] = time.monotonic() - 60.0  # 60s ago
-        assert BoschCameraCoordinator._is_write_locked(
-            coord, CAM_A, coord._privacy_set_at,
-        ) is False
+        assert (
+            BoschCameraCoordinator._is_write_locked(
+                coord,
+                CAM_A,
+                coord._privacy_set_at,
+            )
+            is False
+        )
 
     def test_threshold_boundary_is_locked(self):
         """Right at the boundary (29 s ago) — still locked. The condition
         is `<`, so ≥30 unlocks. Pin the inequality direction."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._privacy_set_at[CAM_A] = time.monotonic() - 29.0
-        assert BoschCameraCoordinator._is_write_locked(
-            coord, CAM_A, coord._privacy_set_at,
-        ) is True
+        assert (
+            BoschCameraCoordinator._is_write_locked(
+                coord,
+                CAM_A,
+                coord._privacy_set_at,
+            )
+            is True
+        )
 
     def test_per_cam_independence(self):
         """Lock for cam-A must not bleed into cam-B."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._privacy_set_at[CAM_A] = time.monotonic()
-        assert BoschCameraCoordinator._is_write_locked(
-            coord, CAM_B, coord._privacy_set_at,
-        ) is False
+        assert (
+            BoschCameraCoordinator._is_write_locked(
+                coord,
+                CAM_B,
+                coord._privacy_set_at,
+            )
+            is False
+        )
 
 
 # ── _get_cam_lan_ip — fallback chain ────────────────────────────────────
@@ -135,6 +164,7 @@ class TestIsWriteLocked:
 class TestGetCamLanIp:
     def test_returns_none_when_no_cache(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         assert BoschCameraCoordinator._get_cam_lan_ip(coord, CAM_A) is None
 
@@ -142,6 +172,7 @@ class TestGetCamLanIp:
         """RCP cache (0x0a36 lookup) is the most authoritative — wins
         over the digest-creds host (which may be a stale mDNS hostname)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_lan_ip_cache[CAM_A] = "192.0.2.1"
         coord._local_creds_cache[CAM_A] = {"host": "shc-fallback.local"}
@@ -149,6 +180,7 @@ class TestGetCamLanIp:
 
     def test_falls_back_to_creds_host(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._local_creds_cache[CAM_A] = {"host": "192.0.2.50", "port": 443}
         assert BoschCameraCoordinator._get_cam_lan_ip(coord, CAM_A) == "192.0.2.50"
@@ -156,6 +188,7 @@ class TestGetCamLanIp:
     def test_creds_without_host_returns_none(self):
         """Empty creds dict (just user/password) → None, not '' / KeyError."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._local_creds_cache[CAM_A] = {"user": "x", "password": "y"}
         assert BoschCameraCoordinator._get_cam_lan_ip(coord, CAM_A) is None
@@ -171,12 +204,19 @@ class TestShouldCheckStatus:
 
     def test_normal_cadence_due(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         now = time.monotonic()
         coord = _make_coord(_per_cam_status_at={CAM_A: now - 90.0})
         # 90 s elapsed > 60 s interval → due
-        assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, now, 60,
-        ) is True
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord,
+                CAM_A,
+                now,
+                60,
+            )
+            is True
+        )
 
     def test_normal_cadence_not_due(self):
         """Camera checked 10s ago with interval=60s must not re-check.
@@ -186,16 +226,24 @@ class TestShouldCheckStatus:
         caused _last_status to advance every tick → status never re-checked.
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         now = time.monotonic()
         coord = _make_coord(_per_cam_status_at={CAM_A: now - 10.0})
         # 10 s ago < 60 s interval → not due
-        assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, now, 60,
-        ) is False
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord,
+                CAM_A,
+                now,
+                60,
+            )
+            is False
+        )
 
     def test_offline_extended_cadence(self):
         """Camera offline >15 min uses the 900 s extended interval."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         now = time.monotonic()
         coord = _make_coord(
             _last_status=now - 60.0,  # global status check just ran
@@ -203,23 +251,36 @@ class TestShouldCheckStatus:
             _per_cam_status_at={CAM_A: now - 950.0},  # last per-cam check 950s ago
         )
         # In extended mode: per_cam_last 950s ago > 900s → due
-        assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, now, 60,
-        ) is True
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord,
+                CAM_A,
+                now,
+                60,
+            )
+            is True
+        )
 
     def test_offline_extended_blocks_premature_recheck(self):
         """A camera offline 20 min, last per-cam check 100s ago → not due
         (extended interval is 900 s, not 60 s)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         now = time.monotonic()
         coord = _make_coord(
             _last_status=now - 60.0,
             _offline_since={CAM_A: now - 1200.0},
             _per_cam_status_at={CAM_A: now - 100.0},
         )
-        assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, now, 60,
-        ) is False
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord,
+                CAM_A,
+                now,
+                60,
+            )
+            is False
+        )
 
     def test_scan_interval_shorter_than_status_interval(self):
         """scan_interval=15s, interval_status=120s: status must fire at 120s, not every 15s.
@@ -234,22 +295,34 @@ class TestShouldCheckStatus:
         # Global _last_status just advanced to t=0 (updated on previous tick)
         now = time.monotonic()
         coord = _make_coord(
-            _last_status=now - 15.0,           # advanced every 15s scan tick (bug scenario)
+            _last_status=now - 15.0,  # advanced every 15s scan tick (bug scenario)
             _per_cam_status_at={CAM_A: now - 15.0},  # last actual check was 15s ago
         )
         # interval_status=120s, only 15s elapsed → NOT due
-        assert BoschCameraCoordinator._should_check_status(
-            coord, CAM_A, now, 120,
-        ) is False, "Status must not re-fire 15s after last check when interval is 120s"
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord,
+                CAM_A,
+                now,
+                120,
+            )
+            is False
+        ), "Status must not re-fire 15s after last check when interval is 120s"
 
         # Now simulate 120s later — status IS due
         coord2 = _make_coord(
-            _last_status=now,                  # global updated every tick (irrelevant now)
+            _last_status=now,  # global updated every tick (irrelevant now)
             _per_cam_status_at={CAM_A: now - 125.0},  # last actual check 125s ago
         )
-        assert BoschCameraCoordinator._should_check_status(
-            coord2, CAM_A, now, 120,
-        ) is True, "Status must fire after 125s when interval is 120s"
+        assert (
+            BoschCameraCoordinator._should_check_status(
+                coord2,
+                CAM_A,
+                now,
+                120,
+            )
+            is True
+        ), "Status must fire after 125s when interval is 120s"
 
 
 # ── _token_still_valid — JWT exp parsing ────────────────────────────────
@@ -258,9 +331,13 @@ class TestShouldCheckStatus:
 def _make_jwt(exp_offset_secs: int) -> str:
     """Build a fake unsigned JWT with `exp` at now + offset."""
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"exp": int(time.time()) + exp_offset_secs}).encode()
-    ).rstrip(b"=").decode()
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps({"exp": int(time.time()) + exp_offset_secs}).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{payload}.sig"
 
 
@@ -281,45 +358,56 @@ class TestTokenStillValid:
 
     def test_valid_token_with_long_exp(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token(_make_jwt(3600))
         assert BoschCameraCoordinator._token_still_valid(coord) is True
 
     def test_token_about_to_expire(self):
         """Token with 30 s remaining < default min_remaining=60 → invalid."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token(_make_jwt(30))
         assert BoschCameraCoordinator._token_still_valid(coord) is False
 
     def test_expired_token(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token(_make_jwt(-3600))
         assert BoschCameraCoordinator._token_still_valid(coord) is False
 
     def test_empty_token(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token("")
         assert BoschCameraCoordinator._token_still_valid(coord) is False
 
     def test_malformed_jwt_doesnt_crash(self):
         """Garbage in token field must be treated as expired, not raise."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token("this-is-not-a-jwt")
         assert BoschCameraCoordinator._token_still_valid(coord) is False
 
     def test_jwt_without_exp_field_is_invalid(self):
         """Default exp=0 in the get → very old → invalid."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(b'{}').rstrip(b"=").decode()
+        payload = base64.urlsafe_b64encode(b"{}").rstrip(b"=").decode()
         coord = _coord_with_token(f"{header}.{payload}.sig")
         assert BoschCameraCoordinator._token_still_valid(coord) is False
 
     def test_min_remaining_param_respected(self):
         """min_remaining=10 must accept tokens with 30 s left."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _coord_with_token(_make_jwt(30))
-        assert BoschCameraCoordinator._token_still_valid(coord, min_remaining=10) is True
-        assert BoschCameraCoordinator._token_still_valid(coord, min_remaining=60) is False
+        assert (
+            BoschCameraCoordinator._token_still_valid(coord, min_remaining=10) is True
+        )
+        assert (
+            BoschCameraCoordinator._token_still_valid(coord, min_remaining=60) is False
+        )
 
 
 # ── _invalidate_rcp_session — RCP cache eviction ────────────────────────
@@ -328,6 +416,7 @@ class TestTokenStillValid:
 class TestInvalidateRcpSession:
     def test_removes_cached_entry(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_session_cache["abc123"] = ("0xdeadbeef", time.monotonic() + 300)
         BoschCameraCoordinator._invalidate_rcp_session(coord, "abc123")
@@ -336,6 +425,7 @@ class TestInvalidateRcpSession:
     def test_idempotent_on_missing_key(self):
         """Invalidating a non-cached hash must not raise."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         BoschCameraCoordinator._invalidate_rcp_session(coord, "never-cached")
         # No exception, no state change
@@ -348,22 +438,29 @@ class TestInvalidateRcpSession:
 class TestProxyHashFromRcpBase:
     def test_extracts_hash_from_canonical_url(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         url = "https://proxy-12.live.cbs.boschsecurity.com:42090/abcdef1234/rcp.xml"
         assert BoschCameraCoordinator._proxy_hash_from_rcp_base(url) == "abcdef1234"
 
     def test_strips_trailing_slash(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         url = "https://host/myhash/rcp.xml/"
         assert BoschCameraCoordinator._proxy_hash_from_rcp_base(url) == "myhash"
 
     def test_returns_none_for_non_rcp_url(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        assert BoschCameraCoordinator._proxy_hash_from_rcp_base(
-            "https://host/abc/snap.jpg"
-        ) is None
+
+        assert (
+            BoschCameraCoordinator._proxy_hash_from_rcp_base(
+                "https://host/abc/snap.jpg"
+            )
+            is None
+        )
 
     def test_returns_none_for_empty(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator._proxy_hash_from_rcp_base("") is None
 
 
@@ -373,16 +470,19 @@ class TestProxyHashFromRcpBase:
 class TestRcpCacheReaders:
     def test_clock_offset_returns_cached(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_clock_offset_cache[CAM_A] = -2.5
         assert BoschCameraCoordinator.clock_offset(coord, CAM_A) == -2.5
 
     def test_clock_offset_none_when_uncached(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator.clock_offset(_make_coord(), CAM_A) is None
 
     def test_rcp_lan_ip(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_lan_ip_cache[CAM_A] = "192.168.1.50"
         assert BoschCameraCoordinator.rcp_lan_ip(coord, CAM_A) == "192.168.1.50"
@@ -390,22 +490,31 @@ class TestRcpCacheReaders:
 
     def test_rcp_product_name(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_product_name_cache[CAM_A] = "HOME_Eyes_Outdoor"
-        assert BoschCameraCoordinator.rcp_product_name(coord, CAM_A) == "HOME_Eyes_Outdoor"
+        assert (
+            BoschCameraCoordinator.rcp_product_name(coord, CAM_A) == "HOME_Eyes_Outdoor"
+        )
         assert BoschCameraCoordinator.rcp_product_name(coord, CAM_B) is None
 
     def test_rcp_bitrate_ladder_default_empty_list(self):
         """Missing entry → [] (not None) so callers can iterate without
         a guard."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator.rcp_bitrate_ladder(_make_coord(), CAM_A) == []
 
     def test_rcp_bitrate_ladder_returns_cached(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._rcp_bitrate_cache[CAM_A] = [500, 2500, 7500]
-        assert BoschCameraCoordinator.rcp_bitrate_ladder(coord, CAM_A) == [500, 2500, 7500]
+        assert BoschCameraCoordinator.rcp_bitrate_ladder(coord, CAM_A) == [
+            500,
+            2500,
+            7500,
+        ]
 
 
 # ── get_quality / set_quality / get_quality_params ──────────────────────
@@ -414,11 +523,13 @@ class TestRcpCacheReaders:
 class TestQualityPreference:
     def test_get_quality_default_auto(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator.get_quality(_make_coord(), CAM_A) == "auto"
 
     def test_runtime_override_wins_over_default(self):
         """Per-camera select-entity override beats the auto default."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._quality_preference[CAM_A] = "low"
         assert BoschCameraCoordinator.get_quality(coord, CAM_A) == "low"
@@ -427,6 +538,7 @@ class TestQualityPreference:
         """Switching quality must drop the cached proxy URL — otherwise
         the next stream-on reuses the old highQualityVideo flag."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._proxy_url_cache[CAM_A] = "stale-url"
         BoschCameraCoordinator.set_quality(coord, CAM_A, "high")
@@ -439,6 +551,7 @@ class TestQualityPreference:
     def test_get_quality_params_high(self):
         """high → highQualityVideo=True, inst=1 (primary encoder)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._quality_preference[CAM_A] = "high"
         # Bind get_quality so get_quality_params can call self.get_quality
@@ -448,6 +561,7 @@ class TestQualityPreference:
     def test_get_quality_params_low(self):
         """low → highQualityVideo=False, inst=4 (low-bandwidth)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._quality_preference[CAM_A] = "low"
         coord.get_quality = lambda cid: BoschCameraCoordinator.get_quality(coord, cid)
@@ -456,6 +570,7 @@ class TestQualityPreference:
     def test_get_quality_params_auto(self):
         """auto → highQualityVideo=False, inst=2 (iOS default, balanced)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord.get_quality = lambda cid: BoschCameraCoordinator.get_quality(coord, cid)
         assert BoschCameraCoordinator.get_quality_params(coord, CAM_A) == (False, 2)
@@ -467,17 +582,25 @@ class TestQualityPreference:
 class TestSettingsReaders:
     def test_motion_settings_empty_when_no_data(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator.motion_settings(_make_coord(), CAM_A) == {}
 
     def test_motion_settings_returns_cam_motion(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        coord = _make_coord(data={CAM_A: {"motion": {"enabled": True, "motionAlarmConfiguration": "HIGH"}}})
+
+        coord = _make_coord(
+            data={
+                CAM_A: {"motion": {"enabled": True, "motionAlarmConfiguration": "HIGH"}}
+            }
+        )
         assert BoschCameraCoordinator.motion_settings(coord, CAM_A) == {
-            "enabled": True, "motionAlarmConfiguration": "HIGH",
+            "enabled": True,
+            "motionAlarmConfiguration": "HIGH",
         }
 
     def test_recording_options(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(data={CAM_A: {"recordingOptions": {"x": 1}}})
         assert BoschCameraCoordinator.recording_options(coord, CAM_A) == {"x": 1}
         # Missing → empty dict
@@ -492,6 +615,7 @@ class TestStreamWarming:
 
     def test_clear_stream_warming_idempotent(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         # Calling on an empty set must not raise
         BoschCameraCoordinator.clear_stream_warming(coord, CAM_A)
@@ -499,12 +623,14 @@ class TestStreamWarming:
 
     def test_is_warming_returns_false_when_not_set(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         assert BoschCameraCoordinator.is_stream_warming(_make_coord(), CAM_A) is False
 
     def test_warming_without_live_conn_auto_clears(self):
         """Scenario 1: flag set but no live_connection — pre-warm errored
         out without clearing. Auto-recover."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic()
@@ -517,6 +643,7 @@ class TestStreamWarming:
         """Scenario 2: URL ready but flag still on — race in cleanup paths.
         Auto-recover."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic()
@@ -532,6 +659,7 @@ class TestStreamWarming:
         proxy reset 3× and warm-up held the privacy switch hostage for
         ~45 s."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic() - 200
@@ -545,6 +673,7 @@ class TestStreamWarming:
         elapsed 250 s would have stayed flagged under the old 300 s rule but
         must now auto-clear."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic() - 250
@@ -554,6 +683,7 @@ class TestStreamWarming:
     def test_warming_under_timeout_stays_true(self):
         """Healthy mid-warm state: live conn pending, no URL, started recently."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic() - 30  # 30 s ago
@@ -564,6 +694,7 @@ class TestStreamWarming:
         """Pin the upper end of the healthy band: 150 s elapsed is still
         within the worst-case outdoor pre-warm envelope and must NOT clear."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()
         coord._stream_warming.add(CAM_A)
         coord._stream_warming_started[CAM_A] = time.monotonic() - 150
@@ -577,15 +708,19 @@ class TestStreamWarming:
 class TestRecordStreamError:
     def _stub_coord_with_model(self, conn_type: str = "LOCAL"):
         from custom_components.bosch_shc_camera.models import get_model_config
+
         coord = _make_coord(_hw_version={CAM_A: "HOME_Eyes_Outdoor"})
         coord._live_connections[CAM_A] = {"_connection_type": conn_type}
-        coord.get_model_config = lambda cam_id: get_model_config(coord._hw_version[cam_id])
+        coord.get_model_config = lambda cam_id: get_model_config(
+            coord._hw_version[cam_id]
+        )
         return coord
 
     def test_remote_session_does_not_increment(self):
         """Errors on REMOTE shouldn't pin the cam to REMOTE forever — the
         counter exists to suppress LOCAL after consecutive LAN failures."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = self._stub_coord_with_model(conn_type="REMOTE")
         BoschCameraCoordinator.record_stream_error(coord, CAM_A)
         assert coord._stream_error_count.get(CAM_A, 0) == 0, (
@@ -596,6 +731,7 @@ class TestRecordStreamError:
 
     def test_local_session_increments(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = self._stub_coord_with_model(conn_type="LOCAL")
         BoschCameraCoordinator.record_stream_error(coord, CAM_A)
         assert coord._stream_error_count[CAM_A] == 1
@@ -603,6 +739,7 @@ class TestRecordStreamError:
 
     def test_local_increments_to_threshold(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = self._stub_coord_with_model(conn_type="LOCAL")
         for _ in range(5):
             BoschCameraCoordinator.record_stream_error(coord, CAM_A)
@@ -612,6 +749,7 @@ class TestRecordStreamError:
 
     def test_record_success_resets_counter(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(
             _stream_error_count={CAM_A: 3},
             _stream_error_at={CAM_A: time.monotonic()},
@@ -636,6 +774,7 @@ class TestRecordStreamError:
 class TestGetModelConfig:
     def test_returns_outdoor_config_for_outdoor_cam(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord(_hw_version={CAM_A: "HOME_Eyes_Outdoor"})
         cfg = BoschCameraCoordinator.get_model_config(coord, CAM_A)
         # Must produce a CameraModelConfig — touch at least one field
@@ -646,6 +785,7 @@ class TestGetModelConfig:
     def test_unknown_hw_falls_back_to_default(self):
         """Cam without entry in _hw_version → "CAMERA" default."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _make_coord()  # _hw_version is empty
         cfg = BoschCameraCoordinator.get_model_config(coord, "any-cam-id")
         assert cfg is not None

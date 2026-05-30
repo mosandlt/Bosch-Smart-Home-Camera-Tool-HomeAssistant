@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -30,6 +29,7 @@ def coord():
 def helpers():
     """Bind the unbound methods from BoschCameraCoordinator."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
     return {
         "clock_offset": BoschCameraCoordinator.clock_offset,
         "rcp_lan_ip": BoschCameraCoordinator.rcp_lan_ip,
@@ -83,7 +83,8 @@ class TestMotionSettings:
 
     def test_returns_motion_dict_from_data(self, coord, helpers):
         coord.data[CAM_ID]["motion"] = {
-            "motionAlarmConfiguration": "MEDIUM_HIGH", "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM_HIGH",
+            "enabled": True,
         }
         result = helpers["motion_settings"](coord, CAM_ID)
         assert result["motionAlarmConfiguration"] == "MEDIUM_HIGH"

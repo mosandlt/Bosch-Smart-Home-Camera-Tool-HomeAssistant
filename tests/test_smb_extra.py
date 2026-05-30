@@ -13,7 +13,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ── _ftp_exists ─────────────────────────────────────────────────────────
 
 
@@ -24,6 +23,7 @@ class TestFtpExists:
 
     def test_existing_file_returns_true(self):
         from custom_components.bosch_shc_camera.smb import _ftp_exists
+
         ftp = MagicMock()
         ftp.size.return_value = 1024
         assert _ftp_exists(ftp, "/foo/bar.jpg") is True
@@ -32,6 +32,7 @@ class TestFtpExists:
         """`SIZE` on missing file raises `error_perm` ('550 No such file').
         Wrapper must catch and return False (not propagate the FTP exc)."""
         from custom_components.bosch_shc_camera.smb import _ftp_exists
+
         ftp = MagicMock()
         ftp.size.side_effect = ftplib.error_perm("550 No such file")
         assert _ftp_exists(ftp, "/foo/missing.jpg") is False
@@ -41,6 +42,7 @@ class TestFtpExists:
         — never raise. Caller decides what to do (typically: try upload
         anyway and let STOR fail with a clearer error)."""
         from custom_components.bosch_shc_camera.smb import _ftp_exists
+
         ftp = MagicMock()
         ftp.size.side_effect = ConnectionResetError()
         assert _ftp_exists(ftp, "/x") is False
@@ -54,6 +56,7 @@ class TestFtpMakedirs:
         """Path /a/b/c → 3 mkd calls: /a, /a/b, /a/b/c. Some FTP servers
         reject a single deep mkd, so we walk segment by segment."""
         from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/Bosch-Kameras/2026/05/06")
         # Expected calls: /Bosch-Kameras, /Bosch-Kameras/2026, .../05, .../06
@@ -71,6 +74,7 @@ class TestFtpMakedirs:
         the cleanup function should NOT raise; it must continue creating
         deeper segments."""
         from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+
         ftp = MagicMock()
         ftp.mkd.side_effect = ftplib.error_perm("550 already exists")
         # Must not raise
@@ -81,6 +85,7 @@ class TestFtpMakedirs:
         """Path with `//` (e.g. base_path empty) must not produce empty
         segments which would create invalid FTP commands."""
         from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/a//b//c/")
         calls = [c.args[0] for c in ftp.mkd.call_args_list]
@@ -93,6 +98,7 @@ class TestFtpMakedirs:
     def test_root_only_no_calls(self):
         """`/` alone has no segments → no calls (idempotent for root)."""
         from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/")
         ftp.mkd.assert_not_called()
@@ -107,10 +113,16 @@ class TestSmbPathPatterns:
     can replicate the exact computation here to pin invariants without
     exercising the full upload pipeline."""
 
-    def _build(self, ts: str, etype: str, ev_id: str, cam_name: str,
-               folder_pattern: str = "{year}/{month}/{day}",
-               file_pattern: str = "{camera}_{date}_{time}_{type}_{id}",
-               base_path: str = "Bosch-Kameras"):
+    def _build(
+        self,
+        ts: str,
+        etype: str,
+        ev_id: str,
+        cam_name: str,
+        folder_pattern: str = "{year}/{month}/{day}",
+        file_pattern: str = "{camera}_{date}_{time}_{type}_{id}",
+        base_path: str = "Bosch-Kameras",
+    ):
         # Mirrors sync_smb_upload's path computation exactly.
         year = ts[:4]
         month = ts[5:7]
@@ -118,11 +130,21 @@ class TestSmbPathPatterns:
         date_str = f"{year}-{month}-{day}"
         time_str = ts[11:19].replace(":", "-")
         folder_parts = folder_pattern.format(
-            year=year, month=month, day=day, camera=cam_name, type=etype,
+            year=year,
+            month=month,
+            day=day,
+            camera=cam_name,
+            type=etype,
         )
         file_base = file_pattern.format(
-            camera=cam_name, date=date_str, time=time_str,
-            type=etype, id=ev_id, year=year, month=month, day=day,
+            camera=cam_name,
+            date=date_str,
+            time=time_str,
+            type=etype,
+            id=ev_id,
+            year=year,
+            month=month,
+            day=day,
         )
         return base_path, folder_parts, file_base
 
@@ -130,7 +152,9 @@ class TestSmbPathPatterns:
         """Default folder pattern must produce zero-padded month + day."""
         ts = "2026-05-06T03:07:04.123Z"
         _, folder, file_base = self._build(ts, "MOVEMENT", "abcd1234", "Terrasse")
-        assert folder == "2026/05/06", "Pattern must zero-pad — '2026/5/6' breaks alphabetical sort"
+        assert folder == "2026/05/06", (
+            "Pattern must zero-pad — '2026/5/6' breaks alphabetical sort"
+        )
         assert file_base.startswith("Terrasse_2026-05-06_03-07-04_MOVEMENT_abcd1234")
 
     def test_time_colons_replaced_with_hyphens(self):
@@ -143,7 +167,10 @@ class TestSmbPathPatterns:
     def test_camera_name_in_folder_pattern(self):
         ts = "2026-05-06T01:02:03.000Z"
         _, folder, _ = self._build(
-            ts, "MOVEMENT", "ee", "Bosch Eingang",
+            ts,
+            "MOVEMENT",
+            "ee",
+            "Bosch Eingang",
             folder_pattern="{camera}/{year}/{month}",
         )
         # Bosch event timestamps sort under each cam first
@@ -152,7 +179,10 @@ class TestSmbPathPatterns:
     def test_event_type_in_file_pattern(self):
         ts = "2026-05-06T01:02:03.000Z"
         _, _, file_base = self._build(
-            ts, "AUDIO_ALARM", "abc12345", "Cam",
+            ts,
+            "AUDIO_ALARM",
+            "abc12345",
+            "Cam",
             file_pattern="{type}_{id}",
         )
         assert file_base == "AUDIO_ALARM_abc12345"
@@ -190,6 +220,7 @@ class TestRetentionMath:
         """retention_days <= 0 must skip cleanup entirely (don't delete
         all files!). Pinned via the `if retention_days <= 0: return` guard."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+
         # Build a stub coordinator that would otherwise enter the loop
         coord = SimpleNamespace(
             options={
@@ -206,7 +237,6 @@ class TestRetentionMath:
         sync_smb_cleanup(coord)  # no exception = pass
 
 
-
 # ── _ftp_connect signature pin ──────────────────────────────────────────
 
 
@@ -216,20 +246,24 @@ class TestFtpConnect:
         `set_pasv(True)` after login. Active mode silently fails on
         NAT'd connections (the default user setup)."""
         import ftplib as _ftplib
+
         captured = {}
 
         class _StubFTP:
             def __init__(self, server, timeout=30):
                 captured["server"] = server
                 captured["timeout"] = timeout
+
             def login(self, u, p):
                 captured["user"] = u
                 captured["pass"] = p
+
             def set_pasv(self, on):
                 captured["pasv"] = on
 
         monkeypatch.setattr(_ftplib, "FTP", _StubFTP)
         from custom_components.bosch_shc_camera.smb import _ftp_connect
+
         ftp = _ftp_connect("fritz.box", "user", "secret")
         assert captured["server"] == "fritz.box"
         assert captured["timeout"] == 30

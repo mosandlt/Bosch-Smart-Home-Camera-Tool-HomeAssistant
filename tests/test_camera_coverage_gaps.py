@@ -8,13 +8,13 @@ Covers:
     When cloud+LAN snapshots return None but _cached_image is set, the cache
     must be returned as the fallback image.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -91,6 +91,7 @@ def _stub_entity(coord=None, **overrides):
 
 def _make_camera(coord=None, **overrides):
     from custom_components.bosch_shc_camera.camera import BoschCamera
+
     coord = coord or _make_coord()
     cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
@@ -128,6 +129,7 @@ class TestCameraTimestampOverlayAttr:
 
     def _get_attrs(self, entity):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         with patch(
             "custom_components.bosch_shc_camera.camera.get_options",
             return_value={"auto_play_default": "lan"},
@@ -139,7 +141,9 @@ class TestCameraTimestampOverlayAttr:
         coord = _make_coord(_timestamp_cache={CAM_ID: True})
         entity = _stub_entity(coord=coord)
         entity._cam_data = {
-            "events": [], "live": {}, "status": "ONLINE",
+            "events": [],
+            "live": {},
+            "status": "ONLINE",
             "info": {"priority": None, "hardwareVersion": "HOME_Eyes_Outdoor"},
         }
         attrs = self._get_attrs(entity)
@@ -153,7 +157,9 @@ class TestCameraTimestampOverlayAttr:
         coord = _make_coord(_timestamp_cache={CAM_ID: False})
         entity = _stub_entity(coord=coord)
         entity._cam_data = {
-            "events": [], "live": {}, "status": "ONLINE",
+            "events": [],
+            "live": {},
+            "status": "ONLINE",
             "info": {"priority": None, "hardwareVersion": "HOME_Eyes_Outdoor"},
         }
         attrs = self._get_attrs(entity)
@@ -166,7 +172,9 @@ class TestCameraTimestampOverlayAttr:
         coord = _make_coord(_timestamp_cache={})
         entity = _stub_entity(coord=coord)
         entity._cam_data = {
-            "events": [], "live": {}, "status": "ONLINE",
+            "events": [],
+            "live": {},
+            "status": "ONLINE",
             "info": {"priority": None, "hardwareVersion": "HOME_Eyes_Outdoor"},
         }
         attrs = self._get_attrs(entity)
@@ -179,7 +187,9 @@ class TestCameraTimestampOverlayAttr:
         coord = _make_coord(_timestamp_cache={CAM_ID: None})
         entity = _stub_entity(coord=coord)
         entity._cam_data = {
-            "events": [], "live": {}, "status": "ONLINE",
+            "events": [],
+            "live": {},
+            "status": "ONLINE",
             "info": {"priority": None, "hardwareVersion": "HOME_Eyes_Outdoor"},
         }
         attrs = self._get_attrs(entity)
@@ -194,7 +204,9 @@ class TestCameraTimestampOverlayAttr:
         del coord._timestamp_cache  # simulate missing attribute
         entity = _stub_entity(coord=coord)
         entity._cam_data = {
-            "events": [], "live": {}, "status": "ONLINE",
+            "events": [],
+            "live": {},
+            "status": "ONLINE",
             "info": {"priority": None, "hardwareVersion": "HOME_Eyes_Outdoor"},
         }
         attrs = self._get_attrs(entity)
@@ -222,6 +234,7 @@ class TestAsyncCameraImageImplCachedImageFallback:
         snap.jpg proxy URL hasn't been refreshed yet (brief window on reconnect).
         """
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         coord = _make_coord()
         # Live connection with rtspsUrl → is_streaming=True, but NO proxyUrl → section 1 skipped
         coord._live_connections = {
@@ -230,7 +243,7 @@ class TestAsyncCameraImageImplCachedImageFallback:
                 # No proxyUrl → proxy_url = "" → section 1 not entered
             }
         }
-        coord._local_creds_cache = {}               # no outage creds → 2b skipped
+        coord._local_creds_cache = {}  # no outage creds → 2b skipped
         coord._auth_outage_count = 0
         coord.data[CAM_ID]["events"] = []
 
@@ -238,15 +251,20 @@ class TestAsyncCameraImageImplCachedImageFallback:
         cam._cached_image = b"\xff\xd8\xff\xe0cached_frame"
         cam._was_streaming = False
         cam.hass = SimpleNamespace(
-            async_create_task=MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1]),
+            async_create_task=MagicMock(
+                side_effect=lambda c: (c.close(), MagicMock())[1]
+            ),
             async_add_executor_job=AsyncMock(),
         )
-        with patch(
-            "custom_components.bosch_shc_camera.camera.get_options",
-            return_value={"use_mjpeg_snapshot": False},
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.get_options",
+                return_value={"use_mjpeg_snapshot": False},
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
         ):
             result = await BoschCamera._async_camera_image_impl(cam)
 

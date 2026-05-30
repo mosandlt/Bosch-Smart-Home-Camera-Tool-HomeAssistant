@@ -25,11 +25,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "192.0.2.103"):
+def _stub_coord(
+    *, gen2: bool = True, with_token: bool = True, shc_ip: str = "192.0.2.103"
+):
     """Stub coordinator mirroring tests/test_shc_round6.py::_stub_coord.
 
     Kept local so this file has no import dependency on sibling test modules
@@ -37,7 +38,11 @@ def _stub_coord(*, gen2: bool = True, with_token: bool = True, shc_ip: str = "19
     """
     opts = {}
     if shc_ip:
-        opts = {"shc_ip": shc_ip, "shc_cert_path": "/cert.pem", "shc_key_path": "/key.pem"}
+        opts = {
+            "shc_ip": shc_ip,
+            "shc_cert_path": "/cert.pem",
+            "shc_key_path": "/key.pem",
+        }
     coord = SimpleNamespace(
         token="tok-AAA" if with_token else "",
         options=opts,
@@ -97,17 +102,20 @@ class TestGen2RcpFallbackFailureDebugLog:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=True
-        ), patch(
-            "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
-            AsyncMock(return_value=False),
-        ) as mock_rcp:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                AsyncMock(return_value=False),
+            ) as mock_rcp,
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
 
         # RCP was called with the cached host, returned False → debug branch hit
@@ -140,17 +148,20 @@ class TestGen2RcpFallbackFailureDebugLog:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=True
-        ), patch(
-            "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
-        ), patch(
-            "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
-            AsyncMock(return_value=False),
-        ) as mock_rcp:
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                AsyncMock(return_value=False),
+            ) as mock_rcp,
+        ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
 
         mock_rcp.assert_called_once()
@@ -190,13 +201,17 @@ class TestPersistentNotificationException:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
-        ), patch(
-            "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
         ):
             # MUST NOT raise — `except Exception: pass` swallows it
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
@@ -226,13 +241,17 @@ class TestPersistentNotificationException:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.put.return_value = cm
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
-        ), patch(
-            "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
+            ),
         ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
 

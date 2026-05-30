@@ -53,6 +53,7 @@ def test_bosch_camera_unique_id_unchanged():
     """Renaming the class must not change the unique_id format (no migration needed)."""
     import inspect
     import re
+
     mod = importlib.import_module("custom_components.bosch_shc_camera.camera")
     src = inspect.getsource(mod.BoschCamera)
     # unique_id must still use the old bosch_shc_cam_ prefix (no migration yet)

@@ -18,6 +18,7 @@ reintroduce this:
 2. `__init__.py:async_fetch_live_snapshot_local` — used by the cloud
    fetch helper that falls back to direct LAN snap.jpg.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +26,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -59,6 +59,7 @@ def _make_coord(**overrides):
 
 def _make_camera(coord=None, **camera_overrides):
     from custom_components.bosch_shc_camera.camera import BoschCamera
+
     coord = coord or _make_coord()
     cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
@@ -96,20 +97,27 @@ class TestCameraImageImplValueError:
     proxies all see a brown error frame / 500 response body."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("err_msg", [
-        "Server returned 401 without WWW-Authenticate header for 'https://...'",
-        "Expected Digest scheme, got: 'Basic'",
-        "Digest challenge missing required 'nonce' directive",
-    ])
+    @pytest.mark.parametrize(
+        "err_msg",
+        [
+            "Server returned 401 without WWW-Authenticate header for 'https://...'",
+            "Expected Digest scheme, got: 'Basic'",
+            "Digest challenge missing required 'nonce' directive",
+        ],
+    )
     async def test_local_digest_value_error_returns_cached(self, err_msg: str):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = _make_camera(_cached_image=b"\xff\xd8cached")
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=ValueError(err_msg)),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=ValueError(err_msg)),
+            ),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         # LOCAL path returns cached image (or placeholder) on auth failure
@@ -119,13 +127,17 @@ class TestCameraImageImplValueError:
     @pytest.mark.asyncio
     async def test_local_digest_value_error_no_cache_returns_placeholder(self):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = _make_camera()  # _cached_image=None
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=ValueError("auth broken")),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=ValueError("auth broken")),
+            ),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         assert out == BoschCamera._PLACEHOLDER_JPEG
@@ -137,13 +149,17 @@ class TestCameraImageImplValueError:
         we don't rely on that — the LOCAL Digest except should swallow
         it directly)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = _make_camera()
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=ValueError("no WWW-Authenticate")),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(side_effect=ValueError("no WWW-Authenticate")),
+            ),
         ):
             # Must not raise
             await BoschCamera._async_camera_image_impl(cam)
@@ -164,6 +180,7 @@ class TestFetchLiveSnapshotLocalValueError:
     def _put_resp_cm(self, status: int, body_json: dict):
         """Build a mock CM for session.put()."""
         import json as _json
+
         resp = MagicMock()
         resp.status = status
         resp.text = AsyncMock(return_value=_json.dumps(body_json))
@@ -177,6 +194,7 @@ class TestFetchLiveSnapshotLocalValueError:
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
         )
+
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._shc_state_cache = {}
         coord._refreshed_token = "tok"
@@ -185,7 +203,8 @@ class TestFetchLiveSnapshotLocalValueError:
         coord.hass = SimpleNamespace(data={})
 
         put_cm = self._put_resp_cm(
-            200, {"user": "cbs-1", "password": "p", "urls": ["192.0.2.1:443"]},
+            200,
+            {"user": "cbs-1", "password": "p", "urls": ["192.0.2.1:443"]},
         )
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_cm)
@@ -194,18 +213,24 @@ class TestFetchLiveSnapshotLocalValueError:
         session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch(
-            "custom_components.bosch_shc_camera.aiohttp.ClientSession",
-            return_value=session_cm,
-        ), patch(
-            "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-            return_value=MagicMock(),
-        ), patch(
-            "custom_components.bosch_shc_camera.async_digest_request",
-            new=AsyncMock(side_effect=ValueError(
-                "Server returned 401 without WWW-Authenticate header for "
-                "'https://192.0.2.1:443/snap.jpg?JpegSize=1206'"
-            )),
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.aiohttp.ClientSession",
+                return_value=session_cm,
+            ),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_digest_request",
+                new=AsyncMock(
+                    side_effect=ValueError(
+                        "Server returned 401 without WWW-Authenticate header for "
+                        "'https://192.0.2.1:443/snap.jpg?JpegSize=1206'"
+                    )
+                ),
+            ),
         ):
             out = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert out is None

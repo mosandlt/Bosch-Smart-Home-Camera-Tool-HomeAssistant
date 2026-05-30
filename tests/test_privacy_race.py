@@ -58,8 +58,10 @@ async def _run_fetcher(
             return {"state": {"value": light_value}}
         return None
 
-    with patch.object(shc, "shc_configured", return_value=True), \
-         patch.object(shc, "async_shc_request", side_effect=_fake_request):
+    with (
+        patch.object(shc, "shc_configured", return_value=True),
+        patch.object(shc, "async_shc_request", side_effect=_fake_request),
+    ):
         await shc.async_update_shc_states(coord, data)
 
 
@@ -151,9 +153,10 @@ async def test_user_light_off_survives_stale_shc_poll() -> None:
     data = {cam_id: {"info": {"title": "terrasse"}}}
     # SHC poll sees stale ON
     await _run_fetcher(
-        coord, data,
+        coord,
+        data,
         mock_response_value="DISABLED",  # privacy stays OFF
-        light_value="ON",                # but light still ON in cloud
+        light_value="ON",  # but light still ON in cloud
     )
     assert coord._shc_state_cache[cam_id]["camera_light"] is False, (
         "camera_light cache race: SHC fetcher overwrote a fresh user-OFF "

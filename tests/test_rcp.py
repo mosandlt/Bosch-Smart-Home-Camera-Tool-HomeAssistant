@@ -24,7 +24,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ── get_cached_rcp_session ────────────────────────────────────────────────────
 
 
@@ -43,7 +42,9 @@ class TestGetCachedRcpSession:
         ):
             result = await get_cached_rcp_session(cache, "proxy-10:42090", "hash123")
 
-        assert result == "session-ABC", "Cache miss must return the newly opened session"
+        assert result == "session-ABC", (
+            "Cache miss must return the newly opened session"
+        )
         assert "hash123" in cache, "New session must be stored in the cache"
         sid, expires = cache["hash123"]
         assert sid == "session-ABC"
@@ -168,12 +169,24 @@ class TestRcpLocalPrivacy:
 
         captured = {}
 
-        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET", num=0, *, user=None, password=None):
+        async def _mock_write(
+            hass,
+            cam_ip,
+            command,
+            payload_hex,
+            type_="P_OCTET",
+            num=0,
+            *,
+            user=None,
+            password=None,
+        ):
             captured["payload"] = payload_hex
             captured["command"] = command
             return True
 
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write", _mock_write):
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_local_write", _mock_write
+        ):
             result = await rcp_local_write_privacy(MagicMock(), "10.0.0.1", True)
 
         assert result is True
@@ -189,11 +202,23 @@ class TestRcpLocalPrivacy:
 
         captured = {}
 
-        async def _mock_write(hass, cam_ip, command, payload_hex, type_="P_OCTET", num=0, *, user=None, password=None):
+        async def _mock_write(
+            hass,
+            cam_ip,
+            command,
+            payload_hex,
+            type_="P_OCTET",
+            num=0,
+            *,
+            user=None,
+            password=None,
+        ):
             captured["payload"] = payload_hex
             return True
 
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write", _mock_write):
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_local_write", _mock_write
+        ):
             await rcp_local_write_privacy(MagicMock(), "10.0.0.1", False)
 
         assert captured["payload"] == "00000000", (
@@ -219,7 +244,9 @@ class TestParseAlarmCatalog:
         result = _parse_alarm_catalog(raw)
 
         virtual = [a for a in result if a.get("type") == "virtual"]
-        assert len(virtual) >= 1, "Names containing 'Virtual Alarm' must get type=virtual"
+        assert len(virtual) >= 1, (
+            "Names containing 'Virtual Alarm' must get type=virtual"
+        )
 
     def test_flame_alarm_classified(self):
         from custom_components.bosch_shc_camera.rcp import _parse_alarm_catalog
@@ -351,9 +378,8 @@ class TestParseMotionCoords:
         """Two 8-byte entries → two zone dicts."""
         from custom_components.bosch_shc_camera.rcp import _parse_motion_coords
 
-        raw = (
-            self._make_coord_bytes(0, 0, 5000, 5000)
-            + self._make_coord_bytes(5000, 5000, 10000, 10000)
+        raw = self._make_coord_bytes(0, 0, 5000, 5000) + self._make_coord_bytes(
+            5000, 5000, 10000, 10000
         )
         result = _parse_motion_coords(raw)
         assert len(result) == 2
@@ -414,7 +440,9 @@ class TestParseNetworkServices:
 
         raw = b"X\x00RTSP\x00Y\x00"
         result = _parse_network_services(raw)
-        assert not any(len(s) <= 1 for s in result), "Single-char entries must be filtered"
+        assert not any(len(s) <= 1 for s in result), (
+            "Single-char entries must be filtered"
+        )
 
     def test_garbage_bytes_does_not_raise(self):
         from custom_components.bosch_shc_camera.rcp import _parse_network_services
@@ -506,7 +534,9 @@ class TestRcpReadSessionInvalidation:
 
         proxy_hash = "abc123def"
         cache = {proxy_hash: ("session-OLD", time.monotonic() + 300)}
-        rcp_base = f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        rcp_base = (
+            f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        )
 
         mock_resp = MagicMock()
         mock_resp.status = 401
@@ -522,7 +552,10 @@ class TestRcpReadSessionInvalidation:
             return_value=mock_session,
         ):
             result = await rcp_read(
-                MagicMock(), rcp_base, "0x0c22", "session-OLD",
+                MagicMock(),
+                rcp_base,
+                "0x0c22",
+                "session-OLD",
                 session_cache=cache,
             )
 
@@ -538,7 +571,9 @@ class TestRcpReadSessionInvalidation:
 
         proxy_hash = "abc123def"
         cache = {proxy_hash: ("session-OLD", time.monotonic() + 300)}
-        rcp_base = f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        rcp_base = (
+            f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        )
 
         mock_resp = MagicMock()
         mock_resp.status = 403
@@ -554,7 +589,10 @@ class TestRcpReadSessionInvalidation:
             return_value=mock_session,
         ):
             await rcp_read(
-                MagicMock(), rcp_base, "0x0c22", "session-OLD",
+                MagicMock(),
+                rcp_base,
+                "0x0c22",
+                "session-OLD",
                 session_cache=cache,
             )
 
@@ -567,7 +605,9 @@ class TestRcpReadSessionInvalidation:
 
         proxy_hash = "abc123def"
         cache = {proxy_hash: ("session-OLD", time.monotonic() + 300)}
-        rcp_base = f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        rcp_base = (
+            f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        )
 
         xml = b"<rcp><err>0x0c0d</err></rcp>"
         mock_resp = MagicMock()
@@ -585,7 +625,10 @@ class TestRcpReadSessionInvalidation:
             return_value=mock_session,
         ):
             result = await rcp_read(
-                MagicMock(), rcp_base, "0x0c22", "session-OLD",
+                MagicMock(),
+                rcp_base,
+                "0x0c22",
+                "session-OLD",
                 session_cache=cache,
             )
 
@@ -601,7 +644,9 @@ class TestRcpReadSessionInvalidation:
 
         proxy_hash = "abc123def"
         cache = {proxy_hash: ("session-VALID", time.monotonic() + 300)}
-        rcp_base = f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        rcp_base = (
+            f"https://proxy-10.live.cbs.boschsecurity.com:42090/{proxy_hash}/rcp.xml"
+        )
 
         xml = b"<rcp><err>0x0090</err></rcp>"
         mock_resp = MagicMock()
@@ -619,7 +664,10 @@ class TestRcpReadSessionInvalidation:
             return_value=mock_session,
         ):
             await rcp_read(
-                MagicMock(), rcp_base, "0x0c22", "session-VALID",
+                MagicMock(),
+                rcp_base,
+                "0x0c22",
+                "session-VALID",
                 session_cache=cache,
             )
 

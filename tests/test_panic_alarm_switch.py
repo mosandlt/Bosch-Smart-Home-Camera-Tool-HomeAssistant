@@ -11,6 +11,7 @@ HOME_Eyes_Outdoor) require the panic_alarm endpoint with status string.
 The acoustic_alarm button was removed from button.py async_setup_entry,
 the BoschAcousticAlarmButton class is kept only for backward registry compat.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -18,20 +19,21 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_ID = "22222222-2222-2222-2222-222222222222"  # Innenkamera II (Gen2)
 
 
 def _make_coord() -> SimpleNamespace:
     return SimpleNamespace(
-        data={CAM_ID: {
-            "info": {
-                "title": "Innenbereich",
-                "hardwareVersion": "HOME_Eyes_Indoor",
-                "firmwareVersion": "9.40.25",
-                "macAddress": "aa:bb:cc:dd:ee:02",
-            },
-        }},
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": "Innenbereich",
+                    "hardwareVersion": "HOME_Eyes_Indoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "aa:bb:cc:dd:ee:02",
+                },
+            }
+        },
         _panic_alarm_cache={},
         _shc_state_cache={},  # required by _warn_if_privacy_on (privacy_mode defaults to False)
         last_update_success=True,
@@ -58,8 +60,10 @@ async def test_turn_on_sends_status_on(stub_entry) -> None:
 
     coord.async_put_camera.assert_called_once()
     args = coord.async_put_camera.call_args.args
-    assert args[1] == "panic_alarm", "Endpoint must be /panic_alarm (not /acoustic_alarm)"
-    assert args[2] == {"status": "ON"}, "Body MUST be {\"status\":\"ON\"} per mitm capture"
+    assert args[1] == "panic_alarm", (
+        "Endpoint must be /panic_alarm (not /acoustic_alarm)"
+    )
+    assert args[2] == {"status": "ON"}, 'Body MUST be {"status":"ON"} per mitm capture'
     assert coord._panic_alarm_cache[CAM_ID] is True
 
 
@@ -104,9 +108,10 @@ async def test_failed_put_does_not_set_cache(stub_entry) -> None:
 
     await entity.async_turn_on()
 
-    assert coord._panic_alarm_cache.get(CAM_ID) is None or coord._panic_alarm_cache[CAM_ID] is False, (
-        "Bei PUT-Fehler: Cache nicht True setzen (sonst Switch zeigt ON ohne Wirkung)"
-    )
+    assert (
+        coord._panic_alarm_cache.get(CAM_ID) is None
+        or coord._panic_alarm_cache[CAM_ID] is False
+    ), "Bei PUT-Fehler: Cache nicht True setzen (sonst Switch zeigt ON ohne Wirkung)"
 
 
 def test_disabled_by_default(stub_entry) -> None:

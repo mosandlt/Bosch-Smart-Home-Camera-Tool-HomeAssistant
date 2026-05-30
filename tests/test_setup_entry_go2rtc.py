@@ -12,6 +12,7 @@ Strategy: patch `BoschCameraCoordinator` to a stub with controllable `data`,
 then drive `async_setup_entry` end-to-end. Mock cf_unbuffer, platform
 forwards, and entity_registry so we only exercise the two blocks of interest.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 MODULE = "custom_components.bosch_shc_camera"
 CAM_A = "11111111-1111-1111-1111-111111111111"
@@ -57,7 +57,9 @@ def _make_hass(go2rtc_entries=None):
     hass.data = {}
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_entries = MagicMock(return_value=go2rtc_entries or [])
-    hass.config_entries.flow.async_init = AsyncMock(return_value={"type": "create_entry"})
+    hass.config_entries.flow.async_init = AsyncMock(
+        return_value={"type": "create_entry"}
+    )
     hass.async_create_task = MagicMock()
     hass.async_create_background_task = MagicMock()
     hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
@@ -81,9 +83,13 @@ class TestGo2rtcAutoCreate:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -106,9 +112,13 @@ class TestGo2rtcAutoCreate:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         hass.config_entries.flow.async_init.assert_not_awaited()
@@ -125,9 +135,13 @@ class TestGo2rtcAutoCreate:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         hass.config_entries.flow.async_init.assert_not_awaited()
@@ -138,16 +152,22 @@ class TestGo2rtcAutoCreate:
         from custom_components.bosch_shc_camera import async_setup_entry
 
         hass = _make_hass(go2rtc_entries=[])
-        hass.config_entries.flow.async_init = AsyncMock(side_effect=RuntimeError("nope"))
+        hass.config_entries.flow.async_init = AsyncMock(
+            side_effect=RuntimeError("nope")
+        )
         entry = _make_entry()
         coord_stub = _make_coord_stub([])
 
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             # Must NOT raise — setup-entry continues
             result = await async_setup_entry(hass, entry)
         assert result is True
@@ -166,9 +186,13 @@ class TestGo2rtcAutoCreate:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
         assert result is True
 
@@ -182,8 +206,9 @@ class TestV802Migration:
         """An entity registered with `disabled_by=INTEGRATION` in an older
         build (v<8.0.2) must be re-enabled via `async_update_entity(...,
         disabled_by=None)` during setup."""
-        from custom_components.bosch_shc_camera import async_setup_entry
         from homeassistant.helpers import entity_registry as er
+
+        from custom_components.bosch_shc_camera import async_setup_entry
 
         hass = _make_hass(go2rtc_entries=[SimpleNamespace(entry_id="x")])  # skip go2rtc
         entry = _make_entry()
@@ -207,23 +232,29 @@ class TestV802Migration:
         ent_reg.async_get = MagicMock(side_effect=_get)
         ent_reg.async_update_entity = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         # 3 uid_suffixes × 1 camera = 3 updates
         assert ent_reg.async_update_entity.call_count == 3
         for call in ent_reg.async_update_entity.call_args_list:
-            assert call.kwargs.get("disabled_by") is None, \
+            assert call.kwargs.get("disabled_by") is None, (
                 "Migration must re-enable, not leave disabled"
+            )
 
     @pytest.mark.asyncio
     async def test_entries_disabled_by_user_left_alone(self):
         """If a user explicitly disabled the entity (`disabled_by=USER`), the
         migration must NOT override their choice."""
-        from custom_components.bosch_shc_camera import async_setup_entry
         from homeassistant.helpers import entity_registry as er
+
+        from custom_components.bosch_shc_camera import async_setup_entry
 
         hass = _make_hass(go2rtc_entries=[SimpleNamespace(entry_id="x")])
         entry = _make_entry()
@@ -241,9 +272,13 @@ class TestV802Migration:
         ent_reg.async_get = MagicMock(side_effect=_get)
         ent_reg.async_update_entity = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         ent_reg.async_update_entity.assert_not_called()
@@ -262,9 +297,13 @@ class TestV802Migration:
         ent_reg.async_get_entity_id = MagicMock(return_value=None)
         ent_reg.async_update_entity = MagicMock()
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -289,18 +328,28 @@ class TestV802Migration:
         ent_reg = MagicMock()
         ent_reg.async_get_entity_id = MagicMock(side_effect=_entity_id)
 
-        with patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub), \
-             patch(f"{MODULE}.cf_unbuffer.register"), \
-             patch("homeassistant.helpers.entity_registry.async_get", return_value=ent_reg):
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
             await async_setup_entry(hass, entry)
 
         # Find lookups for the intensity uid — must be on `number` platform
         intensity_lookups = [p for p, uid in seen_platforms if "intensity" in uid]
         assert intensity_lookups, "intensity uid must be looked up"
-        assert all(p == "number" for p in intensity_lookups), \
+        assert all(p == "number" for p in intensity_lookups), (
             "intensity entities live on the `number` platform, not `switch`"
-        switch_lookups = [p for p, uid in seen_platforms
-                          if "intensity" not in uid and ("front_light_" in uid or "wallwasher_" in uid)]
+        )
+        switch_lookups = [
+            p
+            for p, uid in seen_platforms
+            if "intensity" not in uid
+            and ("front_light_" in uid or "wallwasher_" in uid)
+        ]
         assert switch_lookups
-        assert all(p == "switch" for p in switch_lookups), \
+        assert all(p == "switch" for p in switch_lookups), (
             "front_light / wallwasher live on the `switch` platform"
+        )

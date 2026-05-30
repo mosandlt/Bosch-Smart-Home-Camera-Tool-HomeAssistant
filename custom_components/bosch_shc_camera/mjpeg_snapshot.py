@@ -82,17 +82,24 @@ async def fetch_mjpeg_snapshot(
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
             # Silence all info/warning output — we only care about stdout
-            "-loglevel", "error",
+            "-loglevel",
+            "error",
             # TLS: camera uses a Bosch private CA — skip verification
-            "-rtsp_flags", "prefer_tcp",
-            "-allowed_media_types", "video",
-            "-i", rtsp_url,
+            "-rtsp_flags",
+            "prefer_tcp",
+            "-allowed_media_types",
+            "video",
+            "-i",
+            rtsp_url,
             # Exactly one video frame
-            "-vframes", "1",
+            "-vframes",
+            "1",
             # MJPEG → JPEG passthrough (no re-encode, ~0 CPU)
-            "-c:v", "copy",
+            "-c:v",
+            "copy",
             # Output as raw JPEG bytes to stdout
-            "-f", "image2pipe",
+            "-f",
+            "image2pipe",
             "-",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -106,7 +113,9 @@ async def fetch_mjpeg_snapshot(
             err_text = err.decode(errors="replace")[:200] if err else "(no stderr)"
             _LOGGER.warning(
                 "fetch_mjpeg_snapshot: FFmpeg exited with code %d for %s — %s",
-                proc.returncode, cam_host, err_text,
+                proc.returncode,
+                cam_host,
+                err_text,
             )
             return None
 
@@ -121,21 +130,25 @@ async def fetch_mjpeg_snapshot(
             _LOGGER.warning(
                 "fetch_mjpeg_snapshot: output does not start with JPEG magic "
                 "(got %s) for %s — discarding",
-                out[:4].hex(), cam_host,
+                out[:4].hex(),
+                cam_host,
             )
             return None
 
         _LOGGER.debug(
             "fetch_mjpeg_snapshot: %d bytes in %.1f ms for %s",
-            len(out), elapsed_ms, cam_host,
+            len(out),
+            elapsed_ms,
+            cam_host,
         )
         return out
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed_ms = (time.monotonic() - t0) * 1000
         _LOGGER.warning(
             "fetch_mjpeg_snapshot: timeout after %.1f ms for %s",
-            elapsed_ms, cam_host,
+            elapsed_ms,
+            cam_host,
         )
         # Terminate the lingering process so we don't accumulate zombies
         if proc is not None:
@@ -146,7 +159,7 @@ async def fetch_mjpeg_snapshot(
         return None
     except FileNotFoundError:
         # ffmpeg binary not found — should never happen in HA but be safe
-        _LOGGER.error(  # noqa: G004
+        _LOGGER.error(
             "fetch_mjpeg_snapshot: ffmpeg not found — cannot capture MJPEG snapshot"
         )
         return None

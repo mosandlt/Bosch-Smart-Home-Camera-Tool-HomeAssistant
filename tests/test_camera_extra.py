@@ -20,7 +20,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -76,6 +75,7 @@ class TestYuv422ToJpeg:
 
     def _make_cam(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         return BoschCamera(stub_coord, CAM_ID, stub_entry)
 
     def test_wrong_size_returns_none(self, stub_coord, stub_entry):
@@ -113,6 +113,7 @@ class TestYuv422ToJpeg:
     def test_uniform_yuv_produces_valid_jpeg(self, stub_coord, stub_entry):
         """Y=128, U=128, V=128 → valid neutral grey frame."""
         import struct
+
         cam = self._make_cam(stub_coord, stub_entry)
         # YUYV: Y0 U Y1 V repeats. Make it a flat grey field.
         # raw[:,:,0] = Y plane (128), raw[:,:,1] alternates U=128/V=128
@@ -149,6 +150,7 @@ class TestStreamStatusAttribute:
 
     def test_idle_when_no_session_no_warming(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert attrs["stream_status"] == "idle"
@@ -160,6 +162,7 @@ class TestStreamStatusAttribute:
             "_connection_type": "REMOTE",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert attrs["stream_status"] == "streaming"
@@ -173,6 +176,7 @@ class TestStreamStatusAttribute:
         }
         stub_coord._stream_fell_back[CAM_ID] = True
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert attrs["stream_status"] == "streaming (REMOTE fallback)"
@@ -186,6 +190,7 @@ class TestStreamStatusAttribute:
         }
         stub_coord.is_stream_warming = lambda cam_id: True
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert attrs["stream_status"] == "warming_up", (
@@ -204,6 +209,7 @@ class TestOptionalAttributes:
 
     def test_buffering_time_only_when_set(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert "buffering_time_ms" not in attrs
@@ -216,6 +222,7 @@ class TestOptionalAttributes:
             "_bufferingTime": 500,
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         attrs = cam.extra_state_attributes
         assert attrs["buffering_time_ms"] == 500
@@ -226,6 +233,7 @@ class TestOptionalAttributes:
         the overview card's `use_bosch_sort` option."""
         stub_coord.data[CAM_ID]["info"]["priority"] = 1.5
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.extra_state_attributes["bosch_priority"] == 1.5
 
@@ -233,6 +241,7 @@ class TestOptionalAttributes:
         """Missing priority → None (not "" or 0). Card distinguishes
         these via `priority != null` check before sorting."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.extra_state_attributes["bosch_priority"] is None
 
@@ -240,6 +249,7 @@ class TestOptionalAttributes:
         """Player-side buffer profile must reach the card via attribute."""
         stub_entry.options["live_buffer_mode"] = "low_latency"
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.extra_state_attributes["live_buffer_mode"] == "low_latency"
 
@@ -248,6 +258,7 @@ class TestOptionalAttributes:
         card's BOSCH_BUFFER_PROFILES table — both ends must agree."""
         stub_entry.options.pop("live_buffer_mode", None)
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.extra_state_attributes["live_buffer_mode"] == "balanced"
 
@@ -271,6 +282,7 @@ class TestStreamSourceTransport:
             "_connection_type": "LOCAL",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         url = await cam.stream_source()
         assert url == "rtsps://127.0.0.1:46597/rtsp_tunnel"
@@ -283,6 +295,7 @@ class TestStreamSourceTransport:
             "_connection_type": "REMOTE",
         }
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         url = await cam.stream_source()
         assert url.startswith("rtsps://")
@@ -302,6 +315,7 @@ class TestStreamSourceTransport:
         }
         stub_coord._audio_enabled[CAM_ID] = False
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         url = await cam.stream_source()
         assert "enableaudio=1" not in url
@@ -313,6 +327,7 @@ class TestStreamSourceTransport:
         and returns 503 to the WebSocket caller, which is the documented
         graceful behavior — see test_supported_features_always_advertises_stream)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         url = await cam.stream_source()
         assert url is None

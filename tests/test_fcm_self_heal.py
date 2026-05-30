@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_coord(*, entry_data: dict | None = None, enable_fcm: bool = True) -> SimpleNamespace:
+def _make_coord(
+    *, entry_data: dict | None = None, enable_fcm: bool = True
+) -> SimpleNamespace:
     coord = SimpleNamespace()
     coord._entry = SimpleNamespace(data=dict(entry_data or {}))
     coord.hass = SimpleNamespace(
@@ -25,12 +27,14 @@ def _mark_creds_stale() -> None:
     """Push a fresh staleness timestamp so the 2-stage decision routes to
     the HARD-heal branch — matches the path the original tests cover."""
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
 
 
 def _clear_staleness() -> None:
     """Make sure the soft-heal branch is taken by clearing any prior markers."""
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
@@ -42,6 +46,7 @@ def _reset_fcm_filter_state():
     and produce mysterious flakiness under pytest-randomly. Clear both lists
     at the start of every test so order-dependence is impossible."""
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
     yield
@@ -56,22 +61,29 @@ class TestFcmSelfHealHard:
     async def test_purges_creds_and_restarts(self):
         """Stale creds (PHONE_REGISTRATION_ERROR seen recently) → hard purge + restart."""
         from custom_components.bosch_shc_camera import fcm
+
         _mark_creds_stale()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "x"},
-            "fcm_registered_token": "stale-token",
-            "bearer_token": "bt",     # non-fcm key must survive
-        })
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "x"},
+                "fcm_registered_token": "stale-token",
+                "bearer_token": "bt",  # non-fcm key must survive
+            }
+        )
         stop_mock = AsyncMock()
         start_mock = AsyncMock()
         reset_mock = MagicMock()
-        with patch.object(fcm, "async_stop_fcm_push", stop_mock), \
-             patch.object(fcm, "_async_start_fcm_push_locked", start_mock), \
-             patch.object(fcm, "reset_fcm_error_counter", reset_mock):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", stop_mock),
+            patch.object(fcm, "_async_start_fcm_push_locked", start_mock),
+            patch.object(fcm, "reset_fcm_error_counter", reset_mock),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
         stop_mock.assert_awaited_once_with(coord)
         coord.hass.config_entries.async_update_entry.assert_called_once()
-        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get("data")
+        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
+            "data"
+        )
         assert "fcm_credentials" not in new_data
         assert "fcm_registered_token" not in new_data
         assert new_data["bearer_token"] == "bt", "non-fcm keys must survive the purge"
@@ -84,24 +96,36 @@ class TestFcmSelfHealHard:
         must purge EVERY key beginning with 'fcm_', not just the two originally
         hardcoded ones."""
         from custom_components.bosch_shc_camera import fcm
+
         _mark_creds_stale()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "x"},
-            "fcm_registered_token": "tok",
-            "fcm_config": {"project_id": "p", "app_id": "a", "api_key": "k"},
-            "fcm_registered_device_type": "ANDROID",
-            "fcm_anything_future": "should_also_go",
-            "bearer_token": "bt",
-            "refresh_token": "rt",
-        })
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "x"},
+                "fcm_registered_token": "tok",
+                "fcm_config": {"project_id": "p", "app_id": "a", "api_key": "k"},
+                "fcm_registered_device_type": "ANDROID",
+                "fcm_anything_future": "should_also_go",
+                "bearer_token": "bt",
+                "refresh_token": "rt",
+            }
+        )
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
-        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get("data")
+        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
+            "data"
+        )
         # All fcm_* keys must be gone:
-        for k in ("fcm_credentials", "fcm_registered_token", "fcm_config",
-                  "fcm_registered_device_type", "fcm_anything_future"):
+        for k in (
+            "fcm_credentials",
+            "fcm_registered_token",
+            "fcm_config",
+            "fcm_registered_device_type",
+            "fcm_anything_future",
+        ):
             assert k not in new_data, f"{k!r} must be purged by self-heal"
         # Non-fcm keys must survive:
         assert new_data["bearer_token"] == "bt"
@@ -109,6 +133,7 @@ class TestFcmSelfHealHard:
 
     async def test_does_not_restart_when_fcm_disabled(self):
         from custom_components.bosch_shc_camera import fcm
+
         _mark_creds_stale()
         coord = _make_coord(
             entry_data={"fcm_credentials": {"gcm": "x"}},
@@ -116,9 +141,11 @@ class TestFcmSelfHealHard:
         )
         stop_mock = AsyncMock()
         start_mock = AsyncMock()
-        with patch.object(fcm, "async_stop_fcm_push", stop_mock), \
-             patch.object(fcm, "_async_start_fcm_push_locked", start_mock), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", stop_mock),
+            patch.object(fcm, "_async_start_fcm_push_locked", start_mock),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
         stop_mock.assert_awaited_once()
         start_mock.assert_not_awaited()
@@ -128,11 +155,14 @@ class TestFcmSelfHealHard:
         idempotent — calling on a freshly-installed integration without
         stored creds must not raise."""
         from custom_components.bosch_shc_camera import fcm
+
         _clear_staleness()
         coord = _make_coord(entry_data=None)
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             # Must not raise.
             await fcm.async_self_heal_fcm_push(coord)
 
@@ -143,7 +173,11 @@ class TestFcmSelfHealHard:
         without a second checkin_or_register()."""
         from custom_components.bosch_shc_camera import fcm
 
-        coord = _make_coord(entry_data={"fcm_config": {"api_key": "k", "project_id": "p", "app_id": "a"}})
+        coord = _make_coord(
+            entry_data={
+                "fcm_config": {"api_key": "k", "project_id": "p", "app_id": "a"}
+            }
+        )
         # Simulate a coordinator that has not started FCM yet.
         coord._fcm_running = False
         coord.options = {"enable_fcm_push": True}
@@ -191,53 +225,76 @@ class TestFcmSelfHealSoft:
         Regression for: 2026-05-24 cascade where purging valid creds forced
         gcm_register() into Google's transient PHONE_REGISTRATION_ERROR."""
         from custom_components.bosch_shc_camera import fcm
+
         _clear_staleness()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "valid"},
-            "fcm_registered_token": "tok",
-            "fcm_config": {"project_id": "p", "app_id": "a", "api_key": "k"},
-            "bearer_token": "bt",
-        })
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "valid"},
+                "fcm_registered_token": "tok",
+                "fcm_config": {"project_id": "p", "app_id": "a", "api_key": "k"},
+                "bearer_token": "bt",
+            }
+        )
 
         async def fake_start(c):
             c._fcm_running = True  # mimic successful soft restart
 
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)
+            ),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
 
         # entry.data MUST be untouched — soft-heal preserves all creds.
         coord.hass.config_entries.async_update_entry.assert_not_called()
         assert coord._entry.data["fcm_credentials"] == {"gcm": "valid"}
         assert coord._entry.data["fcm_registered_token"] == "tok"
-        assert coord._entry.data["fcm_config"] == {"project_id": "p", "app_id": "a", "api_key": "k"}
+        assert coord._entry.data["fcm_config"] == {
+            "project_id": "p",
+            "app_id": "a",
+            "api_key": "k",
+        }
 
     async def test_soft_heal_escalates_to_hard_when_restart_fails(self):
         """If soft-heal's start_locked returns without _fcm_running=True,
         escalate to hard-heal in the same call so the watchdog's failure
         counter accurately tracks one heal attempt."""
         from custom_components.bosch_shc_camera import fcm
+
         _clear_staleness()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "looksValid"},
-            "fcm_registered_token": "tok",
-            "bearer_token": "bt",
-        })
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "looksValid"},
+                "fcm_registered_token": "tok",
+                "bearer_token": "bt",
+            }
+        )
 
         # start_locked returns without setting _fcm_running → soft-heal fails
         async def fake_start_fails(c):
             pass  # leave _fcm_running unset (effectively False)
+
         coord._fcm_running = False
 
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start_fails)), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(
+                fcm,
+                "_async_start_fcm_push_locked",
+                AsyncMock(side_effect=fake_start_fails),
+            ),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
 
         # Escalation: entry.data should have been updated (hard-heal purge).
         coord.hass.config_entries.async_update_entry.assert_called_once()
-        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get("data")
+        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
+            "data"
+        )
         assert "fcm_credentials" not in new_data
         assert "fcm_registered_token" not in new_data
         assert new_data["bearer_token"] == "bt"
@@ -247,19 +304,26 @@ class TestFcmSelfHealSoft:
         are proven stale (Google rejected them). Even though they're persisted,
         hard-heal MUST run because soft refresh would fail the same way."""
         from custom_components.bosch_shc_camera import fcm
+
         _mark_creds_stale()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "rejectedByGoogle"},
-            "bearer_token": "bt",
-        })
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "rejectedByGoogle"},
+                "bearer_token": "bt",
+            }
+        )
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
 
         # Hard-heal ran: entry.data updated with creds removed.
         coord.hass.config_entries.async_update_entry.assert_called_once()
-        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get("data")
+        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
+            "data"
+        )
         assert "fcm_credentials" not in new_data
 
     async def test_soft_heal_resets_failure_counter_on_success(self):
@@ -267,19 +331,26 @@ class TestFcmSelfHealSoft:
         window — immediately reset the failure counter so the next outage
         starts at cool-down ladder index 0."""
         from custom_components.bosch_shc_camera import fcm
+
         _clear_staleness()
-        coord = _make_coord(entry_data={
-            "fcm_credentials": {"gcm": "valid"},
-        })
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "valid"},
+            }
+        )
         coord._fcm_self_heal_failures = 3
         coord._fcm_self_heal_paused_logged = True
 
         async def fake_start(c):
             c._fcm_running = True
 
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()), \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)), \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)
+            ),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
 
         assert coord._fcm_self_heal_failures == 0
@@ -293,7 +364,9 @@ class TestFcmSelfHealSoft:
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         now = time.monotonic()
         # 2 recent (within 600s), 1 old (700s ago)
-        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.extend([now - 700, now - 100, now - 10])
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.extend(
+            [now - 700, now - 100, now - 10]
+        )
         assert fcm.get_recent_fcm_creds_staleness_count(600.0) == 2
 
     async def test_soft_heal_disabled_fcm_does_not_purge_creds(self):
@@ -307,6 +380,7 @@ class TestFcmSelfHealSoft:
         today via its own `enable_fcm_push` gate, but the heal function must
         be correct in isolation."""
         from custom_components.bosch_shc_camera import fcm
+
         coord = _make_coord(
             entry_data={
                 "fcm_credentials": {"gcm": "valid"},
@@ -317,9 +391,13 @@ class TestFcmSelfHealSoft:
         )
         coord._fcm_running = False  # disabled means stopped
 
-        with patch.object(fcm, "async_stop_fcm_push", AsyncMock()) as stop_mock, \
-             patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()) as start_mock, \
-             patch.object(fcm, "reset_fcm_error_counter", MagicMock()):
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()) as stop_mock,
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", AsyncMock()
+            ) as start_mock,
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
             await fcm.async_self_heal_fcm_push(coord)
 
         stop_mock.assert_awaited_once()

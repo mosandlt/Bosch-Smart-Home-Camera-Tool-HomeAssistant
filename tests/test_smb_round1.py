@@ -7,13 +7,14 @@ Covers missing lines: 58, 91-92, 103-233, 238-252, 261, 267-314, 324-377,
 All SMB/FTP calls are mocked via sys.modules or patch — no real network.
 urllib.request.urlopen is patched instead of requests.Session (removed).
 """
+
 from __future__ import annotations
 
 import asyncio
 import sys
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -47,21 +48,26 @@ class TestSyncLocalSaveUncovered:
     def test_short_timestamp_returns_early(self, tmp_path):
         """Timestamp shorter than 19 chars → return without writing any file."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _coord({"download_path": str(tmp_path)})
-        ev = {"timestamp": "2026-05", "eventType": "MOVEMENT",
-              "imageUrl": "https://cdn.boschsecurity.com/snap.jpg"}
+        ev = {
+            "timestamp": "2026-05",
+            "eventType": "MOVEMENT",
+            "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
+        }
         sync_local_save(coord, ev, "tok", "Terrasse")
-        assert list(tmp_path.iterdir()) == [], \
+        assert list(tmp_path.iterdir()) == [], (
             "Short timestamp must cause early return — no folder or file created"
+        )
 
     def test_empty_timestamp_returns_early(self, tmp_path):
         """Empty timestamp → return without writing."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
+
         coord = _coord({"download_path": str(tmp_path)})
         ev = {"timestamp": "", "eventType": "MOVEMENT"}
         sync_local_save(coord, ev, "tok", "Terrasse")
-        assert list(tmp_path.iterdir()) == [], \
-            "Empty timestamp must cause early return"
+        assert list(tmp_path.iterdir()) == [], "Empty timestamp must cause early return"
 
     def test_mp4_skipped_when_status_not_done(self, tmp_path):
         """MP4 url present but videoClipUploadStatus != 'Done' → MP4 not downloaded."""
@@ -124,6 +130,7 @@ class TestSyncSmbUploadEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return before any network calls."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         coord = _coord({"smb_server": "", "smb_share": "SHARE"})
         # Should not raise even if smbclient is missing
         sync_smb_upload(coord, {}, "tok")
@@ -131,12 +138,14 @@ class TestSyncSmbUploadEarlyExits:
     def test_no_share_returns_early(self):
         """Empty smb_share → return before any network calls."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": ""})
         sync_smb_upload(coord, {}, "tok")
 
     def test_smbclient_import_error_logs_warning(self):
         """smbclient not installed → log warning and return gracefully."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE"})
 
         # Make smbclient unavailable
@@ -150,6 +159,7 @@ class TestSyncSmbUploadEarlyExits:
     def test_ftp_protocol_delegates_to_ftp(self):
         """upload_protocol='ftp' → delegates to _sync_ftp_upload."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         coord = _coord({"upload_protocol": "ftp", "smb_server": ""})
 
         with patch(f"{MODULE}._sync_ftp_upload") as mock_ftp:
@@ -160,6 +170,7 @@ class TestSyncSmbUploadEarlyExits:
     def test_smb_session_failure_returns_gracefully(self):
         """register_session raising → log warning and return."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE"})
 
         fake_smb = MagicMock()
@@ -180,19 +191,25 @@ class TestSyncSmbCleanupEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without any SMB calls."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
-        coord = _coord({"smb_server": "", "smb_share": "SHARE", "smb_retention_days": 30})
+
+        coord = _coord(
+            {"smb_server": "", "smb_share": "SHARE", "smb_retention_days": 30}
+        )
         sync_smb_cleanup(coord)  # must not raise
 
     def test_retention_zero_returns_early(self):
         """smb_retention_days=0 → keep forever, no deletion."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_retention_days": 0})
+
+        coord = _coord(
+            {"smb_server": "192.168.1.1", "smb_share": "SHARE", "smb_retention_days": 0}
+        )
         sync_smb_cleanup(coord)
 
     def test_ftp_protocol_delegates_to_ftp(self):
         """upload_protocol='ftp' → delegates to _sync_ftp_cleanup."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+
         coord = _coord({"upload_protocol": "ftp"})
 
         with patch(f"{MODULE}._sync_ftp_cleanup") as mock_ftp:
@@ -203,8 +220,14 @@ class TestSyncSmbCleanupEarlyExits:
     def test_session_failure_returns_gracefully(self):
         """register_session raising → log warning and return without crash."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
-        coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE",
-                        "smb_retention_days": 30})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_share": "SHARE",
+                "smb_retention_days": 30,
+            }
+        )
 
         fake_smb = MagicMock()
         fake_smb.register_session.side_effect = Exception("connection refused")
@@ -214,7 +237,6 @@ class TestSyncSmbCleanupEarlyExits:
                 sync_smb_cleanup(coord)  # must not raise
 
 
-
 # ── _sync_ftp_upload ──────────────────────────────────────────────────────────
 
 
@@ -222,14 +244,17 @@ class TestSyncFtpUpload:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without FTP call."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+
         coord = _coord({"smb_server": ""})
         _sync_ftp_upload(coord, {}, "tok")  # must not raise
 
     def test_ftp_connect_failure_returns_gracefully(self):
         """FTP login failure → log warning, return without crash."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "user",
-                        "smb_password": "pw"})
+
+        coord = _coord(
+            {"smb_server": "192.168.1.1", "smb_username": "user", "smb_password": "pw"}
+        )
 
         with patch(f"{MODULE}._ftp_connect", side_effect=Exception("auth failed")):
             _sync_ftp_upload(coord, {}, "tok")  # must not raise
@@ -237,8 +262,15 @@ class TestSyncFtpUpload:
     def test_empty_events_completes_without_upload(self):
         """No events for camera → no FTP stor calls."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "user",
-                        "smb_password": "pw", "smb_base_path": "Bosch"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_username": "user",
+                "smb_password": "pw",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         fake_ftp = MagicMock()
         data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": []}}
@@ -252,12 +284,23 @@ class TestSyncFtpUpload:
     def test_short_timestamp_event_skipped(self):
         """Event with timestamp shorter than 19 chars → skip without crash."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
-                        "smb_password": "p", "smb_base_path": "B"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "B",
+            }
+        )
 
         fake_ftp = MagicMock()
-        data = {CAM_ID: {"info": {"title": "Cam"},
-                          "events": [{"timestamp": "2026-05", "eventType": "MOVEMENT"}]}}
+        data = {
+            CAM_ID: {
+                "info": {"title": "Cam"},
+                "events": [{"timestamp": "2026-05", "eventType": "MOVEMENT"}],
+            }
+        }
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
             with patch(f"{MODULE}._ftp_makedirs"):
@@ -268,10 +311,17 @@ class TestSyncFtpUpload:
     def test_image_uploaded_successfully(self):
         """Valid event with JPEG URL → storbinary called with .jpg path."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
-                        "smb_password": "p", "smb_base_path": "Bosch",
-                        "folder_pattern": "{year}/{month}",
-                        "file_pattern": "{camera}_{date}_{time}_{type}_{id}"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+                "folder_pattern": "{year}/{month}",
+                "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+            }
+        )
 
         fake_ftp = MagicMock()
         resp = _urlopen_resp(200, b"JPEG")
@@ -279,12 +329,14 @@ class TestSyncFtpUpload:
         data = {
             CAM_ID: {
                 "info": {"title": "Terrasse"},
-                "events": [{
-                    "timestamp": "2026-05-07T10:00:00Z",
-                    "eventType": "MOVEMENT",
-                    "id": "EVID1234",
-                    "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
-                }],
+                "events": [
+                    {
+                        "timestamp": "2026-05-07T10:00:00Z",
+                        "eventType": "MOVEMENT",
+                        "id": "EVID1234",
+                        "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
+                    }
+                ],
             }
         }
 
@@ -301,25 +353,36 @@ class TestSyncFtpUpload:
     def test_file_already_exists_skipped(self):
         """File already on FTP server → skip storbinary."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
-                        "smb_password": "p", "smb_base_path": "Bosch"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         fake_ftp = MagicMock()
         data = {
             CAM_ID: {
                 "info": {"title": "Terrasse"},
-                "events": [{
-                    "timestamp": "2026-05-07T10:00:00Z",
-                    "eventType": "MOVEMENT",
-                    "id": "EVID1234",
-                    "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
-                }],
+                "events": [
+                    {
+                        "timestamp": "2026-05-07T10:00:00Z",
+                        "eventType": "MOVEMENT",
+                        "id": "EVID1234",
+                        "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
+                    }
+                ],
             }
         }
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
             with patch(f"{MODULE}._ftp_makedirs"):
-                with patch(f"{MODULE}._ftp_exists", return_value=True):  # already exists
+                with patch(
+                    f"{MODULE}._ftp_exists", return_value=True
+                ):  # already exists
                     _sync_ftp_upload(coord, data, "tok")
 
         fake_ftp.storbinary.assert_not_called()
@@ -327,18 +390,36 @@ class TestSyncFtpUpload:
     def test_ftp_quit_called_on_exception(self):
         """Exception mid-upload propagates through finally → ftp.quit() still called."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
-        coord = _coord({"smb_server": "192.168.1.1", "smb_username": "u",
-                        "smb_password": "p", "smb_base_path": "Bosch"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         fake_ftp = MagicMock()
-        data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [
-            {"timestamp": "2026-05-07T10:00:00Z", "eventType": "MOVEMENT",
-             "id": "X", "imageUrl": "https://cdn.boschsecurity.com/snap.jpg"}
-        ]}}
+        data = {
+            CAM_ID: {
+                "info": {"title": "Terrasse"},
+                "events": [
+                    {
+                        "timestamp": "2026-05-07T10:00:00Z",
+                        "eventType": "MOVEMENT",
+                        "id": "X",
+                        "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
+                    }
+                ],
+            }
+        }
 
         with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
             # _ftp_makedirs raises — propagates through the try/finally in _sync_ftp_upload
-            with patch(f"{MODULE}._ftp_makedirs", side_effect=Exception("mid-upload error")):
+            with patch(
+                f"{MODULE}._ftp_makedirs", side_effect=Exception("mid-upload error")
+            ):
                 try:
                     _sync_ftp_upload(coord, data, "tok")
                 except Exception:
@@ -354,20 +435,29 @@ class TestSyncFtpCleanup:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without any FTP call."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
         coord = _coord({"smb_server": "", "smb_retention_days": 30})
         _sync_ftp_cleanup(coord)  # must not raise
 
     def test_retention_zero_returns_early(self):
         """smb_retention_days=0 → skip cleanup."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
         coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 0})
         _sync_ftp_cleanup(coord)
 
     def test_ftp_connect_failure_returns_gracefully(self):
         """FTP login failure → log warning, return without crash."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
-        coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 30,
-                        "smb_username": "u", "smb_password": "p"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_retention_days": 30,
+                "smb_username": "u",
+                "smb_password": "p",
+            }
+        )
 
         with patch(f"{MODULE}._ftp_connect", side_effect=Exception("auth failed")):
             _sync_ftp_cleanup(coord)  # must not raise
@@ -375,9 +465,16 @@ class TestSyncFtpCleanup:
     def test_empty_directory_completes_without_deletion(self):
         """Empty FTP directory → no DELE commands."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
-        coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 30,
-                        "smb_username": "u", "smb_password": "p",
-                        "smb_base_path": "Bosch"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_retention_days": 30,
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         fake_ftp = MagicMock()
         fake_ftp.nlst.return_value = []  # empty directory
@@ -390,11 +487,19 @@ class TestSyncFtpCleanup:
 
     def test_old_file_deleted(self):
         """File older than retention → FTP delete called via MDTM + delete."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
         import time
-        coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 1,
-                        "smb_username": "u", "smb_password": "p",
-                        "smb_base_path": "Bosch"})
+
+        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_retention_days": 1,
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         # _sync_ftp_cleanup uses retrlines("LIST", callback) + sendcmd("MDTM name")
         old_ts = time.strftime("%Y%m%d%H%M%S", time.gmtime(time.time() - 5 * 86400))
@@ -415,11 +520,19 @@ class TestSyncFtpCleanup:
 
     def test_recent_file_not_deleted(self):
         """File newer than retention → not deleted."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
         import time
-        coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 180,
-                        "smb_username": "u", "smb_password": "p",
-                        "smb_base_path": "Bosch"})
+
+        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_retention_days": 180,
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         # Use retrlines + sendcmd mocks matching the actual implementation
         recent_ts = time.strftime("%Y%m%d%H%M%S", time.gmtime())
@@ -441,9 +554,16 @@ class TestSyncFtpCleanup:
     def test_mlsd_exception_falls_back_to_nlst(self):
         """mlsd() raising → fall back to nlst() for listing."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
-        coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 30,
-                        "smb_username": "u", "smb_password": "p",
-                        "smb_base_path": "Bosch"})
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_retention_days": 30,
+                "smb_username": "u",
+                "smb_password": "p",
+                "smb_base_path": "Bosch",
+            }
+        )
 
         fake_ftp = MagicMock()
         fake_ftp.mlsd.side_effect = Exception("MLSD not supported")
@@ -467,6 +587,7 @@ class TestCleanupAlert:
     def test_no_notify_service_skips_alert(self):
         """No alert_notify_system and no alert_notify_service → call_soon_threadsafe not called."""
         from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+
         coord = _coord({})
         _fire_cleanup_alert(coord, 5, 180, "\\\\nas\\share\\Bosch-Kameras")
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
@@ -474,6 +595,7 @@ class TestCleanupAlert:
     def test_system_service_schedules_alert(self):
         """alert_notify_system set → call_soon_threadsafe called once."""
         from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+
         coord = _coord({"alert_notify_system": "notify.test_user"})
         _fire_cleanup_alert(coord, 3, 90, "\\\\nas\\share\\Bosch")
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
@@ -481,6 +603,7 @@ class TestCleanupAlert:
     def test_fallback_to_alert_notify_service(self):
         """No system service configured → falls back to alert_notify_service."""
         from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+
         coord = _coord({"alert_notify_service": "notify.signal"})
         _fire_cleanup_alert(coord, 1, 180, "nas/Bosch")
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
@@ -489,6 +612,7 @@ class TestCleanupAlert:
     async def test_async_alert_calls_service(self):
         """_async_cleanup_alert calls the notify service when it exists."""
         from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+
         coord = _coord()
         coord.hass.services.has_service = MagicMock(return_value=True)
         coord.hass.services.async_call = AsyncMock()
@@ -499,6 +623,7 @@ class TestCleanupAlert:
     async def test_async_alert_no_service_no_call(self):
         """_async_cleanup_alert: service not registered → no call, no exception."""
         from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+
         coord = _coord()
         coord.hass.services.has_service = MagicMock(return_value=False)
         coord.hass.services.async_call = AsyncMock()

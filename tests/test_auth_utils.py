@@ -14,6 +14,7 @@ Covers:
 11. Custom request headers preserved
 12. SHA-256 algorithm
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,6 +48,7 @@ for _pkg in (
 ):
     if _pkg not in sys.modules:
         import types
+
         sys.modules[_pkg] = types.ModuleType(_pkg)
 
 if _DOTTED_NAME not in sys.modules:
@@ -68,6 +70,7 @@ async_digest_request = _auth_utils.async_digest_request  # type: ignore[attr-def
 # ---------------------------------------------------------------------------
 # Helpers for building fake server responses
 # ---------------------------------------------------------------------------
+
 
 def _make_response(
     status: int,
@@ -96,7 +99,7 @@ def _digest_challenge(
     parts = [
         f'realm="{realm}"',
         f'nonce="{nonce}"',
-        f'algorithm={algorithm}',
+        f"algorithm={algorithm}",
         f'opaque="{opaque}"',
     ]
     if qop:
@@ -107,6 +110,7 @@ def _digest_challenge(
 # ---------------------------------------------------------------------------
 # Unit tests — internal helpers
 # ---------------------------------------------------------------------------
+
 
 class TestMd5:
     def test_known_value(self) -> None:
@@ -152,7 +156,9 @@ class TestParseDigestChallenge:
 class TestBuildDigestHeader:
     def test_qop_auth_header_format(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge())
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert hdr.startswith("Digest ")
         assert 'username="user"' in hdr
         assert "qop=auth" in hdr
@@ -161,30 +167,40 @@ class TestBuildDigestHeader:
 
     def test_no_qop_header_format(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge(qop=""))
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert "qop=" not in hdr
         assert "nc=" not in hdr
         assert "response=" in hdr
 
     def test_opaque_included_when_present(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge(opaque="op99"))
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert 'opaque="op99"' in hdr
 
     def test_opaque_omitted_when_absent(self) -> None:
         header = 'Digest realm="r", nonce="n"'
         challenge = _parse_digest_challenge(header)
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert "opaque" not in hdr
 
     def test_sha256_algorithm(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge(algorithm="SHA-256"))
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert "SHA-256" in hdr
 
     def test_md5_sess_algorithm(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge(algorithm="MD5-SESS"))
-        hdr = _build_digest_header("GET", "https://cam/snap.jpg", "user", "pass", challenge)
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
         assert "MD5-SESS" in hdr
 
     def test_url_with_query_string(self) -> None:
@@ -199,6 +215,7 @@ class TestBuildDigestHeader:
 # ---------------------------------------------------------------------------
 # Integration tests — async_digest_request using mocked ClientSession
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_session() -> MagicMock:
@@ -232,7 +249,9 @@ class TestAsyncDigestRequest:
         assert auth.startswith("Digest ")
         assert "response=" in auth
 
-    async def test_server_200_immediately_no_auth(self, mock_session: MagicMock) -> None:
+    async def test_server_200_immediately_no_auth(
+        self, mock_session: MagicMock
+    ) -> None:
         """TC-2: Server doesn't require auth — return first response."""
         resp_200 = _make_response(200, body=b"ok")
         mock_session.request.side_effect = [resp_200]
@@ -244,7 +263,9 @@ class TestAsyncDigestRequest:
         assert result.status == 200
         assert mock_session.request.call_count == 1
 
-    async def test_401_without_www_authenticate_raises(self, mock_session: MagicMock) -> None:
+    async def test_401_without_www_authenticate_raises(
+        self, mock_session: MagicMock
+    ) -> None:
         """TC-3: 401 with no WWW-Authenticate header → ValueError."""
         resp_401 = _make_response(401, headers={})
         mock_session.request.side_effect = [resp_401]
@@ -433,7 +454,9 @@ class TestAsyncDigestRequest:
         _, kwargs = mock_session.request.call_args
         assert kwargs.get("ssl") is False
 
-    async def test_no_data_not_in_kwargs_when_none(self, mock_session: MagicMock) -> None:
+    async def test_no_data_not_in_kwargs_when_none(
+        self, mock_session: MagicMock
+    ) -> None:
         """When data=None (default) the key 'data' must still be passed (as None)."""
         resp_200 = _make_response(200)
         mock_session.request.side_effect = [resp_200]

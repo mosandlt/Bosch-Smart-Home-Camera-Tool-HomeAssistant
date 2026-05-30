@@ -32,10 +32,12 @@ from custom_components.bosch_shc_camera.config_flow import (
 )
 from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _make_entry(*, options: dict | None = None, bearer_token: str = "") -> SimpleNamespace:
+
+def _make_entry(
+    *, options: dict | None = None, bearer_token: str = ""
+) -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01TEST",
         data={"bearer_token": bearer_token, "refresh_token": "rt"},
@@ -46,18 +48,22 @@ def _make_entry(*, options: dict | None = None, bearer_token: str = "") -> Simpl
 def _legacy_token() -> str:
     """Build a minimal JWT with azp=residential_app (legacy client)."""
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    body = base64.urlsafe_b64encode(
-        json.dumps({"azp": "residential_app"}).encode()
-    ).rstrip(b"=").decode()
+    body = (
+        base64.urlsafe_b64encode(json.dumps({"azp": "residential_app"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{body}.x"
 
 
 def _oss_token() -> str:
     """Build a minimal JWT with azp=oss_residential_app (new OSS client)."""
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    body = base64.urlsafe_b64encode(
-        json.dumps({"azp": "oss_residential_app"}).encode()
-    ).rstrip(b"=").decode()
+    body = (
+        base64.urlsafe_b64encode(json.dumps({"azp": "oss_residential_app"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
     return f"{header}.{body}.x"
 
 
@@ -65,13 +71,12 @@ async def _submit(flow: BoschCameraOptionsFlow, user_input: dict) -> dict:
     """Submit the options form and return the saved data dict."""
     saved: dict = {}
     flow.async_create_entry = MagicMock(
-        side_effect=lambda **kw: saved.update({"data": kw.get("data", {})})
-        or {"type": "create_entry"},
+        side_effect=lambda **kw: (
+            saved.update({"data": kw.get("data", {})}) or {"type": "create_entry"}
+        ),
     )
     result = await flow.async_step_init(user_input=user_input)
-    assert result["type"] == "create_entry", (
-        f"Expected create_entry, got {result}"
-    )
+    assert result["type"] == "create_entry", f"Expected create_entry, got {result}"
     return saved["data"]
 
 
@@ -82,14 +87,17 @@ class TestPollingSection:
     @pytest.mark.asyncio
     async def test_custom_intervals_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "polling": {
-                "scan_interval": 120,
-                "interval_status": 600,
-                "interval_events": 400,
-                "snapshot_interval": 3600,
+        data = await _submit(
+            flow,
+            {
+                "polling": {
+                    "scan_interval": 120,
+                    "interval_status": 600,
+                    "interval_events": 400,
+                    "snapshot_interval": 3600,
+                },
             },
-        })
+        )
         assert data["scan_interval"] == 120
         assert data["interval_status"] == 600
         assert data["interval_events"] == 400
@@ -101,7 +109,10 @@ class TestPollingSection:
         # Submit an unrelated section; polling fields should fall back to DEFAULT_OPTIONS.
         data = await _submit(flow, {"auth": {"force_relogin": False}})
         # scan_interval not in user_input → falls back to saved options (empty) → DEFAULT_OPTIONS
-        assert "scan_interval" not in data or data["scan_interval"] == DEFAULT_OPTIONS["scan_interval"]
+        assert (
+            "scan_interval" not in data
+            or data["scan_interval"] == DEFAULT_OPTIONS["scan_interval"]
+        )
 
     def test_scan_interval_min_boundary(self):
         """vol.Range(min=10): value 10 must be accepted."""
@@ -111,6 +122,7 @@ class TestPollingSection:
 
     def test_scan_interval_below_min_raises(self):
         import voluptuous as vol
+
         schema_inner = _get_section_schema("polling")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"scan_interval": 9})
@@ -122,6 +134,7 @@ class TestPollingSection:
 
     def test_scan_interval_above_max_raises(self):
         import voluptuous as vol
+
         schema_inner = _get_section_schema("polling")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"scan_interval": 3601})
@@ -133,6 +146,7 @@ class TestPollingSection:
 
     def test_snapshot_interval_below_min_raises(self):
         import voluptuous as vol
+
         schema_inner = _get_section_schema("polling")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"snapshot_interval": 299})
@@ -142,16 +156,19 @@ class TestFeaturesSection:
     @pytest.mark.asyncio
     async def test_all_feature_toggles_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "features": {
-                "enable_snapshots": True,
-                "enable_sensors": False,
-                "enable_binary_sensors": False,
-                "enable_snapshot_button": True,
-                "audio_default_on": False,
-                "enable_intercom": True,
+        data = await _submit(
+            flow,
+            {
+                "features": {
+                    "enable_snapshots": True,
+                    "enable_sensors": False,
+                    "enable_binary_sensors": False,
+                    "enable_snapshot_button": True,
+                    "audio_default_on": False,
+                    "enable_intercom": True,
+                },
             },
-        })
+        )
         assert data["enable_snapshots"] is True
         assert data["enable_sensors"] is False
         assert data["enable_binary_sensors"] is False
@@ -163,9 +180,12 @@ class TestFeaturesSection:
     async def test_boolean_coercion_1_0(self):
         """int 1/0 → True/False (HA schema may deliver ints from selector)."""
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "features": {"enable_snapshots": 1, "enable_intercom": 0},
-        })
+        data = await _submit(
+            flow,
+            {
+                "features": {"enable_snapshots": 1, "enable_intercom": 0},
+            },
+        )
         assert data["enable_snapshots"] is True
         assert data["enable_intercom"] is False
 
@@ -214,20 +234,23 @@ class TestFcmSection:
     @pytest.mark.asyncio
     async def test_fcm_push_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "fcm": {
-                "enable_fcm_push": True,
-                "fcm_push_mode": "android",
-                "mark_events_read": True,
-                "alert_save_snapshots": True,
-                "alert_delete_after_send": False,
-                "alert_notify_service": "notify.test_user",
-                "alert_notify_information": "notify.info",
-                "alert_notify_screenshot": "notify.screenshot",
-                "alert_notify_video": "notify.video",
-                "alert_notify_system": "notify.system",
+        data = await _submit(
+            flow,
+            {
+                "fcm": {
+                    "enable_fcm_push": True,
+                    "fcm_push_mode": "android",
+                    "mark_events_read": True,
+                    "alert_save_snapshots": True,
+                    "alert_delete_after_send": False,
+                    "alert_notify_service": "notify.test_user",
+                    "alert_notify_information": "notify.info",
+                    "alert_notify_screenshot": "notify.screenshot",
+                    "alert_notify_video": "notify.video",
+                    "alert_notify_system": "notify.system",
+                },
             },
-        })
+        )
         assert data["enable_fcm_push"] is True
         assert data["fcm_push_mode"] == "android"
         assert data["mark_events_read"] is True
@@ -239,12 +262,15 @@ class TestFcmSection:
     @pytest.mark.asyncio
     async def test_empty_alert_services_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "fcm": {
-                "alert_notify_service": "",
-                "alert_notify_video": "",
+        data = await _submit(
+            flow,
+            {
+                "fcm": {
+                    "alert_notify_service": "",
+                    "alert_notify_video": "",
+                },
             },
-        })
+        )
         assert data.get("alert_notify_service", "") == ""
 
     def test_mark_events_read_default_false(self):
@@ -260,12 +286,14 @@ class TestFcmSection:
     def test_all_fcm_modes_valid(self):
         """fcm_push_mode must accept all four documented values."""
         import voluptuous as vol
+
         validator = vol.In(["auto", "android", "ios", "polling"])
         for mode in ["auto", "android", "ios", "polling"]:
             assert validator(mode) == mode
 
     def test_invalid_fcm_mode_rejected(self):
         import voluptuous as vol
+
         with pytest.raises(vol.Invalid):
             vol.In(["auto", "android", "ios", "polling"])("unknown")
 
@@ -285,28 +313,34 @@ class TestEventsStorageSection:
     @pytest.mark.asyncio
     async def test_download_path_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "events_storage": {"download_path": "/config/my_events"},
-        })
+        data = await _submit(
+            flow,
+            {
+                "events_storage": {"download_path": "/config/my_events"},
+            },
+        )
         assert data["download_path"] == "/config/my_events"
 
     @pytest.mark.asyncio
     async def test_smb_fields_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "events_storage": {
-                "enable_smb_upload": True,
-                "upload_protocol": "ftp",
-                "smb_server": "192.168.1.100",
-                "smb_share": "NAS",
-                "smb_username": "user",
-                "smb_password": "secret",
-                "smb_base_path": "Bosch",
-                "folder_pattern": "{year}/{month}",
-                "file_pattern": "{camera}_{id}",
-                "smb_retention_days": 90,
+        data = await _submit(
+            flow,
+            {
+                "events_storage": {
+                    "enable_smb_upload": True,
+                    "upload_protocol": "ftp",
+                    "smb_server": "192.168.1.100",
+                    "smb_share": "NAS",
+                    "smb_username": "user",
+                    "smb_password": "secret",
+                    "smb_base_path": "Bosch",
+                    "folder_pattern": "{year}/{month}",
+                    "file_pattern": "{camera}_{id}",
+                    "smb_retention_days": 90,
+                },
             },
-        })
+        )
         assert data["enable_smb_upload"] is True
         assert data["upload_protocol"] == "ftp"
         assert data["smb_server"] == "192.168.1.100"
@@ -319,6 +353,7 @@ class TestEventsStorageSection:
 
     def test_smb_retention_days_above_max_raises(self):
         import voluptuous as vol
+
         schema_inner = _get_section_schema("events_storage")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"smb_retention_days": 3651})
@@ -334,15 +369,18 @@ class TestNvrSection:
     @pytest.mark.asyncio
     async def test_nvr_fields_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "nvr": {
-                "enable_nvr": True,
-                "nvr_storage_target": "smb",
-                "nvr_base_path": "/config/bosch_nvr",
-                "nvr_smb_subpath": "NVR",
-                "nvr_retention_days": 7,
+        data = await _submit(
+            flow,
+            {
+                "nvr": {
+                    "enable_nvr": True,
+                    "nvr_storage_target": "smb",
+                    "nvr_base_path": "/config/bosch_nvr",
+                    "nvr_smb_subpath": "NVR",
+                    "nvr_retention_days": 7,
+                },
             },
-        })
+        )
         assert data["enable_nvr"] is True
         assert data["nvr_storage_target"] == "smb"
         assert data["nvr_base_path"] == "/config/bosch_nvr"
@@ -355,6 +393,7 @@ class TestNvrSection:
 
     def test_nvr_retention_below_min_raises(self):
         import voluptuous as vol
+
         schema_inner = _get_section_schema("nvr")
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema_inner({"nvr_retention_days": 0})
@@ -383,18 +422,22 @@ class TestAuthSection:
         flow.async_step_relogin_show = AsyncMock(
             return_value={"type": "form", "step_id": "relogin_show"}
         )
-        result = await flow.async_step_init(user_input={
-            "auth": {"force_relogin": True},
-        })
+        result = await flow.async_step_init(
+            user_input={
+                "auth": {"force_relogin": True},
+            }
+        )
         assert result["step_id"] == "relogin_show"
 
     @pytest.mark.asyncio
     async def test_force_relogin_false_does_not_branch(self):
         flow = BoschCameraOptionsFlow(_make_entry())
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
-        result = await flow.async_step_init(user_input={
-            "auth": {"force_relogin": False},
-        })
+        result = await flow.async_step_init(
+            user_input={
+                "auth": {"force_relogin": False},
+            }
+        )
         assert result["type"] == "create_entry"
 
     @pytest.mark.asyncio
@@ -408,9 +451,11 @@ class TestAuthSection:
         flow.async_abort = MagicMock(
             return_value={"type": "abort", "reason": "migration_started"}
         )
-        result = await flow.async_step_init(user_input={
-            "auth": {"migrate_to_oss_client": True},
-        })
+        result = await flow.async_step_init(
+            user_input={
+                "auth": {"migrate_to_oss_client": True},
+            }
+        )
         assert result["reason"] == "migration_started"
 
     @pytest.mark.asyncio
@@ -444,7 +489,6 @@ class TestAuthSection:
             )
 
 
-
 # ── Cross-section round-trip tests ────────────────────────────────────────────
 
 
@@ -454,29 +498,64 @@ class TestFullRoundTrip:
     @pytest.mark.asyncio
     async def test_all_sections_submitted_together(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        data = await _submit(flow, {
-            "polling": {"scan_interval": 45, "interval_status": 200, "interval_events": 150, "snapshot_interval": 900},
-            "features": {"enable_snapshots": True, "enable_sensors": True, "enable_binary_sensors": True,
-                         "enable_snapshot_button": False, "audio_default_on": False,
-                         "enable_intercom": False},
-            "stream": {"stream_connection_type": "local", "live_buffer_mode": "latency", "enable_go2rtc": True},
-            "fcm": {"enable_fcm_push": True, "fcm_push_mode": "ios", "mark_events_read": False,
-                    "alert_save_snapshots": False, "alert_delete_after_send": True,
-                    "alert_notify_service": "notify.test_user", "alert_notify_information": "",
-                    "alert_notify_screenshot": "", "alert_notify_video": "notify.video",
-                    "alert_notify_system": ""},
-            "events_storage": {"enable_local_save": True, "download_path": "/config/bosch_events",
-                                "enable_smb_upload": False,
-                                "upload_protocol": "smb", "smb_server": "", "smb_share": "",
-                                "smb_username": "", "smb_password": "", "smb_base_path": "Bosch-Kameras",
-                                "folder_pattern": "{year}/{month}/{day}",
-                                "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
-                                "smb_retention_days": 180},
-            "nvr": {"enable_nvr": False, "nvr_storage_target": "local",
-                    "nvr_base_path": "/config/bosch_nvr", "nvr_smb_subpath": "NVR",
-                    "nvr_retention_days": 3},
-            "auth": {"force_relogin": False},
-        })
+        data = await _submit(
+            flow,
+            {
+                "polling": {
+                    "scan_interval": 45,
+                    "interval_status": 200,
+                    "interval_events": 150,
+                    "snapshot_interval": 900,
+                },
+                "features": {
+                    "enable_snapshots": True,
+                    "enable_sensors": True,
+                    "enable_binary_sensors": True,
+                    "enable_snapshot_button": False,
+                    "audio_default_on": False,
+                    "enable_intercom": False,
+                },
+                "stream": {
+                    "stream_connection_type": "local",
+                    "live_buffer_mode": "latency",
+                    "enable_go2rtc": True,
+                },
+                "fcm": {
+                    "enable_fcm_push": True,
+                    "fcm_push_mode": "ios",
+                    "mark_events_read": False,
+                    "alert_save_snapshots": False,
+                    "alert_delete_after_send": True,
+                    "alert_notify_service": "notify.test_user",
+                    "alert_notify_information": "",
+                    "alert_notify_screenshot": "",
+                    "alert_notify_video": "notify.video",
+                    "alert_notify_system": "",
+                },
+                "events_storage": {
+                    "enable_local_save": True,
+                    "download_path": "/config/bosch_events",
+                    "enable_smb_upload": False,
+                    "upload_protocol": "smb",
+                    "smb_server": "",
+                    "smb_share": "",
+                    "smb_username": "",
+                    "smb_password": "",
+                    "smb_base_path": "Bosch-Kameras",
+                    "folder_pattern": "{year}/{month}/{day}",
+                    "file_pattern": "{camera}_{date}_{time}_{type}_{id}",
+                    "smb_retention_days": 180,
+                },
+                "nvr": {
+                    "enable_nvr": False,
+                    "nvr_storage_target": "local",
+                    "nvr_base_path": "/config/bosch_nvr",
+                    "nvr_smb_subpath": "NVR",
+                    "nvr_retention_days": 3,
+                },
+                "auth": {"force_relogin": False},
+            },
+        )
         # Spot-check a key from each section
         assert data["scan_interval"] == 45
         assert data["enable_snapshots"] is True
@@ -493,10 +572,17 @@ class TestFullRoundTrip:
         async_step_init merges with existing options first."""
         prior = {"enable_go2rtc": False}
         flow = BoschCameraOptionsFlow(_make_entry(options=prior))
-        data = await _submit(flow, {"polling": {"scan_interval": 45,
-                                                "interval_status": 300,
-                                                "interval_events": 300,
-                                                "snapshot_interval": 1800}})
+        data = await _submit(
+            flow,
+            {
+                "polling": {
+                    "scan_interval": 45,
+                    "interval_status": 300,
+                    "interval_events": 300,
+                    "snapshot_interval": 1800,
+                }
+            },
+        )
         # The submitted 'polling' section was the only one sent.
         # enable_go2rtc not in the submit → but must be preserved via prior options merge.
         assert data["scan_interval"] == 45
@@ -513,13 +599,8 @@ class TestDefaultOptionsCompleteness:
     """
 
     def test_all_default_option_keys_covered_by_sections(self):
-        all_section_fields = {
-            f for fields in OPTIONS_SECTIONS.values() for f in fields
-        }
-        missing = [
-            k for k in DEFAULT_OPTIONS
-            if k not in all_section_fields
-        ]
+        all_section_fields = {f for fields in OPTIONS_SECTIONS.values() for f in fields}
+        missing = [k for k in DEFAULT_OPTIONS if k not in all_section_fields]
         assert not missing, (
             f"DEFAULT_OPTIONS keys not in any OPTIONS_SECTIONS section: {missing}. "
             "Add them to the correct section so users can configure them."
@@ -530,19 +611,29 @@ class TestDefaultOptionsCompleteness:
         text-only). Fails loudly when a new UI field is added without a default."""
         # Text fields with suggested_value only (no hard default) are OK to be absent
         TEXT_ONLY_FIELDS = {
-            "alert_notify_service", "alert_notify_information",
-            "alert_notify_screenshot", "alert_notify_video", "alert_notify_system",
-            "smb_server", "smb_share", "smb_username", "smb_password",
-            "smb_base_path", "folder_pattern", "file_pattern",
-            "nvr_base_path", "nvr_smb_subpath", "download_path",
+            "alert_notify_service",
+            "alert_notify_information",
+            "alert_notify_screenshot",
+            "alert_notify_video",
+            "alert_notify_system",
+            "smb_server",
+            "smb_share",
+            "smb_username",
+            "smb_password",
+            "smb_base_path",
+            "folder_pattern",
+            "file_pattern",
+            "nvr_base_path",
+            "nvr_smb_subpath",
+            "download_path",
             # auth actions — not persistent state
-            "force_relogin", "migrate_to_oss_client",
+            "force_relogin",
+            "migrate_to_oss_client",
         }
-        all_section_fields = {
-            f for fields in OPTIONS_SECTIONS.values() for f in fields
-        }
+        all_section_fields = {f for fields in OPTIONS_SECTIONS.values() for f in fields}
         missing_defaults = [
-            f for f in all_section_fields
+            f
+            for f in all_section_fields
             if f not in DEFAULT_OPTIONS and f not in TEXT_ONLY_FIELDS
         ]
         assert not missing_defaults, (
@@ -552,6 +643,7 @@ class TestDefaultOptionsCompleteness:
 
 # ── Schema introspection helper ───────────────────────────────────────────────
 
+
 def _get_section_schema(section_name: str):
     """Render the options form and return the inner voluptuous schema for a section.
 
@@ -560,6 +652,7 @@ def _get_section_schema(section_name: str):
     Returns a callable that validates a partial dict (missing keys get defaults).
     """
     import asyncio
+
     import voluptuous as vol
 
     flow = BoschCameraOptionsFlow(_make_entry())

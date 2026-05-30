@@ -8,3 +8,9 @@ defusedxml>=0.7.1
 types-defusedxml
 firebase-messaging>=0.4.5,<1
 smbprotocol>=1.10.0,<2
+
+# Lint / type / security tooling (frontend-checks + CI)
+ruff==0.15.15
+mypy==2.1.0
+codespell==2.4.2
+pip-audit==2.10.0

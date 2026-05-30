@@ -15,13 +15,12 @@ from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
 
 class TestErrStrHelper:
-
     def test_non_empty_str_passes_through(self) -> None:
         err = ValueError("bad value")
         assert BoschCameraCoordinator._err_str(err) == "bad value"
 
     def test_empty_str_falls_back_to_repr(self) -> None:
-        err = asyncio.TimeoutError()
+        err = TimeoutError()
         # str(TimeoutError()) == ""
         assert str(err) == ""
         out = BoschCameraCoordinator._err_str(err)

@@ -28,10 +28,12 @@ class TestFlattenSectionsBasic:
 
     def test_lifts_nested_keys_to_top_level(self):
         """Section dicts get unpacked: ``{section: {field: v}}`` → ``{field: v}``."""
-        out = _flatten_sections({
-            "polling": {"scan_interval": 60, "interval_status": 300},
-            "features": {"enable_snapshots": True},
-        })
+        out = _flatten_sections(
+            {
+                "polling": {"scan_interval": 60, "interval_status": 300},
+                "features": {"enable_snapshots": True},
+            }
+        )
         assert out == {
             "scan_interval": 60,
             "interval_status": 300,
@@ -62,8 +64,9 @@ class TestFlattenSectionsBasic:
 
     def test_input_dict_not_mutated(self):
         original = {"polling": {"scan_interval": 60}}
-        snapshot = {k: dict(v) if isinstance(v, dict) else v
-                    for k, v in original.items()}
+        snapshot = {
+            k: dict(v) if isinstance(v, dict) else v for k, v in original.items()
+        }
         _flatten_sections(original)
         assert original == snapshot
 
@@ -79,10 +82,12 @@ class TestFlattenSectionsCollisions:
         monkeypatch.setitem(OPTIONS_SECTIONS, "_test_b", ["dupe_field"])
         try:
             with pytest.raises(ValueError, match="duplicate key"):
-                _flatten_sections({
-                    "_test_a": {"dupe_field": 1},
-                    "_test_b": {"dupe_field": 2},
-                })
+                _flatten_sections(
+                    {
+                        "_test_a": {"dupe_field": 1},
+                        "_test_b": {"dupe_field": 2},
+                    }
+                )
         finally:
             OPTIONS_SECTIONS.pop("_test_a", None)
             OPTIONS_SECTIONS.pop("_test_b", None)
@@ -91,10 +96,12 @@ class TestFlattenSectionsCollisions:
         """A legit top-level pass-through key colliding with a flattened
         section field must raise — fail-loud — so the caller fixes it."""
         with pytest.raises(ValueError, match="duplicate key"):
-            _flatten_sections({
-                "polling": {"scan_interval": 60},
-                "scan_interval": 999,  # already lifted from polling
-            })
+            _flatten_sections(
+                {
+                    "polling": {"scan_interval": 60},
+                    "scan_interval": 999,  # already lifted from polling
+                }
+            )
 
 
 class TestOptionsSectionsLayout:
@@ -116,8 +123,13 @@ class TestOptionsSectionsLayout:
         """Hard-coded list — pin so a future refactor can't silently
         drop a section the strings.json relies on."""
         required = {
-            "polling", "features", "stream", "fcm",
-            "events_storage", "nvr", "auth",
+            "polling",
+            "features",
+            "stream",
+            "fcm",
+            "events_storage",
+            "nvr",
+            "auth",
         }
         assert required <= set(OPTIONS_SECTIONS.keys())
 
@@ -131,17 +143,18 @@ class TestOptionsSectionsLayout:
 # ── Options-flow schema rendering — exercise the section schema branch ───────
 
 
-from unittest.mock import MagicMock, AsyncMock
-from types import SimpleNamespace
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.bosch_shc_camera.config_flow import (
     BoschCameraOptionsFlow,
 )
 
 
-def _make_entry(*, options: dict | None = None,
-                bearer_token: str = "") -> SimpleNamespace:
+def _make_entry(
+    *, options: dict | None = None, bearer_token: str = ""
+) -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01TEST",
         data={"bearer_token": bearer_token, "refresh_token": "rt"},
@@ -163,6 +176,7 @@ class TestOptionsStepInitRender:
         def capture(**kw):
             captured.update(kw)
             return {"type": "form", **kw}
+
         flow.async_show_form = capture
 
         result = await flow.async_step_init(user_input=None)
@@ -178,11 +192,14 @@ class TestOptionsStepInitRender:
         """A legacy ``residential_app`` JWT must surface the migrate option."""
         import base64
         import json
+
         # Build a minimal JWT with azp=residential_app
         header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-        body = base64.urlsafe_b64encode(
-            json.dumps({"azp": "residential_app"}).encode()
-        ).rstrip(b"=").decode()
+        body = (
+            base64.urlsafe_b64encode(json.dumps({"azp": "residential_app"}).encode())
+            .rstrip(b"=")
+            .decode()
+        )
         token = f"{header}.{body}.x"
 
         flow = BoschCameraOptionsFlow(_make_entry(bearer_token=token))
@@ -197,13 +214,13 @@ class TestOptionsStepInitSubmit:
     @pytest.mark.asyncio
     async def test_submit_plain_save_creates_entry(self):
         flow = BoschCameraOptionsFlow(_make_entry())
-        flow.async_create_entry = MagicMock(
-            return_value={"type": "create_entry"}
-        )
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
         # Sectioned submit shape — only one section non-empty.
-        result = await flow.async_step_init(user_input={
-            "polling": {"scan_interval": 30},
-        })
+        result = await flow.async_step_init(
+            user_input={
+                "polling": {"scan_interval": 30},
+            }
+        )
         assert result == {"type": "create_entry"}
         flow.async_create_entry.assert_called_once()
         kw = flow.async_create_entry.call_args.kwargs
@@ -216,9 +233,11 @@ class TestOptionsStepInitSubmit:
         flow.async_step_relogin_show = AsyncMock(
             return_value={"type": "form", "step_id": "relogin_show"},
         )
-        result = await flow.async_step_init(user_input={
-            "auth": {"force_relogin": True},
-        })
+        result = await flow.async_step_init(
+            user_input={
+                "auth": {"force_relogin": True},
+            }
+        )
         assert result["step_id"] == "relogin_show"
 
     @pytest.mark.asyncio
@@ -229,11 +248,14 @@ class TestOptionsStepInitSubmit:
         flow.hass.config_entries.async_update_entry = MagicMock()
         flow.hass.async_create_task = MagicMock()
         flow._config_entry.async_start_reauth = MagicMock(return_value=None)
-        flow.async_abort = MagicMock(return_value={"type": "abort",
-                                                    "reason": "migration_started"})
-        result = await flow.async_step_init(user_input={
-            "auth": {"migrate_to_oss_client": True},
-        })
+        flow.async_abort = MagicMock(
+            return_value={"type": "abort", "reason": "migration_started"}
+        )
+        result = await flow.async_step_init(
+            user_input={
+                "auth": {"migrate_to_oss_client": True},
+            }
+        )
         assert result["reason"] == "migration_started"
         flow.hass.async_create_task.assert_called_once()
 
@@ -244,10 +266,12 @@ class TestOptionsStepInitSubmit:
         flow.async_create_entry = MagicMock(
             side_effect=lambda **kw: captured.update(kw) or {"type": "create_entry"},
         )
-        await flow.async_step_init(user_input={
-            "features": {"enable_snapshots": 1, "enable_intercom": 0},
-            "nvr": {"enable_nvr": 1},
-        })
+        await flow.async_step_init(
+            user_input={
+                "features": {"enable_snapshots": 1, "enable_intercom": 0},
+                "nvr": {"enable_nvr": 1},
+            }
+        )
         # ``1``/``0`` get coerced to True/False so downstream code can rely
         # on plain bool checks.
         assert captured["data"]["enable_snapshots"] is True

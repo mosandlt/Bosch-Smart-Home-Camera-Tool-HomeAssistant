@@ -8,6 +8,7 @@ Regression for bug reported by Andreas74 (simon42 forum, 2026-05-07):
 - v11.0.11: async_send_alert returned early when no notify service configured →
   bosch_events/ stayed empty after fresh install
 """
+
 from __future__ import annotations
 
 import re
@@ -23,6 +24,7 @@ SMB_MODULE = "custom_components.bosch_shc_camera.smb"
 
 
 # ── 1. DEFAULT_OPTIONS — all required keys present and sensible ───────────────
+
 
 class TestDefaultOptions:
     """get_options with empty entry.options must return all required defaults."""
@@ -49,32 +51,37 @@ class TestDefaultOptions:
 
         assert opts["alert_notify_service"] == "notify.signal"
         # Other defaults still present
-        assert opts["enable_local_save"] is False   # opt-in toggle, default off
+        assert opts["enable_local_save"] is False  # opt-in toggle, default off
         assert opts["download_path"] == "/config/bosch_events"
         assert opts["enable_fcm_push"] is False
 
     def test_default_enable_local_save_is_false(self):
         """Fresh install: enable_local_save must default to False (opt-in, not auto-enabled)."""
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         assert DEFAULT_OPTIONS.get("enable_local_save") is False
 
     def test_default_download_path_is_set(self):
         """download_path has a default path but is inactive until enable_local_save=True."""
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         assert DEFAULT_OPTIONS.get("download_path") == "/config/bosch_events"
 
     def test_default_fcm_push_disabled(self):
         """Fresh install: FCM push is disabled by default — polling drives events."""
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         assert DEFAULT_OPTIONS.get("enable_fcm_push") is False
 
     def test_default_notify_service_empty(self):
         """Fresh install: no notification service configured by default."""
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         assert DEFAULT_OPTIONS.get("alert_notify_service") == ""
 
 
 # ── 2. async_send_alert — fresh-install defaults produce local save ───────────
+
 
 def _make_fresh_coord(**overrides):
     """Coordinator with default options (empty entry.options merged with defaults)."""
@@ -88,7 +95,7 @@ def _make_fresh_coord(**overrides):
     coord = SimpleNamespace(
         token="tok-fresh",
         hass=hass,
-        options=dict(DEFAULT_OPTIONS),   # fresh install = all defaults
+        options=dict(DEFAULT_OPTIONS),  # fresh install = all defaults
         data={CAM_ID: {"info": {"title": "Aussenkamera"}, "events": []}},
         _last_event_ids={CAM_ID: "fresh-event-001"},
         _download_started_at=time.time() - 10,  # started 10s ago
@@ -126,11 +133,18 @@ class TestFreshInstallAlertSave:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Aussenkamera", "MOVEMENT",
+                            coord,
+                            "Aussenkamera",
+                            "MOVEMENT",
                             "2026-05-07T12:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
@@ -142,7 +156,7 @@ class TestFreshInstallAlertSave:
     async def test_local_save_fires_when_enabled_and_path_configured(self):
         """sync_local_save must be called when user enables the toggle AND sets a path."""
         coord = _make_fresh_coord()
-        coord.options["enable_local_save"] = True   # user opted in
+        coord.options["enable_local_save"] = True  # user opted in
         coord.options["download_path"] = "/config/bosch_events"
         coord.hass.async_add_executor_job = AsyncMock(return_value=None)
 
@@ -153,11 +167,18 @@ class TestFreshInstallAlertSave:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Aussenkamera", "MOVEMENT",
+                            coord,
+                            "Aussenkamera",
+                            "MOVEMENT",
                             "2026-05-07T12:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
@@ -178,25 +199,35 @@ class TestFreshInstallAlertSave:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import async_send_alert
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
                         await async_send_alert(
-                            coord, "Aussenkamera", "MOVEMENT",
+                            coord,
+                            "Aussenkamera",
+                            "MOVEMENT",
                             "2026-05-07T12:00:00.000Z",
-                            "", "", "",
+                            "",
+                            "",
+                            "",
                         )
 
         executor_calls = coord.hass.async_add_executor_job.call_args_list
-        assert not any(c.args[0] is mock_smb for c in executor_calls), \
+        assert not any(c.args[0] is mock_smb for c in executor_calls), (
             "sync_smb_upload must NOT fire when enable_smb_upload=False (default)"
+        )
 
 
 # ── 3. _FILE_RE — both old (no-prefix) and new (with-prefix) filenames match ──
+
 
 class TestFilenameRegex:
     """_FILE_RE must handle both v10.x (no camera prefix) and v11+ (with prefix) filenames."""
 
     def _regex(self):
         from custom_components.bosch_shc_camera.media_source import _FILE_RE
+
         return _FILE_RE
 
     def test_old_format_no_prefix_matches(self):
@@ -209,24 +240,37 @@ class TestFilenameRegex:
 
     def test_new_format_with_prefix_matches(self):
         """v11+ files: Aussenkamera_2026-05-07_12-00-00_MOVEMENT_11111111.jpg"""
-        m = self._regex().match("Aussenkamera_2026-05-07_12-00-00_MOVEMENT_11111111.jpg")
+        m = self._regex().match(
+            "Aussenkamera_2026-05-07_12-00-00_MOVEMENT_11111111.jpg"
+        )
         assert m is not None, "New format (with camera prefix) must match _FILE_RE"
         assert m.group("camera") == "Aussenkamera"
         assert m.group("date") == "2026-05-07"
 
     def test_camera_name_with_spaces_converted_to_underscore(self):
         """Camera name with space is stored as underscore — Aussenkamera_Einfahrt."""
-        m = self._regex().match("Aussenkamera_Einfahrt_2026-05-07_12-00-00_MOVEMENT_ABCD1234.mp4")
+        m = self._regex().match(
+            "Aussenkamera_Einfahrt_2026-05-07_12-00-00_MOVEMENT_ABCD1234.mp4"
+        )
         assert m is not None
         assert m.group("camera") == "Aussenkamera_Einfahrt"
         assert m.group("ext") == "mp4"
 
     def test_non_matching_file_returns_none(self):
-        for name in ["thumbs.db", ".DS_Store", "._hidden", "2026-bad.jpg", "random.txt"]:
-            assert self._regex().match(name) is None, f"{name!r} must not match _FILE_RE"
+        for name in [
+            "thumbs.db",
+            ".DS_Store",
+            "._hidden",
+            "2026-bad.jpg",
+            "random.txt",
+        ]:
+            assert self._regex().match(name) is None, (
+                f"{name!r} must not match _FILE_RE"
+            )
 
 
 # ── 4. sync_local_save — file naming uses camera prefix ──────────────────────
+
 
 class TestLocalSaveFilenaming:
     """Files saved by sync_local_save must include camera prefix in filename."""
@@ -246,7 +290,7 @@ class TestLocalSaveFilenaming:
         ev = {
             "timestamp": "2026-05-07T12:00:00.000Z",
             "eventType": "MOVEMENT",
-            "id": "11111111",            # valid hex ID
+            "id": "11111111",  # valid hex ID
             "imageUrl": "https://api.bosch.com/image.jpg",
             "videoClipUrl": "",
             "videoClipUploadStatus": "",
@@ -258,8 +302,14 @@ class TestLocalSaveFilenaming:
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("custom_components.bosch_shc_camera.smb.urllib.request.urlopen", return_value=mock_resp):
-            with patch("custom_components.bosch_shc_camera.smb._is_safe_bosch_url", return_value=True):
+        with patch(
+            "custom_components.bosch_shc_camera.smb.urllib.request.urlopen",
+            return_value=mock_resp,
+        ):
+            with patch(
+                "custom_components.bosch_shc_camera.smb._is_safe_bosch_url",
+                return_value=True,
+            ):
                 sync_local_save(coord, ev, "tok", cam_name)
 
         cam_dir = tmp_path / cam_safe

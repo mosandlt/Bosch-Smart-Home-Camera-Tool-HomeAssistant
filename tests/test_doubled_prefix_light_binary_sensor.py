@@ -19,7 +19,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -58,9 +57,21 @@ def stub_coord_light():
         },
         _lighting_switch_cache={
             CAM_ID: {
-                "frontLightSettings":  {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "topLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                "bottomLedLightSettings": {"brightness": 0, "color": None, "whiteBalance": -1.0},
+                "frontLightSettings": {
+                    "brightness": 0,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
+                "topLedLightSettings": {
+                    "brightness": 0,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
+                "bottomLedLightSettings": {
+                    "brightness": 0,
+                    "color": None,
+                    "whiteBalance": -1.0,
+                },
             }
         },
         last_update_success=True,
@@ -74,6 +85,7 @@ def stub_entry():
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _no_doubled_prefix(entity) -> bool:
     """Return True when _attr_name is None or does not start with 'Bosch '."""
@@ -91,6 +103,7 @@ def _has_entity_name(entity) -> bool:
 
 # ─── binary_sensor ────────────────────────────────────────────────────────────
 
+
 class TestMotionBinarySensorPrefix:
     """binary_sensor.py:155  BoschMotionBinarySensor"""
 
@@ -98,6 +111,7 @@ class TestMotionBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         entity = BoschMotionBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -107,6 +121,7 @@ class TestMotionBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         entity = BoschMotionBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _has_entity_name(entity)
 
@@ -118,6 +133,7 @@ class TestAudioAlarmBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
+
         entity = BoschAudioAlarmBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -127,6 +143,7 @@ class TestAudioAlarmBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
+
         entity = BoschAudioAlarmBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _has_entity_name(entity)
 
@@ -138,6 +155,7 @@ class TestPersonDetectedBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
+
         entity = BoschPersonDetectedBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -147,17 +165,20 @@ class TestPersonDetectedBinarySensorPrefix:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
+
         entity = BoschPersonDetectedBinarySensor(stub_coord_bs, CAM_ID, stub_entry)
         assert _has_entity_name(entity)
 
 
 # ─── light ────────────────────────────────────────────────────────────────────
 
+
 class TestTopLedLightPrefix:
     """light.py:384  BoschTopLedLight (Oberes Licht)"""
 
     def test_name_no_doubled_prefix(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         entity = BoschTopLedLight(stub_coord_light, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -165,6 +186,7 @@ class TestTopLedLightPrefix:
 
     def test_has_entity_name(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
         entity = BoschTopLedLight(stub_coord_light, CAM_ID, stub_entry)
         assert _has_entity_name(entity)
 
@@ -174,6 +196,7 @@ class TestBottomLedLightPrefix:
 
     def test_name_no_doubled_prefix(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+
         entity = BoschBottomLedLight(stub_coord_light, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -181,6 +204,7 @@ class TestBottomLedLightPrefix:
 
     def test_has_entity_name(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+
         entity = BoschBottomLedLight(stub_coord_light, CAM_ID, stub_entry)
         assert _has_entity_name(entity)
 
@@ -190,6 +214,7 @@ class TestFrontLightPrefix:
 
     def test_name_no_doubled_prefix(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
+
         entity = BoschFrontLight(stub_coord_light, CAM_ID, stub_entry)
         assert _no_doubled_prefix(entity), (
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
@@ -197,5 +222,6 @@ class TestFrontLightPrefix:
 
     def test_has_entity_name(self, stub_coord_light, stub_entry):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
+
         entity = BoschFrontLight(stub_coord_light, CAM_ID, stub_entry)
         assert _has_entity_name(entity)

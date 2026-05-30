@@ -18,25 +18,27 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build fake media_source / history responses
 # ---------------------------------------------------------------------------
+
 
 def _make_browse_result(cam="Terrasse", date="2026-05-08", n_segments=4):
     """Simulate what media_source/browse_media returns for one camera+date."""
     children = []
     for i in range(n_segments):
         hour = i * 2
-        children.append({
-            "media_content_id": f"media-source://bosch_shc_camera/N/{cam}/{date}/{hour:02d}-00.mp4",
-            "media_content_type": "video/mp4",
-            "media_class": "video",
-            "title": f"{hour:02d}-00.mp4",
-            "can_play": True,
-            "can_expand": False,
-            "thumbnail": None,
-        })
+        children.append(
+            {
+                "media_content_id": f"media-source://bosch_shc_camera/N/{cam}/{date}/{hour:02d}-00.mp4",
+                "media_content_type": "video/mp4",
+                "media_class": "video",
+                "title": f"{hour:02d}-00.mp4",
+                "can_play": True,
+                "can_expand": False,
+                "thumbnail": None,
+            }
+        )
     return {
         "media_content_id": f"media-source://bosch_shc_camera/N/{cam}/{date}",
         "media_class": "directory",
@@ -50,12 +52,14 @@ def _make_history_response(entity_id, on_timestamps=None):
     on_ts = on_timestamps or ["2026-05-08T14:23:00+00:00"]
     states = []
     for ts in on_ts:
-        states.append({
-            "entity_id": entity_id,
-            "state": "on",
-            "last_changed": ts,
-            "last_updated": ts,
-        })
+        states.append(
+            {
+                "entity_id": entity_id,
+                "state": "on",
+                "last_changed": ts,
+                "last_updated": ts,
+            }
+        )
     return [states]
 
 
@@ -68,8 +72,8 @@ def _make_resolve_result(url="https://192.0.2.4:8123/api/media_source/..."):
 # Tests: media_source/browse_media data contract
 # ===========================================================================
 
-class TestMediaSourceBrowseContract(unittest.TestCase):
 
+class TestMediaSourceBrowseContract(unittest.TestCase):
     def test_browse_result_has_children(self):
         result = _make_browse_result()
         assert "children" in result
@@ -79,7 +83,9 @@ class TestMediaSourceBrowseContract(unittest.TestCase):
         result = _make_browse_result()
         for child in result["children"]:
             assert "media_content_id" in child
-            assert child["media_content_id"].startswith("media-source://bosch_shc_camera/")
+            assert child["media_content_id"].startswith(
+                "media-source://bosch_shc_camera/"
+            )
 
     def test_browse_children_media_class_is_video(self):
         result = _make_browse_result()
@@ -90,6 +96,7 @@ class TestMediaSourceBrowseContract(unittest.TestCase):
         """Card uses title to derive time offset — must be HH-MM.mp4."""
         result = _make_browse_result()
         import re
+
         for child in result["children"]:
             assert re.match(r"\d{2}-\d{2}\.mp4", child["title"]), (
                 f"title {child['title']!r} does not match HH-MM.mp4 format"
@@ -112,8 +119,8 @@ class TestMediaSourceBrowseContract(unittest.TestCase):
 # Tests: motion history query data contract
 # ===========================================================================
 
-class TestMotionHistoryContract(unittest.TestCase):
 
+class TestMotionHistoryContract(unittest.TestCase):
     def test_history_response_is_list_of_lists(self):
         """hass.callApi returns [[state,...]] — card reads [0]."""
         result = _make_history_response("binary_sensor.terrasse_motion")
@@ -134,6 +141,7 @@ class TestMotionHistoryContract(unittest.TestCase):
     def test_history_timestamp_parseable_as_iso(self):
         """Card calls new Date(s.last_changed) — must be ISO 8601."""
         from datetime import datetime, timezone
+
         result = _make_history_response(
             "binary_sensor.bosch_motion",
             on_timestamps=["2026-05-08T14:23:00+00:00"],
@@ -148,6 +156,7 @@ class TestMotionHistoryContract(unittest.TestCase):
         """Verify fractional-day math the card uses to draw motion ticks."""
         ts = "2026-05-08T12:00:00+00:00"
         from datetime import datetime, timezone
+
         dt = datetime.fromisoformat(ts)
         frac = (dt.hour * 3600 + dt.minute * 60 + dt.second) / 86400
         assert abs(frac - 0.5) < 0.001  # noon = 50%
@@ -158,7 +167,9 @@ class TestMotionHistoryContract(unittest.TestCase):
             "2026-05-08T12:00:00+00:00",
             "2026-05-08T18:00:00+00:00",
         ]
-        result = _make_history_response("binary_sensor.bosch_motion", on_timestamps=timestamps)
+        result = _make_history_response(
+            "binary_sensor.bosch_motion", on_timestamps=timestamps
+        )
         assert len(result[0]) == 3
 
 
@@ -166,8 +177,8 @@ class TestMotionHistoryContract(unittest.TestCase):
 # Tests: media_source/resolve_media data contract
 # ===========================================================================
 
-class TestResolveMediaContract(unittest.TestCase):
 
+class TestResolveMediaContract(unittest.TestCase):
     def test_resolve_result_has_url(self):
         result = _make_resolve_result()
         assert "url" in result
@@ -185,6 +196,7 @@ class TestResolveMediaContract(unittest.TestCase):
 # Tests: NVR media source identifier format
 # ===========================================================================
 
+
 class TestNvrSourceIdFormat(unittest.TestCase):
     """Verify the media_content_id format the card config uses."""
 
@@ -200,6 +212,7 @@ class TestNvrSourceIdFormat(unittest.TestCase):
     def test_source_id_date_replacement(self):
         """Card replaces the trailing date segment to navigate days."""
         import re
+
         source_id = "media-source://bosch_shc_camera/N/11111111/2026-05-08"
         new_date = "2026-05-09"
         result = re.sub(r"\d{4}-\d{2}-\d{2}$", new_date, source_id)
@@ -217,6 +230,7 @@ class TestNvrSourceIdFormat(unittest.TestCase):
     def test_time_offset_derivation_from_title(self):
         """Mirror the JS _segmentTimeOffset logic: parse HH-MM from title."""
         import re
+
         title = "14-35.mp4"
         m = re.match(r"(\d{2})[:\-](\d{2})", title)
         assert m is not None
@@ -225,6 +239,7 @@ class TestNvrSourceIdFormat(unittest.TestCase):
 
     def test_time_offset_midnight(self):
         import re
+
         title = "00-00.mp4"
         m = re.match(r"(\d{2})[:\-](\d{2})", title)
         start_frac = (int(m.group(1)) * 60 + int(m.group(2))) * 60 / 86400
@@ -232,6 +247,7 @@ class TestNvrSourceIdFormat(unittest.TestCase):
 
     def test_time_offset_end_of_day(self):
         import re
+
         title = "23-55.mp4"
         m = re.match(r"(\d{2})[:\-](\d{2})", title)
         start_frac = (int(m.group(1)) * 60 + int(m.group(2))) * 60 / 86400

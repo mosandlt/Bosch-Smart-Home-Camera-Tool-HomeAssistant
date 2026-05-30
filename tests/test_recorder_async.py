@@ -29,7 +29,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -44,7 +43,8 @@ def _make_coord(*, conn_type: str = "LOCAL", base_path: str = "/tmp/nvr_test"):
             }
         },
         _nvr_processes={},
-        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _nvr_user_intent={CAM_ID: True},
         _nvr_recent_crash={},
@@ -88,9 +88,11 @@ def _mock_proc(returncode=None, stderr_data: bytes = b""):
     # Real subprocess sets `returncode` after `wait()` resolves; mirror
     # that so debug-log statements like `%d` % proc.returncode don't trip.
     final_rc = returncode if returncode is not None else 0
+
     async def _wait():
         proc.returncode = final_rc
         return final_rc
+
     proc.wait = _wait
     if stderr_data:
         stderr = MagicMock()
@@ -108,6 +110,7 @@ class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_skipped_when_not_local(self, tmp_path):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(conn_type="REMOTE", base_path=str(tmp_path))
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_recorder(coord, CAM_ID)
@@ -118,6 +121,7 @@ class TestStartRecorder:
     async def test_skipped_when_no_proxy_url(self, tmp_path):
         """rtspsUrl missing or not rtsp:// → skip with warning, no spawn."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord._live_connections[CAM_ID]["rtspsUrl"] = ""
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
@@ -129,6 +133,7 @@ class TestStartRecorder:
         """If only the rtsps:// URL is set (not rewritten through proxy),
         skip — recording over TLS to the camera bypasses our proxy."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord._live_connections[CAM_ID]["rtspsUrl"] = "rtsps://camera.lan/x"
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
@@ -139,10 +144,13 @@ class TestStartRecorder:
     async def test_happy_path_spawns_ffmpeg(self, tmp_path):
         """LOCAL + valid proxy URL → spawn, register process, register watcher."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
+
         async def _spawn(*args, **kwargs):
             return proc
+
         with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
             await recorder.start_recorder(coord, CAM_ID)
         assert coord._nvr_processes[CAM_ID] is proc
@@ -155,12 +163,15 @@ class TestStartRecorder:
         """Calling start_recorder while one is already running must stop
         the old before spawning new — required for cred rotation."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         old_proc = _mock_proc(returncode=None)
         coord._nvr_processes[CAM_ID] = old_proc
         new_proc = _mock_proc(returncode=None)
+
         async def _spawn(*args, **kwargs):
             return new_proc
+
         with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
             await recorder.start_recorder(coord, CAM_ID)
         # Old got SIGTERM
@@ -172,9 +183,11 @@ class TestStartRecorder:
     async def test_ffmpeg_not_found_fails_silently(self, tmp_path):
         """Missing ffmpeg binary must not crash HA — log error + return."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=FileNotFoundError("ffmpeg not on PATH"),
         ):
             await recorder.start_recorder(coord, CAM_ID)
@@ -184,9 +197,11 @@ class TestStartRecorder:
     async def test_oserror_on_spawn_returns(self, tmp_path):
         """Generic OSError (permissions, OOM, fork limit) — log + return."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=OSError("EAGAIN"),
         ):
             await recorder.start_recorder(coord, CAM_ID)
@@ -197,12 +212,14 @@ class TestStartRecorder:
         """If we can't create the segment dir (read-only fs, no perms),
         skip the spawn — ffmpeg would just fail later anyway."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
 
         async def _bad_executor(fn, *args, **kwargs):
             if fn is os.makedirs:
                 raise OSError("EROFS")
             return fn(*args, **kwargs)
+
         coord.hass.async_add_executor_job = _bad_executor
 
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
@@ -217,6 +234,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_no_op_when_not_running(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         # No process registered
         await recorder.stop_recorder(coord, CAM_ID)
@@ -226,6 +244,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_already_exited_quick_return(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc = _mock_proc(returncode=0)  # already exited
         coord._nvr_processes[CAM_ID] = proc
@@ -236,6 +255,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_clean_sigterm_exit(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc = _mock_proc(returncode=None)
         proc.wait = AsyncMock(return_value=0)
@@ -249,22 +269,30 @@ class TestStopRecorder:
     async def test_sigkill_escalation_on_timeout(self):
         """If ffmpeg ignores SIGTERM for 5 s, escalate to SIGKILL."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc = _mock_proc(returncode=None)
 
         # First wait (after SIGTERM): timeout. Second wait (after SIGKILL): success.
-        wait_calls = [asyncio.TimeoutError(), 137]
+        wait_calls = [TimeoutError(), 137]
+
         async def _wait():
             r = wait_calls.pop(0)
             if isinstance(r, BaseException):
                 raise r
             return r
+
         proc.wait = _wait
         coord._nvr_processes[CAM_ID] = proc
 
-        with patch.object(asyncio, "wait_for", side_effect=[
-            asyncio.TimeoutError(), 137,
-        ]):
+        with patch.object(
+            asyncio,
+            "wait_for",
+            side_effect=[
+                TimeoutError(),
+                137,
+            ],
+        ):
             await recorder.stop_recorder(coord, CAM_ID)
         proc.send_signal.assert_called_once_with(signal.SIGTERM)
         proc.kill.assert_called_once()
@@ -274,6 +302,7 @@ class TestStopRecorder:
         """If the process died between our check and SIGTERM (race), the
         ProcessLookupError must be swallowed."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc = _mock_proc(returncode=None)
         proc.send_signal = MagicMock(side_effect=ProcessLookupError())
@@ -289,6 +318,7 @@ class TestStopAll:
     @pytest.mark.asyncio
     async def test_stops_every_running_recorder(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc_a = _mock_proc(returncode=0)
         proc_b = _mock_proc(returncode=0)
@@ -301,6 +331,7 @@ class TestStopAll:
     @pytest.mark.asyncio
     async def test_empty_dict_is_safe(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         coord._nvr_processes.clear()
         await recorder.stop_all(coord)
@@ -315,6 +346,7 @@ class TestWatchRecorder:
         """Process exited cleanly AND was already removed from
         _nvr_processes → no respawn (replacement / clean stop scenario)."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         proc = _mock_proc(returncode=0)
         proc.wait = AsyncMock(return_value=0)
@@ -328,13 +360,16 @@ class TestWatchRecorder:
         """ffmpeg crashed but should_record now False (cam offline / switch
         toggled off / went REMOTE) → don't respawn."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(conn_type="REMOTE")  # gate now closed
         proc = _mock_proc(returncode=1, stderr_data=b"connection refused")
         proc.wait = AsyncMock(return_value=1)
         coord._nvr_processes[CAM_ID] = proc
 
-        with patch.object(recorder, "start_recorder", new=AsyncMock()) as restart, \
-             patch.object(asyncio, "sleep", new=AsyncMock()):
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
         restart.assert_not_called()
 
@@ -343,13 +378,16 @@ class TestWatchRecorder:
         """ffmpeg crashes within respawn window AND gate still open →
         respawn after delay."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()  # LOCAL, online
         proc = _mock_proc(returncode=1, stderr_data=b"transient")
         proc.wait = AsyncMock(return_value=1)
         coord._nvr_processes[CAM_ID] = proc
 
-        with patch.object(recorder, "start_recorder", new=AsyncMock()) as restart, \
-             patch.object(asyncio, "sleep", new=AsyncMock()):
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
         restart.assert_awaited_once_with(coord, CAM_ID)
 
@@ -358,6 +396,7 @@ class TestWatchRecorder:
         """Two crashes inside the respawn window → set error_state, no respawn.
         Defends against an infinite restart loop when the camera is dead."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord()
         # Mark a recent crash
         coord._nvr_recent_crash[CAM_ID] = time.monotonic() - 5  # 5 s ago
@@ -365,8 +404,10 @@ class TestWatchRecorder:
         proc.wait = AsyncMock(return_value=1)
         coord._nvr_processes[CAM_ID] = proc
 
-        with patch.object(recorder, "start_recorder", new=AsyncMock()) as restart, \
-             patch.object(asyncio, "sleep", new=AsyncMock()):
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
         restart.assert_not_called()
         assert "crashed" in coord._nvr_error_state.get(CAM_ID, "").lower()
@@ -380,6 +421,7 @@ class TestNvrCleanup:
         """retention_days <= 0 → skip entirely. Hard rule: never delete
         all files just because user fat-fingered the option."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 0
         # Drop a file that would otherwise be deleted
@@ -396,12 +438,14 @@ class TestNvrCleanup:
 
     def test_missing_base_path_no_op(self):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path="/nonexistent/path/that/does/not/exist")
         # Must not raise
         recorder.sync_nvr_cleanup(coord)
 
     def test_deletes_files_older_than_cutoff(self, tmp_path):
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
         # Camera dir + date dir
@@ -424,6 +468,7 @@ class TestNvrCleanup:
         """After deleting files, empty date folders are removed. Camera
         root + base_path itself must NEVER be removed."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
         cam_dir = tmp_path / "Cam"
@@ -444,6 +489,7 @@ class TestNvrCleanup:
         """Boundary: file with mtime == cutoff must NOT be deleted
         (condition is `<`, not `<=`)."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
 
@@ -461,6 +507,7 @@ class TestNvrCleanup:
         """File that os.stat fails on (race: file disappeared mid-walk) must
         be silently skipped, not crash the cleanup loop."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(base_path=str(tmp_path))
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
@@ -469,6 +516,7 @@ class TestNvrCleanup:
 
         # Patch os.stat to fail for one file
         real_stat = os.stat
+
         def _flaky_stat(path, *args, **kwargs):
             if path.endswith("good.mp4"):
                 raise OSError("file vanished")

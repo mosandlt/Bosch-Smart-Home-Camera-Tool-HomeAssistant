@@ -25,6 +25,7 @@ v10.4.10 fix that keeps Gen2 Outdoor LOCAL streaming alive across the
 ~333 s Bosch session-cred rotation. Regression here means streams fail
 silently after ~5 minutes.
 """
+
 from __future__ import annotations
 
 import logging
@@ -33,7 +34,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 CAM_B = "22222222-2222-2222-2222-222222222222"
@@ -53,43 +53,53 @@ class TestIsSafeBoschUrl:
 
     def test_https_bosch_security_passes(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
-        assert _is_safe_bosch_url(
-            "https://residential.cbs.boschsecurity.com/v11/cameras/abc/snap.jpg"
-        ) is True
+
+        assert (
+            _is_safe_bosch_url(
+                "https://residential.cbs.boschsecurity.com/v11/cameras/abc/snap.jpg"
+            )
+            is True
+        )
 
     def test_https_bosch_com_passes(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
+
         assert _is_safe_bosch_url("https://download.bosch.com/firmware/x.bin") is True
 
     def test_http_rejected(self):
         """HTTPS-only — http:// must be rejected even on a Bosch host."""
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
-        assert _is_safe_bosch_url(
-            "http://residential.cbs.boschsecurity.com/x"
-        ) is False
+
+        assert _is_safe_bosch_url("http://residential.cbs.boschsecurity.com/x") is False
 
     def test_lookalike_domain_rejected(self):
         """`boschsecurity.com.evil.example` must NOT pass — `endswith` is
         guarded by the leading `.` in the allowlist entries."""
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
-        assert _is_safe_bosch_url(
-            "https://attacker-boschsecurity.com.evil.example/leak"
-        ) is False
+
+        assert (
+            _is_safe_bosch_url("https://attacker-boschsecurity.com.evil.example/leak")
+            is False
+        )
 
     def test_internal_ip_rejected(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
+
         assert _is_safe_bosch_url("https://192.168.1.1/admin") is False
 
     def test_localhost_rejected(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
+
         assert _is_safe_bosch_url("https://127.0.0.1:8123/api") is False
 
     def test_empty_url_rejected(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
+
         assert _is_safe_bosch_url("") is False
 
     def test_no_scheme_rejected(self):
         from custom_components.bosch_shc_camera import _is_safe_bosch_url
+
         # urlparse on "boschsecurity.com/path" yields scheme=""
         assert _is_safe_bosch_url("boschsecurity.com/path") is False
 
@@ -109,6 +119,7 @@ class TestRedactCreds:
 
     def test_password_redacted(self):
         from custom_components.bosch_shc_camera import _redact_creds
+
         out = _redact_creds({"user": "cbs-12345", "password": "supersecret"})
         assert out["user"] == "cbs-12345"
         assert out["password"] == "sup***(11 chars)"
@@ -116,18 +127,22 @@ class TestRedactCreds:
     def test_short_password_still_redacted(self):
         """Even a 3-char password gets the redaction treatment."""
         from custom_components.bosch_shc_camera import _redact_creds
+
         out = _redact_creds({"password": "abc"})
         assert out["password"].startswith("abc***")
         assert "(3 chars)" in out["password"]
 
     def test_other_fields_passthrough(self):
         from custom_components.bosch_shc_camera import _redact_creds
-        out = _redact_creds({
-            "user": "cbs-99",
-            "password": "x" * 20,
-            "rtspsUrl": "rtsps://1.2.3.4/x",
-            "_connection_type": "LOCAL",
-        })
+
+        out = _redact_creds(
+            {
+                "user": "cbs-99",
+                "password": "x" * 20,
+                "rtspsUrl": "rtsps://1.2.3.4/x",
+                "_connection_type": "LOCAL",
+            }
+        )
         assert out["user"] == "cbs-99"
         assert out["rtspsUrl"] == "rtsps://1.2.3.4/x"
         assert out["_connection_type"] == "LOCAL"
@@ -136,17 +151,20 @@ class TestRedactCreds:
         """Defensive — if password is None/int/whatever, don't crash with
         a string slice on a non-string."""
         from custom_components.bosch_shc_camera import _redact_creds
+
         out = _redact_creds({"password": None, "x": 1})
         assert out["password"] is None
 
     def test_empty_dict(self):
         from custom_components.bosch_shc_camera import _redact_creds
+
         assert _redact_creds({}) == {}
 
     def test_returns_copy_not_mutation(self):
         """Must return a new dict — caller-side mutations of the input
         dict (live session cache) must not affect the redacted log copy."""
         from custom_components.bosch_shc_camera import _redact_creds
+
         original = {"password": "secret"}
         out = _redact_creds(original)
         out["password"] = "changed"
@@ -165,6 +183,7 @@ class TestGetOptions:
     def test_empty_options_returns_defaults(self):
         from custom_components.bosch_shc_camera import get_options
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         entry = SimpleNamespace(options={})
         out = get_options(entry)
         for k, v in DEFAULT_OPTIONS.items():
@@ -172,6 +191,7 @@ class TestGetOptions:
 
     def test_entry_options_override_defaults(self):
         from custom_components.bosch_shc_camera import get_options
+
         entry = SimpleNamespace(options={"scan_interval": 999})
         out = get_options(entry)
         assert out["scan_interval"] == 999
@@ -182,6 +202,7 @@ class TestGetOptions:
         subsequent call. Must return a copy."""
         from custom_components.bosch_shc_camera import get_options
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+
         entry = SimpleNamespace(options={})
         out = get_options(entry)
         out["scan_interval"] = "MUTATED"
@@ -211,23 +232,30 @@ class TestStreamSupportNoiseFilter:
 
     def test_unrelated_messages_pass_through(self):
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
         rec = self._record("Some other camera error")
         assert f.filter(rec) is True
 
     def test_first_match_passes(self):
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
-        msg = ("Error requesting stream: camera.bosch_terrasse "
-               "does not support play stream service")
+        msg = (
+            "Error requesting stream: camera.bosch_terrasse "
+            "does not support play stream service"
+        )
         rec = self._record(msg)
         assert f.filter(rec) is True
 
     def test_second_match_within_30s_dropped(self):
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
-        msg = ("Error requesting stream: camera.bosch_terrasse "
-               "does not support play stream service")
+        msg = (
+            "Error requesting stream: camera.bosch_terrasse "
+            "does not support play stream service"
+        )
         f.filter(self._record(msg))  # let the first one through
         # Second one within window — must be dropped
         assert f.filter(self._record(msg)) is False
@@ -236,20 +264,28 @@ class TestStreamSupportNoiseFilter:
         """Other camera integrations on the same logger must not be
         affected — their entity_ids don't start with 'bosch_'."""
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
-        msg = ("Error requesting stream: camera.frigate_garden "
-               "does not support play stream service")
+        msg = (
+            "Error requesting stream: camera.frigate_garden "
+            "does not support play stream service"
+        )
         assert f.filter(self._record(msg)) is True
         # Even the second time
         assert f.filter(self._record(msg)) is True
 
     def test_different_entities_tracked_independently(self):
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
-        m1 = ("Error requesting stream: camera.bosch_terrasse "
-              "does not support play stream service")
-        m2 = ("Error requesting stream: camera.bosch_kamera "
-              "does not support play stream service")
+        m1 = (
+            "Error requesting stream: camera.bosch_terrasse "
+            "does not support play stream service"
+        )
+        m2 = (
+            "Error requesting stream: camera.bosch_kamera "
+            "does not support play stream service"
+        )
         # Both first occurrences pass
         assert f.filter(self._record(m1)) is True
         assert f.filter(self._record(m2)) is True
@@ -263,11 +299,14 @@ class TestStreamSupportNoiseFilter:
         the new one. Pin the cap so a future refactor can't silently
         remove the prune (memory leak in long-running HA installs)."""
         from custom_components.bosch_shc_camera import _StreamSupportNoiseFilter
+
         f = _StreamSupportNoiseFilter()
         # Fill past the limit
         for i in range(f._MAX_TRACKED + 5):
-            msg = (f"Error requesting stream: camera.bosch_test_{i:03d} "
-                   "does not support play stream service")
+            msg = (
+                f"Error requesting stream: camera.bosch_test_{i:03d} "
+                "does not support play stream service"
+            )
             f.filter(self._record(msg))
         assert len(f._last_passed) <= f._MAX_TRACKED, (
             f"Filter dict grew past _MAX_TRACKED ({f._MAX_TRACKED}) — "
@@ -277,9 +316,10 @@ class TestStreamSupportNoiseFilter:
     def test_install_idempotent(self):
         """Re-installing the filter must not stack duplicates."""
         from custom_components.bosch_shc_camera import (
-            _StreamSupportNoiseFilter,
             _install_stream_support_noise_filter,
+            _StreamSupportNoiseFilter,
         )
+
         cam_logger = logging.getLogger("homeassistant.components.camera")
         # Clear any prior state
         for f in list(cam_logger.filters):
@@ -289,8 +329,7 @@ class TestStreamSupportNoiseFilter:
         _install_stream_support_noise_filter()
         _install_stream_support_noise_filter()
         count = sum(
-            1 for f in cam_logger.filters
-            if isinstance(f, _StreamSupportNoiseFilter)
+            1 for f in cam_logger.filters if isinstance(f, _StreamSupportNoiseFilter)
         )
         assert count == 1, f"Expected 1 filter, got {count}"
         # Cleanup so other tests don't see this filter
@@ -331,59 +370,75 @@ class TestStreamWorkerErrorListener:
 
     def test_below_error_level_ignored(self):
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         coord = self._coord_with_entity()
         listener = _StreamWorkerErrorListener(coord)
         rec = logging.LogRecord(
             name="homeassistant.components.stream.stream.camera.bosch_terrasse",
             level=logging.WARNING,
-            pathname="x", lineno=1,
-            msg="Error from stream worker", args=None, exc_info=None,
+            pathname="x",
+            lineno=1,
+            msg="Error from stream worker",
+            args=None,
+            exc_info=None,
         )
         listener.emit(rec)
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_unrelated_error_ignored(self):
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         coord = self._coord_with_entity()
         listener = _StreamWorkerErrorListener(coord)
-        listener.emit(self._record(
-            "homeassistant.components.stream.stream.camera.bosch_terrasse",
-            "RecorderBuildError: foo",
-        ))
+        listener.emit(
+            self._record(
+                "homeassistant.components.stream.stream.camera.bosch_terrasse",
+                "RecorderBuildError: foo",
+            )
+        )
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_unrelated_logger_ignored(self):
         """Stream worker errors on other loggers (or with the marker
         substring outside the right place) must not trigger."""
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         coord = self._coord_with_entity()
         listener = _StreamWorkerErrorListener(coord)
-        listener.emit(self._record(
-            "homeassistant.components.camera",  # wrong logger
-            "Error from stream worker for some other camera",
-        ))
+        listener.emit(
+            self._record(
+                "homeassistant.components.camera",  # wrong logger
+                "Error from stream worker for some other camera",
+            )
+        )
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_unknown_entity_ignored(self):
         """Logger hits the marker, but the entity_id doesn't map to any
         of our cam_ids — must skip silently rather than crash."""
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         coord = self._coord_with_entity()
         listener = _StreamWorkerErrorListener(coord)
-        listener.emit(self._record(
-            "homeassistant.components.stream.stream.camera.frigate_garden",
-            "Error from stream worker",
-        ))
+        listener.emit(
+            self._record(
+                "homeassistant.components.stream.stream.camera.frigate_garden",
+                "Error from stream worker",
+            )
+        )
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_match_routes_to_coordinator(self):
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         coord = self._coord_with_entity()
         listener = _StreamWorkerErrorListener(coord)
-        listener.emit(self._record(
-            "homeassistant.components.stream.stream.camera.bosch_terrasse",
-            "Error from stream worker: TimeoutError",
-        ))
+        listener.emit(
+            self._record(
+                "homeassistant.components.stream.stream.camera.bosch_terrasse",
+                "Error from stream worker: TimeoutError",
+            )
+        )
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
         call_args = coord.hass.loop.call_soon_threadsafe.call_args[0]
         # First positional arg is the function, then cam_id, msg.
@@ -397,14 +452,17 @@ class TestStreamWorkerErrorListener:
         the log with a re-entrant feedback loop. The except clause must
         swallow everything."""
         from custom_components.bosch_shc_camera import _StreamWorkerErrorListener
+
         # Coordinator missing _camera_entities — would normally AttributeError.
         broken_coord = SimpleNamespace()  # no _camera_entities, no hass
         listener = _StreamWorkerErrorListener(broken_coord)
         # Must NOT raise
-        listener.emit(self._record(
-            "homeassistant.components.stream.stream.camera.bosch_terrasse",
-            "Error from stream worker",
-        ))
+        listener.emit(
+            self._record(
+                "homeassistant.components.stream.stream.camera.bosch_terrasse",
+                "Error from stream worker",
+            )
+        )
 
 
 # ── is_camera_online / is_session_stale ───────────────────────────────────
@@ -417,11 +475,13 @@ class TestStateChecks:
 
     def test_is_camera_online_true_when_online(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(data={CAM_A: {"status": "ONLINE"}})
         assert BoschCameraCoordinator.is_camera_online(coord, CAM_A) is True
 
     def test_is_camera_online_false_when_offline(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(data={CAM_A: {"status": "OFFLINE"}})
         assert BoschCameraCoordinator.is_camera_online(coord, CAM_A) is False
 
@@ -430,16 +490,19 @@ class TestStateChecks:
         != ONLINE) — better to gate the switch off than to fire commands
         at a possibly-offline cam."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(data={CAM_A: {}})
         assert BoschCameraCoordinator.is_camera_online(coord, CAM_A) is False
 
     def test_is_camera_online_false_when_cam_unknown(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(data={})
         assert BoschCameraCoordinator.is_camera_online(coord, CAM_A) is False
 
     def test_is_session_stale_default_false(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(_session_stale={})
         assert BoschCameraCoordinator.is_session_stale(coord, CAM_A) is False
 
@@ -447,6 +510,7 @@ class TestStateChecks:
         """The flag is set elsewhere by the auto-renew loop; here we
         just pin the read contract."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = SimpleNamespace(_session_stale={CAM_A: True})
         assert BoschCameraCoordinator.is_session_stale(coord, CAM_A) is True
 
@@ -500,10 +564,15 @@ class TestRefreshLocalCredsFromHeartbeat:
         updated. The new URL must point to the same proxy port and carry
         the new creds."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         resp = '{"user": "new-user", "password": "new-pass"}'
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, resp, generation=1, elapsed=30.0,
+            coord,
+            CAM_A,
+            resp,
+            generation=1,
+            elapsed=30.0,
         )
         live = coord._live_connections[CAM_A]
         assert live["_local_user"] == "new-user"
@@ -520,14 +589,18 @@ class TestRefreshLocalCredsFromHeartbeat:
         preserve it. Bosch's session-per-instance limits mean wrong inst
         triggers concurrent-session rejection on Gen1."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         # Override URL with inst=2
         coord._live_connections[CAM_A]["rtspsUrl"] = (
             "rtsp://old:old@127.0.0.1:46767/rtsp_tunnel?inst=2&enableaudio=1"
         )
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         assert "inst=2" in coord._live_connections[CAM_A]["rtspsUrl"]
 
@@ -536,20 +609,29 @@ class TestRefreshLocalCredsFromHeartbeat:
         NOT include `enableaudio=1` — including it pulls audio packets
         and wastes LAN bandwidth."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord(_audio_enabled={CAM_A: False})
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         assert "enableaudio" not in coord._live_connections[CAM_A]["rtspsUrl"]
 
     def test_no_creds_in_response_skips_silently(self):
         """Bosch sometimes returns {} on heartbeat — must be a no-op."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         before = dict(coord._live_connections[CAM_A])
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, "{}", generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            "{}",
+            generation=1,
+            elapsed=10.0,
         )
         assert coord._live_connections[CAM_A] == before
 
@@ -557,10 +639,14 @@ class TestRefreshLocalCredsFromHeartbeat:
         """If the live session was torn down between PUT and parse, the
         cam_id is gone from `_live_connections` — must not crash."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord(_live_connections={})
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         # No exception, no mutation
         assert coord._live_connections == {}
@@ -570,12 +656,16 @@ class TestRefreshLocalCredsFromHeartbeat:
         creds are no longer relevant. Skip rather than overwrite a
         REMOTE session with rebuilt LOCAL URL."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         coord._live_connections[CAM_A]["_connection_type"] = "REMOTE"
         before = dict(coord._live_connections[CAM_A])
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         assert coord._live_connections[CAM_A]["_connection_type"] == "REMOTE"
         # creds untouched
@@ -585,14 +675,17 @@ class TestRefreshLocalCredsFromHeartbeat:
         """If the response carries the same user+password we already
         have, skip — no need to call Stream.update_source for nothing."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         # Stream stub that records calls
         stream = MagicMock()
         coord._camera_entities[CAM_A].stream = stream
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A,
+            coord,
+            CAM_A,
             '{"user": "old-user", "password": "old-pass"}',
-            generation=1, elapsed=10.0,
+            generation=1,
+            elapsed=10.0,
         )
         stream.update_source.assert_not_called()
 
@@ -601,13 +694,16 @@ class TestRefreshLocalCredsFromHeartbeat:
         Stream.update_source must be called with the new URL so HA's
         stream worker rebuilds without a teardown."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         stream = MagicMock()
         coord._camera_entities[CAM_A].stream = stream
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A,
+            coord,
+            CAM_A,
             '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            generation=1,
+            elapsed=10.0,
         )
         stream.update_source.assert_called_once()
         call_url = stream.update_source.call_args[0][0]
@@ -618,15 +714,18 @@ class TestRefreshLocalCredsFromHeartbeat:
         must keep going and update the cache anyway — the next worker
         restart will pick up the cached URL."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         stream = MagicMock()
         stream.update_source.side_effect = RuntimeError("HA stream error")
         coord._camera_entities[CAM_A].stream = stream
         # Must NOT raise
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A,
+            coord,
+            CAM_A,
             '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            generation=1,
+            elapsed=10.0,
         )
         # Cache still updated
         assert coord._local_creds_cache[CAM_A]["user"] == "n"
@@ -635,10 +734,14 @@ class TestRefreshLocalCredsFromHeartbeat:
         """If TLS proxy was stopped between PUT and parse, no port to
         point the URL at — must skip, not crash."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord(_tls_proxy_ports={})
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         # Live conn untouched
         assert coord._live_connections[CAM_A]["_local_user"] == "old-user"
@@ -647,10 +750,15 @@ class TestRefreshLocalCredsFromHeartbeat:
         """The handler is best-effort — bad JSON must not crash the
         heartbeat loop. The reactive 401-rescue path is the safety net."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord()
         # Must NOT raise
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, "not json {{{ bad", generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            "not json {{{ bad",
+            generation=1,
+            elapsed=10.0,
         )
 
     def test_active_recorder_triggers_restart(self):
@@ -659,14 +767,18 @@ class TestRefreshLocalCredsFromHeartbeat:
         the new URL) — the ~1-2 s gap is documented in mini-nvr-concept.
         Pin so a refactor of the NVR teardown can't silently drop this."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord, _ = self._coord(
-            _nvr_processes={CAM_A: object()},   # any non-empty value
+            _nvr_processes={CAM_A: object()},  # any non-empty value
             _nvr_user_intent={CAM_A: True},
         )
         coord._restart_recorder_if_active = MagicMock()
         BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord, CAM_A, '{"user": "n", "password": "p"}',
-            generation=1, elapsed=10.0,
+            coord,
+            CAM_A,
+            '{"user": "n", "password": "p"}',
+            generation=1,
+            elapsed=10.0,
         )
         coord.hass.async_create_task.assert_called_once()
 
@@ -686,14 +798,18 @@ class TestFCMNoiseFilter:
         rec = logging.LogRecord(
             name="firebase_messaging.fcmpushclient",
             level=logging.ERROR,
-            pathname="x", lineno=1,
-            msg=msg, args=None, exc_info=None,
+            pathname="x",
+            lineno=1,
+            msg=msg,
+            args=None,
+            exc_info=None,
         )
         rec.exc_text = exc_text
         return rec
 
     def test_unrelated_message_passes(self):
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         rec = self._record("Connected to FCM")
         assert f.filter(rec) is True
@@ -702,6 +818,7 @@ class TestFCMNoiseFilter:
 
     def test_target_record_first_passes_but_strips_trace(self):
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         rec = self._record("Unexpected exception during read")
         assert f.filter(rec) is True
@@ -711,6 +828,7 @@ class TestFCMNoiseFilter:
 
     def test_second_within_60s_dropped(self):
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
         f = _FCMNoiseFilter()
         f.filter(self._record("Unexpected exception during read"))
         rec2 = self._record("Unexpected exception during read")
@@ -724,6 +842,7 @@ class TestFCMNoiseFilter:
             _FCMNoiseFilter,
             _install_fcm_noise_filter,
         )
+
         fcm_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         # Clear prior state
         for f in list(fcm_logger.filters):
@@ -732,10 +851,7 @@ class TestFCMNoiseFilter:
         _install_fcm_noise_filter()
         _install_fcm_noise_filter()
         _install_fcm_noise_filter()
-        count = sum(
-            1 for f in fcm_logger.filters
-            if isinstance(f, _FCMNoiseFilter)
-        )
+        count = sum(1 for f in fcm_logger.filters if isinstance(f, _FCMNoiseFilter))
         assert count == 1
         # Cleanup
         for f in list(fcm_logger.filters):
@@ -753,6 +869,7 @@ class TestModuleConstants:
         """The SSRF allowlist must stay narrow. Adding e.g.
         `.example.com` here would silently widen the surface."""
         from custom_components.bosch_shc_camera import _SAFE_DOMAINS
+
         assert _SAFE_DOMAINS == frozenset({".boschsecurity.com", ".bosch.com"}), (
             f"_SAFE_DOMAINS changed to {_SAFE_DOMAINS} — only Bosch domains "
             "should be reachable via the resolver."
@@ -762,6 +879,7 @@ class TestModuleConstants:
         """Each entry must start with `.` so `endswith` rejects
         lookalikes like `attacker-bosch.com`."""
         from custom_components.bosch_shc_camera import _SAFE_DOMAINS
+
         for d in _SAFE_DOMAINS:
             assert d.startswith("."), (
                 f"_SAFE_DOMAINS entry {d!r} missing leading '.' — "
@@ -774,10 +892,15 @@ class TestModuleConstants:
         diagnostics + service-call metadata report a coherent version."""
         import json
         from pathlib import Path
+
         from custom_components.bosch_shc_camera import _INTEGRATION_VERSION
+
         manifest = json.loads(
-            (Path(__file__).parent.parent
-             / "custom_components" / "bosch_shc_camera" / "manifest.json"
-             ).read_text()
+            (
+                Path(__file__).parent.parent
+                / "custom_components"
+                / "bosch_shc_camera"
+                / "manifest.json"
+            ).read_text()
         )
         assert _INTEGRATION_VERSION == manifest["version"]

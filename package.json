@@ -1,0 +1,29 @@
+{
+  "name": "bosch-camera-card",
+  "private": true,
+  "description": "Lovelace card bundle for the Bosch Smart Home Camera integration",
+  "scripts": {
+    "build": "node scripts/build-card.mjs",
+    "extract:css": "node scripts/extract-card-css.mjs",
+    "lint:css": "node scripts/extract-card-css.mjs && stylelint build/card-extracted.css",
+    "test:e2e": "playwright test"
+  },
+  "browserslist": [
+    "last 2 Chrome versions",
+    "last 2 Edge versions",
+    "last 2 Firefox versions",
+    "last 2 Safari versions",
+    "last 2 iOS versions"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
+    "browserslist": "^4.24.0",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
+    "stylelint": "^17.12.0",
+    "stylelint-browser-compat": "1.0.0-beta.180",
+    "terser": "^5.46.2",
+    "typescript": "^6.0.3"
+  }
+}

@@ -19,6 +19,7 @@ Root cause:
 Fix: in async_create_stream, if cam_id ∈ _stream_warming, poll-wait until
 warming completes (up to cfg.min_total_wait + 5s grace), then delegate to super.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +27,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "22222222-2222-2222-2222-222222222222"
 
@@ -46,6 +46,7 @@ def _make_coord(**overrides):
 
 def _make_camera(coord):
     from custom_components.bosch_shc_camera.camera import BoschCamera
+
     cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
     cam._cam_id = CAM_ID
@@ -65,13 +66,14 @@ async def test_prewarm_in_progress_waits_for_completion():
     cam = _make_camera(coord)
 
     fake_stream = object()
+
     # Schedule background task to finish pre-warm after 0.3s
     async def _finish_prewarm():
         await asyncio.sleep(0.3)
         coord._live_connections[CAM_ID]["rtspsUrl"] = "rtsp://127.0.0.1:36107/x"
         coord._stream_warming.discard(CAM_ID)
 
-    asyncio.create_task(_finish_prewarm())
+    asyncio.create_task(_finish_prewarm())  # noqa: RUF006  # fire-and-forget in test
 
     with patch(
         "homeassistant.components.camera.Camera.async_create_stream",
@@ -102,8 +104,10 @@ async def test_prewarm_timeout_returns_none():
 
     # Replace sleep with a no-op so the deadline loop exits in microseconds
     # rather than waiting 5 real seconds.
-    with patch("custom_components.bosch_shc_camera.camera.asyncio.sleep",
-               new=AsyncMock(return_value=None)):
+    with patch(
+        "custom_components.bosch_shc_camera.camera.asyncio.sleep",
+        new=AsyncMock(return_value=None),
+    ):
         result = await cam.async_create_stream()
 
     assert result is None

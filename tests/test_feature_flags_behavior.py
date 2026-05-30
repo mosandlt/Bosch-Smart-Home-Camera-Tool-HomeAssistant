@@ -28,7 +28,7 @@ import inspect
 import pytest
 
 from custom_components.bosch_shc_camera.const import ALL_PLATFORMS, DEFAULT_OPTIONS
-
+from tests.source_match import assert_in_source
 
 # ── enable_binary_sensors ─────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ class TestEnableBinarySensors:
         """Reproduce the platform-list logic from async_setup_entry."""
         platforms = [p for p in ALL_PLATFORMS if p != "binary_sensor"]
         if opts.get("enable_binary_sensors", True):
-            platforms = ["binary_sensor"] + platforms
+            platforms = ["binary_sensor", *platforms]
         return platforms
 
     def test_binary_sensor_included_when_enabled(self):
@@ -76,13 +76,13 @@ class TestEnableBinarySensors:
 
     def test_gate_present_in_source(self):
         """Pin the exact source-level guard so a refactor can't silently remove it."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         # async_setup_entry is module-level, not a method — inspect the module source.
         import custom_components.bosch_shc_camera as init_module
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         src = inspect.getsource(init_module)
-        assert 'opts.get("enable_binary_sensors", True)' in src, (
-            "enable_binary_sensors gate missing from __init__.py async_setup_entry — "
-            "disabling the option would have no effect"
+        assert_in_source(  # enable_binary_sensors gate missing from __init__.py async_setup_entry — disabling the option would have no effect
+            src, 'opts.get("enable_binary_sensors", True)'
         )
 
     def test_default_enable_binary_sensors_true(self):
@@ -107,10 +107,10 @@ class TestEnableGo2rtc:
     def test_gate_present_in_source(self):
         """Pin the source-level guard so a refactor can't silently remove it."""
         import custom_components.bosch_shc_camera as init_module
+
         src = inspect.getsource(init_module)
-        assert 'opts.get("enable_go2rtc", True)' in src, (
-            "enable_go2rtc gate missing from __init__.py async_setup_entry — "
-            "disabling go2rtc would have no effect"
+        assert_in_source(  # enable_go2rtc gate missing from __init__.py async_setup_entry — disabling go2rtc would have no effect
+            src, 'opts.get("enable_go2rtc", True)'
         )
 
     def test_default_enable_go2rtc_true(self):
@@ -134,21 +134,26 @@ class TestEnableGo2rtc:
 
         # Replicate the gated block from async_setup_entry
         import asyncio
+
         if opts.get("enable_go2rtc", True):
-            go2rtc_lock = fake_hass.data.setdefault("bosch_shc_camera_go2rtc_init_lock", asyncio.Lock())
+            go2rtc_lock = fake_hass.data.setdefault(
+                "bosch_shc_camera_go2rtc_init_lock", asyncio.Lock()
+            )
             async with go2rtc_lock:
                 go2rtc_entries = fake_hass.config_entries.async_entries("go2rtc")
                 if not go2rtc_entries:
-                    await fake_hass.config_entries.flow.async_init("go2rtc", context={"source": "system"}, data={})
+                    await fake_hass.config_entries.flow.async_init(
+                        "go2rtc", context={"source": "system"}, data={}
+                    )
 
         flow_init.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_go2rtc_init_called_when_enabled_and_no_existing_entry(self):
         """When enable_go2rtc=True and no go2rtc entry exists, init is called."""
+        import asyncio
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
-        import asyncio
 
         flow_init = AsyncMock(return_value={"type": "create_entry"})
         fake_hass = SimpleNamespace(
@@ -161,20 +166,26 @@ class TestEnableGo2rtc:
         opts = {"enable_go2rtc": True}
 
         if opts.get("enable_go2rtc", True):
-            go2rtc_lock = fake_hass.data.setdefault("bosch_shc_camera_go2rtc_init_lock", asyncio.Lock())
+            go2rtc_lock = fake_hass.data.setdefault(
+                "bosch_shc_camera_go2rtc_init_lock", asyncio.Lock()
+            )
             async with go2rtc_lock:
                 go2rtc_entries = fake_hass.config_entries.async_entries("go2rtc")
                 if not go2rtc_entries:
-                    await fake_hass.config_entries.flow.async_init("go2rtc", context={"source": "system"}, data={})
+                    await fake_hass.config_entries.flow.async_init(
+                        "go2rtc", context={"source": "system"}, data={}
+                    )
 
-        flow_init.assert_called_once_with("go2rtc", context={"source": "system"}, data={})
+        flow_init.assert_called_once_with(
+            "go2rtc", context={"source": "system"}, data={}
+        )
 
     @pytest.mark.asyncio
     async def test_go2rtc_init_skipped_when_entry_already_exists(self):
         """When go2rtc entry already active, init must NOT be called (no duplicates)."""
+        import asyncio
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
-        import asyncio
 
         existing_entry = SimpleNamespace(entry_id="existing_go2rtc")
         flow_init = AsyncMock(return_value={"type": "create_entry"})
@@ -188,20 +199,24 @@ class TestEnableGo2rtc:
         opts = {"enable_go2rtc": True}
 
         if opts.get("enable_go2rtc", True):
-            go2rtc_lock = fake_hass.data.setdefault("bosch_shc_camera_go2rtc_init_lock", asyncio.Lock())
+            go2rtc_lock = fake_hass.data.setdefault(
+                "bosch_shc_camera_go2rtc_init_lock", asyncio.Lock()
+            )
             async with go2rtc_lock:
                 go2rtc_entries = fake_hass.config_entries.async_entries("go2rtc")
                 if not go2rtc_entries:
-                    await fake_hass.config_entries.flow.async_init("go2rtc", context={"source": "system"}, data={})
+                    await fake_hass.config_entries.flow.async_init(
+                        "go2rtc", context={"source": "system"}, data={}
+                    )
 
         flow_init.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_go2rtc_lock_prevents_duplicate_parallel_inits(self):
         """Two concurrent callers share the same lock — only one fires async_init."""
+        import asyncio
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
-        import asyncio
 
         call_count = 0
         created_entries: list = []
@@ -216,7 +231,9 @@ class TestEnableGo2rtc:
         fake_hass = SimpleNamespace(
             data={},
             config_entries=SimpleNamespace(
-                async_entries=MagicMock(side_effect=lambda domain: list(created_entries)),
+                async_entries=MagicMock(
+                    side_effect=lambda domain: list(created_entries)
+                ),
                 flow=SimpleNamespace(async_init=fake_init),
             ),
         )
@@ -224,11 +241,15 @@ class TestEnableGo2rtc:
 
         async def _setup():
             if opts.get("enable_go2rtc", True):
-                go2rtc_lock = fake_hass.data.setdefault("bosch_shc_camera_go2rtc_init_lock", asyncio.Lock())
+                go2rtc_lock = fake_hass.data.setdefault(
+                    "bosch_shc_camera_go2rtc_init_lock", asyncio.Lock()
+                )
                 async with go2rtc_lock:
                     go2rtc_entries = fake_hass.config_entries.async_entries("go2rtc")
                     if not go2rtc_entries:
-                        await fake_hass.config_entries.flow.async_init("go2rtc", context={"source": "system"}, data={})
+                        await fake_hass.config_entries.flow.async_init(
+                            "go2rtc", context={"source": "system"}, data={}
+                        )
 
         await asyncio.gather(_setup(), _setup())
         assert call_count == 1, (
@@ -249,9 +270,10 @@ class TestBinarySensorSetupEntry:
 
     def test_setup_entry_creates_entities_when_enabled(self):
         """With a coordinator that has one camera, setup must add entities."""
-        from types import SimpleNamespace
-        from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
         import asyncio
+        from types import SimpleNamespace
+
+        from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
 
         CAM_ID = "TEST-CAM-001"
         coord = SimpleNamespace(
@@ -269,7 +291,9 @@ class TestBinarySensorSetupEntry:
             },
             options={"enable_binary_sensors": True},
         )
-        entry = SimpleNamespace(runtime_data=coord, entry_id="01TEST", data={}, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, entry_id="01TEST", data={}, options={}
+        )
         added: list = []
         asyncio.run(async_setup_entry(None, entry, lambda e, **kw: added.extend(e)))
         assert len(added) >= 2, (
@@ -278,11 +302,13 @@ class TestBinarySensorSetupEntry:
 
     def test_setup_entry_creates_audio_sensor_when_sound_supported(self):
         """Camera with featureSupport.sound=True gets an extra audio alarm sensor."""
-        from types import SimpleNamespace
-        from custom_components.bosch_shc_camera.binary_sensor import (
-            async_setup_entry, BoschAudioAlarmBinarySensor,
-        )
         import asyncio
+        from types import SimpleNamespace
+
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+            async_setup_entry,
+        )
 
         CAM_ID = "TEST-CAM-SOUND"
         coord = SimpleNamespace(
@@ -300,7 +326,9 @@ class TestBinarySensorSetupEntry:
             },
             options={},
         )
-        entry = SimpleNamespace(runtime_data=coord, entry_id="01TEST2", data={}, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, entry_id="01TEST2", data={}, options={}
+        )
         added: list = []
         asyncio.run(async_setup_entry(None, entry, lambda e, **kw: added.extend(e)))
         audio_sensors = [e for e in added if isinstance(e, BoschAudioAlarmBinarySensor)]
@@ -340,14 +368,10 @@ class TestFeatureFlagCoverage:
         Catching the 'someone added a flag but never wrote a test' case.
         """
         from pathlib import Path
+
         tests_dir = Path(__file__).parent
-        all_test_text = "\n".join(
-            f.read_text() for f in tests_dir.glob("test_*.py")
-        )
-        missing = [
-            flag for flag in self.FEATURE_FLAGS
-            if flag not in all_test_text
-        ]
+        all_test_text = "\n".join(f.read_text() for f in tests_dir.glob("test_*.py"))
+        missing = [flag for flag in self.FEATURE_FLAGS if flag not in all_test_text]
         assert not missing, (
             f"Feature flags with NO test coverage at all: {missing}. "
             "Add a behavior test for each."

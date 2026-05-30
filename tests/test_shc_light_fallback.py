@@ -53,11 +53,23 @@ def gen1_coord(stub_coord):
 class TestGen2LocalRcpLightFallback:
     async def test_front_true_writes_brightness_100(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "front", True,
+                stub_coord,
+                CAM_ID,
+                "front",
+                True,
             )
         assert ok is True
         mock_write.assert_awaited_once()
@@ -71,11 +83,23 @@ class TestGen2LocalRcpLightFallback:
 
     async def test_front_false_writes_brightness_0(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "front", False,
+                stub_coord,
+                CAM_ID,
+                "front",
+                False,
             )
         assert ok is True
         assert mock_write.await_args.args[2] == 0
@@ -83,11 +107,23 @@ class TestGen2LocalRcpLightFallback:
 
     async def test_intensity_float_maps_to_percent(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "intensity", 0.5,
+                stub_coord,
+                CAM_ID,
+                "intensity",
+                0.5,
             )
         assert ok is True
         assert mock_write.await_args.args[2] == 50
@@ -95,11 +131,23 @@ class TestGen2LocalRcpLightFallback:
 
     async def test_intensity_int_passes_through(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "intensity", 75,
+                stub_coord,
+                CAM_ID,
+                "intensity",
+                75,
             )
         assert ok is True
         assert mock_write.await_args.args[2] == 75
@@ -107,20 +155,41 @@ class TestGen2LocalRcpLightFallback:
 
     async def test_camera_light_flag_recomputed_after_local_write(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         stub_coord._shc_state_cache[CAM_ID] = {"wallwasher": False}
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             await shc.async_cloud_set_light_component(stub_coord, CAM_ID, "front", True)
         assert stub_coord._shc_state_cache[CAM_ID]["camera_light"] is True
 
     async def test_rcp_failure_returns_false(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=False)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "front", True,
+                stub_coord,
+                CAM_ID,
+                "front",
+                True,
             )
         assert ok is False
         # Cache NOT updated on failure
@@ -130,11 +199,23 @@ class TestGen2LocalRcpLightFallback:
         """Wallwasher write payload is too complex for the unauthenticated
         RCP path — must fall through without touching the camera."""
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock()
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "wallwasher", True,
+                stub_coord,
+                CAM_ID,
+                "wallwasher",
+                True,
             )
         assert ok is False
         mock_write.assert_not_awaited()
@@ -143,34 +224,67 @@ class TestGen2LocalRcpLightFallback:
         """Gen1 cams never enter the LOCAL RCP fallback — auth model is
         different and the writes have not been verified there."""
         from custom_components.bosch_shc_camera import shc
+
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                gen1_coord, CAM_ID, "front", True,
+                gen1_coord,
+                CAM_ID,
+                "front",
+                True,
             )
         assert ok is False
         mock_write.assert_not_awaited()
 
     async def test_no_lan_ip_skips_fallback(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         stub_coord._rcp_lan_ip_cache = {}
         stub_coord._local_creds_cache = {}
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             ok = await shc.async_cloud_set_light_component(
-                stub_coord, CAM_ID, "front", True,
+                stub_coord,
+                CAM_ID,
+                "front",
+                True,
             )
         assert ok is False
         mock_write.assert_not_awaited()
 
     async def test_prefers_local_creds_host_over_rcp_cache(self, stub_coord):
         from custom_components.bosch_shc_camera import shc
+
         stub_coord._local_creds_cache[CAM_ID] = {"host": "10.0.0.5"}
         mock_write = AsyncMock(return_value=True)
-        with patch("custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light", mock_write), \
-             patch("custom_components.bosch_shc_camera.shc.async_get_clientsession", return_value=MagicMock()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                mock_write,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+        ):
             await shc.async_cloud_set_light_component(stub_coord, CAM_ID, "front", True)
         # local_creds.host wins over _rcp_lan_ip_cache
         assert mock_write.await_args.args[1] == "10.0.0.5"

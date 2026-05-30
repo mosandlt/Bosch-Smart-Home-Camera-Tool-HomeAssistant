@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 MODULE = "custom_components.bosch_shc_camera.fcm"
 
@@ -33,24 +32,28 @@ def _resp_cm(status: int, json_data: Any = None) -> Any:
     return cm
 
 
-def _one_event(event_id: str = "new-evt", event_type: str = "MOVEMENT") -> list[dict[str, Any]]:
-    return [{
-        "id": event_id,
-        "eventType": event_type,
-        "eventTags": [],
-        "timestamp": "2026-05-15T10:00:00Z",
-        "imageUrl": "",
-        "videoClipUrl": "",
-        "videoClipUploadStatus": "",
-    }]
+def _one_event(
+    event_id: str = "new-evt", event_type: str = "MOVEMENT"
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": event_id,
+            "eventType": event_type,
+            "eventTags": [],
+            "timestamp": "2026-05-15T10:00:00Z",
+            "imageUrl": "",
+            "videoClipUrl": "",
+            "videoClipUploadStatus": "",
+        }
+    ]
 
 
 def _make_push_coord(**overrides) -> Any:
     hass = MagicMock()
     hass.states.get = MagicMock(return_value=None)
-    hass.async_create_task = MagicMock(return_value=MagicMock(
-        add_done_callback=MagicMock()
-    ))
+    hass.async_create_task = MagicMock(
+        return_value=MagicMock(add_done_callback=MagicMock())
+    )
     hass.bus.async_fire = MagicMock()
     coord = SimpleNamespace(
         token="tok-test",
@@ -84,13 +87,20 @@ class TestPathAExceptionSwallow:
         coord = _make_push_coord(_camera_entities={CAM_ID: cam_entity})
 
         session = MagicMock()
-        session.get = MagicMock(return_value=_resp_cm(
-            200, json_data=_one_event("new-evt", event_type="MOVEMENT"),
-        ))
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200,
+                json_data=_one_event("new-evt", event_type="MOVEMENT"),
+            )
+        )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session), \
-             patch("custom_components.bosch_shc_camera.models.get_model_config",
-                   side_effect=RuntimeError("simulated unknown hw")):
+        with (
+            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.models.get_model_config",
+                side_effect=RuntimeError("simulated unknown hw"),
+            ),
+        ):
             # Must NOT raise — the warn-and-continue arm runs.
             await async_handle_fcm_push(coord)
 
@@ -104,9 +114,12 @@ class TestStopFcmPushCancellation:
         `except Exception` arm above). Pins fcm.py L635-636."""
         import asyncio
         import threading
+
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
 
-        async def _dummy(): return None
+        async def _dummy():
+            return None
+
         coord = SimpleNamespace(
             _fcm_lock=threading.Lock(),
             _fcm_client=MagicMock(
@@ -116,8 +129,9 @@ class TestStopFcmPushCancellation:
             _fcm_running=True,
         )
 
-        with patch("asyncio.wait_for",
-                   new=AsyncMock(side_effect=asyncio.CancelledError)):
+        with patch(
+            "asyncio.wait_for", new=AsyncMock(side_effect=asyncio.CancelledError)
+        ):
             with pytest.raises(asyncio.CancelledError):
                 await async_stop_fcm_push(coord)
 
@@ -130,6 +144,7 @@ class TestPathBExceptionSwallow:
         continues — no propagation, no FCM listener crash.
         Pins fcm.py L1169-1170."""
         import asyncio
+
         from custom_components.bosch_shc_camera.fcm import async_send_alert
 
         cam_b = MagicMock(_cached_image=None, _last_image_fetch=0.0)
@@ -167,14 +182,25 @@ class TestPathBExceptionSwallow:
         # Domain must end with .boschsecurity.com for _is_safe_bosch_url.
         image_url = "https://residential.cbs.boschsecurity.com/img.jpg"
 
-        async def _fast_sleep(_secs): return None
+        async def _fast_sleep(_secs):
+            return None
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session), \
-             patch(f"{MODULE}.save_snapshot",
-                   new=AsyncMock(side_effect=RuntimeError("disk full"))), \
-             patch("asyncio.sleep", new=_fast_sleep):
+        with (
+            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+            patch(
+                f"{MODULE}.save_snapshot",
+                new=AsyncMock(side_effect=RuntimeError("disk full")),
+            ),
+            patch("asyncio.sleep", new=_fast_sleep),
+        ):
             # Must NOT raise — Path B's inner try/except swallows the disk error.
             await async_send_alert(
-                coord, "Terrasse", "MOVEMENT", "2026-05-19T10:00:00Z",
-                image_url, "", "", event_id="ev-1",
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-19T10:00:00Z",
+                image_url,
+                "",
+                "",
+                event_id="ev-1",
             )

@@ -54,8 +54,10 @@ def test_list_preroll_returns_empty_when_dir_missing(tmp_path):
 
 def test_list_preroll_returns_empty_on_listdir_error(monkeypatch, tmp_path):
     """`OSError` from `os.listdir` (e.g. EACCES) is swallowed — return []."""
+
     def _bad_listdir(_p):
         raise OSError("EACCES")
+
     monkeypatch.setattr(recorder.os, "listdir", _bad_listdir)
     result = recorder._list_preroll_segments(str(tmp_path))
     assert result == []

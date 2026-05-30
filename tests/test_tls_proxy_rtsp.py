@@ -20,11 +20,12 @@ Coverage targets:
   - tls_proxy.py lines 261-315 (rtsp_keepalive)
   - tls_proxy.py lines 357-430 (pre_warm_rtsp)
 """
+
 from __future__ import annotations
 
 import asyncio
 import re
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -62,7 +63,7 @@ class FakeRtsp:
         self._server: asyncio.AbstractServer | None = None
         self.requests: list[bytes] = []
 
-    async def __aenter__(self) -> "FakeRtsp":
+    async def __aenter__(self) -> FakeRtsp:
         self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
@@ -91,7 +92,7 @@ class FakeRtsp:
                     return
                 writer.write(resp)
                 await writer.drain()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except Exception:
             pass
@@ -255,8 +256,13 @@ class TestPreWarmRtsp:
 
         async with FakeRtsp(responder) as server:
             ok = await pre_warm_rtsp(
-                server.port, "u", "p", "127.0.0.1",
-                max_attempts=1, retry_wait=0, post_success_wait=0,
+                server.port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=1,
+                retry_wait=0,
+                post_success_wait=0,
             )
             assert ok is True
 
@@ -273,8 +279,13 @@ class TestPreWarmRtsp:
 
         async with FakeRtsp(responder) as server:
             ok = await pre_warm_rtsp(
-                server.port, "u", "p", "127.0.0.1",
-                max_attempts=1, retry_wait=0, post_success_wait=0,
+                server.port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=1,
+                retry_wait=0,
+                post_success_wait=0,
             )
             assert ok is False
 
@@ -296,8 +307,13 @@ class TestPreWarmRtsp:
             # multiple sequential connections — see the multi-connection
             # variant test below. For this one, single-attempt is enough.
             ok = await pre_warm_rtsp(
-                server.port, "u", "p", "127.0.0.1",
-                max_attempts=1, retry_wait=0, post_success_wait=0,
+                server.port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=1,
+                retry_wait=0,
+                post_success_wait=0,
             )
             assert ok is False
             # The fake server saw exactly one request.
@@ -309,8 +325,13 @@ class TestPreWarmRtsp:
         in the except branch (lines 423-430). After `max_attempts` we return
         False. Pinned with retry_wait=0 to keep the test fast."""
         ok = await pre_warm_rtsp(
-            1, "u", "p", "127.0.0.1",
-            max_attempts=3, retry_wait=0, post_success_wait=0,
+            1,
+            "u",
+            "p",
+            "127.0.0.1",
+            max_attempts=3,
+            retry_wait=0,
+            post_success_wait=0,
             describe_timeout=1,
         )
         assert ok is False
@@ -320,13 +341,19 @@ class TestPreWarmRtsp:
         """`max_attempts=N` means at most N tries — pin the loop bound so a
         future refactor can't accidentally turn it into infinite retries."""
         import time
+
         # max_attempts=2, retry_wait=0 → tight upper bound on duration.
         # describe_timeout=1 means each failed attempt takes ~1 s for the
         # asyncio.wait_for to fire. So 2 attempts < ~3 s comfortably.
         start = time.monotonic()
         ok = await pre_warm_rtsp(
-            1, "u", "p", "127.0.0.1",
-            max_attempts=2, retry_wait=0, post_success_wait=0,
+            1,
+            "u",
+            "p",
+            "127.0.0.1",
+            max_attempts=2,
+            retry_wait=0,
+            post_success_wait=0,
             describe_timeout=1,
         )
         elapsed = time.monotonic() - start
@@ -357,8 +384,13 @@ class TestPreWarmRtsp:
 
         async with FakeRtsp(responder) as server:
             await pre_warm_rtsp(
-                server.port, "u", "p", "127.0.0.1",
-                max_attempts=1, retry_wait=0, post_success_wait=0,
+                server.port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=1,
+                retry_wait=0,
+                post_success_wait=0,
             )
             assert captured, "responder never received a request"
             first = captured[0]
@@ -384,8 +416,13 @@ class TestPreWarmRtsp:
         async with FakeRtsp(responder) as server:
             start = time.monotonic()
             ok = await pre_warm_rtsp(
-                server.port, "u", "p", "127.0.0.1",
-                max_attempts=1, retry_wait=0, post_success_wait=1,
+                server.port,
+                "u",
+                "p",
+                "127.0.0.1",
+                max_attempts=1,
+                retry_wait=0,
+                post_success_wait=1,
             )
             elapsed = time.monotonic() - start
             assert ok is True
@@ -424,6 +461,7 @@ class TestRtspHelperContract:
         to 1 (regressing CAMERA_EYES which often needs 3-4 retries on
         cold-start)."""
         import inspect
+
         sig = inspect.signature(pre_warm_rtsp)
         max_attempts_default = sig.parameters["max_attempts"].default
         assert max_attempts_default >= 3, (
@@ -440,6 +478,7 @@ class TestRtspHelperContract:
         annotation is a string at signature inspection time. Compare the
         string form rather than the real `bool` class."""
         import inspect
+
         sig = inspect.signature(rtsp_keepalive)
         assert sig.return_annotation == "bool", (
             f"rtsp_keepalive return annotation is {sig.return_annotation!r} "

@@ -8,7 +8,7 @@ the public RSS fetcher.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -19,7 +19,7 @@ from custom_components.bosch_shc_camera.maintenance import MaintenanceWindow
 
 
 def _mw() -> MaintenanceWindow:
-    ref = datetime(2026, 5, 19, 7, 30, tzinfo=timezone.utc)
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
     return MaintenanceWindow(
         title="Wartung Kamera-Infrastruktur",
         link="https://example/x",
@@ -33,7 +33,8 @@ def _mw() -> MaintenanceWindow:
 
 
 def _make_coord(
-    *, last_fetch: float = float("-inf"),
+    *,
+    last_fetch: float = float("-inf"),
     cooldown: float = 300.0,
     cache: MaintenanceWindow | None = None,
 ) -> SimpleNamespace:
@@ -52,12 +53,22 @@ class TestAsyncRefreshMaintenance:
     async def test_periodic_fetch_updates_cache(self):
         coord = _make_coord()
         new_mw = _mw()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=AsyncMock(return_value=new_mw)), \
-             patch("custom_components.bosch_shc_camera.async_get_clientsession",
-                   return_value=object()):
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=False)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
         assert coord._maintenance_cache is new_mw
         assert coord._maintenance_last_fetch == 1000.0
         coord._async_maybe_announce_maintenance.assert_awaited_once_with(new_mw)
@@ -65,10 +76,18 @@ class TestAsyncRefreshMaintenance:
     async def test_reactive_within_cooldown_is_noop(self):
         coord = _make_coord(last_fetch=950.0, cooldown=300.0)
         fetch_mock = AsyncMock(return_value=_mw())
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=fetch_mock):
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=True)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=fetch_mock,
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=True
+            )
         fetch_mock.assert_not_awaited()
         # Cache untouched, last_fetch untouched (we returned before stamping).
         assert coord._maintenance_cache is None
@@ -77,12 +96,22 @@ class TestAsyncRefreshMaintenance:
     async def test_reactive_outside_cooldown_runs(self):
         coord = _make_coord(last_fetch=500.0, cooldown=300.0)
         new_mw = _mw()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=AsyncMock(return_value=new_mw)), \
-             patch("custom_components.bosch_shc_camera.async_get_clientsession",
-                   return_value=object()):
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=True)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=True
+            )
         assert coord._maintenance_cache is new_mw
 
     async def test_periodic_ignores_cooldown(self):
@@ -90,24 +119,44 @@ class TestAsyncRefreshMaintenance:
         always fetch when scheduled."""
         coord = _make_coord(last_fetch=950.0, cooldown=300.0)
         new_mw = _mw()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=AsyncMock(return_value=new_mw)), \
-             patch("custom_components.bosch_shc_camera.async_get_clientsession",
-                   return_value=object()):
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=False)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
         assert coord._maintenance_cache is new_mw
 
     async def test_fetch_exception_keeps_previous_cache(self):
         previous = _mw()
         coord = _make_coord(cache=previous)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=AsyncMock(side_effect=RuntimeError("network broken"))), \
-             patch("custom_components.bosch_shc_camera.async_get_clientsession",
-                   return_value=object()):
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(side_effect=RuntimeError("network broken")),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
             # Must not raise.
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=False)
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
         # Cache unchanged — sensor stays stable across community-site outage.
         assert coord._maintenance_cache is previous
         coord._async_maybe_announce_maintenance.assert_not_awaited()
@@ -115,11 +164,21 @@ class TestAsyncRefreshMaintenance:
     async def test_fetch_returns_none_keeps_previous_cache(self):
         previous = _mw()
         coord = _make_coord(cache=previous)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
-                   new=AsyncMock(return_value=None)), \
-             patch("custom_components.bosch_shc_camera.async_get_clientsession",
-                   return_value=object()):
-            await BoschCameraCoordinator._async_refresh_maintenance(coord, reactive=False)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
         assert coord._maintenance_cache is previous
         coord._async_maybe_announce_maintenance.assert_not_awaited()

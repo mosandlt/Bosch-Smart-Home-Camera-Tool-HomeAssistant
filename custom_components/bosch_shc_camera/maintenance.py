@@ -26,15 +26,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html import unescape
-from typing import Any, Iterable
-from defusedxml import ElementTree as ET  # XXE-safe drop-in for xml.etree.ElementTree
+from typing import Any
 from xml.etree.ElementTree import Element as _ETElement  # type annotation only
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from defusedxml import ElementTree as ET  # XXE-safe drop-in for xml.etree.ElementTree
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,9 +68,18 @@ _TIME_RANGE_RE = re.compile(
 )
 # Camera-relevant keywords (lower-case match against title + summary).
 _CAMERA_KEYWORDS: tuple[str, ...] = (
-    "kamera", "kameras", "camera", "cameras",
-    "video", "videos", "videostream", "stream",
-    "cbs", "cloud", "backend", "infrastruktur",
+    "kamera",
+    "kameras",
+    "camera",
+    "cameras",
+    "video",
+    "videos",
+    "videostream",
+    "stream",
+    "cbs",
+    "cloud",
+    "backend",
+    "infrastruktur",
 )
 # Items older than this are treated as historical context, never "scheduled".
 _MAX_AGE = timedelta(days=14)
@@ -97,10 +107,14 @@ class MaintenanceWindow:
         - recent: no parseable window but pub_date is within MAX_AGE
         - unknown: no window AND pub_date is old / unparseable
         """
-        moment = now or datetime.now(tz=timezone.utc)
+        moment = now or datetime.now(tz=UTC)
         if self.scheduled_start is not None and self.scheduled_end is not None:
             if moment < self.scheduled_start:
-                return "scheduled" if (self.scheduled_start - moment) <= _MAX_AGE else "unknown"
+                return (
+                    "scheduled"
+                    if (self.scheduled_start - moment) <= _MAX_AGE
+                    else "unknown"
+                )
             if moment > self.scheduled_end:
                 return "past"
             return "active"
@@ -151,7 +165,11 @@ def _parse_window(
     if not range_m:
         return (None, None)
     if date_m:
-        day, mon, year = int(date_m.group(1)), int(date_m.group(2)), int(date_m.group(3))
+        day, mon, year = (
+            int(date_m.group(1)),
+            int(date_m.group(2)),
+            int(date_m.group(3)),
+        )
     else:
         # Fall back to the pub date in Berlin time.
         pub_local = pub_date.astimezone(_BERLIN)
@@ -161,11 +179,13 @@ def _parse_window(
         start = datetime(year, mon, day, h1, m1, tzinfo=_BERLIN)
         end = datetime(year, mon, day, h2, m2, tzinfo=_BERLIN)
     except ValueError:
-        _LOGGER.debug("Maintenance: invalid date/time components in text: %r", text[:160])
+        _LOGGER.debug(
+            "Maintenance: invalid date/time components in text: %r", text[:160]
+        )
         return (None, None)
     if end <= start:
         end += timedelta(days=1)
-    return (start.astimezone(timezone.utc), end.astimezone(timezone.utc))
+    return (start.astimezone(UTC), end.astimezone(UTC))
 
 
 def _parse_pub_date(raw: str) -> datetime:
@@ -179,10 +199,10 @@ def _parse_pub_date(raw: str) -> datetime:
     ):
         try:
             dt = datetime.strptime(raw, fmt)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         except ValueError:
             continue
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _items_from_rss(root: _ETElement) -> Iterable[dict[str, str]]:
@@ -200,7 +220,9 @@ def _items_from_rss(root: _ETElement) -> Iterable[dict[str, str]]:
         link_el = entry.find("a:link", atom_ns)
         link = link_el.attrib.get("href", "") if link_el is not None else ""
         yield {
-            "title": (entry.findtext("a:title", default="", namespaces=atom_ns) or "").strip(),
+            "title": (
+                entry.findtext("a:title", default="", namespaces=atom_ns) or ""
+            ).strip(),
             "link": link,
             "pub": (
                 entry.findtext("a:updated", default="", namespaces=atom_ns)
@@ -208,8 +230,8 @@ def _items_from_rss(root: _ETElement) -> Iterable[dict[str, str]]:
                 or ""
             ).strip(),
             "desc": entry.findtext("a:summary", default="", namespaces=atom_ns)
-                    or entry.findtext("a:content", default="", namespaces=atom_ns)
-                    or "",
+            or entry.findtext("a:content", default="", namespaces=atom_ns)
+            or "",
         }
 
 
@@ -273,7 +295,7 @@ def _parse_html_fallback(body: bytes, source_url: str) -> MaintenanceWindow | No
         re.IGNORECASE,
     )
     summary = _strip_html(desc_m.group(1)) if desc_m else ""
-    pub_date = datetime.now(tz=timezone.utc)
+    pub_date = datetime.now(tz=UTC)
     start, end = _parse_window(f"{title} {summary}", pub_date)
     return MaintenanceWindow(
         title=title,
@@ -318,7 +340,7 @@ async def _fetch_one(
                     _LOGGER.debug("Maintenance HTTP %s for %s", resp.status, url)
                     return None
                 return (resp.status, await resp.read())
-    except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+    except (TimeoutError, aiohttp.ClientError) as exc:
         _LOGGER.debug("Maintenance fetch error for %s: %s", url, exc)
         return None
 

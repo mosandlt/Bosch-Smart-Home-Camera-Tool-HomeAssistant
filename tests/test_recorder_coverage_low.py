@@ -47,13 +47,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_TITLE = "Terrasse"
 
 
 def _make_coord(tmp_path, *, cam_title: str = CAM_TITLE):
     """Stub coordinator with the fields the pre-roll/clip helpers read."""
+
     async def _run_executor(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
@@ -63,12 +63,13 @@ def _make_coord(tmp_path, *, cam_title: str = CAM_TITLE):
             "nvr_preroll_cache_dir": str(tmp_path),
             "nvr_preroll_seconds": 30,
         },
-        _nvr_preroll_processes={}, _nvr_preroll_segment_counts={},
+        _nvr_preroll_processes={},
+        _nvr_preroll_segment_counts={},
         _nvr_preroll_tasks={},
         _bg_tasks=set(),
         # SENTINEL_RULE: monotonic-based "last X" maps default to float('-inf')
         # so any (now - last) >= interval check is True on fresh CI VMs.
-        _nvr_last_preroll_prune={CAM_ID: float('-inf')},
+        _nvr_last_preroll_prune={CAM_ID: float("-inf")},
     )
     coord.hass = SimpleNamespace(
         async_add_executor_job=_run_executor,
@@ -113,8 +114,8 @@ class TestListPrerollSegments:
         invalid-moov error.
         """
         from custom_components.bosch_shc_camera.recorder import (
-            _list_preroll_segments,
             _PREROLL_MIN_SIZE_BYTES,
+            _list_preroll_segments,
         )
 
         cam_dir = tmp_path / "cam"
@@ -148,8 +149,8 @@ class TestPrunePrerollCache:
         /dev/shm cache growing without limit.
         """
         from custom_components.bosch_shc_camera.recorder import (
-            prune_preroll_cache,
             _PREROLL_MIN_SIZE_BYTES,
+            prune_preroll_cache,
         )
 
         cam_dir = tmp_path / "cam"
@@ -175,8 +176,8 @@ class TestPrunePrerollCache:
     def test_under_max_keeps_everything(self, tmp_path):
         """When count ≤ max_segments, no deletes."""
         from custom_components.bosch_shc_camera.recorder import (
-            prune_preroll_cache,
             _PREROLL_MIN_SIZE_BYTES,
+            prune_preroll_cache,
         )
 
         cam_dir = tmp_path / "cam"
@@ -192,8 +193,8 @@ class TestPrunePrerollCache:
         """If unlink raises mid-prune, the loop continues — file might
         have already vanished due to a parallel sweep."""
         from custom_components.bosch_shc_camera.recorder import (
-            prune_preroll_cache,
             _PREROLL_MIN_SIZE_BYTES,
+            prune_preroll_cache,
         )
 
         cam_dir = tmp_path / "cam"
@@ -236,12 +237,14 @@ class TestCreateMotionClip:
         pipeline for other cameras; this entry just returns False.
         """
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         self._seed_preroll(tmp_path)
 
         out_path = str(tmp_path / "clip.mp4")
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=FileNotFoundError("ffmpeg not on PATH"),
         ):
             result = await recorder.create_motion_clip(coord, CAM_ID, out_path)
@@ -256,6 +259,7 @@ class TestCreateMotionClip:
         leak an orphaned ffmpeg trying to read a missing concat file.
         """
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         self._seed_preroll(tmp_path)
 
@@ -267,6 +271,7 @@ class TestCreateMotionClip:
             if callable(fn) and "_write_concat" in getattr(fn, "__qualname__", ""):
                 raise OSError("EROFS")
             return fn(*args, **kwargs)
+
         coord.hass.async_add_executor_job = _bad_executor
 
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
@@ -281,12 +286,14 @@ class TestCreateMotionClip:
         Pin: branch 469-471 — non-FileNotFoundError OSError path covered.
         """
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         self._seed_preroll(tmp_path)
 
         out_path = str(tmp_path / "clip.mp4")
         with patch.object(
-            asyncio, "create_subprocess_exec",
+            asyncio,
+            "create_subprocess_exec",
             side_effect=OSError("EAGAIN"),
         ):
             result = await recorder.create_motion_clip(coord, CAM_ID, out_path)
@@ -302,9 +309,7 @@ class TestCreateMotionClip:
         """
         from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
 
-        argv = create_motion_clip_args(
-            ["/tmp/a.mp4", "/tmp/b.mp4"], "/tmp/out.mp4"
-        )
+        argv = create_motion_clip_args(["/tmp/a.mp4", "/tmp/b.mp4"], "/tmp/out.mp4")
         # Find the -f concat -safe 0 sequence
         assert "-f" in argv
         f_idx = argv.index("-f")
@@ -329,9 +334,11 @@ def _mock_proc(returncode=None):
     proc.send_signal = MagicMock()
     proc.kill = MagicMock()
     final_rc = returncode if returncode is not None else -9
+
     async def _wait():
         proc.returncode = final_rc
         return final_rc
+
     proc.wait = _wait
     return proc
 
@@ -347,16 +354,21 @@ class TestStopPrerollSigkillRace:
         Must be swallowed so stop_preroll_recorder still completes cleanly.
         """
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         proc = _mock_proc(returncode=None)
         proc.kill = MagicMock(side_effect=ProcessLookupError("no such process"))
         coord._nvr_preroll_processes[CAM_ID] = proc
 
         # First wait_for (SIGTERM grace) → TimeoutError; second (post-SIGKILL) → resolves.
-        with patch.object(asyncio, "wait_for", side_effect=[
-            asyncio.TimeoutError(),
-            -9,
-        ]):
+        with patch.object(
+            asyncio,
+            "wait_for",
+            side_effect=[
+                TimeoutError(),
+                -9,
+            ],
+        ):
             # Must not raise
             await recorder.stop_preroll_recorder(coord, CAM_ID)
         proc.send_signal.assert_called_once_with(signal.SIGTERM)
@@ -372,15 +384,20 @@ class TestStopPrerollSigkillRace:
         the integration unload path can finish.
         """
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         proc = _mock_proc(returncode=None)
         coord._nvr_preroll_processes[CAM_ID] = proc
 
         # Both wait_for calls time out — SIGKILL didn't take either.
-        with patch.object(asyncio, "wait_for", side_effect=[
-            asyncio.TimeoutError(),
-            asyncio.TimeoutError(),
-        ]):
+        with patch.object(
+            asyncio,
+            "wait_for",
+            side_effect=[
+                TimeoutError(),
+                TimeoutError(),
+            ],
+        ):
             await recorder.stop_preroll_recorder(coord, CAM_ID)
         proc.send_signal.assert_called_once_with(signal.SIGTERM)
         proc.kill.assert_called_once()
@@ -389,6 +406,7 @@ class TestStopPrerollSigkillRace:
     async def test_no_process_registered_is_no_op(self, tmp_path):
         """Pin idempotency: calling stop on a cam with no live process is safe."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         # No process registered
         await recorder.stop_preroll_recorder(coord, CAM_ID)
@@ -399,6 +417,7 @@ class TestStopPrerollSigkillRace:
     async def test_already_exited_returns_quickly(self, tmp_path):
         """If returncode is already set, send_signal is never called."""
         from custom_components.bosch_shc_camera import recorder
+
         coord = _make_coord(tmp_path)
         proc = _mock_proc(returncode=0)
         coord._nvr_preroll_processes[CAM_ID] = proc

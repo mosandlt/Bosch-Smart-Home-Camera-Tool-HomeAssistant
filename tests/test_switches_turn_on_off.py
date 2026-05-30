@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -71,7 +70,10 @@ def stub_coord():
         async_put_camera=AsyncMock(return_value=True),
         async_request_refresh=AsyncMock(),
         _tear_down_live_stream=AsyncMock(),
-        motion_settings=lambda cid: {"enabled": False, "motionAlarmConfiguration": "MEDIUM"},
+        motion_settings=lambda cid: {
+            "enabled": False,
+            "motionAlarmConfiguration": "MEDIUM",
+        },
         recording_options=lambda cid: {"recordSound": False},
     )
     return coord
@@ -105,6 +107,7 @@ class TestCameraLightSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_calls_cloud_setter_with_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
+
         sw = BoschCameraLightSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -113,6 +116,7 @@ class TestCameraLightSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_setter_with_false(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
+
         sw = BoschCameraLightSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -126,21 +130,27 @@ class TestLightComponentSwitches:
     @pytest.mark.asyncio
     async def test_front_light_on_uses_front_component(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
+
         sw = BoschFrontLightSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
         stub_coord.async_cloud_set_light_component.assert_awaited_once_with(
-            CAM_ID, "front", True,
+            CAM_ID,
+            "front",
+            True,
         )
 
     @pytest.mark.asyncio
     async def test_front_light_off(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
+
         sw = BoschFrontLightSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
         stub_coord.async_cloud_set_light_component.assert_awaited_once_with(
-            CAM_ID, "front", False,
+            CAM_ID,
+            "front",
+            False,
         )
 
     @pytest.mark.asyncio
@@ -148,11 +158,14 @@ class TestLightComponentSwitches:
         """Pin the literal 'wallwasher' string — the cloud handler
         switches on this exact key."""
         from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
+
         sw = BoschWallwasherSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
         stub_coord.async_cloud_set_light_component.assert_awaited_once_with(
-            CAM_ID, "wallwasher", True,
+            CAM_ID,
+            "wallwasher",
+            True,
         )
 
 
@@ -166,6 +179,7 @@ class TestPrivacyModeSwitchActions:
         TLS proxy + encoder init isn't a moment to flip the shutter."""
         stub_coord.is_stream_warming = lambda cid: True
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -179,6 +193,7 @@ class TestPrivacyModeSwitchActions:
         from rapid shutter toggling (red LED / reboot risk)."""
         stub_coord._privacy_set_at[CAM_ID] = time.monotonic() - 5  # 5 s ago
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -191,6 +206,7 @@ class TestPrivacyModeSwitchActions:
         a dead camera (issue #6)."""
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -198,8 +214,11 @@ class TestPrivacyModeSwitchActions:
         stub_coord.async_cloud_set_privacy_mode.assert_awaited_once_with(CAM_ID, True)
 
     @pytest.mark.asyncio
-    async def test_turn_on_no_active_stream_skips_teardown(self, stub_coord, stub_entry):
+    async def test_turn_on_no_active_stream_skips_teardown(
+        self, stub_coord, stub_entry
+    ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -209,6 +228,7 @@ class TestPrivacyModeSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_setter_false(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -222,6 +242,7 @@ class TestNotificationsSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
+
         sw = BoschNotificationsSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -230,6 +251,7 @@ class TestNotificationsSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
+
         sw = BoschNotificationsSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -245,9 +267,11 @@ class TestMotionEnabledSwitchActions:
         """Motion ON via PUT /motion must preserve the existing sensitivity
         — sending only `enabled` resets the level to API default."""
         stub_coord.motion_settings = lambda cid: {
-            "enabled": False, "motionAlarmConfiguration": "SUPER_HIGH",
+            "enabled": False,
+            "motionAlarmConfiguration": "SUPER_HIGH",
         }
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
+
         sw = BoschMotionEnabledSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -260,9 +284,11 @@ class TestMotionEnabledSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off_preserves_sensitivity(self, stub_coord, stub_entry):
         stub_coord.motion_settings = lambda cid: {
-            "enabled": True, "motionAlarmConfiguration": "MEDIUM_LOW",
+            "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM_LOW",
         }
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
+
         sw = BoschMotionEnabledSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -274,6 +300,7 @@ class TestMotionEnabledSwitchActions:
         """If no settings exist yet (first boot), default sensitivity is HIGH."""
         stub_coord.motion_settings = lambda cid: {}
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
+
         sw = BoschMotionEnabledSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -288,6 +315,7 @@ class TestRecordSoundSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_sends_record_sound_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
+
         sw = BoschRecordSoundSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -299,6 +327,7 @@ class TestRecordSoundSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
+
         sw = BoschRecordSoundSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -315,6 +344,7 @@ class TestAutoFollowSwitchActions:
         """Auto-follow API uses the unusual {"result": bool} payload —
         not {"enabled": bool}. Pin so the body schema doesn't drift."""
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
+
         sw = BoschAutoFollowSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
@@ -328,6 +358,7 @@ class TestAutoFollowSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
+
         sw = BoschAutoFollowSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
@@ -345,6 +376,7 @@ class TestAudioSwitchActions:
         Stream-side audio is controlled via the URL `enableaudio=` param at
         the next stream_source() call."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
         stub_coord._audio_enabled[CAM_ID] = False
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
@@ -354,8 +386,35 @@ class TestAudioSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_off_sets_in_memory_flag(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
         stub_coord._audio_enabled[CAM_ID] = True
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_off()
         assert stub_coord._audio_enabled[CAM_ID] is False
+
+    @pytest.mark.asyncio
+    async def test_turn_on_writes_ha_state_immediately(self, stub_coord, stub_entry):
+        """Regression #22: async_turn_on MUST push the new state to HA right
+        away. is_on reads the _audio_enabled dict (not coordinator data), so
+        without async_write_ha_state the toggle stayed visually stale until the
+        next coordinator refresh — which a camera pan happened to trigger,
+        i.e. "can't re-enable audio until I move the camera"."""
+        from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
+        stub_coord._audio_enabled[CAM_ID] = False
+        sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        _bind_hass(sw)
+        await sw.async_turn_on()
+        sw.async_write_ha_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_turn_off_writes_ha_state_immediately(self, stub_coord, stub_entry):
+        """Regression #22 — see test_turn_on_writes_ha_state_immediately."""
+        from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
+        stub_coord._audio_enabled[CAM_ID] = True
+        sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        _bind_hass(sw)
+        await sw.async_turn_off()
+        sw.async_write_ha_state.assert_called()

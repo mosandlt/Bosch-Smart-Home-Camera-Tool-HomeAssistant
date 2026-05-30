@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -80,6 +79,7 @@ class TestOptionConstants:
 
     def test_stream_mode_options_pinned(self):
         from custom_components.bosch_shc_camera.select import STREAM_MODE_OPTIONS
+
         assert STREAM_MODE_OPTIONS == ["auto", "local", "remote"], (
             "Stream-mode option keys are referenced by translations/de.json + "
             "en.json (selector.stream_mode.*) and by the integration's "
@@ -89,11 +89,18 @@ class TestOptionConstants:
 
     def test_motion_sensitivity_options_pinned(self):
         from custom_components.bosch_shc_camera.select import (
-            MOTION_SENSITIVITY_OPTIONS, SENSITIVITY_TO_API,
+            MOTION_SENSITIVITY_OPTIONS,
+            SENSITIVITY_TO_API,
         )
+
         # 6 levels including OFF — Bosch's PUT /motion accepts these UPPER-cased.
         assert MOTION_SENSITIVITY_OPTIONS == [
-            "super_high", "high", "medium_high", "medium_low", "low", "off",
+            "super_high",
+            "high",
+            "medium_high",
+            "medium_low",
+            "low",
+            "off",
         ]
         # Wire format is upper-snake. The mapping must be 1:1 to prevent
         # a typo silently dropping levels (regression seen in v10.4.x).
@@ -102,10 +109,12 @@ class TestOptionConstants:
 
     def test_detection_mode_options_pinned(self):
         from custom_components.bosch_shc_camera.select import DETECTION_MODE_OPTIONS
+
         assert DETECTION_MODE_OPTIONS == ["all_motions", "only_humans", "zones"]
 
     def test_fcm_push_mode_options_pinned(self):
         from custom_components.bosch_shc_camera.select import FCM_PUSH_MODE_OPTIONS
+
         # v12.4.5: simplified to 2 options — OSS Android key handles both platforms.
         # Order matters for the dropdown in the UI.
         assert FCM_PUSH_MODE_OPTIONS == ["auto", "polling"]
@@ -120,6 +129,7 @@ class TestStreamModeSelect:
         wins over the persisted option until the integration reloads.
         Otherwise the next coordinator tick would flip the dropdown back."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         stub_coord._stream_type_override = "local"
         stub_entry.options["stream_connection_type"] = "auto"
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
@@ -128,6 +138,7 @@ class TestStreamModeSelect:
     def test_falls_back_to_persisted_option(self, stub_coord, stub_entry):
         """Without an in-memory override, persisted option wins."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         stub_coord._stream_type_override = None
         stub_entry.options["stream_connection_type"] = "remote"
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
@@ -138,6 +149,7 @@ class TestStreamModeSelect:
         the select entity would refuse to render an out-of-list value.
         Default collapse target is 'local' since v12.4.2 (LOCAL-first)."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         stub_coord._stream_type_override = "made-up-mode"
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "local"
@@ -148,6 +160,7 @@ class TestStreamModeSelect:
         flips immediately. Takes effect on the next stream activation,
         no integration reload required."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("remote")
@@ -164,6 +177,7 @@ class TestFcmPushModeSelect:
         dropdown must show 'unavailable' so the user knows toggling here
         does nothing — the master switch lives in integration options."""
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_coord.options["enable_fcm_push"] = False
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         # Bypass CoordinatorEntity.available chain (it needs hass + last_update)
@@ -178,6 +192,7 @@ class TestFcmPushModeSelect:
 
     def test_available_when_fcm_enabled(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_coord.options["enable_fcm_push"] = True
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.available is True
@@ -187,6 +202,7 @@ class TestFcmPushModeSelect:
         # Pin "polling" — the non-default valid option — to verify persisted
         # entry options are read correctly through the fallback chain.
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_entry.options["fcm_push_mode"] = "polling"
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "polling"
@@ -195,12 +211,14 @@ class TestFcmPushModeSelect:
         """Missing option key → 'auto'. Stable default ensures fresh
         installs land on the cross-platform-safe mode."""
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_entry.options.pop("fcm_push_mode", None)
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
 
     def test_current_option_unknown_collapses(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_entry.options["fcm_push_mode"] = "junk"
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
@@ -215,7 +233,10 @@ class TestMotionSensitivitySelect:
         key list is lower-snake (high). Without lower-casing, the UI shows
         the raw API value as a literal label and the dropdown mismatches."""
         stub_coord.motion_settings = lambda cid: {"motionAlarmConfiguration": "HIGH"}
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "high"
 
@@ -223,7 +244,10 @@ class TestMotionSensitivitySelect:
         """Slow-tier data not yet pulled → None (HA renders 'unknown')
         instead of an arbitrary default that might mismatch the camera."""
         stub_coord.motion_settings = lambda cid: {}
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option is None
 
@@ -233,7 +257,10 @@ class TestMotionSensitivitySelect:
         — the user sees a missing label and we get a bug report instead
         of a silently wrong sensitivity."""
         stub_coord.motion_settings = lambda cid: {"motionAlarmConfiguration": "EXTREME"}
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option is None
 
@@ -242,14 +269,20 @@ class TestMotionSensitivitySelect:
         select rendering with a stale 'auto' that the user might click,
         which would issue a write before the read populated the cache."""
         stub_coord.motion_settings = lambda cid: {}
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.available is False
 
     def test_disabled_by_default_in_registry(self, stub_coord, stub_entry):
         """Hidden by default — too granular for most users; expose only
         when explicitly enabled via Settings → Entities."""
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel._attr_entity_registry_enabled_default is False
 
@@ -260,9 +293,13 @@ class TestMotionSensitivitySelect:
         # Don't trip the gen2 indoor privacy guard
         stub_coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
         stub_coord.motion_settings = lambda cid: {
-            "motionAlarmConfiguration": "MEDIUM_HIGH", "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM_HIGH",
+            "enabled": True,
         }
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("high")
@@ -285,7 +322,10 @@ class TestMotionSensitivitySelect:
         """An option outside the list must not call the API. Defends
         against typos in dashboard service calls (`select.select_option`
         with an arbitrary value)."""
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("bogus_level")
@@ -300,6 +340,7 @@ class TestVideoQualitySelectExtra:
         """get_quality returns the active level — must round-trip if
         in the option list."""
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
         for opt in sel._attr_options:
             stub_coord.get_quality = lambda cid, _o=opt: _o
@@ -325,6 +366,7 @@ class TestStreamModeSelectAutoPinned:
         LOCAL-first-then-REMOTE behaviour.
         """
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+
         stub_coord._stream_type_override = None
         stub_entry.options["stream_connection_type"] = "auto"
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
@@ -349,6 +391,7 @@ class TestFcmPushModeSelectExtraPins:
         explicitly chose this mode must not be silently reverted to 'auto'.
         """
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
         stub_entry.options["fcm_push_mode"] = "polling"
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == "polling", (
@@ -374,13 +417,16 @@ class TestMotionSensitivitySelectAllLevels:
     actual camera setting.
     """
 
-    @pytest.mark.parametrize("api_value,expected_key", [
-        ("SUPER_HIGH",  "super_high"),
-        ("MEDIUM_HIGH", "medium_high"),
-        ("MEDIUM_LOW",  "medium_low"),
-        ("LOW",         "low"),
-        ("OFF",         "off"),
-    ])
+    @pytest.mark.parametrize(
+        "api_value,expected_key",
+        [
+            ("SUPER_HIGH", "super_high"),
+            ("MEDIUM_HIGH", "medium_high"),
+            ("MEDIUM_LOW", "medium_low"),
+            ("LOW", "low"),
+            ("OFF", "off"),
+        ],
+    )
     def test_api_value_maps_to_option_key(
         self, stub_coord, stub_entry, api_value: str, expected_key: str
     ) -> None:
@@ -390,10 +436,11 @@ class TestMotionSensitivitySelectAllLevels:
         exists in MOTION_SENSITIVITY_OPTIONS, so the dropdown renders the
         translated label instead of the raw UPPER-snake API string.
         """
-        stub_coord.motion_settings = lambda cid: {
-            "motionAlarmConfiguration": api_value
-        }
-        from custom_components.bosch_shc_camera.select import BoschMotionSensitivitySelect
+        stub_coord.motion_settings = lambda cid: {"motionAlarmConfiguration": api_value}
+        from custom_components.bosch_shc_camera.select import (
+            BoschMotionSensitivitySelect,
+        )
+
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == expected_key, (
             f"API value '{api_value}' must map to option key '{expected_key}'. "
@@ -415,10 +462,13 @@ class TestDetectionModeSelectPins:
     were identified as unpinned by the test-audit.
     """
 
-    @pytest.mark.parametrize("api_value,expected_key", [
-        ("ALL_MOTIONS", "all_motions"),
-        ("ZONES",       "zones"),
-    ])
+    @pytest.mark.parametrize(
+        "api_value,expected_key",
+        [
+            ("ALL_MOTIONS", "all_motions"),
+            ("ZONES", "zones"),
+        ],
+    )
     def test_detection_mode_api_to_key(
         self, stub_coord, stub_entry, api_value: str, expected_key: str
     ) -> None:
@@ -430,10 +480,9 @@ class TestDetectionModeSelectPins:
         A failure here means the detection-mode dropdown shows 'unknown' despite
         a valid API value being cached, confusing users who check their settings.
         """
-        stub_coord._intrusion_config_cache = {
-            CAM_ID: {"detectionMode": api_value}
-        }
+        stub_coord._intrusion_config_cache = {CAM_ID: {"detectionMode": api_value}}
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+
         sel = BoschDetectionModeSelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option == expected_key, (
             f"API value '{api_value}' must map to option key '{expected_key}'. "

@@ -13,13 +13,14 @@ All tests run without a live HA instance.  Coordinator is a SimpleNamespace stub
 the method is called via the unbound pattern:
     BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time as time_mod
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -41,12 +42,12 @@ def _model_cfg(**overrides):
         max_session_duration=3600,
         generation=2,
         display_name="Eyes Außenkamera II",
-        pre_warm_delay=0,        # zero so tests don't sleep
+        pre_warm_delay=0,  # zero so tests don't sleep
         pre_warm_retries=2,
         pre_warm_retry_wait=1,
         post_warm_buffer=0,
         describe_timeout=5,
-        min_total_wait=0,        # zero so tests don't sleep
+        min_total_wait=0,  # zero so tests don't sleep
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -60,6 +61,7 @@ def _make_coord(**overrides):
     def _create_task(coro, **kwargs):
         """Consume the coroutine so 'never awaited' warnings don't fire."""
         import inspect
+
         if inspect.iscoroutine(coro):
             coro.close()
         return task_mock
@@ -132,11 +134,13 @@ def _make_coord(**overrides):
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
+
     # Wire _replace_renewal_task to use hass.async_create_task
     def _replace_renewal_task(cam_id, coro):
         t = coord.hass.async_create_task(coro)
         coord._renewal_tasks[cam_id] = t
         return t
+
     coord._replace_renewal_task = _replace_renewal_task
     return coord
 
@@ -171,9 +175,16 @@ class TestNoTokenGuard:
         coord = _make_coord(token=None)
 
         session_created = []
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", side_effect=lambda **kw: session_created.append(1) or MagicMock()):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                side_effect=lambda **kw: session_created.append(1) or MagicMock(),
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
         # Session must NOT be created when token is missing
@@ -186,9 +197,13 @@ class TestNoTokenGuard:
 
         coord = _make_coord(token="")
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=MagicMock()):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=MagicMock()),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
 
@@ -218,8 +233,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
@@ -241,8 +258,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
@@ -262,8 +281,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
@@ -286,8 +307,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # First PUT call must be LOCAL
@@ -311,8 +334,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # After aged-out decay the counter must be cleared
@@ -337,8 +362,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # First PUT must be REMOTE (weak WiFi → REMOTE preferred)
@@ -361,8 +388,10 @@ class TestConnectionTypePref:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
@@ -382,7 +411,9 @@ class TestTcpPreCheck:
 
         coord = _make_coord(
             _stream_error_count={},
-            _wifiinfo_cache={CAM_A: {"signalStrength": 80}},  # good WiFi → both candidates
+            _wifiinfo_cache={
+                CAM_A: {"signalStrength": 80}
+            },  # good WiFi → both candidates
             _async_local_tcp_ping=AsyncMock(return_value=False),
             _lan_tcp_reachable={},  # no cache → actual ping
         )
@@ -390,8 +421,10 @@ class TestTcpPreCheck:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # After TCP fail, only REMOTE should be tried
@@ -415,8 +448,10 @@ class TestTcpPreCheck:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # LOCAL should be tried first (TCP ok → LOCAL stays in candidates)
@@ -440,8 +475,10 @@ class TestTcpPreCheck:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         # Ping must NOT be called (cache hit)
@@ -459,12 +496,14 @@ class TestPut200LocalSuccess:
         """PUT 200 LOCAL → result._connection_type='LOCAL', _local_creds_cache populated."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        local_body = json.dumps({
-            "user": "u-local",
-            "password": "p-local",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -480,11 +519,17 @@ class TestPut200LocalSuccess:
         resp = _put_resp(200, local_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert result.get("_connection_type") == "LOCAL"
@@ -501,12 +546,14 @@ class TestPut200LocalSuccess:
         """PUT 200 LOCAL → _start_tls_proxy called with cam host/port."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.0.2.149:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -522,11 +569,17 @@ class TestPut200LocalSuccess:
         resp = _put_resp(200, local_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         coord._start_tls_proxy.assert_awaited_once()
@@ -541,12 +594,14 @@ class TestPut200LocalSuccess:
         """PUT 200 LOCAL → _register_go2rtc_stream called after pre-warm."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         reg_mock = AsyncMock()
         coord = _make_coord(
             _entry=SimpleNamespace(
@@ -564,11 +619,17 @@ class TestPut200LocalSuccess:
         resp = _put_resp(200, local_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         reg_mock.assert_awaited_once()
@@ -580,12 +641,14 @@ class TestPut200LocalSuccess:
         """PUT 200 LOCAL → result['rtspsUrl'] set only after pre-warm, contains proxy port."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        local_body = json.dumps({
-            "user": "u",
-            "password": "p",
-            "urls": ["192.168.1.1:443"],
-            "bufferingTime": 500,
-        })
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -601,11 +664,17 @@ class TestPut200LocalSuccess:
         resp = _put_resp(200, local_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock), \
-             patch("custom_components.bosch_shc_camera.pre_warm_rtsp",
-                   new=AsyncMock(return_value=True)):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert "rtspsUrl" in result
@@ -623,10 +692,12 @@ class TestPut200RemoteSuccess:
         """PUT 200 REMOTE with urls field → rtspsUrl starts with rtsp://127.0.0.1:."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -638,9 +709,13 @@ class TestPut200RemoteSuccess:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert "rtspsUrl" in result
@@ -652,12 +727,14 @@ class TestPut200RemoteSuccess:
         """PUT 200 REMOTE with hash field (no urls) → result['proxyUrl'] contains hash."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "hash": "abc123",
-            "proxyHost": "proxy-01.live.cbs.boschsecurity.com",
-            "proxyPort": 42090,
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "hash": "abc123",
+                "proxyHost": "proxy-01.live.cbs.boschsecurity.com",
+                "proxyPort": 42090,
+                "bufferingTime": 1000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -669,9 +746,13 @@ class TestPut200RemoteSuccess:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert "proxyUrl" in result
@@ -682,10 +763,12 @@ class TestPut200RemoteSuccess:
         """If _start_tls_proxy raises → result['rtspsUrl'] falls back to direct rtsps://."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -697,9 +780,13 @@ class TestPut200RemoteSuccess:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         # Falls back to direct rtsps://
@@ -711,10 +798,12 @@ class TestPut200RemoteSuccess:
         """PUT 200 REMOTE → result['_bufferingTime'] = bufferingTime from body."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 2000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 2000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -726,9 +815,13 @@ class TestPut200RemoteSuccess:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert result.get("_bufferingTime") == 2000
@@ -738,10 +831,12 @@ class TestPut200RemoteSuccess:
         """PUT 200 REMOTE → _live_connections[cam_id] is set."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -753,9 +848,13 @@ class TestPut200RemoteSuccess:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         assert CAM_A in coord._live_connections
@@ -782,9 +881,13 @@ class TestErrorPaths:
         resp = _put_resp(401, "Unauthorized")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
 
@@ -803,9 +906,13 @@ class TestErrorPaths:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
 
@@ -824,17 +931,22 @@ class TestErrorPaths:
         resp = _put_resp(500, "Server Error")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
 
     @pytest.mark.asyncio
     async def test_timeout_error_continues_to_next_candidate(self):
         """asyncio.TimeoutError on PUT → WARNING logged, continues to next candidate."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import aiohttp as _aiohttp
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
             _stream_error_count={},
@@ -845,21 +957,29 @@ class TestErrorPaths:
         )
 
         # First call (LOCAL) → TimeoutError, second call (REMOTE) → 200 success
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         resp_ok = _put_resp(200, remote_body)
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
-        session_mock.put = AsyncMock(side_effect=[
-            asyncio.TimeoutError(),
-            resp_ok,
-        ])
+        session_mock.put = AsyncMock(
+            side_effect=[
+                TimeoutError(),
+                resp_ok,
+            ]
+        )
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         # TimeoutError on LOCAL → fell through to REMOTE → success
         assert result is not None
@@ -867,8 +987,9 @@ class TestErrorPaths:
     @pytest.mark.asyncio
     async def test_client_error_returns_none(self):
         """aiohttp.ClientError → WARNING logged, returns None."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import aiohttp as _aiohttp
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
             _entry=SimpleNamespace(
@@ -879,11 +1000,17 @@ class TestErrorPaths:
 
         session_mock = MagicMock()
         session_mock.close = AsyncMock()
-        session_mock.put = AsyncMock(side_effect=_aiohttp.ClientConnectionError("connection refused"))
+        session_mock.put = AsyncMock(
+            side_effect=_aiohttp.ClientConnectionError("connection refused")
+        )
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
 
@@ -902,8 +1029,10 @@ class TestErrorPaths:
         resp = _put_resp(401, "Unauthorized")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         session_mock.close.assert_awaited_once()
@@ -911,8 +1040,9 @@ class TestErrorPaths:
     @pytest.mark.asyncio
     async def test_session_close_called_on_exception(self):
         """session.close() called even when PUT raises ClientError."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
         import aiohttp as _aiohttp
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
             _entry=SimpleNamespace(
@@ -925,8 +1055,10 @@ class TestErrorPaths:
         session_mock.close = AsyncMock()
         session_mock.put = AsyncMock(side_effect=_aiohttp.ClientConnectionError("fail"))
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         session_mock.close.assert_awaited_once()
@@ -936,10 +1068,12 @@ class TestErrorPaths:
         """session.close() called even when PUT succeeds (REMOTE 200)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        remote_body = json.dumps({
-            "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
-            "bufferingTime": 1000,
-        })
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
         coord = _make_coord(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -951,9 +1085,13 @@ class TestErrorPaths:
         resp = _put_resp(200, remote_body)
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is not None
         session_mock.close.assert_awaited_once()
@@ -976,9 +1114,13 @@ class TestErrorPaths:
         # Return same 500 for all calls
         session_mock.put = AsyncMock(return_value=resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
-            result = await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
 
         assert result is None
         # Both LOCAL and REMOTE must have been tried
@@ -1000,8 +1142,10 @@ class TestErrorPaths:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_headers = session_mock.put.call_args.kwargs["headers"]
@@ -1022,8 +1166,10 @@ class TestErrorPaths:
         resp = _put_resp(404, "not found")
         session_mock = _make_session(resp)
 
-        with patch("aiohttp.TCPConnector", return_value=MagicMock()), \
-             patch("aiohttp.ClientSession", return_value=session_mock):
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
             await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
 
         call_url = session_mock.put.call_args.args[0]

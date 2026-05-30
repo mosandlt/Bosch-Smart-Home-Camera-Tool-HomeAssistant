@@ -10,12 +10,11 @@ plus margin); shorter windows would systematically miss events.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -44,11 +43,11 @@ def stub_entry():
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _ago_iso(seconds: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime(
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).strftime(
         "%Y-%m-%dT%H:%M:%S"
     )
 
@@ -69,6 +68,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is False
 
@@ -79,6 +79,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is True
 
@@ -90,6 +91,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is False
 
@@ -101,6 +103,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is False
 
@@ -116,6 +119,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "evt-123"
@@ -125,6 +129,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.extra_state_attributes == {}
 
@@ -133,6 +138,7 @@ class TestMotionBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
         assert s._attr_entity_registry_enabled_default is False
 
@@ -145,6 +151,7 @@ class TestAudioAlarmBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
+
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is False
 
@@ -155,22 +162,34 @@ class TestAudioAlarmBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
+
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is True
 
     def test_attrs_include_audio_event_metadata(self, stub_coord, stub_entry):
         """extra_state_attributes returns event_id/timestamp/image_url when event present."""
         stub_coord.data[CAM_ID]["events"] = [
-            {"eventType": "AUDIO_ALARM", "id": "aud-99", "timestamp": _now_iso(), "imageUrl": "http://img"},
+            {
+                "eventType": "AUDIO_ALARM",
+                "id": "aud-99",
+                "timestamp": _now_iso(),
+                "imageUrl": "http://img",
+            },
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import BoschAudioAlarmBinarySensor
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+        )
+
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "aud-99"
         assert attrs["image_url"] == "http://img"
 
     def test_attrs_empty_when_no_audio_event(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.binary_sensor import BoschAudioAlarmBinarySensor
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+        )
+
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.extra_state_attributes == {}
 
@@ -181,6 +200,7 @@ class TestAudioAlarmBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
+
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s.is_on is False
 
@@ -193,7 +213,10 @@ class TestPersonDetectedBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
-        s = _patched_hass(BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry))
+
+        s = _patched_hass(
+            BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        )
         assert s.is_on is False
 
     def test_on_with_recent_person_event(self, stub_coord, stub_entry):
@@ -203,30 +226,49 @@ class TestPersonDetectedBinarySensor:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
-        s = _patched_hass(BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry))
+
+        s = _patched_hass(
+            BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        )
         assert s.is_on is True
 
     def test_unique_id_includes_cam_id(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
+
         s = BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
         assert CAM_ID in s._attr_unique_id
 
     def test_attrs_include_person_event_metadata(self, stub_coord, stub_entry):
         """extra_state_attributes returns event_id/timestamp/image_url when PERSON event present."""
         stub_coord.data[CAM_ID]["events"] = [
-            {"eventType": "PERSON", "id": "per-77", "timestamp": _now_iso(), "imageUrl": "http://pic"},
+            {
+                "eventType": "PERSON",
+                "id": "per-77",
+                "timestamp": _now_iso(),
+                "imageUrl": "http://pic",
+            },
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import BoschPersonDetectedBinarySensor
-        s = _patched_hass(BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        s = _patched_hass(
+            BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        )
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "per-77"
         assert attrs["image_url"] == "http://pic"
 
     def test_attrs_empty_when_no_person_event(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.binary_sensor import BoschPersonDetectedBinarySensor
-        s = _patched_hass(BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry))
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        s = _patched_hass(
+            BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        )
         assert s.extra_state_attributes == {}
 
 
@@ -238,6 +280,7 @@ class TestEventWindow:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s._event_within_window({}) is False
         assert s._event_within_window({"timestamp": ""}) is False
@@ -246,6 +289,7 @@ class TestEventWindow:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         assert s._event_within_window({"timestamp": "not-iso8601"}) is False
 
@@ -254,6 +298,7 @@ class TestEventWindow:
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         ts = _now_iso() + ".000Z"
         assert s._event_within_window({"timestamp": ts}) is True
@@ -272,9 +317,11 @@ class TestEventWindow:
         ausgelöst.' — affected every user in DE/EU.
         """
         from unittest.mock import MagicMock
+
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
         fake_hass.config.time_zone = "Europe/Berlin"  # user's HA tz
@@ -286,9 +333,11 @@ class TestEventWindow:
     def test_30s_old_utc_event_in_berlin(self, stub_coord, stub_entry):
         """30s-old event in Berlin TZ must also fire — within 90s window."""
         from unittest.mock import MagicMock
+
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
         fake_hass.config.time_zone = "Europe/Berlin"
@@ -298,8 +347,11 @@ class TestEventWindow:
 
     def test_device_info_structure(self, stub_coord, stub_entry):
         """device_info must include DOMAIN identifier and Bosch manufacturer."""
-        from custom_components.bosch_shc_camera.binary_sensor import BoschMotionBinarySensor
         from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
         s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
         info = s.device_info
         assert info["manufacturer"] == "Bosch"
@@ -313,9 +365,11 @@ class TestEventWindow:
         90s window → False.
         """
         from unittest.mock import MagicMock
+
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
+
         s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
         fake_hass.config.time_zone = "Europe/Berlin"
@@ -332,13 +386,17 @@ class TestSetupEntry:
     async def test_creates_motion_and_person_for_no_sound_cam(self):
         """Camera without sound feature → 2 entities (Motion + PersonDetected)."""
         from custom_components.bosch_shc_camera.binary_sensor import (
-            async_setup_entry, BoschMotionBinarySensor, BoschPersonDetectedBinarySensor,
+            BoschMotionBinarySensor,
+            BoschPersonDetectedBinarySensor,
+            async_setup_entry,
         )
+
         coord = SimpleNamespace(
             data={
                 CAM_ID: {
                     "info": {
-                        "title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor",
+                        "title": "Terrasse",
+                        "hardwareVersion": "HOME_Eyes_Outdoor",
                         "featureSupport": {"sound": False},
                     },
                     "events": [],
@@ -347,15 +405,21 @@ class TestSetupEntry:
         )
         entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         types_ = {type(e) for e in captured}
         assert BoschMotionBinarySensor in types_
         assert BoschPersonDetectedBinarySensor in types_
         # +1 BoschLanReachableBinarySensor (v12.4.10: always-on diagnostic for
         # LAN-fallback paths). Pinning by class set keeps this stable across
         # future additions of unrelated entities.
-        from custom_components.bosch_shc_camera.binary_sensor import BoschLanReachableBinarySensor
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschLanReachableBinarySensor,
+        )
+
         assert BoschLanReachableBinarySensor in types_
         assert len(captured) == 3
 
@@ -363,13 +427,17 @@ class TestSetupEntry:
     async def test_creates_audio_sensor_when_sound_supported(self):
         """Camera with sound feature → 4 entities (Motion + Person + LanReachable + AudioAlarm)."""
         from custom_components.bosch_shc_camera.binary_sensor import (
-            async_setup_entry, BoschAudioAlarmBinarySensor, BoschLanReachableBinarySensor,
+            BoschAudioAlarmBinarySensor,
+            BoschLanReachableBinarySensor,
+            async_setup_entry,
         )
+
         coord = SimpleNamespace(
             data={
                 CAM_ID: {
                     "info": {
-                        "title": "Innen", "hardwareVersion": "CAMERA_360",
+                        "title": "Innen",
+                        "hardwareVersion": "CAMERA_360",
                         "featureSupport": {"sound": True},
                     },
                     "events": [],
@@ -378,8 +446,11 @@ class TestSetupEntry:
         )
         entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         types_ = {type(e) for e in captured}
         assert BoschAudioAlarmBinarySensor in types_
         assert BoschLanReachableBinarySensor in types_
@@ -388,9 +459,13 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_empty_coordinator_yields_no_entities(self):
         from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
+
         coord = SimpleNamespace(data={})
         entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
         captured: list = []
-        await async_setup_entry(hass=None, config_entry=entry,
-                                async_add_entities=lambda e, update_before_add=False: captured.extend(e))
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
         assert captured == []

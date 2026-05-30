@@ -12,7 +12,7 @@ Pins:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -22,7 +22,9 @@ from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.maintenance import MaintenanceWindow
 
 
-def _make_coord(notify_service: str = "thomas", maintenance: MaintenanceWindow | None = None) -> SimpleNamespace:
+def _make_coord(
+    notify_service: str = "thomas", maintenance: MaintenanceWindow | None = None
+) -> SimpleNamespace:
     coord = SimpleNamespace()
     coord.options = {"alert_notify_service": notify_service}
     coord._cloud_outage_started_at = None
@@ -37,7 +39,7 @@ def _make_coord(notify_service: str = "thomas", maintenance: MaintenanceWindow |
 
 
 def _active_maintenance() -> MaintenanceWindow:
-    ref = datetime(2026, 5, 19, 7, 30, tzinfo=timezone.utc)
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
     return MaintenanceWindow(
         title="Wartung Kamera-Infrastruktur",
         link="https://example/x",
@@ -54,14 +56,18 @@ def _active_maintenance() -> MaintenanceWindow:
 class TestCloudStateAnnounce:
     async def test_first_success_is_silent(self):
         coord = _make_coord()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_not_called()
 
     async def test_first_failure_is_silent(self):
         """Single failed tick must never fire — could be a transient blip."""
         coord = _make_coord()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
         assert coord._cloud_outage_started_at == 1000.0
@@ -69,18 +75,26 @@ class TestCloudStateAnnounce:
 
     async def test_failure_under_threshold_stays_silent(self):
         coord = _make_coord()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1030.0):  # +30s
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1030.0
+        ):  # +30s
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
         assert coord._cloud_outage_notified is False
 
     async def test_failure_past_threshold_fires_once(self):
         coord = _make_coord()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1070.0):  # +70s
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1070.0
+        ):  # +70s
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_called_once()
         args = coord.hass.services.async_call.await_args.args
@@ -89,16 +103,22 @@ class TestCloudStateAnnounce:
         assert "nicht erreichbar" in args[2]["title"].lower()
         assert coord._cloud_outage_notified is True
         # Subsequent failed ticks don't re-fire.
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1200.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1200.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         assert coord.hass.services.async_call.await_count == 1
 
     async def test_blip_clears_without_announcing(self):
         """One failed tick followed by a success must not announce anything."""
         coord = _make_coord()
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1010.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1010.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_not_called()
         assert coord._cloud_outage_started_at is None
@@ -108,7 +128,9 @@ class TestCloudStateAnnounce:
         coord = _make_coord()
         coord._cloud_outage_started_at = 1000.0
         coord._cloud_outage_notified = True
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1500.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1500.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_called_once()
         title = coord.hass.services.async_call.await_args.args[2]["title"]
@@ -118,15 +140,25 @@ class TestCloudStateAnnounce:
 
     async def test_active_maintenance_suppresses_outage(self):
         coord = _make_coord(maintenance=_active_maintenance())
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0), \
-             patch("custom_components.bosch_shc_camera.maintenance.datetime") as dt_mock:
-            dt_mock.now.return_value = datetime(2026, 5, 19, 7, 30, tzinfo=timezone.utc)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch("custom_components.bosch_shc_camera.maintenance.datetime") as dt_mock,
+        ):
+            dt_mock.now.return_value = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
             with patch.object(
-                MaintenanceWindow, "state", return_value="active",
+                MaintenanceWindow,
+                "state",
+                return_value="active",
             ):
-                await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+                await BoschCameraCoordinator._async_maybe_announce_cloud_state(
+                    coord, False
+                )
         coord.hass.services.async_call.assert_not_called()
         # Internal state still flipped so a recovery during maintenance does
         # not later re-fire — but no notification was sent.
@@ -145,9 +177,13 @@ class TestCloudStateAnnounce:
 
     async def test_no_service_configured_still_tracks_state(self):
         coord = _make_coord(notify_service="")
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
         # State still tracked so configuring a service mid-outage doesn't
@@ -157,9 +193,13 @@ class TestCloudStateAnnounce:
     async def test_notify_failure_is_swallowed(self):
         coord = _make_coord()
         coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("svc down"))
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
             # Must not raise.
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         # State still flipped so we do not retry-storm.
@@ -167,9 +207,13 @@ class TestCloudStateAnnounce:
 
     async def test_multiple_services_all_called(self):
         coord = _make_coord(notify_service="thomas, signalhome")
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         assert coord.hass.services.async_call.await_count == 2
         services = {c.args[1] for c in coord.hass.services.async_call.await_args_list}
@@ -183,9 +227,13 @@ class TestCloudStateAnnounce:
         splits any `notify.<name>` form so the call lands as
         `domain="notify"`, `service="<name>"`."""
         coord = _make_coord(notify_service="notify.thomas")
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
-        with patch("custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0):
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_called_once()
         args = coord.hass.services.async_call.await_args.args

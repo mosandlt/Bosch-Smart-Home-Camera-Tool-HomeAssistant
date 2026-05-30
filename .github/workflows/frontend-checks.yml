@@ -1,0 +1,73 @@
+name: Frontend checks
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "www/**"
+      - "scripts/**"
+      - "test/e2e/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".stylelintrc.json"
+      - "playwright.config.mjs"
+      - ".github/workflows/frontend-checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "www/**"
+      - "scripts/**"
+      - "test/e2e/**"
+      - "package.json"
+      - ".stylelintrc.json"
+      - "playwright.config.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  css-compat:
+    name: CSS browser-compat (static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint:css
+
+  card-smoke:
+    name: Card smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright test
+
+  js-lint-types:
+    name: ESLint + tsc (card JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: ESLint
+        run: npx eslint src/ scripts/ test/
+      - name: tsc --checkJs (advisory)
+        run: npx tsc -p jsconfig.json
+        continue-on-error: true

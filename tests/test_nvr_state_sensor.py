@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -30,8 +29,16 @@ def _make_coord(
     title: str = "Terrasse",
 ):
     return SimpleNamespace(
-        data={CAM_ID: {"info": {"title": title, "hardwareVersion": "HOME_Eyes_Outdoor",
-                                  "firmwareVersion": "9.40.25", "macAddress": ""}}},
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": title,
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "",
+                }
+            }
+        },
         _nvr_drain_state=drain_state or {},
         _nvr_processes=nvr_processes or {},
         _nvr_preroll_processes={},
@@ -39,7 +46,10 @@ def _make_coord(
         _nvr_preroll_segment_counts=preroll_counts or {},
         _nvr_user_intent=user_intent or {},
         _nvr_error_state=error_state or {},
-        options={"nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache", "nvr_preroll_seconds": 0},
+        options={
+            "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
+            "nvr_preroll_seconds": 0,
+        },
     )
 
 
@@ -53,6 +63,7 @@ def _make_entry():
 class TestNvrStateSensorState:
     def test_idle_when_no_process(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.native_value == "idle"
 
@@ -61,21 +72,27 @@ class TestNvrStateSensorState:
         between switch-tick and stop. Still ``idle`` so the dashboard
         doesn't lie."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(
                 nvr_processes={CAM_ID: object()},
                 user_intent={CAM_ID: False},
-            ), CAM_ID, _make_entry(),
+            ),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.native_value == "idle"
 
     def test_recording_when_process_and_user_intent(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(
                 nvr_processes={CAM_ID: object()},
                 user_intent={CAM_ID: True},
-            ), CAM_ID, _make_entry(),
+            ),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.native_value == "recording"
 
@@ -83,12 +100,15 @@ class TestNvrStateSensorState:
         """If the crash-loop guard tripped, ``error`` overrides everything
         else — including a running process — so the user notices."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(
                 nvr_processes={CAM_ID: object()},
                 user_intent={CAM_ID: True},
                 error_state={CAM_ID: "ffmpeg crashed twice"},
-            ), CAM_ID, _make_entry(),
+            ),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.native_value == "error"
 
@@ -99,22 +119,27 @@ class TestNvrStateSensorState:
 class TestNvrStateSensorAttributes:
     def test_target_attribute(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(drain_state={"target": "smb"}),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.extra_state_attributes["target"] == "smb"
 
     def test_target_default_local_when_state_empty(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.extra_state_attributes["target"] == "local"
 
     def test_pending_and_failed_counts(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(drain_state={"pending": 4, "failed": 2}),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         attrs = s.extra_state_attributes
         assert attrs["pending_uploads"] == 4
@@ -124,33 +149,40 @@ class TestNvrStateSensorAttributes:
         """``_nvr_drain_state.last_age_by_cam`` is keyed by sanitized
         camera title so the per-camera lookup must use the same _safe_name."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(
                 title="Terrasse",
                 drain_state={"last_age_by_cam": {"Terrasse": 42.5}},
             ),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.extra_state_attributes["last_segment_age_s"] == 42.5
 
     def test_last_segment_age_none_when_unknown(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.extra_state_attributes["last_segment_age_s"] is None
 
     def test_user_intent_exposed(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(user_intent={CAM_ID: True}),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.extra_state_attributes["user_intent"] is True
 
     def test_error_attribute_exposed(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(
             _make_coord(error_state={CAM_ID: "ffmpeg crashed twice"}),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.extra_state_attributes["error"] == "ffmpeg crashed twice"
 
@@ -158,15 +190,18 @@ class TestNvrStateSensorAttributes:
         """A camera title with ``/`` or ``..`` must be _safe_name'd before
         looking up the per-camera age — same key the watcher writes."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         # `_safe_name("../../etc")` collapses to `_______etc` (one component).
         from custom_components.bosch_shc_camera.smb import _safe_name
+
         sanitized = _safe_name("../../etc")
         s = BoschNvrStateSensor(
             _make_coord(
                 title="../../etc",
                 drain_state={"last_age_by_cam": {sanitized: 99.0}},
             ),
-            CAM_ID, _make_entry(),
+            CAM_ID,
+            _make_entry(),
         )
         assert s.extra_state_attributes["last_segment_age_s"] == 99.0
 
@@ -197,7 +232,8 @@ class TestNvrStateSensorAttributes:
         try:
             s = BoschNvrStateSensor(
                 _make_coord(preroll_counts={CAM_ID: 5}),
-                CAM_ID, _make_entry(),
+                CAM_ID,
+                _make_entry(),
             )
             attrs = s.extra_state_attributes
             assert attrs["preroll_segments"] == 5
@@ -209,6 +245,7 @@ class TestNvrStateSensorAttributes:
         """If the watcher never ran (NVR off), the count attr defaults to 0
         — never raises AttributeError on an unseen cam_id."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.extra_state_attributes["preroll_segments"] == 0
 
@@ -219,16 +256,19 @@ class TestNvrStateSensorAttributes:
 class TestNvrStateSensorMetadata:
     def test_unique_id_pinned(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.unique_id == f"bosch_shc_nvr_state_{CAM_ID.lower()}"
 
     def test_translation_key(self):
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.translation_key == "nvr_state"
 
     def test_disabled_by_default(self):
         """Diagnostic sensor — opt-in only, never adds noise on first run."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
+
         s = BoschNvrStateSensor(_make_coord(), CAM_ID, _make_entry())
         assert s.entity_registry_enabled_default is False

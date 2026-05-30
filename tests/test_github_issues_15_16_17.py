@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 _REPO = Path(__file__).parent.parent
 _CARD_SRC = _REPO / "src" / "bosch-camera-card.js"
 _CARD_BUNDLE = (
@@ -104,9 +103,10 @@ class TestGH16_FullscreenToggle:
         inner #img-wrapper, so the detector must consult
         shadowRoot.fullscreenElement / `=== this` instead (GH#16 root cause)."""
         assert "_isNativeFullscreen()" in card_src, "_isNativeFullscreen helper missing"
-        assert "sr.fullscreenElement" in card_src or "shadowRoot.fullscreenElement" in card_src, (
-            "must read shadowRoot.fullscreenElement (retargeting fix)"
-        )
+        assert (
+            "sr.fullscreenElement" in card_src
+            or "shadowRoot.fullscreenElement" in card_src
+        ), "must read shadowRoot.fullscreenElement (retargeting fix)"
         assert "docFs === this" in card_src, (
             "must treat host (=== this) as fullscreen (retargeting fix)"
         )
@@ -185,7 +185,9 @@ class TestCardFeatureParity:
         "name",
         ["apple_style", "compact", "minimal", "show_title", "show_last_event"],
     )
-    def test_overview_editor_exposes_design_options(self, card_src: str, name: str) -> None:
+    def test_overview_editor_exposes_design_options(
+        self, card_src: str, name: str
+    ) -> None:
         """The overview editor must expose the same design/hide checkboxes the
         single-card editor has."""
         idx = card_src.find("class BoschCameraOverviewCardEditor")
@@ -207,9 +209,10 @@ class TestControlStackVisibility:
 
     def test_overflow_open_default_expression(self, card_src: str) -> None:
         """Non-minimal, non-compact apple-style cards start expanded (⋮ open)."""
-        assert "this._config.apple_style && !this._config.minimal && !this._config.compact" in card_src, (
-            "overflow-open default must be apple_style && !minimal && !compact"
-        )
+        assert (
+            "this._config.apple_style && !this._config.minimal && !this._config.compact"
+            in card_src
+        ), "overflow-open default must be apple_style && !minimal && !compact"
 
     def test_more_button_state_synced(self, card_src: str) -> None:
         """The ⋮ button must reflect the open state from first paint."""
@@ -285,7 +288,7 @@ class TestOsChecks:
 
     @pytest.mark.parametrize("os_name", ["windows", "macos", "ios", "android", "linux"])
     def test_os_host_classes_present(self, card_src: str, os_name: str) -> None:
-        assert f'"os-" + c' in card_src, "OS host class must be applied"
+        assert '"os-" + c' in card_src, "OS host class must be applied"
         assert f'"{os_name}"' in card_src, f"OS detection must cover {os_name}"
 
     def test_os_detection_uses_ua_not_deprecated_platform(self, card_src: str) -> None:

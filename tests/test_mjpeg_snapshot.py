@@ -20,17 +20,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16 + b"\xff\xd9"  # minimal valid-looking JPEG
+FAKE_JPEG = (
+    b"\xff\xd8\xff\xe0" + b"\x00" * 16 + b"\xff\xd9"
+)  # minimal valid-looking JPEG
 CAM_HOST = "10.0.0.149"
 CAM_PORT = 443
 USER = "cbs-ABCDEF12"
 PASS = "supersecret"
 
 
-def _mock_proc(returncode: int = 0, stdout: bytes = FAKE_JPEG, stderr: bytes = b"") -> MagicMock:
+def _mock_proc(
+    returncode: int = 0, stdout: bytes = FAKE_JPEG, stderr: bytes = b""
+) -> MagicMock:
     """Build a mock asyncio subprocess with communicate() returning (stdout, stderr)."""
     proc = MagicMock()
     proc.returncode = returncode
@@ -41,16 +44,17 @@ def _mock_proc(returncode: int = 0, stdout: bytes = FAKE_JPEG, stderr: bytes = b
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
-class TestFetchMjpegSnapshot:
 
+class TestFetchMjpegSnapshot:
     @pytest.mark.asyncio
     async def test_success_returns_jpeg_bytes(self):
         """Happy path: FFmpeg exits 0, stdout is a JPEG → bytes returned."""
         proc = _mock_proc(returncode=0, stdout=FAKE_JPEG)
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result == FAKE_JPEG
 
@@ -59,12 +63,18 @@ class TestFetchMjpegSnapshot:
         """Subprocess hangs past timeout → None, proc.kill() called."""
         proc = _mock_proc()
         # Make communicate() hang by raising TimeoutError at wait_for level
-        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ), patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
-            result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001)
+        proc.communicate = AsyncMock(side_effect=TimeoutError())
+        with (
+            patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
+        ):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            result = await fetch_mjpeg_snapshot(
+                CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001
+            )
         assert result is None
         proc.kill.assert_called_once()
 
@@ -74,11 +84,17 @@ class TestFetchMjpegSnapshot:
         kill() raises ProcessLookupError → swallowed, None still returned (line 144)."""
         proc = _mock_proc()
         proc.kill = MagicMock(side_effect=ProcessLookupError("already gone"))
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ), patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
-            result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001)
+        with (
+            patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
+        ):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            result = await fetch_mjpeg_snapshot(
+                CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001
+            )
         assert result is None
         proc.kill.assert_called_once()
 
@@ -86,10 +102,11 @@ class TestFetchMjpegSnapshot:
     async def test_nonzero_returncode_returns_none(self):
         """FFmpeg exits with code != 0 → None + warning logged."""
         proc = _mock_proc(returncode=1, stdout=b"", stderr=b"some error")
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
 
@@ -97,10 +114,11 @@ class TestFetchMjpegSnapshot:
     async def test_empty_stdout_returns_none(self):
         """FFmpeg exits 0 but stdout is empty → None + warning logged."""
         proc = _mock_proc(returncode=0, stdout=b"")
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
 
@@ -109,10 +127,11 @@ class TestFetchMjpegSnapshot:
         """Output does not start with JPEG magic (0xFF 0xD8) → None + warning."""
         not_jpeg = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100  # PNG bytes
         proc = _mock_proc(returncode=0, stdout=not_jpeg)
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
 
@@ -120,7 +139,10 @@ class TestFetchMjpegSnapshot:
     async def test_empty_host_returns_none_without_subprocess(self):
         """Missing cam_host → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot("", CAM_PORT, USER, PASS)
         assert result is None
         mock_exec.assert_not_called()
@@ -129,7 +151,10 @@ class TestFetchMjpegSnapshot:
     async def test_empty_user_returns_none_without_subprocess(self):
         """Missing user → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, "", PASS)
         assert result is None
         mock_exec.assert_not_called()
@@ -138,7 +163,10 @@ class TestFetchMjpegSnapshot:
     async def test_empty_password_returns_none_without_subprocess(self):
         """Missing password → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, "")
         assert result is None
         mock_exec.assert_not_called()
@@ -150,7 +178,10 @@ class TestFetchMjpegSnapshot:
             "asyncio.create_subprocess_exec",
             new=AsyncMock(side_effect=FileNotFoundError("ffmpeg not found")),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
 
@@ -161,7 +192,10 @@ class TestFetchMjpegSnapshot:
             "asyncio.create_subprocess_exec",
             new=AsyncMock(side_effect=OSError("spawn failed")),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
 
@@ -176,7 +210,10 @@ class TestFetchMjpegSnapshot:
             return proc
 
         with patch("asyncio.create_subprocess_exec", new=fake_exec):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
 
         # The RTSP URL argument must contain inst=3 and the camera host.
@@ -199,10 +236,14 @@ class TestFetchMjpegSnapshot:
             recorded_timeout.append(timeout)
             return await original_wait_for(coro, timeout=10)  # type: ignore[arg-type]
 
-        with patch(
-            "asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)
-        ), patch("asyncio.wait_for", new=fake_wait_for):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import fetch_mjpeg_snapshot
+        with (
+            patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+            patch("asyncio.wait_for", new=fake_wait_for),
+        ):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
             await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS, timeout=3.5)
 
         assert recorded_timeout and recorded_timeout[0] == 3.5

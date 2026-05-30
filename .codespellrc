@@ -1,0 +1,6 @@
+[codespell]
+# The integration has German comments/strings + intentional English variants
+# (re-use, browseable, pre-emptive). Skip generated/minified/translation files
+# and allow-list the German words + valid variants so codespell only flags real typos.
+skip = ./.git,*.json,*.min.js,www,build,node_modules,package-lock.json,htmlcov,.venv,.venv-tests,captures,credentials,test-results,playwright-report,*.lock,*.svg
+ignore-words-list = hass,als,browseable,checkin,explizit,hav,ist,lokal,lokales,oder,passt,pre-emptive,pre-emptively,re-use,re-uses,sie,tage,ue,unparseable,uptodate,nd,fo,iif,vor,wenn,doesnt,parms,alle,unter,titel,segmente,beginn,ende,wenns,statt,manuell,attribut,februar,cros

@@ -23,7 +23,6 @@ from custom_components.bosch_shc_camera.const import (
     DEFAULT_OPTIONS,
 )
 
-
 CAM_PAN = "22222222-AAAA-BBBB-CCCC-000000000001"  # CAMERA_360, has pan
 CAM_NOPAN = "11111111-AAAA-BBBB-CCCC-000000000001"  # Gen2 outdoor, no pan
 
@@ -101,7 +100,9 @@ async def test_pan_select_created_when_toggle_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pan_select_NOT_created_on_non_pan_camera_even_when_toggle_enabled() -> None:
+async def test_pan_select_NOT_created_on_non_pan_camera_even_when_toggle_enabled() -> (
+    None
+):
     """panLimit = 0 + toggle on → still no entity (gate is panLimit AND toggle)."""
     from custom_components.bosch_shc_camera.select import async_setup_entry
 

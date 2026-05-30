@@ -22,6 +22,7 @@ Targets:
 Pattern: identical to test_services_round1.py — mock hass, extract closures
 via _get_handlers(), patch async_get_clientsession, assert HomeAssistantError.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -193,9 +194,11 @@ class TestCancelCoordinatorTasksExceptions:
         handle.cancel.side_effect = RuntimeError("already cancelled")
         coord = _make_cancel_coord(_token_refresh_handle=handle)
 
-        with patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()), \
-             patch(f"{MODULE}.stop_all_proxies"), \
-             patch("asyncio.gather", AsyncMock(return_value=[])):
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
             # Must NOT propagate the RuntimeError
             await _async_cancel_coordinator_tasks(coord)
 
@@ -212,9 +215,11 @@ class TestCancelCoordinatorTasksExceptions:
         handle.cancel.side_effect = AttributeError("no cancel method")
         coord = _make_cancel_coord(_token_refresh_handle=handle)
 
-        with patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()), \
-             patch(f"{MODULE}.stop_all_proxies"), \
-             patch("asyncio.gather", AsyncMock(return_value=[])):
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
             await _async_cancel_coordinator_tasks(coord)
 
         handle.cancel.assert_called_once()
@@ -227,9 +232,14 @@ class TestCancelCoordinatorTasksExceptions:
 
         coord = _make_cancel_coord()
 
-        with patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock(side_effect=RuntimeError("nvr crash"))) as mock_stop, \
-             patch(f"{MODULE}.stop_all_proxies"), \
-             patch("asyncio.gather", AsyncMock(return_value=[])):
+        with (
+            patch(
+                f"{MODULE}.nvr_recorder.stop_all",
+                AsyncMock(side_effect=RuntimeError("nvr crash")),
+            ) as mock_stop,
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
             # Must NOT propagate
             await _async_cancel_coordinator_tasks(coord)
 
@@ -242,9 +252,14 @@ class TestCancelCoordinatorTasksExceptions:
 
         coord = _make_cancel_coord(_tls_proxy_ports={"cam1": 9999})
 
-        with patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock(side_effect=OSError("disk full"))), \
-             patch(f"{MODULE}.stop_all_proxies") as mock_proxy, \
-             patch("asyncio.gather", AsyncMock(return_value=[])):
+        with (
+            patch(
+                f"{MODULE}.nvr_recorder.stop_all",
+                AsyncMock(side_effect=OSError("disk full")),
+            ),
+            patch(f"{MODULE}.stop_all_proxies") as mock_proxy,
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
             await _async_cancel_coordinator_tasks(coord)
 
         mock_proxy.assert_called_once_with({"cam1": 9999})
@@ -311,6 +326,7 @@ class TestHandleCreateRuleException:
     async def test_network_error_raises_homeassistant_error(self):
         """Non-HomeAssistantError from session.post → HomeAssistantError (4562-4563)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -328,12 +344,16 @@ class TestHandleCreateRuleException:
             with pytest.raises(HomeAssistantError) as exc_info:
                 await handler(call_mock)
 
-        assert "Create rule" in str(exc_info.value) or exc_info.value.translation_key == "unexpected_error"
+        assert (
+            "Create rule" in str(exc_info.value)
+            or exc_info.value.translation_key == "unexpected_error"
+        )
 
     @pytest.mark.asyncio
     async def test_timeout_error_raises_homeassistant_error(self):
         """asyncio.TimeoutError from session.post → wrapped HomeAssistantError."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -360,6 +380,7 @@ class TestHandleDeleteRuleException:
     async def test_network_error_raises_homeassistant_error(self):
         """Non-HomeAssistantError from session.delete → HomeAssistantError (4587-4588)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -383,6 +404,7 @@ class TestHandleDeleteRuleException:
     async def test_http_error_response_raises_homeassistant_error(self):
         """HTTP 500 from delete → HomeAssistantError with http_error key."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -411,10 +433,17 @@ class TestHandleUpdateRulePutException:
     async def test_put_network_error_raises_homeassistant_error(self):
         """session.put raising OSError during update → HomeAssistantError (4651-4652)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
-        existing = {"id": "r1", "name": "Old", "isActive": True,
-                    "startTime": "08:00:00", "endTime": "20:00:00", "weekdays": [0]}
+        existing = {
+            "id": "r1",
+            "name": "Old",
+            "isActive": True,
+            "startTime": "08:00:00",
+            "endTime": "20:00:00",
+            "weekdays": [0],
+        }
         entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -441,6 +470,7 @@ class TestHandleGetMotionZonesException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.get raising → HomeAssistantError (4738-4739)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -464,6 +494,7 @@ class TestHandleGetMotionZonesException:
     async def test_missing_cam_id_raises_service_validation_error(self):
         """Empty camera_id → ServiceValidationError before HTTP call."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()
@@ -483,6 +514,7 @@ class TestHandleShareCameraException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.put raising → HomeAssistantError (4788-4789)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -506,6 +538,7 @@ class TestHandleShareCameraException:
     async def test_missing_friend_id_raises_service_validation_error(self):
         """Empty friend_id → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()
@@ -525,6 +558,7 @@ class TestHandleGetPrivacyMasksException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.get raising → HomeAssistantError (4834-4835)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -548,6 +582,7 @@ class TestHandleGetPrivacyMasksException:
     async def test_http_500_raises_homeassistant_error(self):
         """HTTP 500 from GET privacy_masks → HomeAssistantError with http_error_with_body."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -576,6 +611,7 @@ class TestHandleSetPrivacyMasksException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.post raising → HomeAssistantError (4871-4872)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -602,6 +638,7 @@ class TestHandleSetPrivacyMasksException:
     async def test_missing_mask_field_raises_service_validation_error(self):
         """Mask missing required field 'h' → ServiceValidationError with missing_field."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()
@@ -625,6 +662,7 @@ class TestHandleDeleteMotionZoneException:
     async def test_fetch_network_error_raises_homeassistant_error(self):
         """session.get raising → HomeAssistantError (4912-4913)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -648,6 +686,7 @@ class TestHandleDeleteMotionZoneException:
     async def test_missing_args_raises_service_validation_error(self):
         """Empty camera_id + negative zone_index → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()
@@ -667,6 +706,7 @@ class TestHandleGetLightingScheduleException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.get raising → HomeAssistantError (4964-4965)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -731,6 +771,7 @@ class TestHandleRenameCameraException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.put raising → HomeAssistantError (4993-4994)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -754,6 +795,7 @@ class TestHandleRenameCameraException:
     async def test_missing_args_raises_service_validation_error(self):
         """Missing camera_id/new_name → ServiceValidationError."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()
@@ -773,6 +815,7 @@ class TestHandleInviteFriendException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.post raising → HomeAssistantError (5026-5027)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -796,6 +839,7 @@ class TestHandleInviteFriendException:
     async def test_http_error_response_raises_homeassistant_error(self):
         """HTTP 400 → HomeAssistantError with http_error_with_body key."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -824,6 +868,7 @@ class TestHandleListFriendsException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.get raising → HomeAssistantError (5062-5063)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -847,6 +892,7 @@ class TestHandleListFriendsException:
     async def test_http_error_response_raises_homeassistant_error(self):
         """HTTP 503 → HomeAssistantError with http_error key."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -875,6 +921,7 @@ class TestHandleRemoveFriendException:
     async def test_network_error_raises_homeassistant_error(self):
         """session.delete raising → HomeAssistantError (5087-5088)."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -898,6 +945,7 @@ class TestHandleRemoveFriendException:
     async def test_http_error_response_raises_homeassistant_error(self):
         """HTTP 404 → HomeAssistantError with http_error key."""
         from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera import _register_services
 
         entry, coord = _entry_with_coord()
@@ -921,6 +969,7 @@ class TestHandleRemoveFriendException:
     async def test_missing_friend_id_raises_service_validation_error(self):
         """Empty friend_id → ServiceValidationError before HTTP call."""
         from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera import _register_services
 
         hass = _make_hass()

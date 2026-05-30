@@ -18,6 +18,7 @@ Setting _feature_flags and _protocol_checked=True skips FF + protocol fetches.
 Setting _last_slow to time.monotonic() (recent) skips slow-tier.
 Setting _first_tick_done avoids the fast-first-tick do_events/do_slow override.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
 
 CAM_A = "CAM-A"
 
@@ -65,9 +65,7 @@ def _url_session(url_map: dict):
 
     cam_list_resp = url_map.get("__cam_list__")
     # Remove the sentinel from the pattern dict before building the match list.
-    pattern_items = [
-        (k, v) for k, v in url_map.items() if k != "__cam_list__"
-    ]
+    pattern_items = [(k, v) for k, v in url_map.items() if k != "__cam_list__"]
     # Longer patterns take priority over shorter ones.
     _sorted_patterns = sorted(pattern_items, key=lambda kv: len(kv[0]), reverse=True)
 
@@ -98,6 +96,7 @@ def _make_coord(**overrides):
     they need.  _should_check_status is mocked to True so status runs every
     time; tests that want the real logic pass it explicitly.
     """
+
     def _create_task(coro):
         try:
             coro.close()
@@ -120,24 +119,20 @@ def _make_coord(**overrides):
         refresh_token="rfr-B",
         # options is also a @property (returns get_options(self._entry)); mirror it.
         options={},
-
         # ── feature flags + protocol: already done, skip both ────────────────
         _feature_flags={"dummy": True},
         _protocol_checked=True,
-
         # ── FCM state ────────────────────────────────────────────────────────
         _fcm_lock=threading.Lock(),
         _fcm_running=False,
         _fcm_healthy=True,
         _fcm_client=None,
-
         # ── timing (stale → run status+events; recent _last_slow → skip slow) ─
-        _last_status=float('-inf'),
-        _last_events=float('-inf'),
-        _last_slow=time.monotonic(),   # recent → skip slow tier
+        _last_status=float("-inf"),
+        _last_events=float("-inf"),
+        _last_slow=time.monotonic(),  # recent → skip slow tier
         _last_smb_cleanup=time.monotonic(),
         _last_nvr_cleanup=time.monotonic(),
-
         # ── camera caches ────────────────────────────────────────────────────
         _hw_version={},
         _cached_status={},
@@ -160,7 +155,6 @@ def _make_coord(**overrides):
         _alert_sent_ids={},
         _pan_cache={},
         _lighting_switch_cache={},
-
         # ── write-lock timestamps ────────────────────────────────────────────
         _privacy_set_at={},
         _light_set_at={},
@@ -168,7 +162,6 @@ def _make_coord(**overrides):
         _privacy_sound_set_at={},
         _timestamp_set_at={},
         _ledlights_set_at={},
-
         # ── misc flags ───────────────────────────────────────────────────────
         _integration_version="11.0.10",
         _OFFLINE_EXTENDED_INTERVAL=900,
@@ -177,7 +170,6 @@ def _make_coord(**overrides):
         _SESSION_QUOTA_WINDOW_S=300.0,
         _SESSION_QUOTA_NOTIFY_THRESHOLD=3,
         shc_ready=False,
-
         # ── stream / connection ──────────────────────────────────────────────
         _camera_entities={},
         _stream_locks={},
@@ -189,7 +181,6 @@ def _make_coord(**overrides):
         _nvr_processes={},
         _nvr_user_intent={},
         _rcp_session_cache={},
-
         # ── mocked collaborators ─────────────────────────────────────────────
         _ensure_valid_token=AsyncMock(return_value="fresh-tok"),
         _async_update_shc_states=AsyncMock(),
@@ -205,7 +196,6 @@ def _make_coord(**overrides):
         # _should_check_status mocked → always says "yes, run status now"
         _should_check_status=MagicMock(return_value=True),
         get_model_config=lambda cid: SimpleNamespace(generation=2),
-
         # ── hass ─────────────────────────────────────────────────────────────
         hass=SimpleNamespace(
             async_create_task=MagicMock(side_effect=_create_task),
@@ -231,6 +221,7 @@ CAM_LIST = [{"id": CAM_A, "hardwareVersion": "HOME_Eyes_Outdoor"}]
 
 
 # ── helper: build cam_list response + minimal video_inputs response ───────────
+
 
 def _base_url_map(**extras):
     """Return url_map for _url_session with camera-list returning CAM_LIST.
@@ -311,8 +302,9 @@ class TestCheckStatusTcpHit:
         # We distinguish by checking the /ping mock context was NOT entered for CAM_A.
         # Since our session routes "/ping" to cloud_ping_resp, and TCP took the early
         # return, cloud_ping_resp.__aenter__ must not have been awaited.
-        cloud_ping_resp.__aenter__.assert_not_called(), (
-            "Cloud /ping endpoint must not be called when local TCP ping succeeds"
+        (
+            cloud_ping_resp.__aenter__.assert_not_called(),
+            ("Cloud /ping endpoint must not be called when local TCP ping succeeds"),
         )
 
     @pytest.mark.asyncio
@@ -346,7 +338,7 @@ class TestCheckStatusRemoteFallbackClear:
             _stream_fell_back={CAM_A: True},
             _stream_error_count={CAM_A: 3},
             _stream_error_at={CAM_A: time.monotonic() - 10},
-            _live_connections={},   # no active REMOTE stream → no promotion
+            _live_connections={},  # no active REMOTE stream → no promotion
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A", "refresh_token": "rfr-B"},
                 options={"stream_connection_type": "auto"},
@@ -608,7 +600,9 @@ class TestCheckStatusOfflineTracking:
         ping_resp = _make_resp(503)
         comm_resp = _make_resp(200, json_val={"configured": True, "connected": False})
         session = _url_session(
-            _base_url_map(**{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp})
+            _base_url_map(
+                **{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp}
+            )
         )
 
         with patch(
@@ -650,7 +644,9 @@ class TestCheckStatusOfflineTracking:
         ping_resp = _make_resp(503)
         comm_resp = _make_resp(200, json_val={"configured": True, "connected": False})
         session = _url_session(
-            _base_url_map(**{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp})
+            _base_url_map(
+                **{f"/{CAM_A}/ping": ping_resp, f"/{CAM_A}/commissioned": comm_resp}
+            )
         )
 
         with patch(
@@ -703,7 +699,9 @@ class TestCheckStatusExceptionHandling:
         bad_resp.__aexit__ = AsyncMock(return_value=None)
 
         session = _url_session(
-            _base_url_map(**{f"/{CAM_A}/ping": bad_resp, f"/{CAM_A}/commissioned": bad_resp})
+            _base_url_map(
+                **{f"/{CAM_A}/ping": bad_resp, f"/{CAM_A}/commissioned": bad_resp}
+            )
         )
 
         with patch(
@@ -723,12 +721,15 @@ class TestCheckStatusExceptionHandling:
         coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=False))
 
         timeout_resp = MagicMock()
-        timeout_resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        timeout_resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
         timeout_resp.__aexit__ = AsyncMock(return_value=None)
 
         session = _url_session(
             _base_url_map(
-                **{f"/{CAM_A}/ping": timeout_resp, f"/{CAM_A}/commissioned": timeout_resp}
+                **{
+                    f"/{CAM_A}/ping": timeout_resp,
+                    f"/{CAM_A}/commissioned": timeout_resp,
+                }
             )
         )
 
@@ -764,7 +765,10 @@ class TestFetchEventsLastEventOptimization:
         events_resp = _make_resp(200, json_val=[{"id": "ev-new"}])
         session = _url_session(
             _base_url_map(
-                **{f"/{CAM_A}/last_event": last_ev_resp, "/events?videoInputId": events_resp}
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_resp,
+                }
             )
         )
 
@@ -789,9 +793,7 @@ class TestFetchEventsLastEventOptimization:
             _cached_events={CAM_A: old_events},
         )
         last_ev_resp = _make_resp(200, json_val={"id": "ev-known"})
-        session = _url_session(
-            _base_url_map(**{f"/{CAM_A}/last_event": last_ev_resp})
-        )
+        session = _url_session(_base_url_map(**{f"/{CAM_A}/last_event": last_ev_resp}))
 
         with patch(
             "custom_components.bosch_shc_camera.async_get_clientsession",
@@ -823,7 +825,10 @@ class TestFetchEventsFullFetch:
         events_resp = _make_resp(200, json_val=new_events)
         session = _url_session(
             _base_url_map(
-                **{f"/{CAM_A}/last_event": last_ev_resp, "/events?videoInputId": events_resp}
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_resp,
+                }
             )
         )
 
@@ -843,14 +848,17 @@ class TestFetchEventsFullFetch:
         new_events = [{"id": "ev-brand-new"}]
         coord = _make_coord(
             _async_local_tcp_ping=AsyncMock(return_value=True),
-            _last_event_ids={},   # empty → no known ID
+            _last_event_ids={},  # empty → no known ID
             _cached_events={},
         )
         last_ev_resp = _make_resp(200, json_val={"id": "ev-brand-new"})
         events_resp = _make_resp(200, json_val=new_events)
         session = _url_session(
             _base_url_map(
-                **{f"/{CAM_A}/last_event": last_ev_resp, "/events?videoInputId": events_resp}
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_resp,
+                }
             )
         )
 
@@ -880,12 +888,12 @@ class TestFetchEventsTimeoutSwallowed:
             _cached_events={},
         )
         timeout_resp = MagicMock()
-        timeout_resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        timeout_resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
         timeout_resp.__aexit__ = AsyncMock(return_value=None)
 
         # Also make the full /events endpoint time out so both paths fail gracefully.
         events_timeout = MagicMock()
-        events_timeout.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        events_timeout.__aenter__ = AsyncMock(side_effect=TimeoutError())
         events_timeout.__aexit__ = AsyncMock(return_value=None)
 
         session = _url_session(
@@ -916,11 +924,11 @@ class TestFetchEventsTimeoutSwallowed:
             _cached_events={},
         )
         timeout_resp = MagicMock()
-        timeout_resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        timeout_resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
         timeout_resp.__aexit__ = AsyncMock(return_value=None)
 
         events_timeout = MagicMock()
-        events_timeout.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        events_timeout.__aenter__ = AsyncMock(side_effect=TimeoutError())
         events_timeout.__aexit__ = AsyncMock(return_value=None)
 
         session = _url_session(
@@ -960,9 +968,7 @@ class TestDoEventsFalse:
             _last_events=time.monotonic(),
         )
         events_resp = _make_resp(200, json_val=[{"id": "should-not-appear"}])
-        session = _url_session(
-            _base_url_map(**{"/events?videoInputId": events_resp})
-        )
+        session = _url_session(_base_url_map(**{"/events?videoInputId": events_resp}))
 
         with patch(
             "custom_components.bosch_shc_camera.async_get_clientsession",
@@ -982,9 +988,7 @@ class TestDoEventsFalse:
             _last_events=time.monotonic(),
         )
         last_ev_resp = _make_resp(200, json_val={"id": "ev-never"})
-        session = _url_session(
-            _base_url_map(**{f"/{CAM_A}/last_event": last_ev_resp})
-        )
+        session = _url_session(_base_url_map(**{f"/{CAM_A}/last_event": last_ev_resp}))
 
         with patch(
             "custom_components.bosch_shc_camera.async_get_clientsession",

@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ── _wrap_playlist_response ───────────────────────────────────────────────────
 
 
@@ -47,10 +46,14 @@ class TestWrapPlaylistResponse:
 
     def test_already_event_stream_is_not_double_wrapped(self):
         """Idempotency — text/event-stream must not be wrapped again."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _wrap_playlist_response
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _wrap_playlist_response,
+        )
 
         resp = MagicMock()
-        resp.headers = {"Content-Type": "text/event-stream; x-actual=application/vnd.apple.mpegurl"}
+        resp.headers = {
+            "Content-Type": "text/event-stream; x-actual=application/vnd.apple.mpegurl"
+        }
         result = _wrap_playlist_response(resp)
 
         ct = result.headers["Content-Type"]
@@ -60,13 +63,17 @@ class TestWrapPlaylistResponse:
 
     def test_none_response_passes_through(self):
         """None from the original view must not crash the wrapper."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _wrap_playlist_response
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _wrap_playlist_response,
+        )
 
         assert _wrap_playlist_response(None) is None
 
     def test_response_without_headers_passes_through(self):
         """Objects without headers attribute (e.g. StreamResponse) must pass through unchanged."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _wrap_playlist_response
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _wrap_playlist_response,
+        )
 
         bare = object()
         assert _wrap_playlist_response(bare) is bare
@@ -81,8 +88,9 @@ class TestEmitSegmentChunked:
     @pytest.mark.asyncio
     async def test_re_emits_body_as_stream_response(self):
         """Body bytes are written to a StreamResponse — Content-Length header removed."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _emit_segment_chunked
         from aiohttp import web
+
+        from custom_components.bosch_shc_camera.cf_unbuffer import _emit_segment_chunked
 
         body = b"\x00\x01\x02\x03" * 16
         resp = MagicMock()
@@ -107,7 +115,9 @@ class TestEmitSegmentChunked:
 
         assert stream_resp.prepare.called, "StreamResponse.prepare() must be awaited"
         assert stream_resp.write.called, "Body bytes must be written to the stream"
-        assert stream_resp.write_eof.called, "write_eof() must be called to finish the chunk"
+        assert stream_resp.write_eof.called, (
+            "write_eof() must be called to finish the chunk"
+        )
         # Content-Length must NOT be in the new response headers
         assert "content-length" not in {k.lower() for k in stream_resp.headers}, (
             "Content-Length in chunked response causes cloudflared to buffer again"
@@ -144,7 +154,9 @@ class TestWrapperIdempotency:
 
     def test_playlist_wrapper_sets_cf_wrapped_flag(self):
         """_make_playlist_wrapper sets _cf_wrapped on the returned coroutine."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_playlist_wrapper
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _make_playlist_wrapper,
+        )
 
         async def fake_handle(self, *a, **kw):
             return MagicMock()
@@ -176,6 +188,7 @@ class TestRegisterIdempotency:
     def test_second_call_is_noop(self):
         """After the first register(), _PATCHED is True — second call returns immediately."""
         import types
+
         import custom_components.bosch_shc_camera.cf_unbuffer as mod
 
         # Reset module-level state for a clean test
@@ -192,19 +205,22 @@ class TestRegisterIdempotency:
             "HlsPartView",
             "HlsSegmentView",
         ):
-            cls = type(cls_name, (), {
-                "handle": staticmethod(lambda self, *a, **kw: None)
-            })
+            cls = type(
+                cls_name, (), {"handle": staticmethod(lambda self, *a, **kw: None)}
+            )
             setattr(fake_hls, cls_name, cls)
 
         # Patch the import at the point cf_unbuffer calls it
         stream_pkg = types.ModuleType("homeassistant.components.stream")
         stream_pkg.hls = fake_hls
 
-        with patch.dict("sys.modules", {
-            "homeassistant.components.stream": stream_pkg,
-            "homeassistant.components.stream.hls": fake_hls,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "homeassistant.components.stream": stream_pkg,
+                "homeassistant.components.stream.hls": fake_hls,
+            },
+        ):
             mod.register(MagicMock())
             assert mod._PATCHED is True, "register() must set _PATCHED=True"
             # Capture handle references after first call
@@ -221,6 +237,7 @@ class TestRegisterIdempotency:
     def test_register_handles_missing_hls_module(self):
         """register() must not raise when homeassistant.components.stream.hls is missing."""
         import types
+
         import custom_components.bosch_shc_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
@@ -230,11 +247,20 @@ class TestRegisterIdempotency:
         stream_pkg = types.ModuleType("homeassistant.components.stream")
         # No .hls attribute — getattr inside register() will fall back to exception path
 
-        with patch.dict("sys.modules", {
-            "homeassistant.components.stream": stream_pkg,
-        }), patch.dict("sys.modules", {
-            "homeassistant.components.stream.hls": None,  # None = import blocked
-        }):
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "homeassistant.components.stream": stream_pkg,
+                },
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "homeassistant.components.stream.hls": None,  # None = import blocked
+                },
+            ),
+        ):
             try:
                 mod.register(MagicMock())
             except Exception as exc:
@@ -251,7 +277,9 @@ class TestStructuralContract:
 
     def test_playlist_class_names_pinned(self):
         """_PLAYLIST_VIEW_CLASSES must target the two HLS manifest views."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _PLAYLIST_VIEW_CLASSES
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _PLAYLIST_VIEW_CLASSES,
+        )
 
         assert "HlsMasterPlaylistView" in _PLAYLIST_VIEW_CLASSES, (
             "Master playlist view name changed — update cf_unbuffer too"
@@ -282,7 +310,9 @@ class TestWrapperInvocation:
     @pytest.mark.asyncio
     async def test_playlist_wrapper_invokes_orig_and_rewrites_ct(self):
         """Calling the wrapper must run orig_handle then pass result through _wrap_playlist_response."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_playlist_wrapper
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _make_playlist_wrapper,
+        )
 
         captured_args: list = []
 
@@ -301,11 +331,14 @@ class TestWrapperInvocation:
     @pytest.mark.asyncio
     async def test_segment_wrapper_invokes_orig_and_rewrites_to_chunked(self):
         """Wrapper happy path: aiohttp.web.Response with a body → re-emitted as StreamResponse."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
         from aiohttp import web
 
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+
         async def fake_handle(self, request, *a, **kw):
-            return web.Response(body=b"\x00" * 32, headers={"Content-Type": "video/mp4"})
+            return web.Response(
+                body=b"\x00" * 32, headers={"Content-Type": "video/mp4"}
+            )
 
         wrapped = _make_segment_wrapper(fake_handle)
 
@@ -352,8 +385,9 @@ class TestWrapperInvocation:
     @pytest.mark.asyncio
     async def test_segment_wrapper_swallows_emit_exception(self):
         """If chunked re-emit raises, wrapper logs at DEBUG and returns the original response."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
         from aiohttp import web
+
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
 
         original = web.Response(body=b"x" * 16, headers={"Content-Type": "video/mp4"})
 
@@ -364,9 +398,14 @@ class TestWrapperInvocation:
             raise RuntimeError("simulated chunked emit failure")
 
         wrapped = _make_segment_wrapper(fake_handle)
-        with patch("custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked", side_effect=boom):
+        with patch(
+            "custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked",
+            side_effect=boom,
+        ):
             result = await wrapped(MagicMock(), MagicMock())
-        assert result is original, "On emit failure the original Response must be returned unchanged"
+        assert result is original, (
+            "On emit failure the original Response must be returned unchanged"
+        )
 
 
 class TestRegisterEdgeBranches:
@@ -375,6 +414,7 @@ class TestRegisterEdgeBranches:
     def test_register_skips_views_with_no_handle_attribute(self):
         """A view class without a `handle` method must be skipped (continue branch)."""
         import types
+
         import custom_components.bosch_shc_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
@@ -408,10 +448,13 @@ class TestRegisterEdgeBranches:
         stream_pkg = types.ModuleType("homeassistant.components.stream")
         stream_pkg.hls = fake_hls
 
-        with patch.dict("sys.modules", {
-            "homeassistant.components.stream": stream_pkg,
-            "homeassistant.components.stream.hls": fake_hls,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "homeassistant.components.stream": stream_pkg,
+                "homeassistant.components.stream.hls": fake_hls,
+            },
+        ):
             mod.register(MagicMock())
 
         assert mod._PATCHED is True
@@ -424,6 +467,7 @@ class TestRegisterEdgeBranches:
     def test_register_skips_already_wrapped_handles(self):
         """If a handle already carries _cf_wrapped, the wrapper must not be applied a second time."""
         import types
+
         import custom_components.bosch_shc_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
@@ -433,24 +477,37 @@ class TestRegisterEdgeBranches:
 
         async def already_wrapped_playlist(self, *a, **kw):
             return None
+
         already_wrapped_playlist._cf_wrapped = True  # type: ignore[attr-defined]
 
         async def already_wrapped_segment(self, request, *a, **kw):
             return None
+
         already_wrapped_segment._cf_wrapped = True  # type: ignore[attr-defined]
 
         for cls_name in ("HlsMasterPlaylistView", "HlsPlaylistView"):
-            setattr(fake_hls, cls_name, type(cls_name, (), {"handle": already_wrapped_playlist}))
+            setattr(
+                fake_hls,
+                cls_name,
+                type(cls_name, (), {"handle": already_wrapped_playlist}),
+            )
         for cls_name in ("HlsInitView", "HlsPartView", "HlsSegmentView"):
-            setattr(fake_hls, cls_name, type(cls_name, (), {"handle": already_wrapped_segment}))
+            setattr(
+                fake_hls,
+                cls_name,
+                type(cls_name, (), {"handle": already_wrapped_segment}),
+            )
 
         stream_pkg = types.ModuleType("homeassistant.components.stream")
         stream_pkg.hls = fake_hls
 
-        with patch.dict("sys.modules", {
-            "homeassistant.components.stream": stream_pkg,
-            "homeassistant.components.stream.hls": fake_hls,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "homeassistant.components.stream": stream_pkg,
+                "homeassistant.components.stream.hls": fake_hls,
+            },
+        ):
             mod.register(MagicMock())
 
         assert mod._PATCHED is True
@@ -469,10 +526,19 @@ class TestRegisterEdgeBranches:
 
         # Force the inner `from homeassistant.components.stream import hls` to raise
         # by monkey-patching the import inside the try-block via the builtins import hook.
-        real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+        real_import = (
+            __builtins__["__import__"]
+            if isinstance(__builtins__, dict)
+            else __builtins__.__import__
+        )
 
         def boom_import(name, *a, **kw):
-            if name == "homeassistant.components.stream" and a and len(a) >= 3 and "hls" in a[2]:
+            if (
+                name == "homeassistant.components.stream"
+                and a
+                and len(a) >= 3
+                and "hls" in a[2]
+            ):
                 raise ImportError("simulated stream.hls import failure")
             return real_import(name, *a, **kw)
 
@@ -501,16 +567,20 @@ class TestRegisterLogLevel:
 
     def test_successful_patch_logs_at_info_not_warning(self):
         """register() success path uses _LOGGER.info, not _LOGGER.warning."""
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
         from pathlib import Path
+
+        import custom_components.bosch_shc_camera.cf_unbuffer as mod
 
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "cf_unbuffer.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "cf_unbuffer.py"
         ).read_text()
         # After the _PATCHED = True assignment, the next log call must be info()
         # Find the block: `_PATCHED = True` ... `_LOGGER.<level>(`
         import re
+
         m = re.search(r"_PATCHED\s*=\s*True.*?_LOGGER\.(\w+)\(", src, re.DOTALL)
         assert m, "Could not find _LOGGER call after _PATCHED = True"
         level = m.group(1)
@@ -521,12 +591,14 @@ class TestRegisterLogLevel:
 
     def test_failure_path_still_logs_at_warning(self):
         """register() exception handler must keep WARNING (real failure condition)."""
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         src = (
             Path(__file__).parent.parent
-            / "custom_components" / "bosch_shc_camera" / "cf_unbuffer.py"
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "cf_unbuffer.py"
         ).read_text()
         # Find the outer `except Exception` block (register()'s top-level handler
         # that wraps the whole patch attempt). It must be followed by _LOGGER.warning.
@@ -535,9 +607,12 @@ class TestRegisterLogLevel:
         # outer one, which appears AFTER the `_PATCHED = True` assignment.
         m = re.search(
             r"_PATCHED\s*=\s*True.*?except Exception.*?_LOGGER\.(\w+)\(",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
-        assert m, "Could not find _LOGGER call in outer except block after _PATCHED = True"
+        assert m, (
+            "Could not find _LOGGER call in outer except block after _PATCHED = True"
+        )
         level = m.group(1)
         assert level == "warning", (
             f"CF-unbuffer outer exception handler must log at WARNING (not {level!r})"

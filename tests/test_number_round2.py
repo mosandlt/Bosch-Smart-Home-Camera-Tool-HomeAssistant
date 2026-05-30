@@ -17,6 +17,7 @@ Targets:
 
 No HA runtime needed — SimpleNamespace + AsyncMock pattern.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +26,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -62,14 +62,28 @@ def _coord(
         token="test-token",
         _pan_cache=pan_cache if pan_cache is not None else {},
         _image_rotation_180={},
-        _lens_elevation_cache=lens_elevation_cache if lens_elevation_cache is not None else {},
+        _lens_elevation_cache=lens_elevation_cache
+        if lens_elevation_cache is not None
+        else {},
         _audio_cache=audio_cache if audio_cache is not None else {},
-        _lighting_switch_cache=lighting_switch_cache if lighting_switch_cache is not None else {},
-        _motion_light_cache=motion_light_cache if motion_light_cache is not None else {},
-        _global_lighting_cache=global_lighting_cache if global_lighting_cache is not None else {},
-        _icon_led_brightness_cache=icon_led_brightness_cache if icon_led_brightness_cache is not None else {},
-        _alarm_settings_cache=alarm_settings_cache if alarm_settings_cache is not None else {},
-        _shc_state_cache=shc_state_cache if shc_state_cache is not None else {CAM_ID: {}},
+        _lighting_switch_cache=lighting_switch_cache
+        if lighting_switch_cache is not None
+        else {},
+        _motion_light_cache=motion_light_cache
+        if motion_light_cache is not None
+        else {},
+        _global_lighting_cache=global_lighting_cache
+        if global_lighting_cache is not None
+        else {},
+        _icon_led_brightness_cache=icon_led_brightness_cache
+        if icon_led_brightness_cache is not None
+        else {},
+        _alarm_settings_cache=alarm_settings_cache
+        if alarm_settings_cache is not None
+        else {},
+        _shc_state_cache=shc_state_cache
+        if shc_state_cache is not None
+        else {CAM_ID: {}},
         async_put_camera=AsyncMock(return_value=True),
         is_camera_online=lambda cid: True,
         **overrides,
@@ -157,11 +171,15 @@ async def test_pan_set_native_value_inverted_when_rotated():
 def _make_speaker_level(speaker_level=50):
     from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
 
-    coord = _coord(audio_cache={CAM_ID: {
-        "speakerLevel": speaker_level,
-        "microphoneLevel": 60,
-        "audioEnabled": True,
-    }})
+    coord = _coord(
+        audio_cache={
+            CAM_ID: {
+                "speakerLevel": speaker_level,
+                "microphoneLevel": 60,
+                "audioEnabled": True,
+            }
+        }
+    )
     sw = BoschSpeakerLevelNumber.__new__(BoschSpeakerLevelNumber)
     sw.coordinator = coord
     sw._cam_id = CAM_ID
@@ -247,7 +265,9 @@ def test_front_light_intensity_native_value_none():
 
 
 def test_front_light_intensity_native_value():
-    sw = _make_front_light_intensity(shc_state_cache={CAM_ID: {"front_light_intensity": 0.75}})
+    sw = _make_front_light_intensity(
+        shc_state_cache={CAM_ID: {"front_light_intensity": 0.75}}
+    )
     assert sw.native_value == 75
 
 
@@ -383,7 +403,9 @@ def test_white_balance_native_value_fallback_to_wb_value():
 async def test_white_balance_set_success():
     sw = _make_white_balance()
     session = _mock_aiohttp_session(200)
-    resp_json = {"frontLightSettings": {"brightness": 0, "whiteBalance": 0.2, "color": None}}
+    resp_json = {
+        "frontLightSettings": {"brightness": 0, "whiteBalance": 0.2, "color": None}
+    }
 
     @asynccontextmanager
     async def _put(*args, **kwargs):
@@ -499,7 +521,9 @@ async def test_top_led_set_non_200():
 
 
 def _make_motion_light_sens(motion_light_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschMotionLightSensitivityNumber
+    from custom_components.bosch_shc_camera.number import (
+        BoschMotionLightSensitivityNumber,
+    )
 
     coord = _coord(motion_light_cache=motion_light_cache or {})
     sw = BoschMotionLightSensitivityNumber.__new__(BoschMotionLightSensitivityNumber)
@@ -533,7 +557,9 @@ async def test_motion_light_sens_set_empty_cache_noop():
 
 @pytest.mark.asyncio
 async def test_motion_light_sens_set_updates_cache():
-    sw = _make_motion_light_sens({CAM_ID: {"motionLightSensitivity": 2, "duration": 30}})
+    sw = _make_motion_light_sens(
+        {CAM_ID: {"motionLightSensitivity": 2, "duration": 30}}
+    )
     await sw.async_set_native_value(4.0)
     sw.coordinator.async_put_camera.assert_awaited_once()
     body = sw.coordinator.async_put_camera.call_args[0][2]
@@ -560,7 +586,9 @@ def _make_darkness_threshold(global_lighting_cache=None):
 
 
 def test_darkness_threshold_native_value():
-    sw = _make_darkness_threshold({CAM_ID: {"darknessThreshold": 0.47, "softLightFading": True}})
+    sw = _make_darkness_threshold(
+        {CAM_ID: {"darknessThreshold": 0.47, "softLightFading": True}}
+    )
     assert sw.native_value == 47.0
 
 
@@ -645,7 +673,11 @@ async def test_power_led_set_clamps_min():
 def _make_alarm_delay(alarm_settings=None):
     from custom_components.bosch_shc_camera.number import BoschAlarmDelayNumber
 
-    coord = _coord(alarm_settings_cache={CAM_ID: alarm_settings} if alarm_settings is not None else {})
+    coord = _coord(
+        alarm_settings_cache={CAM_ID: alarm_settings}
+        if alarm_settings is not None
+        else {}
+    )
     sw = BoschAlarmDelayNumber.__new__(BoschAlarmDelayNumber)
     sw.coordinator = coord
     sw._cam_id = CAM_ID
@@ -689,5 +721,3 @@ async def test_alarm_delay_set_empty_noop():
     sw = _make_alarm_delay({})
     await sw.async_set_native_value(30.0)
     sw.coordinator.async_put_camera.assert_not_awaited()
-
-

@@ -9,6 +9,7 @@ refresh has populated `self.data`. Pre-fix the handler raised
 Source: production HA logs 2026-05-24, system_log entries name=homeassistant,
 source=custom_components/bosch_shc_camera/fcm.py:889, count=4.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -38,7 +39,6 @@ def _coord(data: Any) -> Any:
 
 
 class TestPushDataNoneGuard:
-
     @pytest.mark.asyncio
     async def test_returns_early_when_data_is_none(self) -> None:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push

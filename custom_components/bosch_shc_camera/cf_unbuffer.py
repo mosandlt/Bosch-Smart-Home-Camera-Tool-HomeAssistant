@@ -59,7 +59,6 @@ from functools import wraps
 from typing import Any
 
 from aiohttp import web
-
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,7 +87,9 @@ def _wrap_playlist_response(response: web.Response | None) -> web.Response | Non
     return response
 
 
-async def _emit_segment_chunked(request: web.Request, response: web.Response) -> web.StreamResponse | web.Response:
+async def _emit_segment_chunked(
+    request: web.Request, response: web.Response
+) -> web.StreamResponse | web.Response:
     """Binary-segment path — re-emit body via chunked StreamResponse.
 
     aiohttp's `web.Response` always sets Content-Length when the body is
@@ -131,13 +132,15 @@ def _make_playlist_wrapper(orig_handle: Any) -> Any:
 
 def _make_segment_wrapper(orig_handle: Any) -> Any:
     @wraps(orig_handle)
-    async def _wrapped(self: Any, request: web.Request, *args: Any, **kwargs: Any) -> web.StreamResponse | web.Response | None:
+    async def _wrapped(
+        self: Any, request: web.Request, *args: Any, **kwargs: Any
+    ) -> web.StreamResponse | web.Response | None:
         response = await orig_handle(self, request, *args, **kwargs)
         if response is None or not isinstance(response, web.Response):
             return response
         try:
             return await _emit_segment_chunked(request, response)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _LOGGER.debug("CF unbuffer segment chunked emit failed: %s", exc)
             return response
 
@@ -183,5 +186,5 @@ def register(hass: HomeAssistant) -> None:
             ", ".join(patched_playlist) if patched_playlist else "none",
             ", ".join(patched_segment) if patched_segment else "none",
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _LOGGER.warning("CF unbuffer patch failed: %s", exc)

@@ -13,11 +13,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-def _coord(*, is_updating_value: bool, last_update_success: bool = True) -> SimpleNamespace:
+def _coord(
+    *, is_updating_value: bool, last_update_success: bool = True
+) -> SimpleNamespace:
     coord = SimpleNamespace(
         data={
             CAM_ID: {
@@ -53,6 +54,7 @@ def stub_entry():
 class TestCameraAvailable:
     def test_available_when_not_updating(self, stub_entry):
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         coord = _coord(is_updating_value=False)
         cam = BoschCamera.__new__(BoschCamera)
         cam.coordinator = coord
@@ -64,6 +66,7 @@ class TestCameraAvailable:
         even though coordinator.last_update_success is still True (cached
         from before the install started)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         coord = _coord(is_updating_value=True, last_update_success=True)
         cam = BoschCamera.__new__(BoschCamera)
         cam.coordinator = coord
@@ -74,6 +77,7 @@ class TestCameraAvailable:
         """Existing semantics preserved: no is_updating signal, but coordinator
         update failed → unavailable."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
+
         coord = _coord(is_updating_value=False, last_update_success=False)
         cam = BoschCamera.__new__(BoschCamera)
         cam.coordinator = coord
@@ -85,6 +89,7 @@ class TestLightAvailable:
     def _mk_light(self, coord):
         # Concrete subclass — _BoschLightBase carries the available() override.
         from custom_components.bosch_shc_camera.light import BoschFrontLight
+
         light = BoschFrontLight.__new__(BoschFrontLight)
         light.coordinator = coord
         light._cam_id = CAM_ID
@@ -103,6 +108,7 @@ class TestLightAvailable:
 class TestLiveStreamSwitchAvailable:
     def _mk_switch(self, coord):
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         sw = BoschLiveStreamSwitch.__new__(BoschLiveStreamSwitch)
         sw.coordinator = coord
         sw._cam_id = CAM_ID
@@ -120,7 +126,8 @@ class TestLiveStreamSwitchAvailable:
         # Cleanest: patch super() via a synthetic BoschLiveStreamSwitch
         # subclass — but simpler: bypass by setting _shc_state_cache and
         # is_session_stale to consistent healthy values, then mock super.
-        from unittest.mock import patch, PropertyMock
+        from unittest.mock import PropertyMock, patch
+
         with patch(
             "custom_components.bosch_shc_camera.switch._BoschSwitchBase.available",
             new_callable=PropertyMock,
@@ -140,6 +147,7 @@ class TestLiveStreamSwitchAvailable:
 class TestPrivacySwitchAvailable:
     def _mk_switch(self, coord):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
         sw = BoschPrivacyModeSwitch.__new__(BoschPrivacyModeSwitch)
         sw.coordinator = coord
         sw._cam_id = CAM_ID
@@ -163,6 +171,7 @@ class TestIsUpdatingHelper:
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
         )
+
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._firmware_cache = {}
         assert coord.is_updating(CAM_ID) is False
@@ -171,6 +180,7 @@ class TestIsUpdatingHelper:
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
         )
+
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._firmware_cache = {CAM_ID: {"status": "QUEUED"}}
         assert coord.is_updating(CAM_ID) is False
@@ -179,6 +189,7 @@ class TestIsUpdatingHelper:
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
         )
+
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._firmware_cache = {CAM_ID: {"updating": True}}
         assert coord.is_updating(CAM_ID) is True
@@ -187,6 +198,7 @@ class TestIsUpdatingHelper:
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
         )
+
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._firmware_cache = {CAM_ID: {"updating": False}}
         assert coord.is_updating(CAM_ID) is False

@@ -22,7 +22,6 @@ from custom_components.bosch_shc_camera.switch import (
     async_setup_entry,
 )
 
-
 CAM_ID = "DEAD-BEEF-INTERCOM"
 
 
@@ -56,6 +55,7 @@ def _make_setup_inputs(*, enable_intercom: bool, registry_has_intercom: bool):
         ent_reg.async_get_entity_id.return_value = None
 
     added: list = []
+
     def _async_add_entities(ents, *args, **kwargs):
         added.extend(ents)
 
@@ -67,22 +67,29 @@ def _intercom_count(entities) -> int:
 
 
 class TestIntercomOptionGate:
-
     @pytest.mark.asyncio
     async def test_option_true_no_legacy_registers(self) -> None:
         hass, ce, ent_reg, add_fn, added = _make_setup_inputs(
-            enable_intercom=True, registry_has_intercom=False,
+            enable_intercom=True,
+            registry_has_intercom=False,
         )
-        with patch("custom_components.bosch_shc_camera.switch.er.async_get", return_value=ent_reg):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.er.async_get",
+            return_value=ent_reg,
+        ):
             await async_setup_entry(hass, ce, add_fn)
         assert _intercom_count(added) == 1
 
     @pytest.mark.asyncio
     async def test_option_true_with_legacy_registers_once(self) -> None:
         hass, ce, ent_reg, add_fn, added = _make_setup_inputs(
-            enable_intercom=True, registry_has_intercom=True,
+            enable_intercom=True,
+            registry_has_intercom=True,
         )
-        with patch("custom_components.bosch_shc_camera.switch.er.async_get", return_value=ent_reg):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.er.async_get",
+            return_value=ent_reg,
+        ):
             await async_setup_entry(hass, ce, add_fn)
         # Both gates true → still one entity (no duplicate registration).
         assert _intercom_count(added) == 1
@@ -90,9 +97,13 @@ class TestIntercomOptionGate:
     @pytest.mark.asyncio
     async def test_option_false_with_legacy_registers(self) -> None:
         hass, ce, ent_reg, add_fn, added = _make_setup_inputs(
-            enable_intercom=False, registry_has_intercom=True,
+            enable_intercom=False,
+            registry_has_intercom=True,
         )
-        with patch("custom_components.bosch_shc_camera.switch.er.async_get", return_value=ent_reg):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.er.async_get",
+            return_value=ent_reg,
+        ):
             await async_setup_entry(hass, ce, add_fn)
         # Legacy users keep their entity even with option=False.
         assert _intercom_count(added) == 1
@@ -100,9 +111,13 @@ class TestIntercomOptionGate:
     @pytest.mark.asyncio
     async def test_option_false_no_legacy_skips(self) -> None:
         hass, ce, ent_reg, add_fn, added = _make_setup_inputs(
-            enable_intercom=False, registry_has_intercom=False,
+            enable_intercom=False,
+            registry_has_intercom=False,
         )
-        with patch("custom_components.bosch_shc_camera.switch.er.async_get", return_value=ent_reg):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.er.async_get",
+            return_value=ent_reg,
+        ):
             await async_setup_entry(hass, ce, add_fn)
         # Default state: no entity at all.
         assert _intercom_count(added) == 0
@@ -112,10 +127,14 @@ class TestIntercomOptionGate:
         """Option key absent (older install before key was introduced) →
         defaults to False → no entity (unless legacy registry has it)."""
         hass, ce, ent_reg, add_fn, added = _make_setup_inputs(
-            enable_intercom=False, registry_has_intercom=False,
+            enable_intercom=False,
+            registry_has_intercom=False,
         )
         ce.options = {"enable_snapshot_button": True}  # intercom key missing
-        with patch("custom_components.bosch_shc_camera.switch.er.async_get", return_value=ent_reg):
+        with patch(
+            "custom_components.bosch_shc_camera.switch.er.async_get",
+            return_value=ent_reg,
+        ):
             await async_setup_entry(hass, ce, add_fn)
         assert _intercom_count(added) == 0
 

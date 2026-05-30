@@ -6,7 +6,7 @@ genuine state change (scheduled -> active) gets one fresh announcement.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -16,14 +16,16 @@ from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.maintenance import MaintenanceWindow
 
 
-def _mw(state: str, link: str = "https://example/x", camera_relevant: bool = True) -> MaintenanceWindow:
+def _mw(
+    state: str, link: str = "https://example/x", camera_relevant: bool = True
+) -> MaintenanceWindow:
     """Build a MaintenanceWindow that classifies as `state` at frozen 'now'.
 
     Picks start/end relative to a fixed reference instant so the same
     `state()` evaluation lands in the expected bucket regardless of wall
     clock.
     """
-    ref = datetime(2026, 5, 19, 7, 30, tzinfo=timezone.utc)
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
     pub = ref - timedelta(hours=12)
     if state == "active":
         start, end = ref - timedelta(hours=1), ref + timedelta(hours=2)
@@ -131,7 +133,9 @@ class TestMaintenanceAnnounce:
     async def test_notify_failure_is_swallowed(self, freezer):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_coord()
-        coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("service down"))
+        coord.hass.services.async_call = AsyncMock(
+            side_effect=RuntimeError("service down")
+        )
         mw = _mw("active")
         # Must not raise — the maintenance fetch loop should not be brittle
         # to a misconfigured notify service.
@@ -207,7 +211,10 @@ class TestMaintenanceAnnounce:
         past = _mw("past", link=link)
         await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, past)
         assert coord.hass.services.async_call.await_count == 3
-        titles = [c.args[2]["title"].lower() for c in coord.hass.services.async_call.await_args_list]
+        titles = [
+            c.args[2]["title"].lower()
+            for c in coord.hass.services.async_call.await_args_list
+        ]
         assert "geplant" in titles[0]
         assert "läuft" in titles[1]
         assert "beendet" in titles[2]

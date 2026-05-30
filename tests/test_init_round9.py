@@ -11,6 +11,7 @@ Covers missing lines:
 Pattern: unbound method binding via types.MethodType on SimpleNamespace stubs,
 identical to test_init_round8.py.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -54,6 +55,7 @@ def _stub_coord(**kwargs):
 class TestAsyncPutCamera:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.async_put_camera = types.MethodType(
             BoschCameraCoordinator.async_put_camera, coord
         )
@@ -107,6 +109,7 @@ class TestAsyncPutCamera:
         retry_resp.status = 200
 
         call_count = [0]
+
         def _put_cm(*args, **kwargs):
             call_count[0] += 1
             cm = MagicMock()
@@ -159,6 +162,7 @@ class TestAsyncPutCamera:
         retry_resp.status = 403
 
         call_count = [0]
+
         def _put_cm(*args, **kwargs):
             call_count[0] += 1
             cm = MagicMock()
@@ -205,8 +209,9 @@ class TestAsyncPutCamera:
         with patch(f"{MODULE}.async_get_clientsession", return_value=session):
             await coord.async_put_camera(CAM_ID, "privacy", {})
 
-        assert captured_headers[0].get("Authorization") == "Bearer my-secret-token", \
+        assert captured_headers[0].get("Authorization") == "Bearer my-secret-token", (
             "PUT must include Authorization: Bearer header with coordinator token"
+        )
 
 
 # ── get_quality / set_quality / get_quality_params ────────────────────────────
@@ -215,6 +220,7 @@ class TestAsyncPutCamera:
 class TestGetQuality:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.get_quality = types.MethodType(BoschCameraCoordinator.get_quality, coord)
         coord.set_quality = types.MethodType(BoschCameraCoordinator.set_quality, coord)
         coord.get_quality_params = types.MethodType(
@@ -227,19 +233,24 @@ class TestGetQuality:
 
     def test_runtime_override_takes_precedence(self):
         """Runtime preference in _quality_preference overrides default."""
-        coord = self._bind(_stub_coord(
-            _quality_preference={CAM_ID: "low"},
-            _entry=self._make_entry(),
-        ))
-        assert coord.get_quality(CAM_ID) == "low", \
+        coord = self._bind(
+            _stub_coord(
+                _quality_preference={CAM_ID: "low"},
+                _entry=self._make_entry(),
+            )
+        )
+        assert coord.get_quality(CAM_ID) == "low", (
             "Runtime _quality_preference must override default"
+        )
 
     def test_default_returns_auto(self):
         """No runtime override → 'auto'."""
-        coord = self._bind(_stub_coord(
-            _quality_preference={},
-            _entry=self._make_entry(),
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _quality_preference={},
+                _entry=self._make_entry(),
+            )
+        )
         result = coord.get_quality(CAM_ID)
         assert result == "auto", "Default quality must be 'auto'"
 
@@ -247,6 +258,7 @@ class TestGetQuality:
 class TestSetQuality:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.set_quality = types.MethodType(BoschCameraCoordinator.set_quality, coord)
         return coord
 
@@ -254,23 +266,28 @@ class TestSetQuality:
         """set_quality must store the value in _quality_preference."""
         coord = self._bind(_stub_coord(_quality_preference={}, _proxy_url_cache={}))
         coord.set_quality(CAM_ID, "high")
-        assert coord._quality_preference[CAM_ID] == "high", \
+        assert coord._quality_preference[CAM_ID] == "high", (
             "set_quality must write to _quality_preference"
+        )
 
     def test_set_quality_invalidates_proxy_url_cache(self):
         """set_quality must evict the cam's entry from _proxy_url_cache."""
-        coord = self._bind(_stub_coord(
-            _quality_preference={},
-            _proxy_url_cache={CAM_ID: "rtsp://old-url"},
-        ))
+        coord = self._bind(
+            _stub_coord(
+                _quality_preference={},
+                _proxy_url_cache={CAM_ID: "rtsp://old-url"},
+            )
+        )
         coord.set_quality(CAM_ID, "low")
-        assert CAM_ID not in coord._proxy_url_cache, \
+        assert CAM_ID not in coord._proxy_url_cache, (
             "set_quality must invalidate cached proxy URL to force fresh PUT /connection"
+        )
 
 
 class TestGetQualityParams:
     def _bind(self, coord):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord.get_quality = types.MethodType(BoschCameraCoordinator.get_quality, coord)
         coord.get_quality_params = types.MethodType(
             BoschCameraCoordinator.get_quality_params, coord
@@ -281,23 +298,26 @@ class TestGetQualityParams:
         """quality='high' → (True, 1) — primary encoder, max quality."""
         coord = self._bind(_stub_coord(_quality_preference={CAM_ID: "high"}))
         hq, inst = coord.get_quality_params(CAM_ID)
-        assert hq is True and inst == 1, \
+        assert hq is True and inst == 1, (
             "high quality must return (True, 1) — primary encoder"
+        )
 
     def test_low_returns_low_bandwidth_stream(self):
         """quality='low' → (False, 4) — low-bandwidth stream ~1.9 Mbps."""
         coord = self._bind(_stub_coord(_quality_preference={CAM_ID: "low"}))
         hq, inst = coord.get_quality_params(CAM_ID)
-        assert hq is False and inst == 4, \
+        assert hq is False and inst == 4, (
             "low quality must return (False, 4) — low-bandwidth stream"
+        )
 
     def test_auto_returns_balanced_stream(self):
         """quality='auto' → (False, 2) — balanced iOS default ~7.5 Mbps."""
         coord = self._bind(_stub_coord(_quality_preference={}))
         with patch(f"{MODULE}.get_options", return_value={}):
             hq, inst = coord.get_quality_params(CAM_ID)
-        assert hq is False and inst == 2, \
+        assert hq is False and inst == 2, (
             "auto quality must return (False, 2) — balanced stream"
+        )
 
 
 # ── _async_update_rcp_data delegation ────────────────────────────────────────
@@ -308,12 +328,15 @@ class TestAsyncUpdateRcpDataDelegation:
     async def test_delegates_to_rcp_module(self):
         """_async_update_rcp_data must delegate to rcp.async_update_rcp_data."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
         coord = _stub_coord()
         coord._async_update_rcp_data = types.MethodType(
             BoschCameraCoordinator._async_update_rcp_data, coord
         )
 
-        with patch(f"{MODULE}.async_update_rcp_data", new_callable=AsyncMock) as mock_rcp:
+        with patch(
+            f"{MODULE}.async_update_rcp_data", new_callable=AsyncMock
+        ) as mock_rcp:
             await coord._async_update_rcp_data(CAM_ID, "proxy-host", "proxy-hash")
 
         mock_rcp.assert_awaited_once_with(coord, CAM_ID, "proxy-host", "proxy-hash")

@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -65,6 +64,7 @@ def stub_entry():
 class TestPanNumber:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n._attr_translation_key == "pan_position"
         assert n._attr_native_min_value == -120
@@ -72,23 +72,27 @@ class TestPanNumber:
 
     def test_native_value_none_when_cache_empty(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value is None
 
     def test_native_value_reads_cache(self, stub_coord, stub_entry):
         stub_coord._pan_cache[CAM_ID] = 30
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == 30
 
     def test_unavailable_when_cache_empty(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is False
 
     def test_available_when_cache_populated(self, stub_coord, stub_entry):
         stub_coord._pan_cache[CAM_ID] = 0
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is True
 
@@ -97,6 +101,7 @@ class TestPanNumber:
         stub_coord._pan_cache[CAM_ID] = 30
         stub_coord._image_rotation_180[CAM_ID] = True
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == -30
 
@@ -104,6 +109,7 @@ class TestPanNumber:
         stub_coord._pan_cache[CAM_ID] = 30
         stub_coord._image_rotation_180[CAM_ID] = False
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == 30
 
@@ -112,6 +118,7 @@ class TestPanNumber:
         """User drags slider to +50 (right) on ceiling-mounted cam → send -50 to camera."""
         stub_coord._image_rotation_180[CAM_ID] = True
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         await n.async_set_native_value(50)
         stub_coord.async_cloud_set_pan.assert_called_once_with(CAM_ID, -50)
@@ -119,6 +126,7 @@ class TestPanNumber:
     @pytest.mark.asyncio
     async def test_set_value_no_invert_when_not_rotated(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
+
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         await n.async_set_native_value(50)
         stub_coord.async_cloud_set_pan.assert_called_once_with(CAM_ID, 50)
@@ -130,6 +138,7 @@ class TestPanNumber:
 class TestSpeakerLevelNumber:
     def test_construction(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
         n = BoschSpeakerLevelNumber(stub_coord, CAM_ID, stub_entry)
         # Just verify the entity instantiates without error
         assert n is not None
@@ -140,6 +149,9 @@ class TestSpeakerLevelNumber:
 
 class TestFrontLightIntensityNumber:
     def test_construction(self, stub_coord, stub_entry):
-        from custom_components.bosch_shc_camera.number import BoschFrontLightIntensityNumber
+        from custom_components.bosch_shc_camera.number import (
+            BoschFrontLightIntensityNumber,
+        )
+
         n = BoschFrontLightIntensityNumber(stub_coord, CAM_ID, stub_entry)
         assert n is not None

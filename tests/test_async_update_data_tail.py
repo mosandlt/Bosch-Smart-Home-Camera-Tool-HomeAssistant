@@ -24,16 +24,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .test_init_sprint_ka import (
+    _PATCH_SESSION,
     _make_coord,
     _make_resp,
     _make_session,
-    _PATCH_SESSION,
 )
-
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -76,12 +74,16 @@ class TestAsyncUpdateDataHappyTail:
         coord = _coord_with_tail_hooks()
         coord._rcp_lan_ip_cache = {CAM_A: "192.0.2.10"}
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_A, "title": "Terrasse"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_A, "title": "Terrasse"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -109,12 +111,16 @@ class TestAsyncUpdateDataHappyTail:
         # Pretend the same snapshot was already written.
         coord._lan_ips_snapshot = {CAM_A: "192.0.2.10"}
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_A, "title": "Terrasse"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_A, "title": "Terrasse"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -130,12 +136,16 @@ class TestAsyncUpdateDataHappyTail:
         coord._rcp_lan_ip_cache = {}
         coord._maintenance_last_fetch = time.monotonic()  # very fresh
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, [{"id": CAM_A, "title": "Terrasse"}]),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(
+                    200, [{"id": CAM_A, "title": "Terrasse"}]
+                ),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -156,13 +166,14 @@ class TestCloudFiveHundredTriggers:
         coord = _coord_with_tail_hooks()
         coord._rcp_lan_ip_cache = {}
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(503, []),
-            "feature_flags": _make_resp(200, {}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(503, []),
+                "feature_flags": _make_resp(200, {}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             pytest.raises(UpdateFailed):
+        with patch(_PATCH_SESSION, return_value=session), pytest.raises(UpdateFailed):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_refresh_maintenance.assert_called_with(reactive=True)
@@ -181,12 +192,13 @@ class TestOuterExceptBranches:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _coord_with_tail_hooks()
-        session = _make_session({
-            "v11/video_inputs": _make_resp(500, []),
-            "feature_flags": _make_resp(200, {}),
-        })
-        with patch(_PATCH_SESSION, return_value=session), \
-             pytest.raises(UpdateFailed):
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(500, []),
+                "feature_flags": _make_resp(200, {}),
+            }
+        )
+        with patch(_PATCH_SESSION, return_value=session), pytest.raises(UpdateFailed):
             await BoschCameraCoordinator._async_update_data(coord)
 
         # cloud_state announced with False — the cloud is down.
@@ -204,13 +216,15 @@ class TestOuterExceptBranches:
         # Make session.get raise TimeoutError synchronously to bubble out of
         # the `async with asyncio.timeout(15)` block via `__aexit__`.
         timeout_resp = MagicMock()
-        timeout_resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+        timeout_resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
         timeout_resp.__aexit__ = AsyncMock(return_value=None)
         session = MagicMock()
         session.get = MagicMock(return_value=timeout_resp)
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             pytest.raises(UpdateFailed, match="Timeout"):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            pytest.raises(UpdateFailed, match="Timeout"),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_maybe_announce_cloud_state.assert_called_with(False)
@@ -232,8 +246,10 @@ class TestOuterExceptBranches:
         session = MagicMock()
         session.get = MagicMock(return_value=err_resp)
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             pytest.raises(UpdateFailed, match="Network error"):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            pytest.raises(UpdateFailed, match="Network error"),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_maybe_announce_cloud_state.assert_called_with(False)

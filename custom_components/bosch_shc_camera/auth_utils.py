@@ -3,6 +3,7 @@
 Uses only aiohttp + stdlib — no `requests` dependency.
 Implements MD5 and MD5-sess; SHA-256 is accepted if Bosch ever upgrades.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -12,10 +13,10 @@ from typing import Any
 
 import aiohttp
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _md5(data: str) -> str:
     # usedforsecurity=False: MD5 is protocol-mandated by HTTP Digest (RFC 7616),
@@ -70,6 +71,7 @@ def _build_digest_header(
     # Use full URL path portion for the URI field
     # RFC 7616 §3.4: digest-uri = request-uri
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     uri = parsed.path
     if parsed.query:
@@ -107,7 +109,7 @@ def _build_digest_header(
         f'realm="{realm}"',
         f'nonce="{nonce}"',
         f'uri="{uri}"',
-        f'algorithm={algorithm}',
+        f"algorithm={algorithm}",
         f'response="{response}"',
         f'cnonce="{cnonce}"',
     ]
@@ -123,6 +125,7 @@ def _build_digest_header(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def async_digest_request(
     session: aiohttp.ClientSession,

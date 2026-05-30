@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -82,89 +81,110 @@ def coord_indoor(coord):
 
 def _make_pan(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschPanNumber
+
     return BoschPanNumber(coord, CAM_ID, entry, pan_limit=120)
 
 
 def _make_speaker_level(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
     return BoschSpeakerLevelNumber(coord, CAM_ID, entry)
 
 
 def _make_front_light_intensity(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschFrontLightIntensityNumber
+
     return BoschFrontLightIntensityNumber(coord, CAM_ID, entry)
 
 
 def _make_lens_elevation(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+
     return BoschLensElevationNumber(coord, CAM_ID, entry)
 
 
 def _make_microphone_level(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+
     return BoschMicrophoneLevelNumber(coord, CAM_ID, entry)
 
 
 def _make_white_balance(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
     return BoschWhiteBalanceNumber(coord, CAM_ID, entry)
 
 
 def _make_top_led_brightness(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschTopLedBrightnessNumber
+
     return BoschTopLedBrightnessNumber(coord, CAM_ID, entry)
 
 
 def _make_bottom_led_brightness(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschBottomLedBrightnessNumber
+
     return BoschBottomLedBrightnessNumber(coord, CAM_ID, entry)
 
 
 def _make_motion_light_sensitivity(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschMotionLightSensitivityNumber
+    from custom_components.bosch_shc_camera.number import (
+        BoschMotionLightSensitivityNumber,
+    )
+
     return BoschMotionLightSensitivityNumber(coord, CAM_ID, entry)
 
 
 def _make_darkness_threshold(coord, entry):
     from custom_components.bosch_shc_camera.number import BoschDarknessThresholdNumber
+
     return BoschDarknessThresholdNumber(coord, CAM_ID, entry)
 
 
 def _make_power_led_brightness(coord_indoor, entry):
     from custom_components.bosch_shc_camera.number import BoschPowerLedBrightnessNumber
+
     return BoschPowerLedBrightnessNumber(coord_indoor, CAM_ID, entry)
 
 
 def _make_alarm_delay(coord_indoor, entry):
     from custom_components.bosch_shc_camera.number import BoschAlarmDelayNumber
+
     return BoschAlarmDelayNumber(coord_indoor, CAM_ID, entry)
 
 
 def _make_alarm_activation_delay(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import BoschAlarmActivationDelayNumber
+    from custom_components.bosch_shc_camera.number import (
+        BoschAlarmActivationDelayNumber,
+    )
+
     return BoschAlarmActivationDelayNumber(coord_indoor, CAM_ID, entry)
 
 
 def _make_pre_alarm_delay(coord_indoor, entry):
     from custom_components.bosch_shc_camera.number import BoschPreAlarmDelayNumber
+
     return BoschPreAlarmDelayNumber(coord_indoor, CAM_ID, entry)
 
 
 # ── outdoor-coord classes ─────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("factory", [
-    _make_pan,
-    _make_speaker_level,
-    _make_front_light_intensity,
-    _make_lens_elevation,
-    _make_microphone_level,
-    _make_white_balance,
-    _make_top_led_brightness,
-    _make_bottom_led_brightness,
-    _make_motion_light_sensitivity,
-    _make_darkness_threshold,
-])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        _make_pan,
+        _make_speaker_level,
+        _make_front_light_intensity,
+        _make_lens_elevation,
+        _make_microphone_level,
+        _make_white_balance,
+        _make_top_led_brightness,
+        _make_bottom_led_brightness,
+        _make_motion_light_sensitivity,
+        _make_darkness_threshold,
+    ],
+)
 def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
     """_attr_name must not start with 'Bosch ' for outdoor-coord classes."""
     entity = factory(coord, entry)
@@ -174,18 +194,21 @@ def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
     )
 
 
-@pytest.mark.parametrize("factory", [
-    _make_pan,
-    _make_speaker_level,
-    _make_front_light_intensity,
-    _make_lens_elevation,
-    _make_microphone_level,
-    _make_white_balance,
-    _make_top_led_brightness,
-    _make_bottom_led_brightness,
-    _make_motion_light_sensitivity,
-    _make_darkness_threshold,
-])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        _make_pan,
+        _make_speaker_level,
+        _make_front_light_intensity,
+        _make_lens_elevation,
+        _make_microphone_level,
+        _make_white_balance,
+        _make_top_led_brightness,
+        _make_bottom_led_brightness,
+        _make_motion_light_sensitivity,
+        _make_darkness_threshold,
+    ],
+)
 def test_has_entity_name_true_outdoor(factory, coord, entry):
     """_attr_has_entity_name must be True (own or inherited) for all outdoor-coord classes."""
     entity = factory(coord, entry)
@@ -201,12 +224,15 @@ def test_has_entity_name_true_outdoor(factory, coord, entry):
 # ── indoor-coord classes ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("factory", [
-    _make_power_led_brightness,
-    _make_alarm_delay,
-    _make_alarm_activation_delay,
-    _make_pre_alarm_delay,
-])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        _make_power_led_brightness,
+        _make_alarm_delay,
+        _make_alarm_activation_delay,
+        _make_pre_alarm_delay,
+    ],
+)
 def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
     """_attr_name must not start with 'Bosch ' for indoor-coord classes."""
     entity = factory(coord_indoor, entry)
@@ -216,12 +242,15 @@ def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
     )
 
 
-@pytest.mark.parametrize("factory", [
-    _make_power_led_brightness,
-    _make_alarm_delay,
-    _make_alarm_activation_delay,
-    _make_pre_alarm_delay,
-])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        _make_power_led_brightness,
+        _make_alarm_delay,
+        _make_alarm_activation_delay,
+        _make_pre_alarm_delay,
+    ],
+)
 def test_has_entity_name_true_indoor(factory, coord_indoor, entry):
     """_attr_has_entity_name must be True (own or inherited) for all indoor-coord classes."""
     entity = factory(coord_indoor, entry)

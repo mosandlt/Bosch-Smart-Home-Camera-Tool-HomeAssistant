@@ -60,6 +60,7 @@ def _coord():
 @pytest.mark.asyncio
 async def test_privacy_on_does_not_request_full_refresh():
     from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
     coord = _coord()
     with patch(
         "custom_components.bosch_shc_camera.shc.async_get_clientsession",
@@ -77,13 +78,17 @@ async def test_privacy_on_does_not_request_full_refresh():
 @pytest.mark.asyncio
 async def test_privacy_off_does_not_request_full_refresh():
     from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+
     coord = _coord()
-    with patch(
-        "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-        return_value=_put_204_session(),
-    ), patch(
-        "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"
-    ) as mock_snap:
+    with (
+        patch(
+            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+            return_value=_put_204_session(),
+        ),
+        patch(
+            "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"
+        ) as mock_snap,
+    ):
         result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
     assert result is True
     assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is False

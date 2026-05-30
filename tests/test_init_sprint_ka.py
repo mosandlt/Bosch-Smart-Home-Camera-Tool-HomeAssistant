@@ -16,19 +16,18 @@ Coverage targets (lines 1298-1460):
 All tests run without a live HA instance.  Coordinator is a SimpleNamespace stub;
 methods are called via BoschCameraCoordinator.<method>(coord, ...) (unbound pattern).
 """
+
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-import logging
 
 import pytest
-
 from homeassistant.helpers.update_coordinator import UpdateFailed
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,7 +54,9 @@ def _make_session(url_responses: dict):
       sequences on the same URL pattern).
     """
     # Clone so we can pop without mutating the caller's dict
-    state: dict = {k: (list(v) if isinstance(v, list) else [v]) for k, v in url_responses.items()}
+    state: dict = {
+        k: (list(v) if isinstance(v, list) else [v]) for k, v in url_responses.items()
+    }
 
     def _get(url, **kwargs):
         for pattern, queue in state.items():
@@ -105,8 +106,8 @@ def _make_coord(**overrides):
         # Individual tests that want do_slow=True can override with _last_slow=-86400.0.
         _last_status=float("-inf"),
         _last_events=float("-inf"),
-        _last_slow=time.monotonic(),           # not stale → do_slow=False
-        _last_smb_cleanup=time.monotonic(),    # far future → skip SMB cleanup
+        _last_slow=time.monotonic(),  # not stale → do_slow=False
+        _last_smb_cleanup=time.monotonic(),  # far future → skip SMB cleanup
         _last_nvr_cleanup=time.monotonic(),
         # FCM
         _fcm_lock=threading.Lock(),
@@ -174,7 +175,7 @@ def _make_coord(**overrides):
         _async_update_rcp_data=AsyncMock(),
         async_mark_events_read=AsyncMock(),
         _is_write_locked=MagicMock(return_value=False),
-        shc_ready=False,   # skip SHC supplement path by default
+        shc_ready=False,  # skip SHC supplement path by default
         get_model_config=lambda cid: SimpleNamespace(generation=2),
         hass=SimpleNamespace(
             async_create_task=MagicMock(side_effect=_create_task),
@@ -214,12 +215,15 @@ class TestNoTokenGuard:
         # Set both to falsy so the guard fires.
         coord = _make_coord(token=None, refresh_token="")
 
-        with pytest.raises(UpdateFailed, match="Not authenticated"), \
-             patch(_PATCH_SESSION) as mock_sess:
+        with (
+            pytest.raises(UpdateFailed, match="Not authenticated"),
+            patch(_PATCH_SESSION) as mock_sess,
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        mock_sess.assert_not_called(), (
-            "Session should not be opened when token/refresh_token are both missing"
+        (
+            mock_sess.assert_not_called(),
+            ("Session should not be opened when token/refresh_token are both missing"),
         )
 
     @pytest.mark.asyncio
@@ -231,11 +235,13 @@ class TestNoTokenGuard:
         coord = _make_coord(token=None, refresh_token="rfr-B")
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -265,11 +271,13 @@ class TestFirstTickDetection:
             "Pre-condition: _first_tick_done must not exist before first tick"
         )
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -285,7 +293,7 @@ class TestFirstTickDetection:
 
         # Force intervals to appear elapsed
         coord = _make_coord(
-            _last_events=-86400.0,   # 24h ago → do_events would be True without first-tick
+            _last_events=-86400.0,  # 24h ago → do_events would be True without first-tick
             _last_slow=-86400.0,
         )
         assert not hasattr(coord, "_first_tick_done"), (
@@ -321,7 +329,7 @@ class TestFirstTickDetection:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(
-            _last_events=-86400.0,   # stale → do_events=True
+            _last_events=-86400.0,  # stale → do_events=True
             _last_slow=time.monotonic(),  # not stale → do_slow=False (avoids extra calls)
         )
         # Simulate second tick by pre-setting the flag
@@ -353,7 +361,11 @@ class TestFirstTickDetection:
         with patch(_PATCH_SESSION, return_value=session_mock):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        event_urls = [u for u in call_log if ("last_event" in u or ("/events" in u and "feature" not in u))]
+        event_urls = [
+            u
+            for u in call_log
+            if ("last_event" in u or ("/events" in u and "feature" not in u))
+        ]
         assert event_urls, (
             "Events-related URLs must be called on second tick when interval elapsed"
         )
@@ -385,11 +397,13 @@ class TestFcmWatchdog:
         )
         coord._first_tick_done = True  # skip first-tick suppression
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -404,7 +418,9 @@ class TestFcmWatchdog:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         fcm_client = MagicMock()
-        fcm_client.is_started = MagicMock(return_value=False)  # would be dead if running
+        fcm_client.is_started = MagicMock(
+            return_value=False
+        )  # would be dead if running
 
         coord = _make_coord(
             _fcm_running=False,
@@ -414,11 +430,13 @@ class TestFcmWatchdog:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -443,11 +461,13 @@ class TestFcmWatchdog:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -479,15 +499,23 @@ class TestFcmWatchdog:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
-            mock_heal.return_value = None  # coroutine target — async_create_task in stub closes it
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+        ):
+            mock_heal.return_value = (
+                None  # coroutine target — async_create_task in stub closes it
+            )
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._fcm_healthy is False, "silent death still flips healthy=False"
@@ -518,20 +546,30 @@ class TestFcmWatchdog:
             options={"enable_fcm_push": True},
         )
         coord._first_tick_done = True
-        coord._fcm_last_self_heal = time.monotonic() - 300.0  # 5 min ago — still in cool-down
+        coord._fcm_last_self_heal = (
+            time.monotonic() - 300.0
+        )  # 5 min ago — still in cool-down
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+        ):
             mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_healthy is False, "healthy still flipped — flag update is independent of cool-down"
+        assert coord._fcm_healthy is False, (
+            "healthy still flipped — flag update is independent of cool-down"
+        )
         assert not mock_heal.called, (
             "cool-down must suppress a second self-heal within 30 min "
             "to avoid tearing FCM down on every coordinator tick"
@@ -553,12 +591,14 @@ class TestCameraList200:
         coord._first_tick_done = True
 
         cam_data = [{"id": "CAM-A", "hardwareVersion": "HOME_Eyes_Outdoor"}]
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, cam_data),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-            "ping": _make_resp(200, {}, text_data="ONLINE"),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, cam_data),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+                "ping": _make_resp(200, {}, text_data="ONLINE"),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -575,18 +615,18 @@ class TestCameraList200:
         coord = _make_coord()
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
         with patch(_PATCH_SESSION, return_value=session):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
-        assert result == {}, (
-            "Empty camera list must produce an empty data dict"
-        )
+        assert result == {}, "Empty camera list must produce an empty data dict"
 
 
 # ── 5. Camera list 401 → refresh + retry 200 ─────────────────────────────────
@@ -632,8 +672,9 @@ class TestCameraList401Retry:
         assert "CAM-B" in result, (
             "After 401+renewal+retry-200, camera must appear in result data"
         )
-        coord._ensure_valid_token.assert_called_once(), (
-            "_ensure_valid_token must be called exactly once on 401"
+        (
+            coord._ensure_valid_token.assert_called_once(),
+            ("_ensure_valid_token must be called exactly once on 401"),
         )
 
 
@@ -662,8 +703,10 @@ class TestCameraList401DoubleFailure:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with pytest.raises(UpdateFailed, match="Token expired"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            pytest.raises(UpdateFailed, match="Token expired"),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert call_count[0] == 2, (
@@ -693,8 +736,10 @@ class TestCameraListHttpError:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with pytest.raises(UpdateFailed, match="HTTP 500"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            pytest.raises(UpdateFailed, match="HTTP 500"),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
     @pytest.mark.asyncio
@@ -713,8 +758,10 @@ class TestCameraListHttpError:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with pytest.raises(UpdateFailed, match="HTTP 503"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            pytest.raises(UpdateFailed, match="HTTP 503"),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
 
@@ -804,7 +851,7 @@ class TestFeatureFlagsTimeout:
             if "feature_flags" in url:
                 # Return a context manager that raises TimeoutError on __aenter__
                 resp = MagicMock()
-                resp.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+                resp.__aenter__ = AsyncMock(side_effect=TimeoutError())
                 resp.__aexit__ = AsyncMock(return_value=None)
                 return resp
             if "protocol_support" in url:
@@ -848,8 +895,12 @@ class TestProtocolCheckSupported:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            caplog.at_level(
+                logging.WARNING, logger="custom_components.bosch_shc_camera"
+            ),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
         warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -928,12 +979,21 @@ class TestProtocolCheckDeprecated:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            caplog.at_level(
+                logging.WARNING, logger="custom_components.bosch_shc_camera"
+            ),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        assert any("may no longer be supported" in m or "protocol" in m.lower() for m in warning_msgs), (
+        warning_msgs = [
+            r.message for r in caplog.records if r.levelno == logging.WARNING
+        ]
+        assert any(
+            "may no longer be supported" in m or "protocol" in m.lower()
+            for m in warning_msgs
+        ), (
             f"WARNING about protocol support must be emitted, got warnings: {warning_msgs}"
         )
 
@@ -953,11 +1013,17 @@ class TestProtocolCheckDeprecated:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.bosch_shc_camera"), \
-             patch(_PATCH_SESSION, return_value=session_mock):
+        with (
+            caplog.at_level(
+                logging.WARNING, logger="custom_components.bosch_shc_camera"
+            ),
+            patch(_PATCH_SESSION, return_value=session_mock),
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        warning_msgs = [
+            r.message for r in caplog.records if r.levelno == logging.WARNING
+        ]
         assert warning_msgs, (
             "At least one WARNING must be emitted for UNSUPPORTED protocol state"
         )

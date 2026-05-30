@@ -16,6 +16,7 @@ We bypass the 2× 60s sleeps via `patch("asyncio.sleep")` so the test
 runs in milliseconds. The watchdog does its escalation purely through
 coordinator state mutations + try_live_connection() calls.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -47,6 +47,7 @@ def _make_coord(**overrides):
 def _make_switch(coord=None):
     """Build a BoschLiveStreamSwitch stub bypassing __init__."""
     from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
     coord = coord or _make_coord()
     sw = BoschLiveStreamSwitch.__new__(BoschLiveStreamSwitch)
     sw.coordinator = coord
@@ -65,6 +66,7 @@ class TestHealthClassifier:
         No restart, no further escalation. Pin so the success path
         keeps clearing the per-cam error counter."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         cam_entity = SimpleNamespace(stream=SimpleNamespace(available=True))
         coord = _make_coord(_camera_entities={CAM_ID: cam_entity})
         sw = _make_switch(coord)
@@ -80,6 +82,7 @@ class TestHealthClassifier:
         restarting the LOCAL session wouldn't help. Exit silently
         leaving the LOCAL session up for a future consumer."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         cam_entity = SimpleNamespace(stream=None)
         coord = _make_coord(_camera_entities={CAM_ID: cam_entity})
         sw = _make_switch(coord)
@@ -94,6 +97,7 @@ class TestHealthClassifier:
         """Camera entity not yet registered (race) → same outcome as
         no Stream object: silent exit."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         coord = _make_coord(_camera_entities={})  # cam not in dict
         sw = _make_switch(coord)
         with patch("asyncio.sleep", new=AsyncMock()):
@@ -111,6 +115,7 @@ class TestStreamOffShortCircuit:
         nothing to watch, exit. Pin so the watchdog doesn't fire
         spurious restarts after the user already turned the switch off."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         coord = _make_coord(_live_connections={})  # already off
         sw = _make_switch(coord)
         with patch("asyncio.sleep", new=AsyncMock()):
@@ -123,9 +128,12 @@ class TestStreamOffShortCircuit:
         flipped the connection to REMOTE, the LOCAL watchdog stops —
         REMOTE has no LOCAL-specific failure modes."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
-        coord = _make_coord(_live_connections={
-            CAM_ID: {"_connection_type": "REMOTE"},
-        })
+
+        coord = _make_coord(
+            _live_connections={
+                CAM_ID: {"_connection_type": "REMOTE"},
+            }
+        )
         sw = _make_switch(coord)
         with patch("asyncio.sleep", new=AsyncMock()):
             await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
@@ -142,6 +150,7 @@ class TestUnhealthyRestart:
         try_live_connection. Counter NOT yet saturated — gradual
         escalation via per-model threshold."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         # Stream object exists but available=False initially
         cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
         coord = _make_coord(_camera_entities={CAM_ID: cam_entity})
@@ -179,6 +188,7 @@ class TestUnhealthyRestart:
         threshold by setting `_stream_error_count` directly to
         max_stream_errors. Forces REMOTE on the next try_live_connection."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         # Always unhealthy
         cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
         coord = _make_coord(_camera_entities={CAM_ID: cam_entity})
@@ -202,6 +212,7 @@ class TestUnhealthyRestart:
         """First tick unhealthy → restart. try_live_connection picks
         REMOTE this time → exit (no second tick)."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+
         cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
         coord = _make_coord(_camera_entities={CAM_ID: cam_entity})
         # Restart returns REMOTE → watchdog exits

@@ -27,13 +27,14 @@ import re
 import shutil
 import signal
 import time
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from .const import (
+    TIMEOUT_RECORDER_FFMPEG_INIT,
     TIMEOUT_RECORDER_GRACE,
     TIMEOUT_RECORDER_KILL_WAIT,
     TIMEOUT_RECORDER_STDERR_DRAIN,
-    TIMEOUT_RECORDER_FFMPEG_INIT,
 )
 from .smb import _safe_name
 
@@ -62,24 +63,25 @@ _PROXY_URL_WAIT_STEPS = 24
 _PROXY_URL_WAIT_INTERVAL = 0.5
 
 # ── Phase 4: pre-roll buffer tunables ────────────────────────────────────────
-_PREROLL_SEGMENT_SECONDS = 10      # short segments for fine-grained pre-roll
-_PREROLL_MAX_SEGMENTS = 5          # keep last 5 × 10 s = 50 s max in tmpfs
-_PREROLL_MIN_SIZE_BYTES = 1024     # discard sub-1 KB corrupt segments
+_PREROLL_SEGMENT_SECONDS = 10  # short segments for fine-grained pre-roll
+_PREROLL_MAX_SEGMENTS = 5  # keep last 5 × 10 s = 50 s max in tmpfs
+_PREROLL_MIN_SIZE_BYTES = 1024  # discard sub-1 KB corrupt segments
 
 # ── Staging-drain watcher tunables ───────────────────────────────────────────
 # ffmpeg writes EVERY segment locally first ("staging") so a half-flushed file
 # is never uploaded. Once a segment file's mtime stops changing AND it has a
 # reasonable size we treat it as finalized and move it to the configured
 # storage target.
-_DRAIN_TICK_SECONDS = 30.0          # how often the watcher sweeps staging
+_DRAIN_TICK_SECONDS = 30.0  # how often the watcher sweeps staging
 _DRAIN_FINALIZE_AGE_SECONDS = 60.0  # mtime must be older than this
-_DRAIN_MIN_SIZE_BYTES = 10 * 1024   # < 10 KB → still being written / corrupt
-_DRAIN_MAX_RETRIES = 5              # quarantine after this many failed uploads
+_DRAIN_MIN_SIZE_BYTES = 10 * 1024  # < 10 KB → still being written / corrupt
+_DRAIN_MAX_RETRIES = 5  # quarantine after this many failed uploads
 _STAGING_DIRNAME = "_staging"
 _FAILED_DIRNAME = "_failed"
 
 
 # ── pure helpers (testable without spawning ffmpeg or touching disk) ─────────
+
 
 def _segment_dir(base_path: str, cam_name: str) -> str:
     """Return ``{base_path}/{sanitized_cam_name}``.
@@ -120,7 +122,8 @@ def _staging_pattern(base_path: str, cam_name: str) -> str:
     """ffmpeg ``-strftime`` output template inside the staging tree."""
     return os.path.join(
         _staging_dir(base_path, cam_name),
-        "%Y-%m-%d", "%H-%M.mp4",
+        "%Y-%m-%d",
+        "%H-%M.mp4",
     )
 
 
@@ -140,7 +143,9 @@ def _remote_smb_path(opts: dict[str, Any], cam_name: str, date: str, fname: str)
     base = (opts.get("smb_base_path") or "Bosch-Kameras").strip()
     sub = (opts.get("nvr_smb_subpath") or "NVR").strip()
     cam = _safe_name(cam_name)
-    return f"\\\\{server}\\{share}\\{base}\\{sub}\\{cam}\\{date}\\{fname}".replace("/", "\\")
+    return f"\\\\{server}\\{share}\\{base}\\{sub}\\{cam}\\{date}\\{fname}".replace(
+        "/", "\\"
+    )
 
 
 def _remote_ftp_path(opts: dict[str, Any], cam_name: str, date: str, fname: str) -> str:
@@ -192,29 +197,43 @@ def _build_ffmpeg_args(
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
-        "-loglevel", "warning",
+        "-loglevel",
+        "warning",
         # Force TCP — RTP-over-UDP through the loopback proxy is fragile and
         # the TLS proxy already rewrites SETUP to TCP-interleaved anyway.
-        "-rtsp_transport", "tcp",
+        "-rtsp_transport",
+        "tcp",
         # -reconnect_* are HTTP-only options and crash ffmpeg with rc=8 on
         # rtsp:// inputs. The watcher (_watch_recorder) handles respawn on
         # TLS-proxy renewal gaps instead.
-        "-i", effective_url,
-        "-map", "0",  # include all streams (video + AAC audio) — MVP keeps audio per concept §10
-        "-c", "copy",
-        "-f", "segment",
-        "-segment_time", str(segment_seconds),
-        "-segment_format", "mp4",
-        "-segment_atclocktime", "1",
-        "-reset_timestamps", "1",
-        "-strftime", "1",
-        "-strftime_mkdir", "1",
-        "-movflags", "+faststart",
+        "-i",
+        effective_url,
+        "-map",
+        "0",  # include all streams (video + AAC audio) — MVP keeps audio per concept §10
+        "-c",
+        "copy",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(segment_seconds),
+        "-segment_format",
+        "mp4",
+        "-segment_atclocktime",
+        "1",
+        "-reset_timestamps",
+        "1",
+        "-strftime",
+        "1",
+        "-strftime_mkdir",
+        "1",
+        "-movflags",
+        "+faststart",
         segment_pattern,
     ]
 
 
 # ── Phase 4: pre-roll helpers ─────────────────────────────────────────────────
+
 
 def _preroll_dir(cache_dir: str, cam_name: str) -> str:
     """Return {cache_dir}/{safe_cam_name}/"""
@@ -277,23 +296,34 @@ def _build_preroll_ffmpeg_args(rtsp_url: str, pattern: str) -> list[str]:
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
-        "-loglevel", "warning",
-        "-rtsp_transport", "tcp",
-        "-i", rtsp_url,
-        "-map", "0",
-        "-c", "copy",
-        "-f", "segment",
-        "-segment_time", str(_PREROLL_SEGMENT_SECONDS),
-        "-segment_format", "mp4",
-        "-reset_timestamps", "1",
-        "-strftime", "1",
-        "-movflags", "+faststart",
+        "-loglevel",
+        "warning",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        rtsp_url,
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(_PREROLL_SEGMENT_SECONDS),
+        "-segment_format",
+        "mp4",
+        "-reset_timestamps",
+        "1",
+        "-strftime",
+        "1",
+        "-movflags",
+        "+faststart",
         pattern,
     ]
 
 
 async def _watch_preroll_recorder(
-    coordinator: "BoschCameraCoordinator",
+    coordinator: BoschCameraCoordinator,
     cam_id: str,
     cam_dir: str,
     max_segs: int,
@@ -314,14 +344,18 @@ async def _watch_preroll_recorder(
             return
         try:
             remaining = await coordinator.hass.async_add_executor_job(
-                _prune_and_count, cam_dir, max_segs,
+                _prune_and_count,
+                cam_dir,
+                max_segs,
             )
             coordinator._nvr_preroll_segment_counts[cam_id] = remaining
-        except Exception:  # noqa: BLE001
+        except Exception:  # best-effort prune-on-stop; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
             pass
 
 
-async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+async def start_preroll_recorder(
+    coordinator: BoschCameraCoordinator, cam_id: str
+) -> None:
     """Spawn parallel pre-roll ffmpeg for one camera to tmpfs."""
     await stop_preroll_recorder(coordinator, cam_id)
 
@@ -333,17 +367,22 @@ async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: 
         return
 
     opts = coordinator.options
-    cache_dir = (opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache").strip()
-    cam_name = (
-        coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-    )
+    cache_dir = (
+        opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache"  # noqa: S108 # tmpfs NVR cache default, user-overridable via options
+    ).strip()
+    cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
     cam_dir = _preroll_dir(cache_dir, cam_name)
     try:
         await coordinator.hass.async_add_executor_job(
-            os.makedirs, cam_dir, 0o755, True,
+            os.makedirs,
+            cam_dir,
+            0o755,
+            True,
         )
     except OSError as err:
-        _LOGGER.warning("NVR pre-roll: cannot create cache dir for %s: %s", cam_name, err)
+        _LOGGER.warning(
+            "NVR pre-roll: cannot create cache dir for %s: %s", cam_name, err
+        )
         return
 
     pattern = _preroll_pattern(cache_dir, cam_name)
@@ -370,10 +409,12 @@ async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: 
     # Prune on spawn so stale segments from a previous session don't inflate the buffer.
     try:
         remaining = await coordinator.hass.async_add_executor_job(
-            _prune_and_count, cam_dir, max_segs,
+            _prune_and_count,
+            cam_dir,
+            max_segs,
         )
         coordinator._nvr_preroll_segment_counts[cam_id] = remaining
-    except Exception:  # noqa: BLE001
+    except Exception:  # best-effort prune-on-spawn; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
         pass
 
     # Start periodic prune watcher — keeps the ring buffer bounded while running.
@@ -388,7 +429,9 @@ async def start_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: 
     coordinator._nvr_preroll_tasks[cam_id] = task
 
 
-async def stop_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+async def stop_preroll_recorder(
+    coordinator: BoschCameraCoordinator, cam_id: str
+) -> None:
     """Stop pre-roll recorder for one camera."""
     # Cancel the periodic prune watcher first.
     tasks = getattr(coordinator, "_nvr_preroll_tasks", {})
@@ -408,30 +451,30 @@ async def stop_preroll_recorder(coordinator: "BoschCameraCoordinator", cam_id: s
         return
     try:
         await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE_SECONDS)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         try:
             proc.kill()
         except ProcessLookupError:
             pass
         try:
             await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 
-async def stop_all_preroll(coordinator: "BoschCameraCoordinator") -> None:
+async def stop_all_preroll(coordinator: BoschCameraCoordinator) -> None:
     """Stop all pre-roll recorders — called on integration unload."""
     for cam_id in list(coordinator._nvr_preroll_processes.keys()):
         await stop_preroll_recorder(coordinator, cam_id)
 
 
-def list_preroll_files(coordinator: "BoschCameraCoordinator", cam_id: str) -> list[str]:
+def list_preroll_files(coordinator: BoschCameraCoordinator, cam_id: str) -> list[str]:
     """Return list of pre-roll segment paths for cam_id, sorted oldest-first."""
     opts = coordinator.options
-    cache_dir = (opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache").strip()
-    cam_name = (
-        coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-    )
+    cache_dir = (
+        opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache"  # noqa: S108 # tmpfs NVR cache default, user-overridable via options
+    ).strip()
+    cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
     cam_dir = _preroll_dir(cache_dir, cam_name)
     return [path for path, _ in _list_preroll_segments(cam_dir)]
 
@@ -445,21 +488,31 @@ def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
-        "-loglevel", "warning",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concat_file,
-        "-c", "copy",
-        "-movflags", "+faststart",
+        "-loglevel",
+        "warning",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concat_file,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
         "-y",
         output_path,
     ]
 
 
-async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str, output_path: str) -> bool:
+async def create_motion_clip(
+    coordinator: BoschCameraCoordinator, cam_id: str, output_path: str
+) -> bool:
     """Concatenate available pre-roll segments into output_path. Returns True on success."""
     paths = await coordinator.hass.async_add_executor_job(
-        list_preroll_files, coordinator, cam_id,
+        list_preroll_files,
+        coordinator,
+        cam_id,
     )
     if not paths:
         _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
@@ -480,7 +533,9 @@ async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str,
         return False
 
     args = create_motion_clip_args(paths, output_path)
-    _LOGGER.debug("NVR motion clip for %s: %d segments -> %s", cam_id[:8], len(paths), output_path)
+    _LOGGER.debug(
+        "NVR motion clip for %s: %d segments -> %s", cam_id[:8], len(paths), output_path
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -496,8 +551,10 @@ async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str,
         return False
 
     try:
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT_RECORDER_FFMPEG_INIT)
-    except asyncio.TimeoutError:
+        _, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=TIMEOUT_RECORDER_FFMPEG_INIT
+        )
+    except TimeoutError:
         try:
             proc.kill()
         except ProcessLookupError:
@@ -515,14 +572,16 @@ async def create_motion_clip(coordinator: "BoschCameraCoordinator", cam_id: str,
         tail = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:]
         _LOGGER.warning(
             "NVR motion clip: ffmpeg rc=%d for %s. Tail: %s",
-            proc.returncode, cam_id[:8], tail,
+            proc.returncode,
+            cam_id[:8],
+            tail,
         )
         return False
     return True
 
 
 def should_record(
-    coordinator: "BoschCameraCoordinator",
+    coordinator: BoschCameraCoordinator,
     cam_id: str,
     *,
     switch_on: bool,
@@ -547,7 +606,8 @@ def should_record(
 
 # ── recorder lifecycle (per-camera ffmpeg child) ─────────────────────────────
 
-async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+
+async def start_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
     """Spawn (or replace) the ffmpeg recorder for one camera.
 
     Idempotent: if a recorder is already running for ``cam_id`` it is stopped
@@ -594,15 +654,13 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
     # Event-only mode: skip continuous recording, run only the pre-roll ring
     # buffer. Motion events can still create clips from cached segments.
     if opts.get("nvr_event_only", False):
-        preroll_secs = int((opts.get("nvr_preroll_seconds") or 0))
+        preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
         if preroll_secs > 0:
             await start_preroll_recorder(coordinator, cam_id)
         return
 
     base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()
-    cam_name = (
-        coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-    )
+    cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
     # ffmpeg ALWAYS writes to a staging tree first — defends against
     # partial-writes during segment rotation. The drain watcher promotes
     # finalized files to either the local layout or to SMB / FTP, depending
@@ -621,11 +679,16 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
                 datetime.date.today() + datetime.timedelta(days=day_offset)
             ).strftime("%Y-%m-%d")
             await coordinator.hass.async_add_executor_job(
-                os.makedirs, os.path.join(staging_cam, day), 0o755, True,
+                os.makedirs,
+                os.path.join(staging_cam, day),
+                0o755,
+                True,
             )
     except OSError as err:
         _LOGGER.warning(
-            "NVR cannot create staging dir for %s: %s", cam_name, err,
+            "NVR cannot create staging dir for %s: %s",
+            cam_name,
+            err,
         )
         return
 
@@ -634,7 +697,9 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
 
     _LOGGER.info(
         "NVR starting recorder for %s -> %s (quality=%s)",
-        cam_name, pattern, quality,
+        cam_name,
+        pattern,
+        quality,
     )
     _LOGGER.debug("NVR ffmpeg argv for %s: %s", cam_name, " ".join(args))
     try:
@@ -665,12 +730,12 @@ async def start_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> 
     task.add_done_callback(coordinator._bg_tasks.discard)
 
     # Start pre-roll buffer if configured (nvr_preroll_seconds > 0).
-    preroll_secs = int((opts.get("nvr_preroll_seconds") or 0))
+    preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
     if preroll_secs > 0:
         await start_preroll_recorder(coordinator, cam_id)
 
 
-async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> None:
+async def stop_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
     """Stop the recorder for one camera, giving ffmpeg up to 5 s to flush MP4."""
     await stop_preroll_recorder(coordinator, cam_id)
     proc = coordinator._nvr_processes.pop(cam_id, None)
@@ -679,7 +744,8 @@ async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> N
     if proc.returncode is not None:
         _LOGGER.debug(
             "NVR stop_recorder: ffmpeg already exited for %s (rc=%d)",
-            cam_id[:8], proc.returncode,
+            cam_id[:8],
+            proc.returncode,
         )
         return
     try:
@@ -690,12 +756,14 @@ async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> N
         await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE_SECONDS)
         _LOGGER.debug(
             "NVR stop_recorder: ffmpeg cleanly exited for %s (rc=%d)",
-            cam_id[:8], proc.returncode,
+            cam_id[:8],
+            proc.returncode,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _LOGGER.warning(
             "NVR stop_recorder: ffmpeg did not exit within %.0fs for %s — escalating to SIGKILL",
-            _STOP_GRACE_SECONDS, cam_id[:8],
+            _STOP_GRACE_SECONDS,
+            cam_id[:8],
         )
         try:
             proc.kill()
@@ -703,14 +771,14 @@ async def stop_recorder(coordinator: "BoschCameraCoordinator", cam_id: str) -> N
             pass
         try:
             await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.warning(
                 "NVR stop_recorder: ffmpeg still alive after SIGKILL for %s",
                 cam_id[:8],
             )
 
 
-async def stop_all(coordinator: "BoschCameraCoordinator") -> None:
+async def stop_all(coordinator: BoschCameraCoordinator) -> None:
     """Stop every recorder — called on integration unload / HA stop."""
     await stop_all_preroll(coordinator)
     for cam_id in list(coordinator._nvr_processes.keys()):
@@ -718,7 +786,7 @@ async def stop_all(coordinator: "BoschCameraCoordinator") -> None:
 
 
 async def _watch_recorder(
-    coordinator: "BoschCameraCoordinator",
+    coordinator: BoschCameraCoordinator,
     cam_id: str,
     proc: asyncio.subprocess.Process,
 ) -> None:
@@ -743,15 +811,23 @@ async def _watch_recorder(
     err_tail = ""
     if proc.stderr is not None:
         try:
-            err_bytes = await asyncio.wait_for(proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN)
+            err_bytes = await asyncio.wait_for(
+                proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN
+            )
             err_tail = err_bytes.decode("utf-8", errors="replace").strip()
-        except (asyncio.TimeoutError, Exception):
+        except (  # noqa: S110 # best-effort stderr drain before respawn, exit already logged
+            TimeoutError,
+            Exception,
+        ):  # best-effort stderr drain before respawn; ffmpeg exit already logged
             pass
 
     elapsed = time.monotonic() - started_at
     _LOGGER.warning(
         "NVR ffmpeg exited rc=%s after %.0fs for %s. Tail: %s",
-        rc, elapsed, cam_id[:8], err_tail[-500:] if err_tail else "(no stderr)",
+        rc,
+        elapsed,
+        cam_id[:8],
+        err_tail[-500:] if err_tail else "(no stderr)",
     )
 
     # Quick re-check: only respawn if we still want to record.
@@ -768,7 +844,8 @@ async def _watch_recorder(
             _LOGGER.error(
                 "NVR ffmpeg crashed twice within %.0fs for %s — giving up. "
                 "Toggle the recording switch off+on to retry.",
-                _RESPAWN_WINDOW_SECONDS, cam_id[:8],
+                _RESPAWN_WINDOW_SECONDS,
+                cam_id[:8],
             )
             coordinator._nvr_error_state[cam_id] = "ffmpeg crashed twice"
             return
@@ -783,7 +860,10 @@ async def _watch_recorder(
 
 # ── staging-drain watcher (per-coordinator background task) ──────────────────
 
-def _list_staging_candidates(staging_root: str) -> list[tuple[str, str, str, float, int]]:
+
+def _list_staging_candidates(
+    staging_root: str,
+) -> list[tuple[str, str, str, float, int]]:
     """Walk the staging tree and return ``(full_path, cam, date, mtime, size)``
     tuples for every regular file. Pure helper so the watcher is testable
     without spinning up an event loop.
@@ -838,8 +918,14 @@ def _is_segment_finalized(mtime: float, size: int, *, now: float | None = None) 
     )
 
 
-def _move_local(coordinator: "BoschCameraCoordinator",
-                full: str, base_path: str, cam: str, date: str, fname: str) -> bool:
+def _move_local(
+    coordinator: BoschCameraCoordinator,
+    full: str,
+    base_path: str,
+    cam: str,
+    date: str,
+    fname: str,
+) -> bool:
     """target=local: rename staging file into ``{base}/{cam}/{date}/{fname}``.
 
     Returns True on success. The promoted layout is what Media Source / the
@@ -855,13 +941,13 @@ def _move_local(coordinator: "BoschCameraCoordinator",
         shutil.move(full, dest)
         return True
     except OSError as err:
-        _LOGGER.debug("NVR drain (local): move %s -> %s failed: %s",
-                      full, dest, err)
+        _LOGGER.debug("NVR drain (local): move %s -> %s failed: %s", full, dest, err)
         return False
 
 
-def _upload_smb(coordinator: "BoschCameraCoordinator",
-                full: str, cam: str, date: str, fname: str) -> bool:
+def _upload_smb(
+    coordinator: BoschCameraCoordinator, full: str, cam: str, date: str, fname: str
+) -> bool:
     """target=smb: upload one finalized segment via smbclient.
 
     Reuses the session-register pattern from ``smb.py`` but writes only to
@@ -869,7 +955,10 @@ def _upload_smb(coordinator: "BoschCameraCoordinator",
     uploads stay in their own branch.
     """
     try:
-        from smbclient import register_session, open_file  # type: ignore[import-not-found]
+        from smbclient import (
+            open_file,
+            register_session,
+        )
     except ImportError:
         _LOGGER.warning(
             "NVR drain (smb): smbprotocol not installed — install or set "
@@ -885,22 +974,27 @@ def _upload_smb(coordinator: "BoschCameraCoordinator",
         return False
     try:
         register_session(server, username=username, password=password)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.warning("NVR drain (smb): session to %s failed: %s", server, err)
         return False
 
     # Build remote path + ensure the per-date folder exists.
     from .smb import smb_makedirs
+
     base = (opts.get("smb_base_path") or "Bosch-Kameras").strip()
     sub = (opts.get("nvr_smb_subpath") or "NVR").strip()
     server_share = f"\\\\{server}\\{(opts.get('smb_share') or '').strip()}"
     folder_parts = f"{sub}/{cam}/{date}"
     smb_folder = f"{server_share}\\{base}\\{folder_parts}".replace("/", "\\")
     try:
-        smb_makedirs(smb_folder, server,
-                     (opts.get("smb_share") or "").strip(),
-                     base, folder_parts)
-    except Exception as err:  # noqa: BLE001
+        smb_makedirs(
+            smb_folder,
+            server,
+            (opts.get("smb_share") or "").strip(),
+            base,
+            folder_parts,
+        )
+    except Exception as err:
         _LOGGER.debug("NVR drain (smb): mkdir %s failed: %s", smb_folder, err)
         return False
 
@@ -910,16 +1004,17 @@ def _upload_smb(coordinator: "BoschCameraCoordinator",
             for chunk in iter(lambda: src.read(65536), b""):
                 dst.write(chunk)
         return True
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("NVR drain (smb): upload %s -> %s failed: %s",
-                        full, dest, err)
+    except Exception as err:
+        _LOGGER.warning("NVR drain (smb): upload %s -> %s failed: %s", full, dest, err)
         return False
 
 
-def _upload_ftp(coordinator: "BoschCameraCoordinator",
-                full: str, cam: str, date: str, fname: str) -> bool:
+def _upload_ftp(
+    coordinator: BoschCameraCoordinator, full: str, cam: str, date: str, fname: str
+) -> bool:
     """target=ftp: upload one finalized segment via ftplib."""
     from .smb import _ftp_connect, _ftp_makedirs
+
     opts = coordinator.options
     server = (opts.get("smb_server") or "").strip()
     username = (opts.get("smb_username") or "").strip()
@@ -929,7 +1024,7 @@ def _upload_ftp(coordinator: "BoschCameraCoordinator",
         return False
     try:
         ftp = _ftp_connect(server, username, password)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.warning("NVR drain (ftp): login to %s failed: %s", server, err)
         return False
     try:
@@ -939,7 +1034,7 @@ def _upload_ftp(coordinator: "BoschCameraCoordinator",
         ftp_dir = f"/{base}/{sub}/{cam_safe}/{date}".replace("//", "/").rstrip("/")
         try:
             _ftp_makedirs(ftp, ftp_dir)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.debug("NVR drain (ftp): mkdir %s failed: %s", ftp_dir, err)
             return False
         dest = f"{ftp_dir}/{fname}"
@@ -947,21 +1042,26 @@ def _upload_ftp(coordinator: "BoschCameraCoordinator",
             with open(full, "rb") as src:
                 ftp.storbinary(f"STOR {dest}", src)
             return True
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("NVR drain (ftp): upload %s -> %s failed: %s",
-                            full, dest, err)
+        except Exception as err:
+            _LOGGER.warning(
+                "NVR drain (ftp): upload %s -> %s failed: %s", full, dest, err
+            )
             return False
     finally:
         try:
             ftp.quit()
-        except Exception:
+        except Exception:  # best-effort graceful FTP quit; fallback to close below
             try:
                 ftp.close()
-            except Exception:
+            except (  # noqa: S110 # best-effort FTP teardown, failure non-actionable
+                Exception
+            ):  # best-effort FTP socket close on teardown, failure non-actionable
                 pass
 
 
-def _quarantine_failed(base_path: str, full: str, cam: str, date: str, fname: str) -> None:
+def _quarantine_failed(
+    base_path: str, full: str, cam: str, date: str, fname: str
+) -> None:
     """Move a file that exceeded the retry cap into ``{base}/_failed/{cam}/...``.
 
     Keeps the user's recording around for inspection without endlessly
@@ -975,8 +1075,9 @@ def _quarantine_failed(base_path: str, full: str, cam: str, date: str, fname: st
         _LOGGER.debug("NVR drain: quarantine of %s failed: %s", full, err)
 
 
-def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
-                    now: float | None = None) -> dict[str, int]:
+def sync_drain_tick(
+    coordinator: BoschCameraCoordinator, *, now: float | None = None
+) -> dict[str, int]:
     """One synchronous drain pass over the staging tree.
 
     Pure-ish helper (touches disk + may do network I/O via the upload
@@ -1010,7 +1111,9 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
 
         ok = False
         if target == "local":
-            ok = _move_local(coordinator, full, base_path, cam, date, os.path.basename(full))
+            ok = _move_local(
+                coordinator, full, base_path, cam, date, os.path.basename(full)
+            )
             if ok:
                 promoted += 1
         elif target == "smb":
@@ -1020,8 +1123,9 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
                 try:
                     os.unlink(full)
                 except OSError as err:
-                    _LOGGER.debug("NVR drain: unlink %s after smb upload "
-                                  "failed: %s", full, err)
+                    _LOGGER.debug(
+                        "NVR drain: unlink %s after smb upload failed: %s", full, err
+                    )
         elif target == "ftp":
             ok = _upload_ftp(coordinator, full, cam, date, os.path.basename(full))
             if ok:
@@ -1029,11 +1133,14 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
                 try:
                     os.unlink(full)
                 except OSError as err:
-                    _LOGGER.debug("NVR drain: unlink %s after ftp upload "
-                                  "failed: %s", full, err)
+                    _LOGGER.debug(
+                        "NVR drain: unlink %s after ftp upload failed: %s", full, err
+                    )
         else:
             _LOGGER.debug("NVR drain: unknown target %r — treating as local", target)
-            ok = _move_local(coordinator, full, base_path, cam, date, os.path.basename(full))
+            ok = _move_local(
+                coordinator, full, base_path, cam, date, os.path.basename(full)
+            )
             if ok:
                 promoted += 1
 
@@ -1046,7 +1153,8 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
         if failures[full] >= _DRAIN_MAX_RETRIES:
             _LOGGER.error(
                 "NVR drain: %s exceeded %d retries — quarantining to _failed/",
-                full, _DRAIN_MAX_RETRIES,
+                full,
+                _DRAIN_MAX_RETRIES,
             )
             _quarantine_failed(base_path, full, cam, date, os.path.basename(full))
             failures.pop(full, None)
@@ -1057,7 +1165,8 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
                     hass.loop.call_soon_threadsafe(
                         hass.async_create_task,
                         hass.services.async_call(
-                            "persistent_notification", "create",
+                            "persistent_notification",
+                            "create",
                             {
                                 "title": "Bosch Mini-NVR — Upload failed",
                                 "message": (
@@ -1069,7 +1178,9 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
                             },
                         ),
                     )
-            except Exception:
+            except (  # noqa: S110 # best-effort UI notify; quarantine + error already logged
+                Exception
+            ):  # best-effort UI notification; quarantine + error log already done above
                 pass
 
     # Persist the latest drain stats on the coordinator so the sensor can
@@ -1092,7 +1203,7 @@ def sync_drain_tick(coordinator: "BoschCameraCoordinator", *,
     }
 
 
-async def _drain_staging_to_remote(coordinator: "BoschCameraCoordinator") -> None:
+async def _drain_staging_to_remote(coordinator: BoschCameraCoordinator) -> None:
     """Long-running watcher coroutine — one per coordinator (NOT per camera).
 
     Drives ``sync_drain_tick`` on a 30 s schedule via the HA executor pool so
@@ -1105,9 +1216,10 @@ async def _drain_staging_to_remote(coordinator: "BoschCameraCoordinator") -> Non
             if opts.get("enable_nvr", False):
                 try:
                     await coordinator.hass.async_add_executor_job(
-                        sync_drain_tick, coordinator,
+                        sync_drain_tick,
+                        coordinator,
                     )
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     _LOGGER.warning("NVR drain tick raised: %s", err)
             await asyncio.sleep(_DRAIN_TICK_SECONDS)
         except asyncio.CancelledError:
@@ -1117,7 +1229,8 @@ async def _drain_staging_to_remote(coordinator: "BoschCameraCoordinator") -> Non
 
 # ── retention purge (runs in executor thread, once per day) ──────────────────
 
-def sync_nvr_cleanup(coordinator: "BoschCameraCoordinator") -> None:
+
+def sync_nvr_cleanup(coordinator: BoschCameraCoordinator) -> None:
     """Delete NVR segments older than ``nvr_retention_days``.
 
     Dispatches based on ``nvr_storage_target``:
@@ -1144,7 +1257,7 @@ def sync_nvr_cleanup(coordinator: "BoschCameraCoordinator") -> None:
     _sync_nvr_cleanup_local(coordinator)
 
 
-def _sync_nvr_cleanup_local(coordinator: "BoschCameraCoordinator") -> None:
+def _sync_nvr_cleanup_local(coordinator: BoschCameraCoordinator) -> None:
     """Local-disk retention purge — covers ``local`` target plus the staging /
     failed dirs (which exist no matter the target).
     """
@@ -1182,14 +1295,17 @@ def _sync_nvr_cleanup_local(coordinator: "BoschCameraCoordinator") -> None:
     if deleted:
         _LOGGER.info(
             "NVR cleanup (local): deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, base_path,
+            deleted,
+            retention_days,
+            base_path,
         )
 
 
-def _sync_nvr_cleanup_smb(coordinator: "BoschCameraCoordinator") -> None:
+def _sync_nvr_cleanup_smb(coordinator: BoschCameraCoordinator) -> None:
     """Walk only the NVR subtree on the SMB share and unlink old files."""
     try:
-        from smbclient import register_session, scandir, remove, stat as smb_stat
+        from smbclient import register_session, remove, scandir
+        from smbclient import stat as smb_stat
     except ImportError:
         return
     opts = coordinator.options
@@ -1204,7 +1320,7 @@ def _sync_nvr_cleanup_smb(coordinator: "BoschCameraCoordinator") -> None:
         return
     try:
         register_session(server, username=username, password=password)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.warning("NVR cleanup (smb): session to %s failed: %s", server, err)
         return
 
@@ -1216,7 +1332,7 @@ def _sync_nvr_cleanup_smb(coordinator: "BoschCameraCoordinator") -> None:
         nonlocal deleted
         try:
             entries = list(scandir(path))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         for entry in entries:
             full = f"{path}\\{entry.name}"
@@ -1228,22 +1344,24 @@ def _sync_nvr_cleanup_smb(coordinator: "BoschCameraCoordinator") -> None:
                     if st.st_mtime < cutoff:
                         remove(full)
                         deleted += 1
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("NVR cleanup (smb): error on %s: %s",
-                                  entry.name, err)
+                except Exception as err:
+                    _LOGGER.debug("NVR cleanup (smb): error on %s: %s", entry.name, err)
 
     _walk_and_delete(root)
     if deleted:
         _LOGGER.info(
             "NVR cleanup (smb): deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, root,
+            deleted,
+            retention_days,
+            root,
         )
 
 
-def _sync_nvr_cleanup_ftp(coordinator: "BoschCameraCoordinator") -> None:
+def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
     """Walk only the NVR subtree on the FTP server and unlink old files."""
     import ftplib
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from .smb import _ftp_connect
 
     opts = coordinator.options
@@ -1257,7 +1375,7 @@ def _sync_nvr_cleanup_ftp(coordinator: "BoschCameraCoordinator") -> None:
         return
     try:
         ftp = _ftp_connect(server, username, password)
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         _LOGGER.warning("NVR cleanup (ftp): login to %s failed: %s", server, err)
         return
 
@@ -1273,7 +1391,7 @@ def _sync_nvr_cleanup_ftp(coordinator: "BoschCameraCoordinator") -> None:
         entries: list[str] = []
         try:
             ftp.retrlines("LIST", entries.append)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
 
         files: list[str] = []
@@ -1294,21 +1412,26 @@ def _sync_nvr_cleanup_ftp(coordinator: "BoschCameraCoordinator") -> None:
             try:
                 resp = ftp.sendcmd(f"MDTM {name}")
                 ts_str = resp.split()[-1]
-                mt = datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp()
-            except Exception:  # noqa: BLE001
+                mt = (
+                    datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S")
+                    .replace(tzinfo=UTC)
+                    .timestamp()
+                )
+            except Exception:  # skip file if MDTM unavailable; resilient FTP walk loop  # noqa: S112 # skip file if MDTM unavailable, resilient walk
                 continue
             if mt < cutoff:
                 try:
                     ftp.delete(name)
                     deleted += 1
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("NVR cleanup (ftp): delete %s failed: %s",
-                                  name, err)
+                except Exception as err:
+                    _LOGGER.debug("NVR cleanup (ftp): delete %s failed: %s", name, err)
         for sd in subdirs:
             _walk_and_delete(f"{path}/{sd}")
             try:
                 ftp.cwd(path)
-            except Exception:  # noqa: BLE001
+            except (  # noqa: S110 # best-effort cwd restore, sibling loop continues
+                Exception
+            ):  # best-effort cwd back to parent after subdir walk; non-fatal
                 pass
 
     try:
@@ -1317,10 +1440,14 @@ def _sync_nvr_cleanup_ftp(coordinator: "BoschCameraCoordinator") -> None:
     finally:
         try:
             ftp.quit()
-        except Exception:  # noqa: BLE001
+        except (  # noqa: S110 # best-effort FTP teardown, failure non-actionable
+            Exception
+        ):  # best-effort FTP quit on cleanup teardown, failure non-actionable
             pass
     if deleted:
         _LOGGER.info(
             "NVR cleanup (ftp): deleted %d file(s) older than %d days from %s",
-            deleted, retention_days, f"{server}/{base_path}/{sub}",
+            deleted,
+            retention_days,
+            f"{server}/{base_path}/{sub}",
         )

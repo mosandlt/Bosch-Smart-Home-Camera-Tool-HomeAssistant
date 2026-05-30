@@ -34,12 +34,7 @@ def _load(name: str) -> dict:
 
 def _init_sections(data: dict) -> dict:
     """Return the options.step.init.sections dict."""
-    return (
-        data.get("options", {})
-        .get("step", {})
-        .get("init", {})
-        .get("sections", {})
-    )
+    return data.get("options", {}).get("step", {}).get("init", {}).get("sections", {})
 
 
 def _all_section_labels(sections: dict) -> set[str]:
@@ -84,9 +79,7 @@ class TestTranslationStructure:
             for field in fields:
                 if field not in section_data:
                     missing.append(f"{section_key}.{field}")
-        assert not missing, (
-            f"{filename}: missing labels in sections.data: {missing}"
-        )
+        assert not missing, f"{filename}: missing labels in sections.data: {missing}"
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
     def test_all_sections_have_name(self, filename):
@@ -124,7 +117,8 @@ class TestTranslationStructure:
             for field in fields:
                 # Also check it isn't duplicated in a wrong section
                 wrong = [
-                    sk for sk, sec in sections.items()
+                    sk
+                    for sk, sec in sections.items()
                     if sk != section_key and field in sec.get("data", {})
                 ]
                 assert not wrong, (

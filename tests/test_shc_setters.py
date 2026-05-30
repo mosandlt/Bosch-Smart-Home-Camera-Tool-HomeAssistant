@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
@@ -75,11 +74,15 @@ class TestCloudSetPrivacyMode:
         """Cloud PUT 204 → cache + lock + listener call."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
             session_factory.return_value = session
-            from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
+            from custom_components.bosch_shc_camera.shc import (
+                async_cloud_set_privacy_mode,
+            )
+
             ok = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is True
         assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is True
@@ -92,6 +95,7 @@ class TestCloudSetPrivacyMode:
         """No bearer token → skip cloud, try SHC fallback."""
         coord = _stub_coord(with_token=False)
         from custom_components.bosch_shc_camera import shc
+
         # SHC not configured → returns False
         with patch.object(shc, "shc_ready", return_value=False):
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
@@ -104,6 +108,7 @@ class TestCloudSetPrivacyMode:
         """Cloud returns 401 → coordinator._ensure_valid_token called."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             # First PUT returns 401, second PUT (after refresh) returns 204
@@ -122,8 +127,11 @@ class TestCloudSetPrivacyMode:
         """5xx response → cache stays untouched, no lock recorded."""
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
-        with patch.object(shc, "async_get_clientsession") as session_factory, \
-             patch.object(shc, "shc_ready", return_value=False):
+
+        with (
+            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "shc_ready", return_value=False),
+        ):
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(500))
             session_factory.return_value = session
@@ -142,8 +150,11 @@ class TestCloudSetPrivacyMode:
         coord = _stub_coord(gen2=False)
         coord._cached_status[CAM_ID] = "OFFLINE"
         from custom_components.bosch_shc_camera import shc
-        with patch.object(shc, "async_get_clientsession") as session_factory, \
-             patch.object(shc, "shc_ready", return_value=False):
+
+        with (
+            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "shc_ready", return_value=False),
+        ):
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(444))
             session_factory.return_value = session
@@ -162,6 +173,7 @@ class TestCloudSetCameraLight:
         """Gen1 lighting_override PUT 204 → cache updated."""
         coord = _stub_coord(gen2=False)
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
@@ -176,6 +188,7 @@ class TestCloudSetCameraLight:
         """Gen2: front + topdown endpoints. Partial success (one OK) is treated as success."""
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(
@@ -193,8 +206,11 @@ class TestCloudSetCameraLight:
     async def test_gen2_both_endpoints_fail(self):
         coord = _stub_coord(gen2=True)
         from custom_components.bosch_shc_camera import shc
-        with patch.object(shc, "async_get_clientsession") as session_factory, \
-             patch.object(shc, "shc_ready", return_value=False):
+
+        with (
+            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "shc_ready", return_value=False),
+        ):
             session = MagicMock()
             session.put = MagicMock(
                 side_effect=[
@@ -221,6 +237,7 @@ class TestCloudSetNotifications:
             return _mock_response(204)
 
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture_put)
@@ -228,7 +245,10 @@ class TestCloudSetNotifications:
             ok = await shc.async_cloud_set_notifications(coord, CAM_ID, True)
         assert ok is True
         assert captured_body["enabledNotificationsStatus"] == "FOLLOW_CAMERA_SCHEDULE"
-        assert coord._shc_state_cache[CAM_ID]["notifications_status"] == "FOLLOW_CAMERA_SCHEDULE"
+        assert (
+            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            == "FOLLOW_CAMERA_SCHEDULE"
+        )
         assert CAM_ID in coord._notif_set_at
 
     @pytest.mark.asyncio
@@ -241,6 +261,7 @@ class TestCloudSetNotifications:
             return _mock_response(204)
 
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(side_effect=_capture)
@@ -253,6 +274,7 @@ class TestCloudSetNotifications:
     async def test_no_token_returns_false(self):
         coord = _stub_coord(with_token=False)
         from custom_components.bosch_shc_camera import shc
+
         ok = await shc.async_cloud_set_notifications(coord, CAM_ID, True)
         assert ok is False
 
@@ -260,6 +282,7 @@ class TestCloudSetNotifications:
     async def test_http_failure_returns_false(self):
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(500))
@@ -280,6 +303,7 @@ class TestCloudSetPan:
         coord = _stub_coord()
         coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
         from custom_components.bosch_shc_camera import shc
+
         ok = await shc.async_cloud_set_pan(coord, CAM_ID, 30)
         assert ok is False
 
@@ -287,6 +311,7 @@ class TestCloudSetPan:
     async def test_no_token_returns_false(self):
         coord = _stub_coord(with_token=False)
         from custom_components.bosch_shc_camera import shc
+
         ok = await shc.async_cloud_set_pan(coord, CAM_ID, 30)
         assert ok is False
 
@@ -294,6 +319,7 @@ class TestCloudSetPan:
     async def test_success(self):
         coord = _stub_coord()
         from custom_components.bosch_shc_camera import shc
+
         with patch.object(shc, "async_get_clientsession") as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=_mock_response(204))
@@ -338,27 +364,34 @@ class TestShcConfigured:
 
     def test_all_fields_set_returns_true(self):
         from custom_components.bosch_shc_camera.shc import shc_configured
+
         coord = _stub_coord_for_availability()
         assert shc_configured(coord) is True
 
     def test_missing_ip_returns_false(self):
         from custom_components.bosch_shc_camera.shc import shc_configured
+
         coord = _stub_coord_for_availability(shc_ip="")
-        assert shc_configured(coord) is False, "Empty shc_ip must make shc_configured False"
+        assert shc_configured(coord) is False, (
+            "Empty shc_ip must make shc_configured False"
+        )
 
     def test_missing_cert_returns_false(self):
         from custom_components.bosch_shc_camera.shc import shc_configured
+
         coord = _stub_coord_for_availability(cert="")
         assert shc_configured(coord) is False
 
     def test_missing_key_returns_false(self):
         from custom_components.bosch_shc_camera.shc import shc_configured
+
         coord = _stub_coord_for_availability(key="")
         assert shc_configured(coord) is False
 
     def test_whitespace_only_ip_returns_false(self):
         """Whitespace-only IP must be treated as missing — .strip() is expected."""
         from custom_components.bosch_shc_camera.shc import shc_configured
+
         coord = _stub_coord_for_availability(shc_ip="   ")
         assert shc_configured(coord) is False
 
@@ -368,18 +401,21 @@ class TestShcReady:
 
     def test_configured_and_available_returns_true(self):
         from custom_components.bosch_shc_camera.shc import shc_ready
+
         coord = _stub_coord_for_availability(available=True)
         assert shc_ready(coord) is True
 
     def test_not_configured_returns_false(self):
         """Missing config → shc_ready False regardless of availability flag."""
         from custom_components.bosch_shc_camera.shc import shc_ready
+
         coord = _stub_coord_for_availability(shc_ip="", available=True)
         assert shc_ready(coord) is False
 
     def test_offline_within_retry_window_returns_false(self):
         """SHC marked offline + last check was 5s ago (< 60s interval) → not ready."""
         from custom_components.bosch_shc_camera.shc import shc_ready
+
         coord = _stub_coord_for_availability(
             available=False, last_check_age=5.0, retry_interval=60.0
         )
@@ -390,6 +426,7 @@ class TestShcReady:
     def test_offline_past_retry_window_returns_true(self):
         """SHC marked offline + last check was 90s ago (> 60s interval) → allow one retry."""
         from custom_components.bosch_shc_camera.shc import shc_ready
+
         coord = _stub_coord_for_availability(
             available=False, last_check_age=90.0, retry_interval=60.0
         )
@@ -403,21 +440,30 @@ class TestShcMarkSuccessFailure:
 
     def test_mark_success_resets_fail_count(self):
         from custom_components.bosch_shc_camera.shc import _shc_mark_success
+
         coord = _stub_coord_for_availability(available=False, fail_count=3)
         _shc_mark_success(coord)
-        assert coord._shc_available is True, "_shc_mark_success must set _shc_available=True"
+        assert coord._shc_available is True, (
+            "_shc_mark_success must set _shc_available=True"
+        )
         assert coord._shc_fail_count == 0, "_shc_mark_success must reset fail counter"
 
     def test_mark_failure_increments_count(self):
         from custom_components.bosch_shc_camera.shc import _shc_mark_failure
+
         coord = _stub_coord_for_availability(available=True, fail_count=0, max_fails=3)
         _shc_mark_failure(coord)
-        assert coord._shc_fail_count == 1, "_shc_mark_failure must increment fail counter"
-        assert coord._shc_available is True, "One failure must not immediately mark offline"
+        assert coord._shc_fail_count == 1, (
+            "_shc_mark_failure must increment fail counter"
+        )
+        assert coord._shc_available is True, (
+            "One failure must not immediately mark offline"
+        )
 
     def test_mark_failure_at_threshold_marks_offline(self):
         """Exactly _SHC_MAX_FAILS consecutive failures → _shc_available=False."""
         from custom_components.bosch_shc_camera.shc import _shc_mark_failure
+
         coord = _stub_coord_for_availability(available=True, fail_count=2, max_fails=3)
         _shc_mark_failure(coord)
         assert coord._shc_fail_count == 3
@@ -428,6 +474,7 @@ class TestShcMarkSuccessFailure:
     def test_mark_failure_when_already_offline_stays_offline(self):
         """Already offline + another failure must not flip back to online."""
         from custom_components.bosch_shc_camera.shc import _shc_mark_failure
+
         coord = _stub_coord_for_availability(available=False, fail_count=5, max_fails=3)
         _shc_mark_failure(coord)
         assert coord._shc_available is False
@@ -461,25 +508,35 @@ class TestSchedulePrivacyOffSnapshot:
 
     def test_outdoor_gen2_delay_is_0_5s(self):
         """HOME_Eyes_Outdoor (Gen2) → 0.5s delay."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
+
         coord, cam_entity = self._make_coord("HOME_Eyes_Outdoor")
         _schedule_privacy_off_snapshot(coord, CAM_ID)
         assert coord.hass.async_create_task.called, "Must schedule a task"
         # Extract the coroutine that was passed to async_create_task
         coro = coord.hass.async_create_task.call_args[0][0]
         # The coroutine was created with delay=0.5 — check via cr_frame locals
-        delay = coro.cr_frame.f_locals.get("delay") if hasattr(coro, "cr_frame") else None
+        delay = (
+            coro.cr_frame.f_locals.get("delay") if hasattr(coro, "cr_frame") else None
+        )
         # Close the coroutine to avoid warnings
         coro.close()
         # We can also verify via the call_args of _async_trigger_image_refresh
         # if it was called directly (depends on implementation)
         # Primary assertion: task was created (the snapshot refresh was scheduled)
-        assert coord.hass.async_create_task.called, "async_create_task must be called to schedule snapshot refresh"
+        assert coord.hass.async_create_task.called, (
+            "async_create_task must be called to schedule snapshot refresh"
+        )
 
     def test_outdoor_delay_not_indoor_delay(self):
         """Outdoor delay must be strictly less than indoor delay."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
         from unittest.mock import call
+
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
 
         tasks_outdoor = []
         tasks_indoor = []
@@ -499,7 +556,9 @@ class TestSchedulePrivacyOffSnapshot:
         _schedule_privacy_off_snapshot(coord_in, CAM_ID)
 
         # Both should have scheduled exactly one task
-        assert len(tasks_outdoor) == 1, "Outdoor must schedule exactly one snapshot task"
+        assert len(tasks_outdoor) == 1, (
+            "Outdoor must schedule exactly one snapshot task"
+        )
         assert len(tasks_indoor) == 1, "Indoor must schedule exactly one snapshot task"
         # Clean up
         for t in tasks_outdoor + tasks_indoor:
@@ -508,7 +567,10 @@ class TestSchedulePrivacyOffSnapshot:
 
     def test_indoor_hw_types_all_schedule_task(self):
         """All known indoor hw strings must trigger a snapshot task."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
+
         indoor_hws = [
             "CAMERA_360",
             "HOME_Eyes_Indoor",
@@ -528,7 +590,10 @@ class TestSchedulePrivacyOffSnapshot:
 
     def test_missing_camera_entity_does_not_crash(self):
         """No camera entity registered for cam_id → must return silently."""
-        from custom_components.bosch_shc_camera.shc import _schedule_privacy_off_snapshot
+        from custom_components.bosch_shc_camera.shc import (
+            _schedule_privacy_off_snapshot,
+        )
+
         coord = SimpleNamespace(
             _camera_entities={},
             _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},

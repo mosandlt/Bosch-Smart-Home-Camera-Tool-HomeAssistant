@@ -64,7 +64,9 @@ def _base_coord() -> SimpleNamespace:
         _notif_set_at={},
         _light_set_at={},
         _pan_cache={},
-        _shc_state_cache={CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}},
+        _shc_state_cache={
+            CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}
+        },
         _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # gen2
         _lighting_switch_cache={},
         _local_creds_cache={},
@@ -136,12 +138,15 @@ class TestCloudSetCameraLightNoRefresh:
         session = MagicMock()
         session.put.return_value = cm
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
-            return_value=True,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=session,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2",
+                return_value=True,
+            ),
         ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, True)
 
@@ -159,12 +164,15 @@ class TestCloudSetCameraLightNoRefresh:
         coord = _base_coord()
         coord._hw_version[CAM_ID] = "OUTDOOR"  # Gen1
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
-            return_value=False,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=_put_204_session(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2",
+                return_value=False,
+            ),
         ):
             result = await async_cloud_set_camera_light(coord, CAM_ID, False)
 
@@ -182,16 +190,21 @@ class TestCloudSetLightComponentNoRefresh:
     @pytest.mark.asyncio
     async def test_front_on_no_refresh(self) -> None:
         """Light component 'front' ON: cache updated, listeners called, no refresh scheduled."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
 
         coord = _base_coord()
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
-            return_value=False,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=_put_204_session(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2",
+                return_value=False,
+            ),
         ):
             result = await async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
@@ -204,19 +217,26 @@ class TestCloudSetLightComponentNoRefresh:
     @pytest.mark.asyncio
     async def test_front_off_no_refresh(self) -> None:
         """Light component 'front' OFF: cache updated, listeners called, no refresh scheduled."""
-        from custom_components.bosch_shc_camera.shc import async_cloud_set_light_component
+        from custom_components.bosch_shc_camera.shc import (
+            async_cloud_set_light_component,
+        )
 
         coord = _base_coord()
         coord._shc_state_cache[CAM_ID]["front_light"] = True
 
-        with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
-        ), patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
-            return_value=False,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+                return_value=_put_204_session(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._is_gen2",
+                return_value=False,
+            ),
         ):
-            result = await async_cloud_set_light_component(coord, CAM_ID, "front", False)
+            result = await async_cloud_set_light_component(
+                coord, CAM_ID, "front", False
+            )
 
         assert result is True
         assert coord._shc_state_cache[CAM_ID]["front_light"] is False
@@ -243,7 +263,10 @@ class TestCloudSetNotificationsNoRefresh:
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["notifications_status"] == "FOLLOW_CAMERA_SCHEDULE"
+        assert (
+            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            == "FOLLOW_CAMERA_SCHEDULE"
+        )
         assert CAM_ID in coord._notif_set_at
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()

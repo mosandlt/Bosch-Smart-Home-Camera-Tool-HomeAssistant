@@ -12,6 +12,7 @@ These tests pin the third self-heal trigger added in v12.8.3:
   (c) `enable_fcm_push=True` + `_fcm_running=False` + cool-down expired
       → re-attempt self-heal (which restarts FCM from scratch).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,15 +23,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # Reuse helpers from the existing sprint_ka test module — they build the same
 # coordinator + session stubs used by the original watchdog tests, so the new
 # tests behave identically except for the configured pre-conditions.
 from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
+    _PATCH_SESSION,
     _make_coord,
     _make_resp,
     _make_session,
-    _PATCH_SESSION,
 )
 
 
@@ -55,14 +55,20 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+        ):
             mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -88,18 +94,24 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             _fcm_healthy=False,
             _fcm_client=None,
             options={"enable_fcm_push": True},
-            _fcm_last_self_heal=time.monotonic() - 300.0,   # 5 min ago — still cool-down
+            _fcm_last_self_heal=time.monotonic() - 300.0,  # 5 min ago — still cool-down
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+        ):
             mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -127,14 +139,20 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal:
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+        ):
             mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -153,7 +171,7 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         fcm_client = MagicMock()
-        fcm_client.is_started = MagicMock(return_value=True)   # healthy
+        fcm_client.is_started = MagicMock(return_value=True)  # healthy
 
         coord = _make_coord(
             _fcm_running=True,
@@ -164,15 +182,24 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
         )
         coord._first_tick_done = True
 
-        session = _make_session({
-            "v11/video_inputs": _make_resp(200, []),
-            "feature_flags": _make_resp(200, {}),
-            "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
-        })
+        session = _make_session(
+            {
+                "v11/video_inputs": _make_resp(200, []),
+                "feature_flags": _make_resp(200, {}),
+                "protocol_support": _make_resp(200, {"state": "SUPPORTED"}),
+            }
+        )
 
-        with patch(_PATCH_SESSION, return_value=session), \
-             patch("custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push") as mock_heal, \
-             patch("custom_components.bosch_shc_camera.fcm.get_recent_fcm_error_count", return_value=0):
+        with (
+            patch(_PATCH_SESSION, return_value=session),
+            patch(
+                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
+            ) as mock_heal,
+            patch(
+                "custom_components.bosch_shc_camera.fcm.get_recent_fcm_error_count",
+                return_value=0,
+            ),
+        ):
             mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
