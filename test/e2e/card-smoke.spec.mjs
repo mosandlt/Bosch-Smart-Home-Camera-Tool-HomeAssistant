@@ -44,31 +44,31 @@ test("bundle registers custom elements + mounts idle card without uncaught error
   expect(pageErrors, "no uncaught page errors during mount").toEqual([]);
 });
 
-// Regression (issue #21, 2026-05-30): a dashboard theme that zeroes the global
-// --ha-card-border-radius / --ha-card-box-shadow tokens must NOT strip the
-// card's own rounding. The card uses its own --bosch-card-* vars; the optional
-// `border_radius:` card config opts into a custom value.
-test("card keeps its rounding under a theme that zeroes --ha-card-border-radius", async ({ page }) => {
+// Regression (issue #21, 2026-05-30): the cards follow the dashboard's standard
+// --ha-card-border-radius theme token by DEFAULT (so one theme change applies to
+// every card at once, which is what users expect), and the optional
+// border_radius card config overrides the theme per-card. Fallback when the
+// theme sets nothing is the apple-style value (22px).
+test("card follows the dashboard theme radius; the card option overrides it", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
 
   const result = await page.evaluate(async () => {
-    // Simulate Thomas's theme: zero the global card tokens on an ancestor.
-    document.body.style.setProperty("--ha-card-border-radius", "0");
-    document.body.style.setProperty("--ha-card-box-shadow", "none");
+    // A themed dashboard sets the standard token on an ancestor.
+    document.body.style.setProperty("--ha-card-border-radius", "10px");
     const mkHass = () => ({
       states: { "camera.test": { state: "idle", attributes: { friendly_name: "Test" }, last_updated: "2026-01-01T00:00:00Z" } },
       config: { internal_url: "http://localhost:4321" },
       language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
     });
     const mk = (cfg) => { const c = document.createElement("bosch-camera-card"); c.setConfig(cfg); c.hass = mkHass(); document.body.appendChild(c); return c; };
-    const def = mk({ camera_entity: "camera.test", apple_style: true });
-    const opt = mk({ camera_entity: "camera.test", apple_style: true, border_radius: "4px" });
+    const themed = mk({ camera_entity: "camera.test", apple_style: true });
+    const overridden = mk({ camera_entity: "camera.test", apple_style: true, border_radius: "4px" });
     await new Promise((r) => setTimeout(r, 600));
     const radius = (el) => { const hc = el.shadowRoot && el.shadowRoot.querySelector("ha-card"); return hc ? getComputedStyle(hc).borderTopLeftRadius : null; };
-    return { def: radius(def), opt: radius(opt) };
+    return { themed: radius(themed), overridden: radius(overridden) };
   });
 
-  expect(result.def, "apple-style default rounding survives a zeroing theme").toBe("22px");
-  expect(result.opt, "border_radius card config opts into a custom value").toBe("4px");
+  expect(result.themed, "default follows the dashboard --ha-card-border-radius").toBe("10px");
+  expect(result.overridden, "border_radius card option overrides the theme").toBe("4px");
 });

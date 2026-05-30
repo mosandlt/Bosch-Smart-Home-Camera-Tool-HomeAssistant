@@ -148,7 +148,16 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.1";
+const CARD_VERSION = "13.4.2";
+
+// Fullscreen coordination shared across ALL bosch-camera-card instances on the
+// page (module scope = one per bundle). Fixes a multi-card mobile bug where
+// closing one card's fullscreen immediately opened another card's: the exit tap,
+// once the overlay was removed, landed on (or propagated to) a sibling card's
+// tap-to-fullscreen video. `_boschFsExitAt` lets the enter path swallow taps for
+// a moment after any exit; `_boschFsOwner` enforces a single fullscreen card.
+let _boschFsExitAt = 0;
+let _boschFsOwner = null;
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -293,7 +302,12 @@ class BoschCameraCard extends HTMLElement {
     window.addEventListener("bosch-card-mode-change",  this._onModeBroadcast);
     // Native browser fullscreen state — fired on Esc-exit, F-key, browser-UI
     // exit etc. Bound here (not as a class field) for older WKWebView compat.
-    this._onFullscreenChange = () => this._updateFullscreenButtonState();
+    this._onFullscreenChange = () => {
+      // When native fullscreen ends (Esc / swipe / system back), arm the exit
+      // guard so the same gesture can't immediately re-enter another card.
+      if (!this._isNativeFullscreen()) _boschFsExitAt = Date.now();
+      this._updateFullscreenButtonState();
+    };
     document.addEventListener("fullscreenchange",       this._onFullscreenChange);
     document.addEventListener("webkitfullscreenchange", this._onFullscreenChange);
     document.addEventListener("mozfullscreenchange",    this._onFullscreenChange);
@@ -1041,9 +1055,9 @@ class BoschCameraCard extends HTMLElement {
           /* Own --bosch-card-* vars (issue #21), not the global --ha-card-*
              radius/shadow tokens — a dashboard theme that zeroes those must not
              strip our card geometry. Background DOES follow the theme (intended). */
-          border-radius: var(--bosch-card-radius, 12px);
+          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 12px));
           background: var(--ha-card-background, var(--card-background-color, #1c1c1e));
-          box-shadow: var(--bosch-card-shadow, 0 2px 8px rgba(0,0,0,.3));
+          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.3)));
         }
 
         /* Header */
@@ -1501,6 +1515,14 @@ class BoschCameraCard extends HTMLElement {
           transition: background 0.25s;
         }
         .sw-row.on    .sw-toggle { background: #30d158; }
+        /* Audio "tap for sound" hint (issue #22): the stream starts muted by the
+           browser autoplay policy, so the Ton row reads off until a tap unmutes.
+           A gentle pulse on the toggle draws the eye to it. */
+        .sw-row.tap-hint .sw-toggle { animation: bosch-audio-hint 1.6s ease-in-out infinite; }
+        @keyframes bosch-audio-hint {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,159,10,0); }
+          50%      { box-shadow: 0 0 0 3px rgba(255,159,10,.4); }
+        }
         .sw-row.privacy-row.on .sw-toggle { background: #ff453a; }
         .sw-thumb {
           width: 22px; height: 22px; border-radius: 50%; background: #fff;
@@ -1649,23 +1671,22 @@ class BoschCameraCard extends HTMLElement {
              must still get the apple-style rounding by default; the optional
              border_radius / box_shadow card config sets --bosch-card-* to
              opt into a custom look without us inheriting the global theme value. */
-          border-radius: var(--bosch-card-radius, 22px);
-          box-shadow: var(--bosch-card-shadow, 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.06));
+          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 22px));
+          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.06)));
+          border-width: var(--ha-card-border-width, 0);
         }
         @media (prefers-color-scheme: dark) {
           :host(.apple-style) ha-card {
-            box-shadow: var(--bosch-card-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4));
+            box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4)));
           }
         }
         /* Hover affordance parity with the overview tiles (issue #15.1): a
-           subtle box-shadow lift on pointer devices only. No transform, so the
-           full-width single card never shifts position; the resting state still
-           honors the user's --ha-card-box-shadow theme var (issue #21). */
-        :host(.apple-style) ha-card { transition: box-shadow .18s ease; }
+           subtle lift on pointer devices. Uses transform, NOT box-shadow, so it
+           does not clobber the user's themed --ha-card-box-shadow on hover (the
+           glow stayed visible — RkcCorian, issue #15/#21). */
+        :host(.apple-style) ha-card { transition: transform .18s ease; }
         @media (hover: hover) and (pointer: fine) {
-          :host(.apple-style) ha-card:hover {
-            box-shadow: 0 8px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.10);
-          }
+          :host(.apple-style) ha-card:hover { transform: translateY(-2px); }
         }
         :host(.apple-style) .header,
         :host(.apple-style) .info-row,
@@ -1873,7 +1894,7 @@ class BoschCameraCard extends HTMLElement {
           /* M3 large radius (28px) as the Android default; the optional
              border_radius card config (--bosch-card-radius) overrides it
              (issue #21). !important still beats ha-card's base rule. */
-          border-radius: var(--bosch-card-radius, 28px) !important;
+          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 28px)) !important;
         }
         :host(.apple-style.theme-android) .ap-glass {
           background: rgba(73, 69, 79, .92);   /* M3 surface-variant dark */
@@ -2594,7 +2615,7 @@ class BoschCameraCard extends HTMLElement {
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                   <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
                 </svg>
-                <span>Ton / Video</span>
+                <span>Ton</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
@@ -5008,6 +5029,18 @@ class BoschCameraCard extends HTMLElement {
         if (!audioOn || this._androidAudioMuted) {
           video.muted = true;
         }
+        // The Ton toggle reflects AUDIBILITY while streaming (issue #22): "on"
+        // only when you actually hear sound (video unmuted). It starts muted by
+        // the browser autoplay policy, so it reads OFF at stream start and a
+        // single tap unmutes. A subtle pulse + label hint draws the eye.
+        const b = this.shadowRoot.getElementById("btn-audio");
+        if (b && b.style.display !== "none") {
+          b.classList.toggle("on", !video.muted);
+          b.classList.toggle("tap-hint", !!video.muted);
+          const lbl = b.querySelector(".sw-left span");
+          if (lbl) lbl.textContent = video.muted ? "Ton einschalten" : "Ton";
+          b.setAttribute("title", video.muted ? "Tippen für Ton" : "Ton stummschalten");
+        }
       }
     }
 
@@ -5615,25 +5648,36 @@ class BoschCameraCard extends HTMLElement {
   _toggleAudio() {
     const entityId = this._entities.audio;
     if (!this._hass || !entityId) return;
+    const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
+    // While the stream is playing the Ton toggle controls AUDIBILITY (local
+    // video mute), not the backend track (issue #22). The AAC track is already
+    // in the stream (audio defaults on), so a single tap unmutes instantly — no
+    // 2-tap off/on dance, no stream re-open. The video starts muted by the
+    // browser autoplay policy, so the toggle reads OFF at stream start and one
+    // tap = sound. Unmuting here is safe: we are inside the click's user gesture,
+    // the only context where Chrome allows video.muted=false without pausing.
+    if (video) {
+      this._androidAudioMuted = false;
+      const unmuting = video.muted; // muted now -> this tap turns sound ON
+      video.muted = !unmuting;
+      if (unmuting && video.paused) video.play().catch(() => {});
+      const b = this.shadowRoot.getElementById("btn-audio");
+      if (b) b.classList.toggle("on", !video.muted);
+      // If the stream is currently video-only (track disabled earlier), also
+      // enable the backend track so there is actually something to hear; the
+      // local unmute above makes it audible once the re-opened stream arrives.
+      if (unmuting && this._hass.states[entityId]?.state === "off") {
+        this._setOptimistic(entityId, "on");
+        this._callService("switch", "turn_on", { entity_id: entityId });
+      }
+      return;
+    }
+    // Off-stream: toggle the backend audio entity (whether the NEXT stream open
+    // carries the AAC track).
     const state = this._hass.states[entityId]?.state;
     if (!state || state === "unavailable" || state === "unknown") return;
     const turningOn = state !== "on";
-    // First explicit tap on Android clears the startup mute override.
-    this._androidAudioMuted = false;
-    // Apply mute/unmute to the live <video> HERE — synchronously, inside the
-    // click's user-gesture context. This is the ONLY place Chrome permits
-    // video.muted=false without pausing the element. _update() must not unmute
-    // (it runs on every hass push, with no gesture → "Unmuting failed").
-    if (this._liveVideoActive) {
-      const video = this.shadowRoot.getElementById("cam-video");
-      if (video) {
-        video.muted = !turningOn;
-        if (turningOn && video.paused) video.play().catch(() => {});
-      }
-    }
-    // Optimistic update drives the Ton icon; _update() only ever re-mutes.
     this._setOptimistic(entityId, turningOn ? "on" : "off");
-    // Persist to HA (affects rtsps URL for next stream open)
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });
   }
 
@@ -5690,6 +5734,11 @@ class BoschCameraCard extends HTMLElement {
       this._exitCssFullscreen();
       return;
     }
+    // Swallow the tap that just closed another card's fullscreen so it doesn't
+    // immediately ENTER this card's fullscreen (multi-card mobile bug: closing
+    // one opened another). Only the enter path is guarded — the exit branch
+    // above already handled the case where this card was the fullscreen one.
+    if (Date.now() - _boschFsExitAt < 400) return;
     // iOS Safari / HA Companion: native Fullscreen API drags the <video>
     // into the system AVPlayerViewController which (a) auto-hides any HTML
     // overlay after ~10s of inactivity (the user's pill-bar vanishes) and
@@ -5707,6 +5756,7 @@ class BoschCameraCard extends HTMLElement {
     // Toggle: if we are already in native fullscreen, the button exits it
     // instead of re-requesting (issue #16 — clicking the button again exits).
     if (this._isNativeFullscreen()) {
+      _boschFsExitAt = Date.now();
       if (document.exitFullscreen)       return document.exitFullscreen();
       if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
       if (document.mozCancelFullScreen)  return document.mozCancelFullScreen();
@@ -5729,6 +5779,12 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _enterCssFullscreen() {
+    // One card fullscreen at a time — close any other owner first so two cards
+    // can't both be in the position:fixed overlay.
+    if (_boschFsOwner && _boschFsOwner !== this && _boschFsOwner.classList?.contains("fs-active")) {
+      _boschFsOwner._exitCssFullscreen();
+    }
+    _boschFsOwner = this;
     this.classList.add("fs-active");
     this._updateFullscreenButtonState();
     document.body.style.overflow = "hidden";
@@ -5746,6 +5802,9 @@ class BoschCameraCard extends HTMLElement {
 
   _exitCssFullscreen() {
     this.classList.remove("fs-active");
+    if (_boschFsOwner === this) _boschFsOwner = null;
+    // Arm the exit guard so the closing tap can't enter another card's video.
+    _boschFsExitAt = Date.now();
     this._updateFullscreenButtonState();
     document.body.style.overflow = "";
     if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
@@ -6097,12 +6156,24 @@ class BoschCameraOverviewCard extends HTMLElement {
       // show_title:false / show_last_event:false strip the title pill / badge.
       show_title:           config.show_title !== false,
       show_last_event:      config.show_last_event !== false,
+      // Per-card geometry (issue #21). Applied as --bosch-card-* on the overview
+      // host, which cascades into the grid cells AND the child cards (CSS custom
+      // properties cross shadow boundaries). Default null = signature look.
+      border_radius:        typeof config.border_radius === "string" ? config.border_radius : null,
+      box_shadow:           typeof config.box_shadow === "string" ? config.box_shadow : null,
       overrides: (config.overrides && typeof config.overrides === "object") ? config.overrides : {},
       card_defaults: (config.card_defaults && typeof config.card_defaults === "object") ? config.card_defaults : {},
     };
     if (this._config.minimal) {
       this._config.card_defaults = { ...this._config.card_defaults, minimal: true };
     }
+    // Geometry overrides (issue #21): set on the host so they cascade into the
+    // grid cells AND every child bosch-camera-card (CSS vars inherit through
+    // shadow boundaries) — fixes the overview ignoring border_radius/box_shadow.
+    if (this._config.border_radius) this.style.setProperty("--bosch-card-radius", this._config.border_radius);
+    else this.style.removeProperty("--bosch-card-radius");
+    if (this._config.box_shadow) this.style.setProperty("--bosch-card-shadow", this._config.box_shadow);
+    else this.style.removeProperty("--bosch-card-shadow");
     // Propagate apple_style + theme + mode + compact + hide-toggles to every
     // child card unless an explicit per-key override already exists in
     // card_defaults.
@@ -6192,20 +6263,20 @@ class BoschCameraOverviewCard extends HTMLElement {
         :host(.apple-style) .bco-cell[data-tier="1"],
         :host(.apple-style) .bco-cell[data-tier="2"] {
           border: 0;
-          border-radius: var(--bosch-card-radius, 22px);
+          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 22px));
           opacity: 1;
           /* Smooth scale + shadow on hover so desktop users get a clear
              "this tile is tappable" affordance. Touch devices ignore :hover
-             so the static state stays unchanged on mobile. */
+             so the static state stays unchanged on mobile. transform-origin:top
+             anchors the TOP edge, so the scale grows downward — the tile no
+             longer "jumps" up when the inner card expands via ⋮ (issue #15.3)
+             while keeping the scale effect RkcCorian liked. */
+          transform-origin: top center;
           transition: transform .18s ease, box-shadow .18s ease;
         }
         @media (hover: hover) and (pointer: fine) {
           :host(.apple-style) .bco-cell:hover {
-            /* translateY only — no scale(). Scaling a variable-height tile
-               shifts its top edge when the inner card expands via ⋮, which
-               reads as the tile "jumping" (issue #15.3). translateY is
-               height-independent, so the lift affordance stays jump-free. */
-            transform: translateY(-2px);
+            transform: translateY(-2px) scale(1.012);
             box-shadow: 0 12px 32px rgba(0,0,0,.18);
             z-index: 1;
           }
