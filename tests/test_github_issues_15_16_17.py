@@ -244,6 +244,21 @@ class TestControlStackVisibility:
         )
 
 
+class TestDebugLineRemoved:
+    """The on-card debug line (`Card vX | fresh … | WxH`) was removed in
+    v13.3.3 (user request 2026-05-30 — no longer needed)."""
+
+    def test_no_debug_line_element(self, card_src: str) -> None:
+        assert 'id="debug-line"' not in card_src, (
+            "the debug-line element must be gone (removed v13.3.3)"
+        )
+
+    def test_no_debug_line_textcontent_update(self, card_src: str) -> None:
+        assert 'getElementById("debug-line")' not in card_src, (
+            "no code should reference the removed debug-line element"
+        )
+
+
 # ── shared: src and bundled mirror stay in sync ────────────────────────────
 
 

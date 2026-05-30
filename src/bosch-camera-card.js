@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.3.2";
+const CARD_VERSION = "13.3.3";
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -2333,8 +2333,7 @@ class BoschCameraCard extends HTMLElement {
             <div class="status-dot unknown" id="status-dot"></div>
             <span class="title" id="title">Bosch Camera</span>
           </div>
-          <span id="debug-line" style="font-size:9px;color:#999;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right;padding:0 8px">v${CARD_VERSION}</span>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto">
             <div class="push-badge poll" id="push-badge">
               <div class="pdot"></div>
               <span id="push-label">poll</span>
@@ -3436,20 +3435,7 @@ class BoschCameraCard extends HTMLElement {
       this._setLoadingOverlay(false);
     }
 
-    // Debug: show load time + frame interval on card
-    const dbg = this.shadowRoot.getElementById("debug-line");
-    if (dbg) {
-      const now = new Date().toLocaleTimeString("de-DE");
-      const w = img?.naturalWidth || "?", h = img?.naturalHeight || "?";
-      const nowMs = Date.now();
-      // Frame delta in seconds (1 decimal) so the debug row stays readable
-      // at a glance — e.g. "Δ2.0s" instead of "Δ2003ms".
-      const dt = (!isCache && this._lastFrameTime)
-        ? ` Δ${((nowMs - this._lastFrameTime) / 1000).toFixed(1)}s`
-        : "";
-      if (!isCache) this._lastFrameTime = nowMs;
-      dbg.textContent = `Card v${CARD_VERSION} | ${isCache ? "cache" : "fresh"} ${now}${dt} | ${w}×${h}`;
-    }
+    // (Debug line removed 2026-05-30 — no longer rendered.)
     // Uptime counter is handled by its own setInterval (_uptimeTimer) — no update needed here.
     // Store image to localStorage so next app launch shows it instantly.
     // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
@@ -5000,8 +4986,6 @@ class BoschCameraCard extends HTMLElement {
       if (panSec) panSec.style.display = "none";
       const qualSec = this.shadowRoot.getElementById("quality-section");
       if (qualSec) qualSec.style.display = "none";
-      const dbgLine = this.shadowRoot.getElementById("debug-line");
-      if (dbgLine) dbgLine.style.display = "none";
     }
   }
 

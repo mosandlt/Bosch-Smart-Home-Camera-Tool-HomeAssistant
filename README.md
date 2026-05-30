@@ -45,6 +45,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Installation](#installation)
 - [Setup](#setup)
 - [Architecture](#architecture)
+- [Streaming & Reliability](#streaming--reliability)
 - [Quality Scale: Platinum](#quality-scale-platinum)
 - [Features](#features)
   - [Entities](#entities)
@@ -55,6 +56,8 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
 - [Lovelace Cards](#lovelace-cards)
   - [`bosch-camera-card` — single camera](#bosch-camera-card--single-camera)
   - [`bosch-camera-overview-card` — multi-camera grid](#bosch-camera-overview-card--multi-camera-grid)
+  - [Dashboard examples](#dashboard-examples)
+  - [Admin / Health Dashboard Example](#admin--health-dashboard-example)
 - [Requirements](#requirements)
 - [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
 - [Apple HomeKit / Apple Home Integration](#apple-homekit--apple-home-integration)
@@ -377,6 +380,139 @@ stateDiagram-v2
 * **bufferingTime hint** from `PUT /connection` is `1000 ms` for REMOTE (vs `500 ms` for LOCAL) — Bosch's server-side hint about expected latency.
 
 ---
+
+## Streaming & Reliability
+
+How the integration brings a live stream up and keeps it alive — connection types, startup timing, watchdogs, the privacy interlock, and the buffer settings that trade latency for smoothness. These are integration / stream internals (configured in the integration's own options), not Lovelace card options.
+
+### Reliability
+
+- **Consistent snapshot refresh** — backend frame interval is shorter than the card's poll interval, so every card request always returns a fresh frame (no jitter).
+- **HLS auto-recovery** — hls.js soft errors recover automatically; fatal errors trigger a full reconnect after 2 s. Buffer-stall detection seeks to the live edge on the first two stalls and does a full reconnect on the third (`bosch-camera-card: 3 buffer stalls, reconnecting HLS`).
+- **hls.js CDN load hardening** — the card loads hls.js from jsdelivr with a pinned version + subresource-integrity hash (`hls.js@1.6.16` + matching `sha384`). The previous floating `@1` range broke silently whenever jsdelivr shipped a new patch release; updates now require an explicit version + hash bump.
+- **Cred-rotation refresh** — Bosch rotates the per-session digest creds on every `PUT /connection LOCAL`. The heartbeat parses each response, caches the new `user`/`password`, rebuilds the cached `rtspsUrl`, and calls `Stream.update_source()` so the next reconnect uses fresh creds. A reactive 401 rescue (max 1 per 5 min per cam) covers the rare cases where the proactive refresh missed a tick. Together they keep AUTO-mode streams on LAN even after long idle gaps (HLS consumer disconnect → reconnect would otherwise hit HTTP 401).
+- **Session renewal** — REMOTE proxy hashes expire after ~60 s; the backend opens a new connection before expiry and hands the card a fresh URL via `Stream.update_source()`. LOCAL streams survive the Gen2 Outdoor firmware's ~65 s RTSP TCP reset via a transparent FFmpeg reconnect on the same TLS proxy port with the same Digest credentials (~2 s gap, HLS output continues).
+- **TLS-proxy circuit breaker** — when the camera goes physically offline (privacy hardware button, power cut, Wi-Fi drop), the proxy stops retrying after 5 consecutive connect failures within 30 s instead of looping forever. The coordinator decides whether to rebuild via `try_live_connection()` once the camera is reachable again.
+- **Hardware-privacy auto-teardown** — when the camera's physical privacy button is pressed (or the Bosch app toggles privacy), the coordinator detects the OFF→ON transition and tears down the live session, the same path as a user-toggle. No more stuck `state: streaming` or endless reconnect loop.
+- **"Connecting" badge** — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays. Safety timeout hides the overlay after 120 s if the video never produces a frame, keeping the snapshot visible underneath.
+- **Stream uptime counter** — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
+- **Frame Δt in debug line** — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
+- **Snap error retry** — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
+- **Connection type badge** — shows "LAN" (green) or "Cloud" (gray) in the header while streaming.
+
+### Stream Connection Types
+
+The integration supports three connection modes, configurable in **Settings → Configure → Stream connection type** or at runtime via the **Stream Modus** select entity:
+
+| Mode | Description |
+|------|-------------|
+| **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
+| **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
+| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes; restart with one tap from the live-stream switch. |
+
+### Stream Status Sensor
+
+Every camera gets a `sensor.bosch_{name}_stream_status` entity that exposes the current live stream state as a persistent HA sensor:
+
+| State | Meaning |
+|---|---|
+| `idle` | Stream is off |
+| `warming_up` | LOCAL pre-warm running — waiting for camera encoder to initialise |
+| `connecting` | RTSP URL obtained, FFmpeg connecting |
+| `streaming` | Active, via local LAN |
+| `streaming_remote` | Active, via Bosch cloud proxy |
+
+The card reads this sensor on every `hass` update — so opening a dashboard while the stream is already warming up correctly shows the overlay and snapshot background without needing a toggle click (cold-open fix). You can also use the sensor in automations to react to stream state changes.
+
+### Stream Startup Timing
+
+The card badge progresses `idle` → `warming_up` / `connecting` (yellow) → `streaming` (blue) when you flip the live-stream switch on. How long that first transition takes depends on the connection mode and the camera model — the LOCAL path has a deliberate pre-warm to wake the camera's H.264 encoder before exposing the RTSP URL to FFmpeg, while REMOTE is just a cloud-proxy handshake.
+
+| Camera / mode | Typical time to first frame | Why |
+|---|---|---|
+| Any camera · **Remote (Cloud)** | **~5–10 s** | `PUT /connection REMOTE` → cloud proxy URL exposed immediately → FFmpeg opens `rtsps://proxy-NN.live.cbs.boschsecurity.com:443/...` → first HLS segment in 3–5 s. No pre-warm. |
+| **Gen1 360 Innenkamera** · Local | ~30–35 s | `min_total_wait = 25 s` from `PUT /connection LOCAL` before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer. |
+| **Gen2 Eyes Innenkamera II** · Local | ~30–35 s | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s`). |
+| **Gen1 Eyes Außenkamera** · Local | ~40–45 s | Outdoor encoder is slower; `min_total_wait = 35 s` + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer. |
+| **Gen2 Eyes Außenkamera II** · Local | ~40–45 s | Same outdoor profile (`HOME_Eyes_Outdoor`). |
+| Any camera · **Auto** with working LAN | same as Local | Auto picks LOCAL when LAN is reachable. |
+| Any camera · **Auto**, LAN **un**reachable | **~100 s outdoor**, **~40 s indoor**, then + ~5 s for REMOTE | `pre_warm_rtsp()` tries each retry with a ~10 s TLS-handshake timeout plus `pre_warm_retry_wait` between attempts, so the worst case is `pre_warm_retries × (~10 s TLS timeout + pre_warm_retry_wait)`: outdoor `8 × (10 + 5) = ~120 s`, indoor `3 × (10 + 3) = ~39 s`. On exhaustion `_try_live_connection_inner` tears LOCAL down, sets `_stream_fell_back[cam_id]`, and `continue`s to REMOTE (v10.3.2+). Measured end-to-end on a live HA 2026.4.3: patched Gen2 Outdoor target IP to `192.0.2.1` (RFC 5737 TEST-NET) → user-visible fallback after 101 s with `WARNING: LOCAL pre-warm failed … Falling back to REMOTE.`. |
+| Any camera · Any mode, **after 2 failed 60-s watchdog ticks** | ~2 min recovery | If FFmpeg opens LOCAL cleanly but the stream goes half-dead later, `_stream_health_watchdog` saturates the error counter on the second failing tick and forces the next `try_live_connection` to REMOTE. Worst-case end-to-end recovery ~2 min (v10.3.2+). |
+
+Renewals after the initial startup take **roughly 2/3** of the `min_total_wait` (camera encoder already warm), so ~17 s indoor, ~23 s outdoor. The TLS proxy can service a re-opened session during that window without user-visible interruption (`Stream.update_source()` hot-swap).
+
+Values are configurable per model in `custom_components/bosch_shc_camera/models.py` if you need to tune them for a slower network or a specific firmware; the defaults above are empirically measured and known-good.
+
+### WebRTC / go2rtc
+
+When [go2rtc](https://github.com/AlexxIT/go2rtc) is available, the card uses **WebRTC** (~2 s latency) instead of HLS (~12 s latency).
+
+**Setup (HA 2024.11+):**
+Since Home Assistant 2024.11, go2rtc is **built-in** — no separate add-on or installation needed. Just make sure `go2rtc:` is in your `configuration.yaml` (added by `default_config`). **Do NOT install go2rtc as a separate add-on** — this can cause conflicts.
+
+On stream start, the integration automatically registers the RTSP URL with go2rtc. The card detects WebRTC support and uses it. If WebRTC fails, it falls back to HLS automatically.
+
+**How it works:**
+- On stream start, the integration registers the RTSP URL with go2rtc's API (port 1984 inside HA container)
+- The card checks `camera/capabilities` — if `web_rtc` is available, it creates an `RTCPeerConnection`
+- Full ICE candidate exchange via HA's `camera/webrtc/offer` websocket
+- On stream stop, the registration is removed from go2rtc
+- If WebRTC fails (go2rtc not running, network issue), falls back to HLS automatically
+
+### Stream Watchdog
+
+A separate JavaScript resource (`bosch-camera-autoplay-fix.js`) monitors all camera cards and auto-recovers from common issues:
+
+| Issue | Detection | Recovery |
+|-------|-----------|----------|
+| Chrome autoplay block | Video paused with readyState ≥ 2 | Play muted |
+| Dead HLS stream | readyState = 0 for 20 s | Request new HLS URL via `camera/stream` WS |
+| Hidden video element | display:none while stream ON | Show video, start HLS |
+| Buffer stall | 3 consecutive `bufferStalledError` | Full HLS reconnect |
+| Video freeze | `currentTime` unchanged for 15 s | Seek to live edge or restart |
+
+The watchdog gets entity IDs directly from HA states, so it works even when the card's JavaScript is cached.
+
+### Privacy Guard
+
+The **Live Stream switch cannot be turned ON while Privacy Mode is active** (camera shutter is closed). Since v10.4.6 this is enforced at four levels so there's no bypass path:
+- `BoschLiveStreamSwitch.available` returns `False` while privacy is on → the entity greys out in the UI.
+- An attempted service call raises a `ServiceValidationError` → HA shows a clean toast in the UI, no persistent notification clutter.
+- `BoschAudioSwitch._apply_audio_change` and `coordinator.try_live_connection()` both early-exit with a logged warning if privacy is active.
+- When privacy gets enabled while a stream is already running — including via the camera's hardware privacy button or the Bosch app — the coordinator detects the OFF→ON transition and tears down the live session automatically (v10.4.10).
+
+### Fast Startup
+
+The first coordinator tick after HA restart **skips events and slow-tier API calls** (WiFi, ambient light, RCP, motion, etc.). This reduces startup from ~2 minutes to ~15 seconds. Full data loads on the second tick (60 s later).
+
+### Model-Specific Configuration
+
+Camera timing and behavior is configured per model via `CameraModelConfig`. Indoor cams keep an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), while Gen1/Gen2 outdoor cams have heartbeat disabled (`= renewal_interval`) because the Outdoor firmware rotates digest creds on every PUT and would invalidate the running RTSP session.
+
+| Parameter | 360 Innenkamera (Gen1) | Eyes Innenkamera II (Gen2) | Eyes Außenkamera (Gen1) | Eyes Außenkamera II (Gen2) | Purpose |
+|---|---|---|---|---|---|
+| Heartbeat interval | 30 s | 30 s | 3600 s (≈ off) | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
+| Pre-warm delay | 1 s | 1 s | 2 s | 2 s | Wait before first RTSP DESCRIBE |
+| Pre-warm retries | 3 | 3 | 8 | 8 | Max DESCRIBE attempts |
+| Min total wait | 25 s | 25 s | 35 s | 35 s | Minimum time before exposing RTSP URL |
+| Renewal interval | 3500 s | 3500 s | 3600 s | 3600 s | Proactive session renewal (safety net) |
+| Max session duration | 3600 s | 3600 s | 3600 s | 3600 s | Sent in RTSP URL `maxSessionDuration=` (Bosch default hint is 60 s but cams accept 3600) |
+
+### HLS Buffer Tuning
+
+The card's HLS.js configuration is tuned to prevent HA's stream component from killing FFmpeg, and since v10.4.7 it's selectable via the **HLS player buffer profile** (`live_buffer_mode`) option in the integration settings:
+
+| Profile | `liveSync` / `maxLatency` / `maxBuffer` / `maxMaxBuffer` / `lowLatencyMode` | Lag | Trade-off |
+|---|---|---|---|
+| **Latency** | `3 / 6 / 10 / 20 / true` | ~4–6 s | Lowest delay, may stutter on flaky Wi-Fi |
+| **Balanced** *(default)* | `4 / 8 / 14 / 22 / false` | ~8–10 s | Robust against typical Wi-Fi hiccups |
+| **Stable** | `6 / 12 / 22 / 30 / false` | ~12–15 s | Smooth even on weak links |
+
+- **`maxBufferLength` cap** — All three modes stay below HA's `OUTPUT_IDLE_TIMEOUT` (30 s). If hls.js buffered ≥ 30 s it would stop requesting segments → HA thinks nobody's watching → kills FFmpeg → freeze.
+- **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net.
+- **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
+
+The player buffer profile is independent of the **Reaktion** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
 
 ## Quality Scale: Platinum
 
@@ -1152,12 +1288,14 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 
 | Card | Use case | Versioning |
 |---|---|---|
-| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Card v13.0.0 |
-| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline**. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Overview v13.0.0 |
+| `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Shared bundle — tracks the integration version |
+| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline**. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Shared bundle — tracks the integration version |
 
-> **v13.0.0 — Apple-style redesign + theme switcher (iOS / Material You).** Glass title pill with camera name + green/orange/grey status dot overlays the top of the video; semantic status badge (LIVE / PRIVAT / Verbinde / Offline) sits in the top-right. Glass pill-bar with six circular buttons (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom — the More button reveals the Audio toggle and every other switch / accordion. The card auto-detects iOS vs Android user-agent and renders in the matching design language; a three-state switcher (Auto / iOS / Android) inside the More menu lets the user override, with the choice persisted in `localStorage` and broadcast to every Bosch card on the page. Opt out of the redesign entirely with `apple_style: false`; pin a theme via YAML with `theme: ios | android | auto` (default `ios`).
+> **Since v13.0.0 — Apple-style redesign + theme switcher (iOS / Material You).** Glass title pill with camera name + green/orange/grey status dot overlays the top of the video; semantic status badge (LIVE / PRIVAT / Verbinde / Offline) sits in the top-right. Glass pill-bar with six circular buttons (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom — the More button reveals the Audio toggle and every other switch / accordion. The card auto-detects iOS vs Android user-agent and renders in the matching design language; a three-state switcher (Auto / iOS / Android) inside the More menu lets the user override, with the choice persisted in `localStorage` and broadcast to every Bosch card on the page. Opt out of the redesign entirely with `apple_style: false`; pin a theme via YAML with `theme: ios | android | auto` (default `ios`).
 
-The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card-multi-camera-grid) at the bottom.
+The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card--multi-camera-grid) at the bottom. Dashboards combining several cards are under [Dashboard examples](#dashboard-examples).
+
+> Two further BETA cards — `bosch-nvr-timeline-card` and `bosch-nvr-multicam-card` — are part of the Mini-NVR feature and documented under [Mini-NVR → Lovelace Cards](#lovelace-cards-beta), not here.
 
 ---
 
@@ -1211,135 +1349,6 @@ The detailed reference for each card follows below — start with `bosch-camera-
 - **Diagnose** — WiFi signal %, firmware version, ambient light %, movement/audio events today
 - **Zeitpläne & Zonen** — schedule rules list with AN/AUS toggle per rule + delete button, motion zone overlay toggle, motion zone count (RCP)
 
-#### Reliability
-
-- **Consistent snapshot refresh** — backend frame interval is shorter than the card's poll interval, so every card request always returns a fresh frame (no jitter).
-- **HLS auto-recovery** — hls.js soft errors recover automatically; fatal errors trigger a full reconnect after 2 s. Buffer-stall detection seeks to the live edge on the first two stalls and does a full reconnect on the third (`bosch-camera-card: 3 buffer stalls, reconnecting HLS`).
-- **hls.js CDN load hardening** — the card loads hls.js from jsdelivr with a pinned version + subresource-integrity hash (`hls.js@1.6.16` + matching `sha384`). The previous floating `@1` range broke silently whenever jsdelivr shipped a new patch release; updates now require an explicit version + hash bump.
-- **Cred-rotation refresh** — Bosch rotates the per-session digest creds on every `PUT /connection LOCAL`. The heartbeat parses each response, caches the new `user`/`password`, rebuilds the cached `rtspsUrl`, and calls `Stream.update_source()` so the next reconnect uses fresh creds. A reactive 401 rescue (max 1 per 5 min per cam) covers the rare cases where the proactive refresh missed a tick. Together they keep AUTO-mode streams on LAN even after long idle gaps (HLS consumer disconnect → reconnect would otherwise hit HTTP 401).
-- **Session renewal** — REMOTE proxy hashes expire after ~60 s; the backend opens a new connection before expiry and hands the card a fresh URL via `Stream.update_source()`. LOCAL streams survive the Gen2 Outdoor firmware's ~65 s RTSP TCP reset via a transparent FFmpeg reconnect on the same TLS proxy port with the same Digest credentials (~2 s gap, HLS output continues).
-- **TLS-proxy circuit breaker** — when the camera goes physically offline (privacy hardware button, power cut, Wi-Fi drop), the proxy stops retrying after 5 consecutive connect failures within 30 s instead of looping forever. The coordinator decides whether to rebuild via `try_live_connection()` once the camera is reachable again.
-- **Hardware-privacy auto-teardown** — when the camera's physical privacy button is pressed (or the Bosch app toggles privacy), the coordinator detects the OFF→ON transition and tears down the live session, the same path as a user-toggle. No more stuck `state: streaming` or endless reconnect loop.
-- **"Connecting" badge** — amber badge with fast pulse while HLS is negotiating. Clears to blue "streaming" once video plays. Safety timeout hides the overlay after 120 s if the video never produces a frame, keeping the snapshot visible underneath.
-- **Stream uptime counter** — badge shows `00:47` / `1:23` while streaming, updating every 2 s. Proves session renewal keeps the stream alive past 60 s.
-- **Frame Δt in debug line** — shows actual ms between frames (`Δ2003ms`) — live verification that 2 s intervals are consistent.
-- **Snap error retry** — a failed snap.jpg during streaming triggers one immediate 500 ms retry instead of waiting for the next 2 s timer tick.
-- **Connection type badge** — shows "LAN" (green) or "Cloud" (gray) in the header while streaming.
-
-#### Stream Connection Types
-
-The integration supports three connection modes, configurable in **Settings → Configure → Stream connection type** or at runtime via the **Stream Modus** select entity:
-
-| Mode | Description |
-|------|-------------|
-| **Auto** (recommended) | Try local LAN first, automatically fall back to Bosch cloud proxy on failure. |
-| **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
-| **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes; restart with one tap from the live-stream switch. |
-
-#### Stream Status Sensor
-
-Every camera gets a `sensor.bosch_{name}_stream_status` entity that exposes the current live stream state as a persistent HA sensor:
-
-| State | Meaning |
-|---|---|
-| `idle` | Stream is off |
-| `warming_up` | LOCAL pre-warm running — waiting for camera encoder to initialise |
-| `connecting` | RTSP URL obtained, FFmpeg connecting |
-| `streaming` | Active, via local LAN |
-| `streaming_remote` | Active, via Bosch cloud proxy |
-
-The card reads this sensor on every `hass` update — so opening a dashboard while the stream is already warming up correctly shows the overlay and snapshot background without needing a toggle click (cold-open fix). You can also use the sensor in automations to react to stream state changes.
-
-#### Stream Startup Timing
-
-The card badge progresses `idle` → `warming_up` / `connecting` (yellow) → `streaming` (blue) when you flip the live-stream switch on. How long that first transition takes depends on the connection mode and the camera model — the LOCAL path has a deliberate pre-warm to wake the camera's H.264 encoder before exposing the RTSP URL to FFmpeg, while REMOTE is just a cloud-proxy handshake.
-
-| Camera / mode | Typical time to first frame | Why |
-|---|---|---|
-| Any camera · **Remote (Cloud)** | **~5–10 s** | `PUT /connection REMOTE` → cloud proxy URL exposed immediately → FFmpeg opens `rtsps://proxy-NN.live.cbs.boschsecurity.com:443/...` → first HLS segment in 3–5 s. No pre-warm. |
-| **Gen1 360 Innenkamera** · Local | ~30–35 s | `min_total_wait = 25 s` from `PUT /connection LOCAL` before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer. |
-| **Gen2 Eyes Innenkamera II** · Local | ~30–35 s | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s`). |
-| **Gen1 Eyes Außenkamera** · Local | ~40–45 s | Outdoor encoder is slower; `min_total_wait = 35 s` + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer. |
-| **Gen2 Eyes Außenkamera II** · Local | ~40–45 s | Same outdoor profile (`HOME_Eyes_Outdoor`). |
-| Any camera · **Auto** with working LAN | same as Local | Auto picks LOCAL when LAN is reachable. |
-| Any camera · **Auto**, LAN **un**reachable | **~100 s outdoor**, **~40 s indoor**, then + ~5 s for REMOTE | `pre_warm_rtsp()` tries each retry with a ~10 s TLS-handshake timeout plus `pre_warm_retry_wait` between attempts, so the worst case is `pre_warm_retries × (~10 s TLS timeout + pre_warm_retry_wait)`: outdoor `8 × (10 + 5) = ~120 s`, indoor `3 × (10 + 3) = ~39 s`. On exhaustion `_try_live_connection_inner` tears LOCAL down, sets `_stream_fell_back[cam_id]`, and `continue`s to REMOTE (v10.3.2+). Measured end-to-end on a live HA 2026.4.3: patched Gen2 Outdoor target IP to `192.0.2.1` (RFC 5737 TEST-NET) → user-visible fallback after 101 s with `WARNING: LOCAL pre-warm failed … Falling back to REMOTE.`. |
-| Any camera · Any mode, **after 2 failed 60-s watchdog ticks** | ~2 min recovery | If FFmpeg opens LOCAL cleanly but the stream goes half-dead later, `_stream_health_watchdog` saturates the error counter on the second failing tick and forces the next `try_live_connection` to REMOTE. Worst-case end-to-end recovery ~2 min (v10.3.2+). |
-
-Renewals after the initial startup take **roughly 2/3** of the `min_total_wait` (camera encoder already warm), so ~17 s indoor, ~23 s outdoor. The TLS proxy can service a re-opened session during that window without user-visible interruption (`Stream.update_source()` hot-swap).
-
-Values are configurable per model in `custom_components/bosch_shc_camera/models.py` if you need to tune them for a slower network or a specific firmware; the defaults above are empirically measured and known-good.
-
-#### WebRTC / go2rtc
-
-When [go2rtc](https://github.com/AlexxIT/go2rtc) is available, the card uses **WebRTC** (~2 s latency) instead of HLS (~12 s latency).
-
-**Setup (HA 2024.11+):**
-Since Home Assistant 2024.11, go2rtc is **built-in** — no separate add-on or installation needed. Just make sure `go2rtc:` is in your `configuration.yaml` (added by `default_config`). **Do NOT install go2rtc as a separate add-on** — this can cause conflicts.
-
-On stream start, the integration automatically registers the RTSP URL with go2rtc. The card detects WebRTC support and uses it. If WebRTC fails, it falls back to HLS automatically.
-
-**How it works:**
-- On stream start, the integration registers the RTSP URL with go2rtc's API (port 1984 inside HA container)
-- The card checks `camera/capabilities` — if `web_rtc` is available, it creates an `RTCPeerConnection`
-- Full ICE candidate exchange via HA's `camera/webrtc/offer` websocket
-- On stream stop, the registration is removed from go2rtc
-- If WebRTC fails (go2rtc not running, network issue), falls back to HLS automatically
-
-#### Stream Watchdog
-
-A separate JavaScript resource (`bosch-camera-autoplay-fix.js`) monitors all camera cards and auto-recovers from common issues:
-
-| Issue | Detection | Recovery |
-|-------|-----------|----------|
-| Chrome autoplay block | Video paused with readyState ≥ 2 | Play muted |
-| Dead HLS stream | readyState = 0 for 20 s | Request new HLS URL via `camera/stream` WS |
-| Hidden video element | display:none while stream ON | Show video, start HLS |
-| Buffer stall | 3 consecutive `bufferStalledError` | Full HLS reconnect |
-| Video freeze | `currentTime` unchanged for 15 s | Seek to live edge or restart |
-
-The watchdog gets entity IDs directly from HA states, so it works even when the card's JavaScript is cached.
-
-#### Privacy Guard
-
-The **Live Stream switch cannot be turned ON while Privacy Mode is active** (camera shutter is closed). Since v10.4.6 this is enforced at four levels so there's no bypass path:
-- `BoschLiveStreamSwitch.available` returns `False` while privacy is on → the entity greys out in the UI.
-- An attempted service call raises a `ServiceValidationError` → HA shows a clean toast in the UI, no persistent notification clutter.
-- `BoschAudioSwitch._apply_audio_change` and `coordinator.try_live_connection()` both early-exit with a logged warning if privacy is active.
-- When privacy gets enabled while a stream is already running — including via the camera's hardware privacy button or the Bosch app — the coordinator detects the OFF→ON transition and tears down the live session automatically (v10.4.10).
-
-#### Fast Startup
-
-The first coordinator tick after HA restart **skips events and slow-tier API calls** (WiFi, ambient light, RCP, motion, etc.). This reduces startup from ~2 minutes to ~15 seconds. Full data loads on the second tick (60 s later).
-
-#### Model-Specific Configuration
-
-Camera timing and behavior is configured per model via `CameraModelConfig`. Indoor cams keep an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), while Gen1/Gen2 outdoor cams have heartbeat disabled (`= renewal_interval`) because the Outdoor firmware rotates digest creds on every PUT and would invalidate the running RTSP session.
-
-| Parameter | 360 Innenkamera (Gen1) | Eyes Innenkamera II (Gen2) | Eyes Außenkamera (Gen1) | Eyes Außenkamera II (Gen2) | Purpose |
-|---|---|---|---|---|---|
-| Heartbeat interval | 30 s | 30 s | 3600 s (≈ off) | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
-| Pre-warm delay | 1 s | 1 s | 2 s | 2 s | Wait before first RTSP DESCRIBE |
-| Pre-warm retries | 3 | 3 | 8 | 8 | Max DESCRIBE attempts |
-| Min total wait | 25 s | 25 s | 35 s | 35 s | Minimum time before exposing RTSP URL |
-| Renewal interval | 3500 s | 3500 s | 3600 s | 3600 s | Proactive session renewal (safety net) |
-| Max session duration | 3600 s | 3600 s | 3600 s | 3600 s | Sent in RTSP URL `maxSessionDuration=` (Bosch default hint is 60 s but cams accept 3600) |
-
-#### HLS Buffer Tuning
-
-The card's HLS.js configuration is tuned to prevent HA's stream component from killing FFmpeg, and since v10.4.7 it's selectable via the **HLS player buffer profile** (`live_buffer_mode`) option in the integration settings:
-
-| Profile | `liveSync` / `maxLatency` / `maxBuffer` / `maxMaxBuffer` / `lowLatencyMode` | Lag | Trade-off |
-|---|---|---|---|
-| **Latency** | `3 / 6 / 10 / 20 / true` | ~4–6 s | Lowest delay, may stutter on flaky Wi-Fi |
-| **Balanced** *(default)* | `4 / 8 / 14 / 22 / false` | ~8–10 s | Robust against typical Wi-Fi hiccups |
-| **Stable** | `6 / 12 / 22 / 30 / false` | ~12–15 s | Smooth even on weak links |
-
-- **`maxBufferLength` cap** — All three modes stay below HA's `OUTPUT_IDLE_TIMEOUT` (30 s). If hls.js buffered ≥ 30 s it would stop requesting segments → HA thinks nobody's watching → kills FFmpeg → freeze.
-- **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net.
-- **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
-
-The player buffer profile is independent of the **Reaktion** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
-
 #### Card YAML
 
 ```yaml
@@ -1378,7 +1387,7 @@ show_last_event: false
 
 ```
 
-**All single-card options**
+#### Options
 
 | Key | Default | Effect |
 |-----|---------|--------|
@@ -1401,61 +1410,7 @@ show_last_event: false
 
 All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist. The **Reaktion** slot in the info row reads the `buffering_time_ms` attribute exposed by the camera entity (Bosch cloud-issued, ~500 ms on LOCAL and ~1000 ms on REMOTE); it stays `—` while the stream is idle. The **Verbindung** slot reads `connection_type` and shows `LAN`, `Cloud`, or `—`.
 
-#### Two-camera dashboard
-
-```yaml
-type: grid
-columns: 2
-cards:
-  - type: custom:bosch-camera-card
-    camera_entity: camera.bosch_garten
-    title: Garten
-  - type: custom:bosch-camera-card
-    camera_entity: camera.bosch_kamera
-    title: Kamera
-```
-
-#### A full camera dashboard view
-
-A complete dashboard view that mixes both cards in different configurations — a handy reference / test board you can paste into a new view (the **sections** view type, HA 2024.4+). Each entry is a custom card placed in a grid section; `grid_options: {columns: 12}` makes each one span the full section width.
-
-```yaml
-title: Cameras
-path: cameras
-type: sections
-max_columns: 2
-sections:
-  # ── Single cards, one per configuration ───────────────────────────
-  - type: grid
-    cards:
-      - type: heading
-        heading: Single camera
-      - type: custom:bosch-camera-card          # full glass chrome, controls expanded
-        camera_entity: camera.bosch_terrasse
-        title: Terrasse
-        grid_options: {columns: 12}
-      - type: custom:bosch-camera-card          # clean Apple-Home tile
-        camera_entity: camera.bosch_innenbereich
-        compact: true
-        grid_options: {columns: 12}
-      - type: custom:bosch-camera-card          # bare video, nothing overlaid
-        camera_entity: camera.bosch_kamera
-        compact: true
-        show_title: false
-        show_last_event: false
-        grid_options: {columns: 12}
-  # ── Overview grid: every camera at once ───────────────────────────
-  - type: grid
-    cards:
-      - type: heading
-        heading: All cameras
-      - type: custom:bosch-camera-overview-card
-        title: All cameras
-        columns: 2
-        grid_options: {columns: 12}
-```
-
-> The view above is exactly how the bundled “Card Test” reference board is built. Standalone single cards show their controls expanded by default; overview-grid tiles stay collapsed (tap the ⋮ on a tile to reveal its controls) so the grid stays glanceable. Set `minimal: false` on a single card to collapse it behind the ⋮, or `minimal: false` on the overview to expand every tile.
+> Dashboards mixing several cards (two-up, full grids) are documented under [Dashboard examples](#dashboard-examples) below, after the overview card.
 
 ---
 
@@ -1541,7 +1496,7 @@ card_defaults:                  # base options applied to every tile (overrides 
   refresh_interval_streaming: 5
 ```
 
-**All overview-card options**
+#### Options
 
 | Key | Default | Effect |
 |-----|---------|--------|
@@ -1574,6 +1529,68 @@ card_defaults:                  # base options applied to every tile (overrides 
 * **Discovery is live.** When a camera is added or removed, the overview re-discovers on the next `hass` update — no card config edit required.
 * **Tier transitions are smooth.** When a camera's privacy switch flips or it goes offline, only the changed tile re-mounts; the others stay (no full grid rebuild).
 * **`bosch_priority` attribute.** Exposed on every Bosch camera entity (`camera.bosch_*`). Visible in Developer Tools → States. You can also use it in templates / sensors outside the card, e. g. to drive a different layout.
+
+---
+
+### Dashboard examples
+
+Ready-to-paste layouts that combine the two cards above.
+
+#### Two-camera dashboard
+
+```yaml
+type: grid
+columns: 2
+cards:
+  - type: custom:bosch-camera-card
+    camera_entity: camera.bosch_garten
+    title: Garten
+  - type: custom:bosch-camera-card
+    camera_entity: camera.bosch_kamera
+    title: Kamera
+```
+
+#### A full camera dashboard view
+
+A complete dashboard view that mixes both cards in different configurations — a handy reference / test board you can paste into a new view (the **sections** view type, HA 2024.4+). Each entry is a custom card placed in a grid section; `grid_options: {columns: 12}` makes each one span the full section width.
+
+```yaml
+title: Cameras
+path: cameras
+type: sections
+max_columns: 2
+sections:
+  # ── Single cards, one per configuration ───────────────────────────
+  - type: grid
+    cards:
+      - type: heading
+        heading: Single camera
+      - type: custom:bosch-camera-card          # full glass chrome, controls expanded
+        camera_entity: camera.bosch_terrasse
+        title: Terrasse
+        grid_options: {columns: 12}
+      - type: custom:bosch-camera-card          # clean Apple-Home tile
+        camera_entity: camera.bosch_innenbereich
+        compact: true
+        grid_options: {columns: 12}
+      - type: custom:bosch-camera-card          # bare video, nothing overlaid
+        camera_entity: camera.bosch_kamera
+        compact: true
+        show_title: false
+        show_last_event: false
+        grid_options: {columns: 12}
+  # ── Overview grid: every camera at once ───────────────────────────
+  - type: grid
+    cards:
+      - type: heading
+        heading: All cameras
+      - type: custom:bosch-camera-overview-card
+        title: All cameras
+        columns: 2
+        grid_options: {columns: 12}
+```
+
+> The view above is exactly how the bundled “Card Test” reference board is built. Standalone single cards show their controls expanded by default; overview-grid tiles stay collapsed (tap the ⋮ on a tile to reveal its controls) so the grid stays glanceable. Set `minimal: false` on a single card to collapse it behind the ⋮, or `minimal: false` on the overview to expand every tile.
 
 ---
 
@@ -1780,7 +1797,7 @@ If you already have an alarm automation that toggles `privacy_mode` on your othe
     #     entity_id: switch.bosch_innen_sirene
 ```
 
-### Lovelace card setup
+### Card config for the alarm system
 
 The custom Lovelace card automatically shows the new alarm rows (Alarmanlage, Sirene, Pre-Alarm, Power-LED) when the alarm entities exist and the alarm system is gated behind the presence of `switch.{base}_alarmanlage`. No card config changes needed:
 
@@ -1920,15 +1937,15 @@ Features investigated or intentionally parked — listed here so the direction i
 - **Rules editor** (`/v11/video_inputs/{id}/rules`) — adjust event rules from the HA UI
 - **Camera sharing** (`/v11/friends`) — manage shared access from HA
 - **Live thumbnail via local RCP+** — opcode `0x099e` is reachable, but the local XML endpoint returns `<err>0x60</err>` for the `F_DATA` reads we tried (the cloud proxy uses binary TLV on the same path). Use case is narrow anyway: the card already shows live HLS as soon as the LOCAL session is up.
-- **`low_bandwidth: true` card option** — would suppress HLS autostart, showing a ▶ overlay until tapped (mobile data saver). Earlier attempts in card v2.10.3–v2.10.5 introduced stream-startup races and were reverted. Parked because the HA Companion App handles bandwidth on its own.
 
 ## Releases
 
-Latest: **v13.3.2** — see the GitHub release page for full notes:
-[**v13.3.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.3.2)
+Latest: **v13.3.3** — see the GitHub release page for full notes:
+[**v13.3.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.3.3)
 
 | Version | Highlights |
 |---|---|
+| **v13.3.3** | **Removed the on-card debug line** — the small `Card vX | fresh … | WxH` diagnostics line at the top of the card is gone (it lived inside the otherwise-hidden header). No functional change. If the card looks unchanged after updating, your browser is serving a cached copy — force a refresh (Safari: ⌘+⌥+R "Reload From Origin"; HA Companion app: Settings → Companion App → Debug → Reset frontend cache; Chrome/Edge/Firefox: Ctrl/⌘+Shift+R). |
 | **v13.3.2** | **Fullscreen button now closes fullscreen again** — on desktop/Android the ⛶ button entered fullscreen but a second tap did nothing (only `Esc` exited). The card requests fullscreen on an element inside its shadow root, where `document.fullscreenElement` retargets to the shadow host, so the old "already fullscreen?" check never matched; detection now reads `shadowRoot.fullscreenElement` and the button toggles in and out. **New card no longer stuck on one camera** — a freshly added `bosch-camera-card` defaulted to a hard-coded entity (`camera.bosch_garten`) that only exists on the author's instance, and the visual editor's camera picker stayed empty when entity names didn't contain "bosch". The picker now derives its default from your own cameras and lists every `camera.*` entity, and keeps the configured value selected. **Two new hide options** — `show_title: false` and `show_last_event: false` strip the title pill and last-event badge for a clean video-only tile (pairs with `compact: true` to match the overview-card grid look); both default to on, available in YAML and the visual editor. Applies to single cards and to overview-grid tiles via `card_defaults`. **`minimal` is now meaningful in the default (Apple-style) layout** — a standalone card shows its full control stack (switches + accordions) expanded by default with the ⋮ "Mehr" button pre-opened; `minimal: true` keeps everything collapsed behind ⋮. Overview-grid tiles default to `minimal: true` so the grid stays glanceable (tap a tile's ⋮ to reveal its controls). The overview editor now exposes the same Design / hide sub-features as the single card. **Offline cameras show less chrome** — the garbled overlapping label on offline tiles is fixed (the redundant top title-pill is hidden; the centered "Kamera Offline" pill is the single source of truth), and in the expanded layout an offline camera now hides the unusable control stack (keeping only attached automations). **White strip below the video removed** — collapsed control rows left ~20 px of `padding`/`border` showing under `max-height:0`; now zeroed so the card sizes exactly to the video. |
 | **v13.3.1** | **Privacy/light toggle no longer interrupts streams on other cameras** — toggling privacy mode or the camera light on one camera triggered a coordinator-wide state broadcast that briefly flashed a reconnecting/HLS overlay on every other camera on the same dashboard; each card now skips the re-render path for unrelated entities. **Loading spinner centered in HA mobile app** — `inset` CSS shorthand unsupported on older iOS WebViews caused the spinner to anchor bottom-right instead of center; replaced with explicit four-side properties. **Tap reliability improved** — tap-to-play and fullscreen overlay touch handling improved for mobile. **`bosch-camera-autoplay-fix.js` deprecated** — the separate autoplay-watchdog resource is now a no-op; the card self-heals on its own; the resource is auto-removed on next HA restart, no action needed. **Internal:** intrusion-detection `distance` maximum aligned to API limit (8 m); test coverage expanded for switch on/off modes. |
 | **v13.2.5** | **WebRTC race on first stream-start fixed** — `BoschCamera.is_streaming` returned True the moment `try_live_connection` populated `_live_connections`, BEFORE the 25-35 s pre-warm wrote `rtspsUrl`. Card's `_waitForStreamReady` saw `cam.state === "streaming"`, immediately fired `camera/webrtc/offer`, HA's go2rtc rejected with `Camera has no stream source`, card 5-s-timed-out and fell back to HLS — making WebRTC look like "only works after a browser reload." `is_streaming` now mirrors `stream_source`'s gate (entry present AND has `rtspsUrl`/`rtspUrl`). WebRTC succeeds on first stream-start; TLS-proxy logs show `User-Agent: go2rtc/1.9.14` confirming the actual transport. **Loading overlay leaks during privacy on/off closed.** Five layered fixes for paths where "Aktualisiere…" / "Bild wird geladen…" stuck while the shutter was closed or during the 12 s post-off re-snapshot grace: `_setLoadingOverlay` entry-guard, `_update` privacy-on force-clear, gated direct-DOM paths in `_restoreCachedImage` and `_onImageLoaded`, gated `set hass` firstHass block, and a pre-pass at the TOP of `_update` that sets `_privacyOffSuppressUntil` BEFORE the same-tick stream-stopped + backend-waiting overlay shows could fire. **Stuck "Verbinde" badge** when the card mounted on an already-active stream now self-heals: video-element `!paused && currentTime > 0 && readyState >= 2` force-clears the stale `_startingLiveVideo` flag + dismisses the overlay (the `playing`-event listener that would normally do it is no longer in scope). **Loading overlay stacked on OFFLINE** for ~15 s of HTTP retries — stream-OFF transition's snapshot-fetch + overlay-show now gated on `!_isOffline`. **Card 404 noise eliminated** — `_pullFreshSwitchStates` filters by `id in hass.states` before the REST call (Gen2 LED rings live under `light.*`, but the default fallback fabricated `switch.X_camera_light`). |
@@ -1962,7 +1979,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.3.2** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.3.3** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.1** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.0.3** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widget |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.0** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
@@ -1971,8 +1988,6 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.0-alpha Phase-1 skeleton (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land here first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
-
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.0-alpha Phase-1 skeleton (dashboard + camera detail + settings) — community interest welcome
 
 ---
 
