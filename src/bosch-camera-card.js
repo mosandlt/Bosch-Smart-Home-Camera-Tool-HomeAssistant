@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.4";
+const CARD_VERSION = "13.4.4.1";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -6293,19 +6293,21 @@ class BoschCameraOverviewCard extends HTMLElement {
              clipped by its own overflow:hidden. Default none = unchanged look. */
           box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, none));
           opacity: 1;
-          /* Smooth scale + shadow on hover so desktop users get a clear
+          /* Smooth scale on hover so desktop users get a clear
              "this tile is tappable" affordance. Touch devices ignore :hover
              so the static state stays unchanged on mobile. transform-origin:top
              anchors the TOP edge, so the scale grows downward — the tile no
              longer "jumps" up when the inner card expands via ⋮ (issue #15.3)
-             while keeping the scale effect RkcCorian liked. */
+             while keeping the scale effect RkcCorian liked. Uses transform
+             ONLY — NOT box-shadow — so a themed --ha-card-box-shadow stays
+             visible during the lift, exactly like the single card (issue #15,
+             RkcCorian: theme variables were ignored during the overview lift). */
           transform-origin: top center;
-          transition: transform .18s ease, box-shadow .18s ease;
+          transition: transform .18s ease;
         }
         @media (hover: hover) and (pointer: fine) {
           :host(.apple-style) .bco-cell:hover {
             transform: translateY(-2px) scale(1.012);
-            box-shadow: 0 12px 32px rgba(0,0,0,.18);
             z-index: 1;
           }
         }
