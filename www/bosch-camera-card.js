@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.4.4.1";
+const CARD_VERSION = "13.4.4.2";
 
 let _boschFsExitAt = 0;
 
@@ -1702,7 +1702,7 @@ class BoschCameraCard extends HTMLElement {
     const apBtnStream = this.shadowRoot.getElementById("ap-btn-stream");
     const apBtnPrivacy = this.shadowRoot.getElementById("ap-btn-privacy");
     const apStreamIcon = this.shadowRoot.getElementById("ap-stream-icon");
-    const privActive = hass.states[ents.privacy]?.state === "on";
+    const privActive = this._optimisticActive(ents.privacy, hass);
     if (apBadge) {
       if (streamBadgeState === "offline") {
         apBadge.className = "ap-badge offline";
@@ -1733,7 +1733,7 @@ class BoschCameraCard extends HTMLElement {
       apBtnPrivacy.setAttribute("aria-pressed", privActive ? "true" : "false");
     }
     const apBtnLight = this.shadowRoot.getElementById("ap-btn-light");
-    const lightActive = hass.states[ents.light]?.state === "on";
+    const lightActive = this._optimisticActive(ents.light, hass);
     if (apBtnLight) {
       apBtnLight.classList.toggle("on", lightActive);
       apBtnLight.setAttribute("aria-pressed", lightActive ? "true" : "false");
@@ -2471,6 +2471,12 @@ class BoschCameraCard extends HTMLElement {
   _getEffectiveState(entityId) {
     if (entityId in this._optimistic) return this._optimistic[entityId];
     return this._hass?.states[entityId]?.state;
+  }
+  _optimisticActive(entityId, hass) {
+    const opt = this._optimistic[entityId];
+    const isPending = opt === "pending";
+    const displayState = entityId in this._optimistic && !isPending ? opt : hass?.states[entityId]?.state;
+    return displayState === "on";
   }
   _streamPhaseText() {
     const st = this._hass?.states[this._entities.streamStatus]?.state || this._hass?.states[this._entities.camera]?.attributes?.stream_status || "";

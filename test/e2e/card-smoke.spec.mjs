@@ -182,6 +182,47 @@ test("audio toggle unmutes the playing video (mock hass)", async ({ page }) => {
   expect(r.mutedAfter, "one tap unmutes the video").toBe(false);
 });
 
+// #27: the apple-style privacy pill (#ap-btn-privacy) must clear its "on"
+// marking as soon as HA reports privacy back OFF — without a second tap. The
+// pill used to read raw hass and ignore the optimistic override, so on a Gen1
+// LOCAL camera (slow status push) it stayed marked after toggling off
+// (RkcCorian). This pins: privacy ON → pill.on; privacy OFF (same render) →
+// pill no longer .on; and the optimistic OFF set on tap already clears it.
+test("privacy pill clears its marked state after privacy turns off (#27)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const mk = (priv) => ({ ...base, states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_privacy_mode": { state: priv, attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } });
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = mk("on");
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const pill = () => card.shadowRoot.getElementById("ap-btn-privacy");
+    if (!pill()) return { error: "no ap-btn-privacy element" };
+    const onWhilePrivacy = pill().classList.contains("on");
+    // Optimistic OFF (what the tap handler sets) must immediately clear the mark
+    // even before HA confirms the new state.
+    card._optimistic["switch.test_privacy_mode"] = "off";
+    card._update();
+    const onAfterOptimisticOff = pill().classList.contains("on");
+    // And once HA actually reports OFF (optimistic cleared), it stays cleared.
+    delete card._optimistic["switch.test_privacy_mode"];
+    card.hass = mk("off");
+    await new Promise((res) => setTimeout(res, 100));
+    const onAfterHassOff = pill().classList.contains("on");
+    return { onWhilePrivacy, onAfterOptimisticOff, onAfterHassOff };
+  });
+  expect(r.error, "card renders #ap-btn-privacy").toBeUndefined();
+  expect(r.onWhilePrivacy, "pill is marked while privacy is on").toBe(true);
+  expect(r.onAfterOptimisticOff, "pill clears on optimistic off (the tap)").toBe(false);
+  expect(r.onAfterHassOff, "pill stays cleared once HA reports off").toBe(false);
+});
+
 // mobile fullscreen: only one card may be in the CSS-fullscreen overlay — a
 // second card entering closes the first (single-owner; part of the "closing one
 // opened another" fix).

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.4.1";
+const CARD_VERSION = "13.4.4.2";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -4515,7 +4515,12 @@ class BoschCameraCard extends HTMLElement {
     const apBtnStream = this.shadowRoot.getElementById("ap-btn-stream");
     const apBtnPrivacy = this.shadowRoot.getElementById("ap-btn-privacy");
     const apStreamIcon = this.shadowRoot.getElementById("ap-stream-icon");
-    const privActive = hass.states[ents.privacy]?.state === "on";
+    // #27: the apple-style privacy pill must honour the optimistic override the
+    // same way btn-privacy / btn-privacy-inline do. Reading raw hass here left
+    // the pill marked "on" after a privacy Off until HA's next push — on Gen1
+    // LOCAL that lag is large enough that the tile stayed active and needed a
+    // second tap to force a re-render (RkcCorian, #27).
+    const privActive = this._optimisticActive(ents.privacy, hass);
     if (apBadge) {
       // Priority: offline > live > connecting > hidden. Privacy hides badge.
       if (streamBadgeState === "offline") {
@@ -4548,8 +4553,10 @@ class BoschCameraCard extends HTMLElement {
       apBtnPrivacy.setAttribute("aria-pressed", privActive ? "true" : "false");
     }
     // Light mirror (Audio toggle lives in the Mehr menu, not the pill-bar)
+    // Same optimistic-aware read as privacy (#27) — keeps the light pill in sync
+    // with the user's tap before HA confirms.
     const apBtnLight = this.shadowRoot.getElementById("ap-btn-light");
-    const lightActive = hass.states[ents.light]?.state === "on";
+    const lightActive = this._optimisticActive(ents.light, hass);
     if (apBtnLight) {
       apBtnLight.classList.toggle("on", lightActive);
       apBtnLight.setAttribute("aria-pressed", lightActive ? "true" : "false");
@@ -5444,6 +5451,24 @@ class BoschCameraCard extends HTMLElement {
   _getEffectiveState(entityId) {
     if (entityId in this._optimistic) return this._optimistic[entityId];
     return this._hass?.states[entityId]?.state;
+  }
+
+  /**
+   * Optimistic-aware "is this switch active?" for the apple-style pill-bar.
+   * Mirrors the exact display logic in _updateToggleBtn (#27): while a service
+   * call is in flight the optimistic value is "pending" — keep showing the real
+   * HA state (no premature flip); once the call resolves the optimistic value
+   * is the target ("on"/"off") and wins until HA confirms it. Reading raw hass
+   * here was what left the ap-btn-privacy / ap-btn-light pills marked after the
+   * user toggled them off (RkcCorian, #27 — Gen1 LOCAL hass-push lag).
+   */
+  _optimisticActive(entityId, hass) {
+    const opt = this._optimistic[entityId];
+    const isPending = opt === "pending";
+    const displayState = (entityId in this._optimistic && !isPending)
+      ? opt
+      : hass?.states[entityId]?.state;
+    return displayState === "on";
   }
 
   // Connecting-overlay text derived PURELY from the shared backend stream_status
