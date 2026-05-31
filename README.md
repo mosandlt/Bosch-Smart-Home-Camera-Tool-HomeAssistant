@@ -1400,6 +1400,8 @@ show_last_event: false
 | `minimal` | `false` | `false` (default) shows the full control stack (switches + accordions) expanded with the ⋮ pre-opened; `true` collapses everything behind the ⋮ "Mehr" button until tapped. (Overview-grid tiles default to `minimal: true`.) |
 | `show_title` | `true` | Set `false` to hide the title pill entirely (clean video-only tile). |
 | `show_last_event` | `true` | Set `false` to hide the last-event badge in the bottom-right of the video. |
+| `border_radius` | *(theme)* | CSS length, e.g. `"22px"`. Overrides the card corner radius for this card only. By default the card follows your dashboard theme's `ha-card-border-radius`; set this to pin a value regardless of the theme. |
+| `box_shadow` | *(theme)* | CSS shadow, e.g. `"0 0 4px 1.5px rgba(255,255,255,.5)"`. Overrides the card shadow for this card only. By default the card follows your theme's `ha-card-box-shadow`. |
 | `auto_play` | *(integration default)* | `lan` / `always` / `never` — per-card override of the integration's auto-play behaviour. |
 | `show_motion_zones` | `false` | Overlay the configured motion-zone SVG on the video. |
 | `snapshot_during_warmup` | `true` | Show the last snapshot under the loading overlay while the stream warms up. |
@@ -1513,6 +1515,7 @@ card_defaults:                  # base options applied to every tile (overrides 
 | `mode` | `auto` | Propagated to every tile: `auto` / `day` / `night`. |
 | `compact` | `false` | `true` makes every tile an Apple-Home tile (no pill-bar / status badge). Pair with `columns: 2`/`3` for a clean grid. |
 | `minimal` | `true` | Default on for the grid — every tile starts collapsed (controls behind its ⋮). Set `false` to expand every tile's control stack. |
+| `border_radius` / `box_shadow` | *(theme)* | CSS overrides applied to the whole grid (every tile). By default the cards follow your dashboard theme's `ha-card-border-radius` / `ha-card-box-shadow`. |
 | `overrides` | `{}` | Per-camera `setConfig()` overrides, keyed by entity_id. Deep-merged into that tile (`camera_entity` is set automatically). |
 | `card_defaults` | `{}` | Base options applied to every tile; an explicit `overrides.<entity>` key wins over these. Accepts any single-card option (see table above). |
 
