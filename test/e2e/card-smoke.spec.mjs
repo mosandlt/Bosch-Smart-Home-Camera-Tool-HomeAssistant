@@ -270,3 +270,64 @@ test("overview tile follows the theme box-shadow (#21)", async ({ page }) => {
   // The cell's resolved box-shadow must reflect the theme value (non-"none").
   expect(shadow === "no-cell" || shadow === "none", "cell carries the themed shadow").toBe(false);
 });
+
+// Stale go2rtc source (live fix 2026-05-31): after Bosch rotates the LOCAL
+// session creds the backend rebuilds the TLS proxy on a NEW port. go2rtc/the
+// card's WebRTC PC stay pinned to the dead port → "connection refused" /
+// "wrong user/pass" → frozen image. The card must classify those errors
+// distinctly from the benign HA stream-type race ("does not support WebRTC").
+test("stale-source errors are classified distinctly from the HA stream-type race", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: { "camera.test": { state: "idle", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    return {
+      refused:  card._isStaleSourceError("webrtc: streams: dial tcp 127.0.0.1:41325: connect: connection refused, exec/rtsp"),
+      userpass: card._isStaleSourceError("webrtc: streams: wrong user/pass, exec/rtsp"),
+      describe: card._isStaleSourceError("method DESCRIBE failed: 404 Not Found"),
+      race:     card._isStaleSourceError("Camera does not support WebRTC, frontend_stream_types={HLS}"),
+      iceFail:  card._isStaleSourceError("WebRTC: no track within 5s"),
+    };
+  });
+  expect(r.refused, "connection refused → stale source").toBe(true);
+  expect(r.userpass, "wrong user/pass → stale source").toBe(true);
+  expect(r.describe, "DESCRIBE 404 → stale source").toBe(true);
+  expect(r.race, "the benign HA stream-type race is NOT a stale source").toBe(false);
+  expect(r.iceFail, "a plain ICE/track timeout is NOT a stale source").toBe(false);
+});
+
+// The forced backend rebuild cycles the live-stream switch off→on (fresh PUT
+// /connection + new proxy port + go2rtc re-register) and is cooldown-guarded so
+// a burst of stale-source errors triggers at most one rebuild.
+test("stale go2rtc source forces a cooldown-guarded backend stream rebuild", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const calls = [];
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_live_stream": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    card._callService = (d, s) => calls.push(`${d}.${s}`);
+    card._stopLiveVideo = () => {};
+    card._waitForStreamReady = () => {};
+    const first = card._maybeForceBackendRewarm();
+    const second = card._maybeForceBackendRewarm(); // within the 20s cooldown
+    await new Promise((res) => setTimeout(res, 1800)); // let the off→on timeouts fire
+    return { first, second, calls };
+  });
+  expect(r.first, "first stale-source rebuild is initiated").toBe(true);
+  expect(r.second, "second call within cooldown is suppressed").toBe(false);
+  expect(r.calls.includes("switch.turn_off"), "switch turned off").toBe(true);
+  expect(r.calls.includes("switch.turn_on"), "switch turned back on after delay").toBe(true);
+});

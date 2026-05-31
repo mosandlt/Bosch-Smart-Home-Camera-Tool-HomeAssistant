@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.4.4.2";
+const CARD_VERSION = "13.4.5";
 
 let _boschFsExitAt = 0;
 
@@ -79,6 +79,8 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive = false;
     this._startingLiveVideo = false;
     this._hls = null;
+    this._staleSourceSeen = false;
+    this._lastRewarmAt = 0;
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
       const isCompanion = /Home\s?Assistant/i.test(ua);
@@ -1120,6 +1122,8 @@ class BoschCameraCard extends HTMLElement {
       const clearOverlay = () => {
         if (img) img.style.display = "none";
         this._setLoadingOverlay(false);
+        this._staleSourceSeen = false;
+        this._lastRewarmAt = 0;
         if (this._streamConnecting) {
           this._streamConnecting = false;
           if (this._connectSteps) {
@@ -1180,6 +1184,9 @@ class BoschCameraCard extends HTMLElement {
         const expectedRace = m.includes("does not support WebRTC") || m.includes("frontend_stream_types");
         if (expectedRace) {
           console.debug("bosch-camera-card: WebRTC race miss, falling back to HLS:", m);
+        } else if (this._isStaleSourceError(m)) {
+          this._staleSourceSeen = true;
+          console.warn("bosch-camera-card: WebRTC source stale (dead proxy/rotated creds), will rebuild backend stream:", m);
         } else {
           console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", m);
         }
@@ -1311,6 +1318,10 @@ class BoschCameraCard extends HTMLElement {
       }
       activateVideo();
     } catch (e) {
+      if (this._staleSourceSeen && this._isStreaming()) {
+        this._staleSourceSeen = false;
+        if (this._maybeForceBackendRewarm()) return;
+      }
       if (attempt < 5) {
         setTimeout(() => {
           const cam = this._hass?.states[this._entities.camera];
@@ -1435,6 +1446,33 @@ class BoschCameraCard extends HTMLElement {
       this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
       this._waitForStreamReady();
     }
+  }
+  _isStaleSourceError(msg) {
+    const m = String(msg || "").toLowerCase();
+    return m.includes("wrong user/pass") || m.includes("connection refused") || m.includes("exec/rtsp") || m.includes("describe failed") || m.includes("404");
+  }
+  _maybeForceBackendRewarm() {
+    const now = Date.now();
+    if (this._lastRewarmAt && now - this._lastRewarmAt < 2e4) return false;
+    const sw = this._entities.switch;
+    if (!sw || !this._hass?.states?.[sw]) return false;
+    this._lastRewarmAt = now;
+    console.warn("bosch-camera-card: go2rtc source stale — forcing backend stream rebuild via", sw);
+    this._stopLiveVideo();
+    this._waitingForStream = true;
+    this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+    this._callService("switch", "turn_off", {
+      entity_id: sw
+    });
+    setTimeout(() => {
+      this._callService("switch", "turn_on", {
+        entity_id: sw
+      });
+      setTimeout(() => {
+        if (this._waitingForStream) this._waitForStreamReady();
+      }, 1e3);
+    }, 1500);
+    return true;
   }
   _stopLiveVideo() {
     if (this._hls) {

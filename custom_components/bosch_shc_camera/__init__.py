@@ -1452,9 +1452,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 and is_auth_error
                 and self._local_rescue_attempts.get(cam_id, 0) < 1
             ):
-                self._local_rescue_attempts[cam_id] = (
-                    self._local_rescue_attempts.get(cam_id, 0) + 1
-                )
+                # Claim the rescue burst (one per cam at a time; decays after
+                # _LOCAL_RESCUE_TTL_SEC). The burst itself retries internally.
+                self._local_rescue_attempts[cam_id] = 1
                 self._local_rescue_at[cam_id] = now_mono
                 _LOGGER.warning(
                     "Stream worker auth-failed for %s on LOCAL — Bosch session "
@@ -1466,14 +1466,49 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 self._stream_error_count[cam_id] = 0
                 self._stream_fell_back.pop(cam_id, None)
                 self._live_connections.pop(cam_id, None)
-                await self._stop_tls_proxy(cam_id)
-                result = await self.try_live_connection(cam_id)
-                if result:
-                    _LOGGER.info(
-                        "LOCAL rescue: %s restarted as %s",
-                        cam_id[:8],
-                        result.get("_connection_type", "?"),
-                    )
+                # Resilient rescue: a fresh PUT /connection can briefly race the
+                # camera's own session teardown — observed live 2026-05-31 (Indoor
+                # Gen2): the new TLS proxy got "SSL UNEXPECTED_EOF" / "Connection
+                # reset by peer" on the first re-issue while the camera was
+                # mid-rotation. A SINGLE attempt then left go2rtc + HA Stream
+                # pinned to the dead proxy port, so consumers saw "connection
+                # refused" / "wrong user/pass" → frozen image until a manual
+                # integration reload. Because the rescue tears the stream down,
+                # no NEW stream-worker error fires to retrigger us — so the burst
+                # must self-retry with backoff instead of relying on another
+                # error to drive attempt 2.
+                _LOCAL_RESCUE_MAX_ATTEMPTS = 3
+                _LOCAL_RESCUE_RETRY_DELAY = 5
+                result = None
+                for rescue_try in range(1, _LOCAL_RESCUE_MAX_ATTEMPTS + 1):
+                    await self._stop_tls_proxy(cam_id)
+                    result = await self.try_live_connection(cam_id)
+                    if result:
+                        _LOGGER.info(
+                            "LOCAL rescue: %s restarted as %s (attempt %d/%d)",
+                            cam_id[:8],
+                            result.get("_connection_type", "?"),
+                            rescue_try,
+                            _LOCAL_RESCUE_MAX_ATTEMPTS,
+                        )
+                        break
+                    if rescue_try < _LOCAL_RESCUE_MAX_ATTEMPTS:
+                        _LOGGER.warning(
+                            "LOCAL rescue attempt %d/%d failed for %s — camera "
+                            "transiently unreachable; retrying in %ds",
+                            rescue_try,
+                            _LOCAL_RESCUE_MAX_ATTEMPTS,
+                            cam_id[:8],
+                            _LOCAL_RESCUE_RETRY_DELAY,
+                        )
+                        await asyncio.sleep(_LOCAL_RESCUE_RETRY_DELAY)
+                    else:
+                        _LOGGER.warning(
+                            "LOCAL rescue exhausted %d attempts for %s — leaving "
+                            "to health watchdog / next failure burst",
+                            _LOCAL_RESCUE_MAX_ATTEMPTS,
+                            cam_id[:8],
+                        )
                 return  # whatever try_live_connection produced is the new state
 
             if conn_type != "LOCAL":

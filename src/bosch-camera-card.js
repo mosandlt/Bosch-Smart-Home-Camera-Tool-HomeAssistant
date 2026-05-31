@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.4.2";
+const CARD_VERSION = "13.4.5";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -221,6 +221,8 @@ class BoschCameraCard extends HTMLElement {
     this._liveVideoActive   = false; // true when HLS <video> is playing
     this._startingLiveVideo = false; // true while _startLiveVideo() is in progress
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
+    this._staleSourceSeen   = false; // true when WebRTC failed on a dead go2rtc source (rotated creds / dead proxy port)
+    this._lastRewarmAt      = 0;     // ts of last forced backend stream rebuild (cooldown guard)
     // Skip WebRTC + show HLS banner when:
     //   (a) HA Companion App reaches us through an external endpoint
     //       (Cloudflare Tunnel / Nabu Casa) — UDP can't ride the tunnel,
@@ -3721,6 +3723,11 @@ class BoschCameraCard extends HTMLElement {
         // NOW hide the snapshot — video is playing, no black gap
         if (img) img.style.display = "none";
         this._setLoadingOverlay(false);
+        // Live frame is on screen — the backend source is healthy again. Clear
+        // the stale-source latch + rewarm cooldown so a future creds rotation
+        // can recover immediately. (live fix 2026-05-31)
+        this._staleSourceSeen = false;
+        this._lastRewarmAt    = 0;
         if (this._streamConnecting) {
           this._streamConnecting = false;
           if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
@@ -3822,6 +3829,14 @@ class BoschCameraCard extends HTMLElement {
                           || m.includes("frontend_stream_types");
         if (expectedRace) {
           console.debug("bosch-camera-card: WebRTC race miss, falling back to HLS:", m);
+        } else if (this._isStaleSourceError(m)) {
+          // go2rtc's source points at a dead TLS-proxy port / carries rotated
+          // Digest creds (Bosch rotated the LOCAL session, backend rebuilt the
+          // proxy on a new port). Retrying the same offer just hits the same
+          // dead source — latch it so the HLS-fallback failure below forces a
+          // backend stream rebuild instead of looping. (live fix 2026-05-31)
+          this._staleSourceSeen = true;
+          console.warn("bosch-camera-card: WebRTC source stale (dead proxy/rotated creds), will rebuild backend stream:", m);
         } else {
           console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", m);
         }
@@ -3980,6 +3995,17 @@ class BoschCameraCard extends HTMLElement {
       activateVideo();
 
     } catch (e) {
+      // If WebRTC failed on a stale go2rtc source AND the HLS fallback also
+      // failed, the backend source itself is dead (rotated creds / dead proxy
+      // port). The camera entity still reports "streaming", so the retry loop
+      // below would hammer the same dead source forever. Force a backend
+      // rebuild once (cooldown-guarded) so the integration re-issues PUT
+      // /connection, spins a fresh TLS proxy and re-registers go2rtc on the
+      // live port. (live fix 2026-05-31)
+      if (this._staleSourceSeen && this._isStreaming()) {
+        this._staleSourceSeen = false;
+        if (this._maybeForceBackendRewarm()) return;
+      }
       if (attempt < 5) {
         // Re-check camera state before retrying: if the backend connection died,
         // the camera entity goes to "idle" (supported_features loses STREAM) and
@@ -4155,6 +4181,50 @@ class BoschCameraCard extends HTMLElement {
       this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
       this._waitForStreamReady();
     }
+  }
+
+  /**
+   * Classify a WebRTC/HLS error as a "stale backend source" failure: go2rtc's
+   * RTSP source points at a TLS-proxy port that no longer exists (Bosch rotated
+   * the LOCAL session creds → backend rebuilt the proxy on a new port) or
+   * carries the old Digest creds. Distinct from the benign HA stream-type race
+   * ("does not support WebRTC") — retrying the same source can never succeed,
+   * only a backend rebuild fixes it. (live fix 2026-05-31)
+   */
+  _isStaleSourceError(msg) {
+    const m = String(msg || "").toLowerCase();
+    return m.includes("wrong user/pass")
+        || m.includes("connection refused")
+        || m.includes("exec/rtsp")
+        || m.includes("describe failed")
+        || m.includes("404");
+  }
+
+  /**
+   * Force the backend to rebuild the live stream (fresh PUT /connection + TLS
+   * proxy on a new port + go2rtc re-registration) by cycling the live-stream
+   * switch off→on. Cooldown-guarded (20s) so a burst of stale-source errors
+   * triggers at most one rebuild. Returns true if a rebuild was initiated,
+   * false if skipped (cooldown elapsed too recently / no switch). (live fix 2026-05-31)
+   */
+  _maybeForceBackendRewarm() {
+    const now = Date.now();
+    if (this._lastRewarmAt && (now - this._lastRewarmAt) < 20000) return false;
+    const sw = this._entities.switch;
+    if (!sw || !this._hass?.states?.[sw]) return false;
+    this._lastRewarmAt = now;
+    console.warn("bosch-camera-card: go2rtc source stale — forcing backend stream rebuild via", sw);
+    this._stopLiveVideo();
+    this._waitingForStream = true;
+    this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+    this._callService("switch", "turn_off", { entity_id: sw });
+    // Re-arm after the backend has torn down (camera → idle), then poll until
+    // it reports "streaming" again and restart the video on the live port.
+    setTimeout(() => {
+      this._callService("switch", "turn_on", { entity_id: sw });
+      setTimeout(() => { if (this._waitingForStream) this._waitForStreamReady(); }, 1000);
+    }, 1500);
+    return true;
   }
 
   _stopLiveVideo() {
