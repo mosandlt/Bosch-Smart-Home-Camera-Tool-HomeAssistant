@@ -1,5 +1,19 @@
 import { test, expect } from "@playwright/test";
 
+// Remove any mounted cards after each test so their refresh timers + hls.js
+// loader stop (disconnectedCallback → _stopRefreshTimer). Leaving them running
+// kept the page busy and hung the WebKit-on-Windows worker at context-close
+// ("worker process did not exit … force-killed", CI). Idle page → clean close.
+test.afterEach(async ({ page }) => {
+  await page
+    .evaluate(() => {
+      document
+        .querySelectorAll("bosch-camera-card, bosch-camera-overview-card")
+        .forEach((c) => c.remove());
+    })
+    .catch(() => {});
+});
+
 // Minimal cross-engine smoke: the bundle must parse and register all custom
 // elements, and mounting an idle single card with a mock `hass` must not throw
 // an uncaught exception, in every engine. No real Home Assistant needed.
@@ -71,4 +85,147 @@ test("card follows the dashboard theme radius; the card option overrides it", as
 
   expect(result.themed, "default follows the dashboard --ha-card-border-radius").toBe("10px");
   expect(result.overridden, "border_radius card option overrides the theme").toBe("4px");
+});
+
+// Proof that interactive card UX is testable headlessly with a mock hass +
+// Playwright's REAL-browser event simulation (no live Home Assistant / stream
+// needed). This pins the single-card hover lift+scale (issue #15.1, RkcCorian):
+// at rest the ha-card has no transform; on hover it gains a scale>1 transform.
+test("single card scales up on hover (mock hass + real hover)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  // Skip on engines that don't advertise a fine hover pointer — the lift is
+  // deliberately gated behind @media (hover: hover) and (pointer: fine).
+  const fineHover = await page.evaluate(() => matchMedia("(hover: hover) and (pointer: fine)").matches);
+  test.skip(!fineHover, "engine reports no fine-hover pointer; hover lift is gated to those");
+
+  await page.evaluate(() => {
+    const card = document.createElement("bosch-camera-card");
+    card.id = "hovercard";
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = {
+      states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } },
+      config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+    };
+    document.body.appendChild(card);
+  });
+  await page.waitForTimeout(400);
+
+  const haCard = page.locator("#hovercard ha-card");
+  const atRest = await haCard.evaluate((el) => getComputedStyle(el).transform);
+  await haCard.hover();
+  await page.waitForTimeout(250); // let the .18s transition settle
+  const onHover = await haCard.evaluate((el) => {
+    const t = getComputedStyle(el).transform;
+    // Parse the scale factor out of the 2D matrix(a,b,c,d,e,f) → a is x-scale.
+    const m = t.match(/matrix\(([^,]+),/);
+    return { transform: t, scale: m ? parseFloat(m[1]) : 1 };
+  });
+
+  expect(atRest === "none" || atRest === "matrix(1, 0, 0, 1, 0, 0)", "no transform at rest").toBeTruthy();
+  expect(onHover.scale, "card scales up on hover").toBeGreaterThan(1);
+});
+
+// Shared minimal hass factory for the interaction tests below.
+const HASS_BASE = `{ config:{}, language:"en", localize:()=>"", callService:()=>{}, callApi:async()=>({}), callWS:async()=>({}) }`;
+
+// #22: privacy ON must stop THIS session's <video> so the HLS buffer doesn't
+// keep playing video+sound after the backend tears the stream down.
+test("privacy ON stops the live video (mock hass)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const stopCalled = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const mk = (priv) => ({ ...base, states: {
+      "camera.test": { state: "streaming", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_privacy_mode": { state: priv, attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } });
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = mk("off");
+    document.body.appendChild(card);
+    await new Promise((r) => setTimeout(r, 300));
+    let called = false;
+    card._liveVideoActive = true;     // pretend the stream is playing
+    card._lastPrivacy = false;        // ensure an OFF→ON transition
+    card._stopLiveVideo = () => { called = true; card._liveVideoActive = false; };
+    card.hass = mk("on");             // privacy turns ON
+    await new Promise((r) => setTimeout(r, 200));
+    return called;
+  });
+  expect(stopCalled, "privacy ON triggers _stopLiveVideo").toBe(true);
+});
+
+// #22: while streaming, one tap on the Ton toggle unmutes the <video> instantly
+// (audibility toggle) — no 2-tap off/on dance.
+test("audio toggle unmutes the playing video (mock hass)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}), states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const video = card.shadowRoot.getElementById("cam-video");
+    if (!video) return { error: "no cam-video element" };
+    card._liveVideoActive = true;
+    video.muted = true;            // browser autoplay starts muted
+    card._toggleAudio();           // one tap
+    return { mutedAfter: video.muted };
+  });
+  expect(r.error, "card renders a <video id=cam-video>").toBeUndefined();
+  expect(r.mutedAfter, "one tap unmutes the video").toBe(false);
+});
+
+// mobile fullscreen: only one card may be in the CSS-fullscreen overlay — a
+// second card entering closes the first (single-owner; part of the "closing one
+// opened another" fix).
+test("fullscreen is single-owner across cards (mock hass)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const mk = (id) => {
+      const c = document.createElement("bosch-camera-card");
+      c.setConfig({ camera_entity: "camera." + id, apple_style: true });
+      c.hass = { ...base, states: { ["camera." + id]: { state: "idle", attributes: { friendly_name: id }, last_updated: "2026-01-01T00:00:00Z" } } };
+      document.body.appendChild(c);
+      return c;
+    };
+    const A = mk("a"), B = mk("b");
+    await new Promise((res) => setTimeout(res, 300));
+    A._enterCssFullscreen();
+    B._enterCssFullscreen(); // should close A
+    return { aActive: A.classList.contains("fs-active"), bActive: B.classList.contains("fs-active") };
+  });
+  expect(r.bActive, "second card is fullscreen").toBe(true);
+  expect(r.aActive, "first card was closed when the second opened").toBe(false);
+});
+
+// #21: the overview tile (.bco-cell) carries the themed box-shadow itself,
+// because its overflow:hidden (corner-cropping) would clip the inner card's
+// shadow. So a dashboard `ha-card-box-shadow` must appear on the cell.
+test("overview tile follows the theme box-shadow (#21)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const shadow = await page.evaluate(async () => {
+    document.body.style.setProperty("--ha-card-box-shadow", "0px 0px 4px 1.5px rgba(255, 255, 255, 0.5)");
+    const ov = document.createElement("bosch-camera-overview-card");
+    ov.setConfig({});
+    ov.hass = {
+      config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: { "camera.demo": { state: "idle", attributes: { friendly_name: "Demo", brand: "Bosch" }, last_updated: "2026-01-01T00:00:00Z" } },
+    };
+    document.body.appendChild(ov);
+    await new Promise((r) => setTimeout(r, 500));
+    const cell = ov.shadowRoot && ov.shadowRoot.querySelector(".bco-cell");
+    return cell ? getComputedStyle(cell).boxShadow : "no-cell";
+  });
+  // The cell's resolved box-shadow must reflect the theme value (non-"none").
+  expect(shadow === "no-cell" || shadow === "none", "cell carries the themed shadow").toBe(false);
 });

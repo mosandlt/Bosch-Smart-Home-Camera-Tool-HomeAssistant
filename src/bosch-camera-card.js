@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.3";
+const CARD_VERSION = "13.4.4";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -644,6 +644,27 @@ class BoschCameraCard extends HTMLElement {
     if (apBadge) { apBadge.className = "ap-badge live"; apBadge.textContent = "Live"; }
     const apBtnStream = this.shadowRoot?.getElementById("ap-btn-stream");
     if (apBtnStream) apBtnStream.classList.remove("connecting");
+    // The stream just started → also flip the Ton toggle to reflect the (muted)
+    // audibility right away, so it doesn't read a stale "on" until the next hass
+    // push (issue #22: toggle showed activated but no sound at stream start).
+    this._refreshAudioToggle();
+  }
+
+  // The Ton toggle reflects AUDIBILITY while streaming (issue #22): "on" only
+  // when you actually HEAR sound (video unmuted). The stream starts muted by the
+  // browser autoplay policy, so the toggle reads OFF at start with a tap-for-sound
+  // pulse, and a single tap unmutes. Called from the hass-driven update AND the
+  // moment the <video> plays, so the display never lags behind a hass push.
+  _refreshAudioToggle() {
+    if (!this._liveVideoActive) return;
+    const video = this.shadowRoot?.getElementById("cam-video");
+    const b = this.shadowRoot?.getElementById("btn-audio");
+    if (!video || !b || b.style.display === "none") return;
+    b.classList.toggle("on", !video.muted);
+    b.classList.toggle("tap-hint", !!video.muted);
+    const lbl = b.querySelector(".sw-left span");
+    if (lbl) lbl.textContent = video.muted ? "Ton einschalten" : "Ton";
+    b.setAttribute("title", video.muted ? "Tippen für Ton" : "Ton stummschalten");
   }
 
   _refreshModeSwitcher() {
@@ -1680,13 +1701,14 @@ class BoschCameraCard extends HTMLElement {
             box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4)));
           }
         }
-        /* Hover affordance parity with the overview tiles (issue #15.1): a
-           subtle lift on pointer devices. Uses transform, NOT box-shadow, so it
-           does not clobber the user's themed --ha-card-box-shadow on hover (the
-           glow stayed visible — RkcCorian, issue #15/#21). */
-        :host(.apple-style) ha-card { transition: transform .18s ease; }
+        /* Hover affordance parity with the overview tiles (issue #15.1): lift +
+           a subtle scale on pointer devices, like the grid tiles. transform-origin
+           anchors the top edge so the card grows downward (no jump). Uses transform
+           only — NOT box-shadow — so a themed --ha-card-box-shadow stays visible on
+           hover (RkcCorian, issue #15/#21). */
+        :host(.apple-style) ha-card { transition: transform .18s ease; transform-origin: top center; }
         @media (hover: hover) and (pointer: fine) {
-          :host(.apple-style) ha-card:hover { transform: translateY(-2px); }
+          :host(.apple-style) ha-card:hover { transform: translateY(-2px) scale(1.01); }
         }
         :host(.apple-style) .header,
         :host(.apple-style) .info-row,
@@ -5029,18 +5051,9 @@ class BoschCameraCard extends HTMLElement {
         if (!audioOn || this._androidAudioMuted) {
           video.muted = true;
         }
-        // The Ton toggle reflects AUDIBILITY while streaming (issue #22): "on"
-        // only when you actually hear sound (video unmuted). It starts muted by
-        // the browser autoplay policy, so it reads OFF at stream start and a
-        // single tap unmutes. A subtle pulse + label hint draws the eye.
-        const b = this.shadowRoot.getElementById("btn-audio");
-        if (b && b.style.display !== "none") {
-          b.classList.toggle("on", !video.muted);
-          b.classList.toggle("tap-hint", !!video.muted);
-          const lbl = b.querySelector(".sw-left span");
-          if (lbl) lbl.textContent = video.muted ? "Ton einschalten" : "Ton";
-          b.setAttribute("title", video.muted ? "Tippen für Ton" : "Ton stummschalten");
-        }
+        // Reflect the (muted) audibility on the Ton toggle (issue #22) — shared
+        // with the on-play path in _markLiveBadge so it never lags a hass push.
+        this._refreshAudioToggle();
       }
     }
 
@@ -6273,6 +6286,12 @@ class BoschCameraOverviewCard extends HTMLElement {
         :host(.apple-style) .bco-cell[data-tier="2"] {
           border: 0;
           border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 22px));
+          /* Shadow lives on the CELL, not the inner card: the cell's
+             overflow:hidden (for corner-cropping) would clip the inner card's
+             box-shadow, so a themed ha-card-box-shadow never showed on overview
+             tiles (issue #21, RkcCorian). An element's own outset shadow is not
+             clipped by its own overflow:hidden. Default none = unchanged look. */
+          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, none));
           opacity: 1;
           /* Smooth scale + shadow on hover so desktop users get a clear
              "this tile is tappable" affordance. Touch devices ignore :hover

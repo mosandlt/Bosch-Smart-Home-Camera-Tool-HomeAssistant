@@ -1,0 +1,39 @@
+name: E2E (real HA)
+
+# Layer-5 full end-to-end smoke (docs/ci-cd.md): hass-taste-test spins up a real
+# Home Assistant Core instance, serves the built card as a Lovelace resource and
+# asserts it renders in HA's own frontend. Heavy (builds a HA venv) — runs on
+# demand + weekly, not per-push. Linux only (macOS hits a pyroute2 limitation).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # weekly, Monday 04:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  hass-taste-test:
+    name: hass-taste-test (real HA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Build card bundle
+        run: node scripts/build-card.mjs
+      - name: Cache Home Assistant venv
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hasstest-venv
+          key: hasstest-venv-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: hass-taste-test (real HA loads the card)
+        run: npm run test:taste
