@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.4.2";
+const CARD_VERSION = "13.4.3";
 
 let _boschFsExitAt = 0;
 
@@ -2124,6 +2124,9 @@ class BoschCameraCard extends HTMLElement {
     if (this._lastPrivacy === true && !privacyOn) {
       this._scheduleImageLoad(6e3);
       this._scheduleImageLoad(9e3);
+    }
+    if (this._lastPrivacy !== true && privacyOn && this._liveVideoActive) {
+      this._stopLiveVideo();
     }
     this._lastPrivacy = privacyOn;
     this._updateMotionZones(hass, ents);

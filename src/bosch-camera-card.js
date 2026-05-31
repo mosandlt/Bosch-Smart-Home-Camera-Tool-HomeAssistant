@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.2";
+const CARD_VERSION = "13.4.3";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -5073,6 +5073,15 @@ class BoschCameraCard extends HTMLElement {
     if (this._lastPrivacy === true && !privacyOn) {
       this._scheduleImageLoad(6000);
       this._scheduleImageLoad(9000);
+    }
+    // Privacy just turned ON → stop THIS session's <video> right away. The
+    // backend tears the live connection down (the coordinator detects privacy
+    // ON), but the card's HLS buffer would otherwise keep playing video AND
+    // SOUND for several seconds, and the controls felt stuck while a torn-down
+    // stream was still "playing" (RkcCorian, #22). Stopping the element here
+    // clears the buffered audio immediately and frees the UI.
+    if (this._lastPrivacy !== true && privacyOn && this._liveVideoActive) {
+      this._stopLiveVideo();
     }
     this._lastPrivacy = privacyOn;
 
