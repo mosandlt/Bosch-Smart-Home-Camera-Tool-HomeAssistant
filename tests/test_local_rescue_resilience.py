@@ -61,9 +61,14 @@ async def test_rescue_retries_until_success():
             coord, CAM_ID, "RTSP/1.0 401 Unauthorized"
         )
     assert coord.try_live_connection.await_count == 3
-    # Fresh proxy on every attempt (the new-port-per-restart design forces a
-    # fresh RTSP URL so go2rtc re-registration carries the new creds).
-    assert coord._stop_tls_proxy.await_count == 3
+    # Teardown of the dead proxy now happens INSIDE try_live_connection, under
+    # the per-cam stream lock (force_reset=True), NOT via an external
+    # _stop_tls_proxy that could race a concurrent renewal/heartbeat rebuild
+    # (rescue↔renewal proxy race, 2026-06-01). So the rescue makes NO direct
+    # _stop_tls_proxy call, and every attempt passes force_reset=True.
+    assert coord._stop_tls_proxy.await_count == 0
+    for call in coord.try_live_connection.await_args_list:
+        assert call.kwargs.get("force_reset") is True
 
 
 @pytest.mark.asyncio

@@ -305,10 +305,12 @@ class TestStreamSourceTransport:
         )
 
     @pytest.mark.asyncio
-    async def test_audio_off_strips_audio_param(self, stub_coord, stub_entry):
-        """When the audio switch is OFF, `enableaudio=1` must be removed
-        from the RTSP URL so the server doesn't stream the audio track
-        unnecessarily."""
+    async def test_audio_param_kept_even_when_switch_off(self, stub_coord, stub_entry):
+        """The audio track is ALWAYS kept in the stream now — switch.<cam>_audio
+        is a card-side mute preference, not a track toggle. stream_source() must
+        NOT strip enableaudio=1 even when _audio_enabled is False, else a session
+        started while muted would have no track to unmute. Regression for the
+        always-on-audio design (2026-06-01)."""
         stub_coord._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1",
             "_connection_type": "REMOTE",
@@ -318,7 +320,7 @@ class TestStreamSourceTransport:
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         url = await cam.stream_source()
-        assert "enableaudio=1" not in url
+        assert "enableaudio=1" in url
         assert "inst=1" in url and "fmtp=1" in url
 
     @pytest.mark.asyncio

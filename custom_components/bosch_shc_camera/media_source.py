@@ -226,6 +226,16 @@ class _LocalBackend:
         cam_dir = _safe_join(self.base, camera)
         if cam_dir is None:
             return []
+        # Validate the date components before joining — they come from the media
+        # identifier (split on "/") and were NOT sanitised, so a crafted value
+        # like ".." would escape the camera directory (path traversal). The
+        # regexes only admit purely-numeric two/four-digit names.
+        if not (
+            _YEAR_RE.match(year)
+            and _DATE_DIR_RE.match(month)
+            and _DATE_DIR_RE.match(day)
+        ):
+            return []
         day_dir = cam_dir / year / month / day
         if not day_dir.is_dir():
             return []

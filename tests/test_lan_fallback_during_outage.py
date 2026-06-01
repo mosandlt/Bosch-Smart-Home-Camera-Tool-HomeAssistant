@@ -214,3 +214,114 @@ class TestShcLanFallbackFiresForUnknownHw:
             "the Gen2 gate for unknown hw — light writes will fail during "
             "cold-start cloud outages."
         )
+
+
+# ── 4. Cloud 444 → skip-cloud cooldown ───────────────────────────────────
+
+
+class TestCloud444Cooldown:
+    """A cloud HTTP 444 (session quota / freshly re-paired camera that is
+    'online' for status but rejects writes) must:
+      1. stamp `coordinator._cloud_444_at[cam_id]`, then
+      2. make the *next* privacy write within the cooldown skip the cloud
+         entirely and go straight to the LAN/SHC fallback.
+
+    Surfaced 2026-06-01: a re-paired Gen1 indoor returned 444 to every cloud
+    privacy write while status still read 'online'. Without the cooldown we
+    re-hit the cloud for another 444 on every toggle.
+    """
+
+    def _coord(self):
+        return SimpleNamespace(
+            token="token-AAA",
+            hass=SimpleNamespace(
+                async_create_task=lambda coro: coro.close(),
+                services=SimpleNamespace(async_call=AsyncMock()),
+            ),
+            _shc_state_cache={CAM_ID: {}},
+            _privacy_set_at={},
+            _light_set_at={},
+            _notif_set_at={},
+            _local_creds_cache={},
+            _rcp_lan_ip_cache={},
+            _pan_cache={},
+            _camera_entities={},
+            _hw_version={CAM_ID: "OUTDOOR"},
+            _cached_status={},  # NOT "OFFLINE" — status reads online
+            _cloud_444_at={},
+            _auth_outage_count=0,
+            async_update_listeners=lambda: None,
+            async_request_refresh=AsyncMock(),
+            _ensure_valid_token=AsyncMock(return_value="token-FRESH"),
+        )
+
+    def _resp(self, status: int):
+        resp = MagicMock()
+        resp.status = status
+        resp.json = AsyncMock(return_value={})
+        resp.text = AsyncMock(return_value="")
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=resp)
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        return ctx
+
+    @pytest.mark.asyncio
+    async def test_444_stamps_and_next_write_skips_cloud(self):
+        from custom_components.bosch_shc_camera import shc
+
+        coord = self._coord()
+
+        # First write: cloud returns 444 → must stamp _cloud_444_at and fall
+        # through to the (unconfigured) SHC fallback → overall False.
+        with (
+            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "shc_ready", return_value=False),
+        ):
+            session = MagicMock()
+            session.put = MagicMock(return_value=self._resp(444))
+            session_factory.return_value = session
+            ok1 = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
+
+        assert ok1 is False
+        assert CAM_ID in coord._cloud_444_at, (
+            "REGRESSION: a cloud 444 no longer stamps _cloud_444_at — the next "
+            "write will re-hit the cloud for another 444."
+        )
+
+        # Second write within the cooldown: cloud must NOT be called at all.
+        with (
+            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "shc_ready", return_value=False),
+        ):
+            session = MagicMock()
+            session.put = MagicMock(return_value=self._resp(204))
+            session_factory.return_value = session
+            ok2 = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
+
+            assert session.put.call_count == 0, (
+                "REGRESSION: privacy write hit the cloud despite a recent 444 — "
+                "the LAN/SHC fallback should be used directly during cooldown."
+            )
+        assert ok2 is False  # SHC unconfigured → fallback also fails
+
+    @pytest.mark.asyncio
+    async def test_stale_444_outside_cooldown_uses_cloud_again(self):
+        import time
+
+        from custom_components.bosch_shc_camera import shc
+
+        coord = self._coord()
+        # Stamp a 444 well outside the 120s cooldown.
+        coord._cloud_444_at[CAM_ID] = time.monotonic() - 600
+
+        with patch.object(shc, "async_get_clientsession") as session_factory:
+            session = MagicMock()
+            session.put = MagicMock(return_value=self._resp(204))
+            session_factory.return_value = session
+            ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
+
+            assert session.put.call_count == 1, (
+                "REGRESSION: a stale (expired) 444 still suppressed the cloud — "
+                "cooldown must lapse after _CLOUD_444_COOLDOWN seconds."
+            )
+        assert ok is True

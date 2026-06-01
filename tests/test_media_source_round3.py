@@ -137,6 +137,28 @@ class TestLocalBackendListEvents:
         result = backend.list_events("../../etc", "2026-05-07")
         assert result == []
 
+    def test_dated_path_traversal_rejected(self, tmp_path):
+        """Regression: list_events_dated must validate year/month/day before
+        joining — a '..' component (from a crafted media identifier) must NOT
+        escape the camera directory. 2026-06-01 security fix."""
+        # A secret file one level ABOVE the camera dir that traversal would reach.
+        cam_dir = tmp_path / "Terrasse" / "2026" / "05" / "07"
+        cam_dir.mkdir(parents=True)
+        secret = tmp_path / "Terrasse" / "secret"
+        secret.mkdir()
+        (secret / "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4").write_bytes(
+            b"x"
+        )
+        backend = _LocalBackend(str(tmp_path))
+        # year=".." would resolve cam_dir/../05/07 — must be rejected → []
+        assert backend.list_events_dated("Terrasse", "..", "05", "07") == []
+        assert backend.list_events_dated("Terrasse", "2026", "..", "secret") == []
+        # A legitimate numeric path still works.
+        (cam_dir / "Terrasse_2026-05-07_10-00-00_MOVEMENT_22222222.mp4").write_bytes(
+            b"x"
+        )
+        assert len(backend.list_events_dated("Terrasse", "2026", "05", "07")) == 1
+
     def test_macos_junk_file_skipped(self, tmp_path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()

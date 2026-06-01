@@ -604,10 +604,11 @@ class TestRefreshLocalCredsFromHeartbeat:
         )
         assert "inst=2" in coord._live_connections[CAM_A]["rtspsUrl"]
 
-    def test_audio_disabled_drops_enableaudio(self):
-        """When audio is off (snapshot-only mode), the rebuilt URL must
-        NOT include `enableaudio=1` — including it pulls audio packets
-        and wastes LAN bandwidth."""
+    def test_audio_track_always_in_rebuilt_url(self):
+        """The AAC track is ALWAYS requested now — switch.<cam>_audio is a synced
+        card-side MUTE preference, not a stream-track toggle — so the rebuilt
+        cred-rotation URL carries enableaudio=1 even when the mute is off. (This
+        is what lets mute/unmute sync instantly without re-opening the stream.)"""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(_audio_enabled={CAM_A: False})
@@ -618,7 +619,7 @@ class TestRefreshLocalCredsFromHeartbeat:
             generation=1,
             elapsed=10.0,
         )
-        assert "enableaudio" not in coord._live_connections[CAM_A]["rtspsUrl"]
+        assert "enableaudio=1" in coord._live_connections[CAM_A]["rtspsUrl"]
 
     def test_no_creds_in_response_skips_silently(self):
         """Bosch sometimes returns {} on heartbeat — must be a no-op."""

@@ -859,10 +859,13 @@ class TestHandleStreamWorkerError:
         assert coord._local_rescue_attempts.get(CAM_A) == 1
         # Error counter reset so try_live_connection picks LOCAL again
         assert coord._stream_error_count[CAM_A] == 0
-        # Live conn cleared, TLS proxy stopped, new try_live_connection called
+        # Live conn cleared; rebuild via try_live_connection(force_reset=True),
+        # which now stops the old proxy ITSELF under the per-cam stream lock —
+        # no external _stop_tls_proxy that could race a concurrent renewal
+        # (rescue↔renewal proxy race, 2026-06-01).
         assert CAM_A not in coord._live_connections
-        coord._stop_tls_proxy.assert_awaited_once_with(CAM_A)
-        coord.try_live_connection.assert_awaited_once_with(CAM_A)
+        coord._stop_tls_proxy.assert_not_awaited()
+        coord.try_live_connection.assert_awaited_once_with(CAM_A, force_reset=True)
 
     @pytest.mark.asyncio
     async def test_local_401_second_attempt_falls_back_to_remote(self):
@@ -963,8 +966,9 @@ class TestHandleStreamWorkerError:
         )
         # Decay reset → fresh rescue attempt allowed
         assert coord._local_rescue_attempts.get(CAM_A) == 1  # incremented from 0
-        # And we DID call try_live_connection (rescue path)
-        coord.try_live_connection.assert_awaited_once_with(CAM_A)
+        # And we DID call try_live_connection (rescue path) with force_reset so
+        # the proxy teardown happens atomically under the stream lock.
+        coord.try_live_connection.assert_awaited_once_with(CAM_A, force_reset=True)
 
     @pytest.mark.asyncio
     async def test_dispatch_pending_set_cleared_on_completion(self):

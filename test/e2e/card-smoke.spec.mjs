@@ -89,9 +89,11 @@ test("card follows the dashboard theme radius; the card option overrides it", as
 
 // Proof that interactive card UX is testable headlessly with a mock hass +
 // Playwright's REAL-browser event simulation (no live Home Assistant / stream
-// needed). This pins the single-card hover lift+scale (issue #15.1, RkcCorian):
-// at rest the ha-card has no transform; on hover it gains a scale>1 transform.
-test("single card scales up on hover (mock hass + real hover)", async ({ page }) => {
+// needed). This pins the single-card hover as SHADOW-ONLY (issue #15, RkcCorian):
+// at rest the ha-card has no scale transform; on hover it gains an elevation
+// box-shadow and STILL no transform (no geometry change → no edge shimmer, no
+// fullscreen-clip). The old scale-based lift was replaced in v13.5.0.
+test("single card lifts via shadow-only on hover (no scale)", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
 
@@ -113,18 +115,29 @@ test("single card scales up on hover (mock hass + real hover)", async ({ page })
   await page.waitForTimeout(400);
 
   const haCard = page.locator("#hovercard ha-card");
-  const atRest = await haCard.evaluate((el) => getComputedStyle(el).transform);
+  const atRest = await haCard.evaluate((el) => ({
+    transform: getComputedStyle(el).transform,
+    shadow: getComputedStyle(el).boxShadow,
+  }));
   await haCard.hover();
   await page.waitForTimeout(250); // let the .18s transition settle
   const onHover = await haCard.evaluate((el) => {
-    const t = getComputedStyle(el).transform;
+    const cs = getComputedStyle(el);
+    const t = cs.transform;
     // Parse the scale factor out of the 2D matrix(a,b,c,d,e,f) → a is x-scale.
     const m = t.match(/matrix\(([^,]+),/);
-    return { transform: t, scale: m ? parseFloat(m[1]) : 1 };
+    return { transform: t, scale: m ? parseFloat(m[1]) : 1, shadow: cs.boxShadow };
   });
 
-  expect(atRest === "none" || atRest === "matrix(1, 0, 0, 1, 0, 0)", "no transform at rest").toBeTruthy();
-  expect(onHover.scale, "card scales up on hover").toBeGreaterThan(1);
+  // SHADOW-ONLY: no scale transform on hover (identity / none), and an
+  // elevation box-shadow that differs from the at-rest shadow.
+  expect(onHover.scale, "no scale transform on hover (shadow-only)").toBe(1);
+  expect(
+    onHover.transform === "none" || onHover.transform === "matrix(1, 0, 0, 1, 0, 0)",
+    "no transform on hover",
+  ).toBeTruthy();
+  expect(onHover.shadow !== "none", "box-shadow elevation appears on hover").toBeTruthy();
+  expect(onHover.shadow !== atRest.shadow, "box-shadow changes on hover").toBeTruthy();
 });
 
 // Shared minimal hass factory for the interaction tests below.
@@ -163,11 +176,14 @@ test("audio toggle unmutes the playing video (mock hass)", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
   const r = await page.evaluate(async () => {
+    const calls = [];
     const card = document.createElement("bosch-camera-card");
     card.setConfig({ camera_entity: "camera.test", apple_style: true });
-    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}), states: {
+    card.hass = { config: {}, language: "en", localize: () => "",
+      callService: (d, s, data) => { calls.push(`${d}.${s}:${data?.entity_id}`); return Promise.resolve(); },
+      callApi: async () => ({}), callWS: async () => ({}), states: {
       "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
-      "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_audio": { state: "off", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
     } };
     document.body.appendChild(card);
     await new Promise((res) => setTimeout(res, 300));
@@ -176,10 +192,43 @@ test("audio toggle unmutes the playing video (mock hass)", async ({ page }) => {
     card._liveVideoActive = true;
     video.muted = true;            // browser autoplay starts muted
     card._toggleAudio();           // one tap
-    return { mutedAfter: video.muted };
+    return { mutedAfter: video.muted, calls };
   });
   expect(r.error, "card renders a <video id=cam-video>").toBeUndefined();
   expect(r.mutedAfter, "one tap unmutes the video").toBe(false);
+  // The tap also drives the backend switch so the choice syncs to every device.
+  expect(r.calls, "tap toggles switch.test_audio on").toContain("switch.turn_on:switch.test_audio");
+});
+
+// use_card_audio_settings:true decouples the pill from the global audio entities
+// — a tap toggles ONLY this browser's video.muted (localStorage), never the
+// backend switch / other devices.
+test("decoupled audio (use_card_audio_settings) toggles locally, not the switch", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const calls = [];
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, use_card_audio_settings: true });
+    card.hass = { config: {}, language: "en", localize: () => "",
+      callService: (d, s, data) => { calls.push(`${d}.${s}:${data?.entity_id}`); return Promise.resolve(); },
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const video = card.shadowRoot.getElementById("cam-video");
+    if (!video) return { error: "no cam-video element" };
+    card._liveVideoActive = true;
+    video.muted = true;
+    card._toggleAudio();
+    return { mutedAfter: video.muted, calls };
+  });
+  expect(r.error).toBeUndefined();
+  expect(r.mutedAfter, "tap still unmutes this video locally").toBe(false);
+  expect(r.calls, "decoupled tap must NOT call any switch service").not.toContain("switch.turn_on:switch.test_audio");
+  expect(r.calls.filter((c) => c.startsWith("switch.")), "no backend switch writes in decoupled mode").toHaveLength(0);
 });
 
 // #27: the apple-style privacy pill (#ap-btn-privacy) must clear its "on"
@@ -377,4 +426,126 @@ test("stale go2rtc source forces a cooldown-guarded backend stream rebuild", asy
   expect(r.second, "second call within cooldown is suppressed").toBe(false);
   expect(r.calls.includes("switch.turn_off"), "switch turned off").toBe(true);
   expect(r.calls.includes("switch.turn_on"), "switch turned back on after delay").toBe(true);
+});
+
+// Fullscreen digital zoom: double-tap zooms 2x, fullscreen exit resets it.
+test("fullscreen double-tap zooms the video and exit resets it", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const wrap = card.shadowRoot.getElementById("img-wrapper");
+    if (!wrap) return { error: "no img-wrapper" };
+    card._enterCssFullscreen();
+    const fire = (type, id, x) => wrap.dispatchEvent(new PointerEvent(type, { pointerId: id, clientX: x, clientY: 120, bubbles: true, cancelable: true }));
+    fire("pointerdown", 1, 200); fire("pointerup", 1, 200);          // tap 1
+    fire("pointerdown", 2, 200); fire("pointerup", 2, 200);          // tap 2 → double-tap
+    const scaleAfterDouble = card._zoom.scale;
+    const vt = (card.shadowRoot.getElementById("cam-video") || {}).style?.transform || "";
+    card._exitCssFullscreen();
+    const scaleAfterExit = card._zoom.scale;
+    const vtAfter = (card.shadowRoot.getElementById("cam-video") || {}).style?.transform || "";
+    card.remove();
+    return { scaleAfterDouble, vt, scaleAfterExit, vtAfter };
+  });
+  expect(r.error, "card renders img-wrapper").toBeUndefined();
+  expect(r.scaleAfterDouble, "double-tap zooms to 2x").toBe(2);
+  expect(r.vt.includes("scale(2"), "video carries the zoom transform").toBe(true);
+  expect(r.scaleAfterExit, "exit resets zoom to 1x").toBe(1);
+  expect(r.vtAfter, "transform cleared on exit").toBe("");
+});
+
+// Audio pill: renders in the pill bar, reflects the backend audio state, the tap
+// toggles it, and show_audio:false hides the whole control.
+test("audio pill: grayed off-stream, active + state-true while streaming, hideable", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const states = { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const pill = () => card.shadowRoot.getElementById("ap-btn-audio");
+    const hasPill = !!pill();
+    const grayedOffStream = card.classList.contains("audio-inactive");
+    // Simulate a live stream → pill activates and reflects mute state.
+    card._liveVideoActive = true;
+    const v = card.shadowRoot.getElementById("cam-video");
+    if (v) v.muted = true;
+    card._refreshAudioPill();
+    const grayedOnStream = card.classList.contains("audio-inactive");
+    const onWhileMuted = pill().classList.contains("on");
+    if (v) { v.muted = false; v.volume = 1; }
+    card._refreshAudioPill();
+    const onAfterUnmute = pill().classList.contains("on");
+    // second card with the option off → control hidden
+    const card2 = document.createElement("bosch-camera-card");
+    card2.setConfig({ camera_entity: "camera.test", apple_style: true, show_audio: false });
+    card2.hass = { ...base, states };
+    document.body.appendChild(card2);
+    await new Promise((res) => setTimeout(res, 300));
+    const hidden = card2.classList.contains("audio-hidden");
+    card.remove(); card2.remove();
+    return { hasPill, grayedOffStream, grayedOnStream, onWhileMuted, onAfterUnmute, hidden };
+  });
+  expect(r.hasPill, "audio pill is rendered in the control bar").toBe(true);
+  expect(r.grayedOffStream, "pill is grayed out (audio-inactive) when not streaming").toBe(true);
+  expect(r.grayedOnStream, "pill becomes active once a live stream plays").toBe(false);
+  expect(r.onWhileMuted, "pill is off while the video is muted").toBe(false);
+  expect(r.onAfterUnmute, "pill turns on once the video is unmuted").toBe(true);
+  expect(r.hidden, "show_audio:false hides the audio control").toBe(true);
+});
+
+// Both config editors must localise their labels from hass.language: German
+// for "de*", English for everything else (the universal fallback). Regression
+// for the editors previously being hard-coded German only.
+test("config editors localise labels by hass.language (de/en)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card-editor"), null, { timeout: 10000 });
+
+  const r = await page.evaluate(async () => {
+    const mkHass = (lang) => ({ language: lang, localize: () => "", states: {}, config: {}, callService: () => {} });
+    const labels = async (tag, lang) => {
+      const ed = document.createElement(tag);
+      ed.setConfig({});
+      ed.hass = mkHass(lang);
+      document.body.appendChild(ed);
+      await new Promise((res) => setTimeout(res, 120));
+      const text = ed.shadowRoot ? ed.shadowRoot.textContent : "";
+      ed.remove();
+      return text;
+    };
+    return {
+      singleEn: await labels("bosch-camera-card-editor", "en"),
+      singleDe: await labels("bosch-camera-card-editor", "de"),
+      singleFr: await labels("bosch-camera-card-editor", "fr"),
+      singleZh: await labels("bosch-camera-card-editor", "zh-Hans"),
+      singlePtBr: await labels("bosch-camera-card-editor", "pt-BR"),
+      overviewEn: await labels("bosch-camera-overview-card-editor", "en"),
+      overviewDe: await labels("bosch-camera-overview-card-editor", "de"),
+    };
+  });
+
+  expect(r.singleEn, "single editor in English").toContain("Show audio button");
+  expect(r.singleEn).toContain("Camera entity");
+  expect(r.singleDe, "single editor in German").toContain("Audio-Button anzeigen");
+  expect(r.singleDe).not.toContain("Show audio button");
+  // Any of the integration's 11 languages resolves; region suffix (pt-BR) and
+  // Chinese variants map onto the base table key.
+  expect(r.singleFr, "single editor in French").toContain("Afficher le bouton audio");
+  expect(r.singleFr).not.toContain("Show audio button");
+  expect(r.singleZh, "single editor in Chinese (zh-Hans)").toContain("显示音频按钮");
+  expect(r.singlePtBr, "pt-BR falls back to pt").toContain("Mostrar botão de áudio");
+  expect(r.overviewEn, "overview editor in English").toContain("Columns");
+  expect(r.overviewEn).toContain("Show audio button");
+  expect(r.overviewDe, "overview editor in German").toContain("Spalten");
+  expect(r.overviewDe).not.toContain("Columns");
 });

@@ -91,8 +91,12 @@ class TestOnTlsProxyDied:
             live={"_connection_type": "LOCAL"}, try_result={"_connection_type": "LOCAL"}
         )
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
-        c._stop_tls_proxy.assert_awaited_once_with("C")
-        c.try_live_connection.assert_awaited_once_with("C")
+        # Teardown of the dead proxy now happens INSIDE try_live_connection
+        # under the stream lock (force_reset=True), so the proxy-died flow makes
+        # NO external _stop_tls_proxy call that could race a concurrent renewal
+        # (rescue↔renewal proxy race, 2026-06-01).
+        c._stop_tls_proxy.assert_not_awaited()
+        c.try_live_connection.assert_awaited_once_with("C", force_reset=True)
 
     async def test_rebuild_returns_none(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
@@ -101,7 +105,7 @@ class TestOnTlsProxyDied:
         # try_live_connection returns falsy → "returned no result" warning branch (L4324).
         c = _coord(live={"_connection_type": "LOCAL"}, try_result=None)
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
-        c.try_live_connection.assert_awaited_once_with("C")
+        c.try_live_connection.assert_awaited_once_with("C", force_reset=True)
 
     async def test_rebuild_raises(self, monkeypatch, no_sleep):
         from custom_components.bosch_shc_camera import time as _m_time
@@ -115,4 +119,4 @@ class TestOnTlsProxyDied:
         # Must NOT propagate — the wrapper swallows so the camera task
         # survives until the next heartbeat retry.
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
-        c.try_live_connection.assert_awaited_once_with("C")
+        c.try_live_connection.assert_awaited_once_with("C", force_reset=True)

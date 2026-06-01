@@ -388,10 +388,21 @@ async def async_cloud_set_privacy_mode(
     SHC fallback ensures control when cloud is unreachable (offline mode).
     """
     # Skip cloud for known-offline cams: Bosch closes with HTTP 444 → log spam.
-    cam_offline = coordinator._cached_status.get(cam_id) == "OFFLINE"
+    # Also skip for a short window after a recent 444 (cloud session quota / a
+    # freshly re-paired camera that is "online" for status but rejects writes) so
+    # we go straight to the LAN/SHC fallback instead of re-hitting the cloud for
+    # another 444. -inf = never (SENTINEL_RULE).
+    _CLOUD_444_COOLDOWN = 120
+    _cloud_444_at = getattr(coordinator, "_cloud_444_at", {})
+    _recent_444 = (
+        _cloud_444_at.get(cam_id, float("-inf"))
+        > time.monotonic() - _CLOUD_444_COOLDOWN
+    )
+    cam_offline = coordinator._cached_status.get(cam_id) == "OFFLINE" or _recent_444
     if cam_offline:
         _LOGGER.debug(
-            "cloud_set_privacy_mode: cam %s offline — skipping cloud, trying fallbacks",
+            "cloud_set_privacy_mode: cam %s offline/cloud-degraded — skipping "
+            "cloud, trying fallbacks",
             cam_id,
         )
 
@@ -470,6 +481,10 @@ async def async_cloud_set_privacy_mode(
                                             coordinator, cam_id
                                         )
                                     return True
+                    if resp.status == 444 and hasattr(coordinator, "_cloud_444_at"):
+                        # Session quota / not-ready — remember so the next write
+                        # skips the cloud and uses the LAN/SHC fallback directly.
+                        coordinator._cloud_444_at[cam_id] = time.monotonic()
                     _LOGGER.warning(
                         "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
                     )

@@ -42,7 +42,7 @@ async def _noop_coro(*args, **kwargs):
 def _make_coord(**overrides):
     """Coordinator stub with every dict the tested methods touch."""
 
-    def _create_task(coro):
+    def _create_task(coro, **kwargs):  # accept name= like hass.async_create_task
         try:
             coro.close()
         except (AttributeError, RuntimeError):
@@ -100,6 +100,7 @@ def _make_coord(**overrides):
         _ensure_go2rtc_schemes_fresh=AsyncMock(),
         _try_live_connection_inner=AsyncMock(return_value={"ok": True}),
         _unregister_go2rtc_stream=AsyncMock(),
+        _register_go2rtc_stream=AsyncMock(return_value=True),
         # _get_stream_lock is a real method call inside try_live_connection;
         # provide a simple lambda so tests don't need BoschCameraCoordinator bound.
         # Individual tests that pre-populate _stream_locks can rely on this.
@@ -332,6 +333,22 @@ class TestRecordStreamError:
         BoschCameraCoordinator.record_stream_error(coord, CAM_A)
 
         # Counter must stay untouched
+        assert CAM_A not in coord._stream_error_count
+
+    def test_no_session_skips_count(self):
+        """Regression: an error with no live session (connection_type None, e.g.
+        a worker error firing after teardown) must NOT count — only confirmed
+        LOCAL failures poison the LOCAL-vs-REMOTE decision."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord(
+            _stream_error_count={},
+            _stream_error_at={},
+            _live_connections={},  # no session → _connection_type is None
+        )
+
+        BoschCameraCoordinator.record_stream_error(coord, CAM_A)
+
         assert CAM_A not in coord._stream_error_count
 
 

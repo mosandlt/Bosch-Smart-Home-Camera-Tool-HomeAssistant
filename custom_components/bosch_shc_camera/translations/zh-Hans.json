@@ -349,6 +349,9 @@
       "speaker_level": {
         "name": "扬声器音量"
       },
+      "audio_volume": {
+        "name": "音频音量"
+      },
       "front_light_intensity": {
         "name": "前置灯光亮度"
       },

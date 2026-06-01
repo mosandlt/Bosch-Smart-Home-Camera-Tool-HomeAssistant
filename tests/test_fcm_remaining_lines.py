@@ -234,6 +234,61 @@ class TestAsyncStartFcmPushClosures:
         assert calls == [some_obj]
 
 
+# ── Lines 930-933: _spawn_fcm_handler closure tracks the handler task ────────
+
+
+class TestOnFcmPushSpawnHandler:
+    """`_on_fcm_push` schedules `_spawn_fcm_handler` on the HA loop; invoking that
+    closure must create the event-fetch task AND store it in `_bg_tasks` so it
+    holds a strong reference (an untracked task can be GC-cancelled mid-flight)."""
+
+    def _coord(self):
+        fake_task = MagicMock(name="handler_task")
+        hass = MagicMock()
+        hass.async_create_task = MagicMock(return_value=fake_task)
+        scheduled: list = []
+        hass.loop.call_soon_threadsafe = lambda fn: scheduled.append(fn)
+        coord = SimpleNamespace(
+            hass=hass,
+            _fcm_lock=threading.Lock(),
+            _fcm_running=True,
+            _fcm_last_push=0.0,
+            _fcm_healthy=False,
+            _bg_tasks=set(),
+        )
+        return coord, scheduled, fake_task
+
+    @pytest.mark.asyncio
+    async def test_spawn_handler_creates_and_tracks_task(self):
+        from custom_components.bosch_shc_camera import fcm
+
+        coord, scheduled, fake_task = self._coord()
+        with patch.object(fcm, "async_handle_fcm_push", new=MagicMock()):
+            fcm._on_fcm_push(coord, {"from": "bosch"}, "pid-1")
+            # Push marked healthy; exactly one closure scheduled on the loop.
+            assert coord._fcm_healthy is True
+            assert len(scheduled) == 1
+            # Run the scheduled closure → create + track the handler task.
+            scheduled[0]()
+
+        coord.hass.async_create_task.assert_called_once()
+        assert fake_task in coord._bg_tasks, (
+            "REGRESSION: FCM handler task not tracked in _bg_tasks — it can be "
+            "GC-cancelled mid-flight, leaving coordinator.data partially updated."
+        )
+        fake_task.add_done_callback.assert_called_once_with(coord._bg_tasks.discard)
+
+    @pytest.mark.asyncio
+    async def test_trailing_push_after_stop_is_dropped(self):
+        """_fcm_running=False (client stopped) → push dropped, nothing scheduled."""
+        from custom_components.bosch_shc_camera import fcm
+
+        coord, scheduled, _ = self._coord()
+        coord._fcm_running = False
+        fcm._on_fcm_push(coord, {"from": "bosch"}, "pid-2")
+        assert scheduled == []
+
+
 # ── Lines 583-584: exception in mark_events_read inside async_handle_fcm_push ─
 
 

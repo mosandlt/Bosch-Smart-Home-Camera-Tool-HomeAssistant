@@ -66,8 +66,10 @@ class TestGH17_CameraDefaultStuck:
     def test_camera_picker_falls_back_to_all_cameras(self, card_src: str) -> None:
         """When no bosch-tagged camera is found, list every camera.* entity so
         the dropdown is never empty/single-option."""
-        idx = card_src.find("_bosch_cameras()")
-        assert idx != -1, "_bosch_cameras missing"
+        # Anchor on the METHOD declaration, not an earlier call site (the editor's
+        # hass-change guard also calls _bosch_cameras()).
+        idx = card_src.find("_bosch_cameras() {")
+        assert idx != -1, "_bosch_cameras method missing"
         body = card_src[idx : idx + 800]
         assert "out.length === 0" in body, (
             "_bosch_cameras must have an empty-list fallback (GH#17)"

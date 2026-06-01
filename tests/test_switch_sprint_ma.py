@@ -507,20 +507,32 @@ class TestAudioSwitch:
         assert stub_coord._audio_enabled[CAM_ID] is False
 
     @pytest.mark.asyncio
-    async def test_apply_audio_skipped_during_privacy(self, stub_coord, stub_entry):
-        """Lines 478-482: _apply_audio_change skips reconnect when privacy ON."""
+    async def test_turn_on_never_reconnects_even_during_privacy(
+        self, stub_coord, stub_entry
+    ):
+        """The audio switch is a card-side mute now — turning it on must never
+        re-open the live connection, including while privacy is active (the old
+        _apply_audio_change reconnect was removed)."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
+        stub_coord._live_connections[CAM_ID] = {
+            "_connection_type": "LOCAL",
+            "rtspsUrl": "rtsps://x",
+        }
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
-        # try_live_connection must NOT be called when privacy is active
+        assert stub_coord._audio_enabled[CAM_ID] is True
         stub_coord.try_live_connection.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_apply_audio_reconnects_when_live(self, stub_coord, stub_entry):
-        """Line 483-487: reconnects when stream is active."""
+    async def test_turn_on_does_not_reopen_stream_when_live(
+        self, stub_coord, stub_entry
+    ):
+        """Audio is now a synced card-side MUTE — the AAC track is always in the
+        stream, so toggling the switch must NOT re-open the live connection
+        (regression for the old reconnect-on-every-toggle jank, #22)."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         stub_coord._live_connections[CAM_ID] = {
@@ -530,21 +542,23 @@ class TestAudioSwitch:
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
         await sw.async_turn_on()
-        stub_coord.try_live_connection.assert_awaited_once_with(CAM_ID)
+        assert stub_coord._audio_enabled[CAM_ID] is True
+        stub_coord.try_live_connection.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_apply_audio_requests_refresh_when_not_live(
+    async def test_toggle_no_reconnect_no_refresh_when_not_live(
         self, stub_coord, stub_entry
     ):
-        """Line 489: requests refresh when no active stream."""
+        """Off-stream toggle just stores the preference + writes state — no
+        stream re-open and no coordinator refresh."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
-        # No live connection
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        await sw.async_turn_on()
+        await sw.async_turn_off()
+        assert stub_coord._audio_enabled[CAM_ID] is False
         stub_coord.try_live_connection.assert_not_called()
-        sw.hass.async_create_task.assert_called_once()
+        sw.hass.async_create_task.assert_not_called()
 
 
 # ── BoschCameraLightSwitch.available ─────────────────────────────────────────

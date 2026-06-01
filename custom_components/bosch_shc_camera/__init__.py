@@ -514,6 +514,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._stream_type_override: str | None = None
         # Per-camera audio setting — True = audio+video on (default), False = snapshot-only
         self._audio_enabled: dict[str, bool] = {}
+        # Per-camera card playback volume 0-100 — the automatable, cross-session
+        # source of truth the Lovelace card applies to its <video> (browser has
+        # no backend volume knob; this is a virtual preference). Mirrors the
+        # _audio_enabled pattern: in-memory, seeded to a default per camera.
+        self._audio_volume: dict[str, int] = {}
         # Auto-renewal tasks and generation counters per camera.
         # The generation counter increments on every new stream start,
         # allowing stale renewal loops to detect they belong to an old session.
@@ -552,6 +557,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._last_slow: float = -86400.0  # force slow check on first tick
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
+        # Per-cam time (monotonic) the cloud last returned HTTP 444 (session
+        # quota / not-ready, e.g. a freshly re-paired camera). For a short window
+        # after, WRITE paths skip the cloud and go straight to the LAN/SHC
+        # fallback instead of re-hitting the cloud for another 444. -inf = never.
+        self._cloud_444_at: dict[str, float] = {}
         self._cached_events: dict[str, list[Any]] = {}
         # SHC local API state cache — keyed by cam_id
         # Each entry: {"device_id": str, "camera_light": bool|None, "privacy_mode": bool|None}
@@ -563,9 +573,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # SHC health tracking — skip SHC calls when offline to avoid latency
         self._shc_available: bool = True  # assume available until proven otherwise
         self._shc_fail_count: int = 0  # consecutive failures
-        self._shc_last_check: float = (
-            0.0  # last time we probed SHC after it went offline
-        )
+        self._shc_last_check: float = float(
+            "-inf"
+        )  # last SHC probe (time.monotonic); -inf = never (SENTINEL_RULE)
         # _SHC_MAX_FAILS + _SHC_RETRY_INTERVAL are class-level constants
         # mirrored from const.py — see top-of-class declaration.
         # Pan position cache — keyed by cam_id, only populated for cameras with panLimit > 0
@@ -1167,9 +1177,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     except ValueError:
                         pass
                     break
-            audio_param = (
-                "&enableaudio=1" if self._audio_enabled.get(cam_id, True) else ""
-            )
+            # Audio track is ALWAYS requested. switch.<cam>_audio is now a
+            # lightweight synced MUTE preference applied card-side (video.muted),
+            # so toggling it no longer re-opens the stream (AAC ≈ negligible
+            # bandwidth) — this is what makes mute/unmute sync instantly across
+            # devices and fixes the audio-toggle reconnect jank (#22). 2026-06-01.
+            audio_param = "&enableaudio=1"
             mcfg = self.get_model_config(cam_id)
             new_url = (
                 f"rtsp://{_q(new_user, safe='')}:{_q(new_pass, safe='')}@"
@@ -1200,6 +1213,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         cam_id[:8],
                         err,
                     )
+                # go2rtc (WebRTC) holds the proxy URL with the OLD embedded creds
+                # too. HA Stream (HLS) was just updated above; re-register go2rtc
+                # with the same fresh URL so WebRTC viewers don't 401 → freeze once
+                # the camera rotates the old creds out (~60 s grace). Tracked bg
+                # task (sync method — can't await). 2026-06-01.
+                go2rtc_task = self.hass.async_create_task(
+                    self._register_go2rtc_stream(cam_id, new_url),
+                    name=f"bosch_go2rtc_reregister_{cam_id[:8]}",
+                )
+                self._bg_tasks.add(go2rtc_task)
+                go2rtc_task.add_done_callback(self._bg_tasks.discard)
             # NVR sidecar: ffmpeg holds the OLD creds — once the camera rotates
             # them out (~60 s grace per Bosch session), reconnects 401 and the
             # recording dies. Re-spawning ffmpeg now (with the new URL) costs
@@ -1227,12 +1251,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     def record_stream_error(self, cam_id: str) -> None:
         """Record a stream error. After max_stream_errors, next stream start uses REMOTE."""
         # The counter exists to suppress LOCAL after consecutive LAN failures.
-        # Errors that happened while we were on REMOTE are unrelated to the
-        # LAN's health — letting them saturate the counter would leave the
-        # cam permanently pinned to REMOTE after a single Cloud-side hiccup,
-        # even when LAN works fine again.
+        # Only count errors on a CONFIRMED-LOCAL session: REMOTE errors are
+        # unrelated to LAN health, and a None type (no session / torn down, e.g.
+        # a worker error firing after _tear_down_live_stream cleared the dict)
+        # is not a LAN-health signal either. Counting those would pin the cam to
+        # REMOTE after an unrelated hiccup even when LAN works fine again.
         live = self._live_connections.get(cam_id, {})
-        if live.get("_connection_type") == "REMOTE":
+        if live.get("_connection_type") != "LOCAL":
             return
         count = self._stream_error_count.get(cam_id, 0) + 1
         self._stream_error_count[cam_id] = count
@@ -1490,8 +1515,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 _LOCAL_RESCUE_RETRY_DELAY = 5
                 result = None
                 for rescue_try in range(1, _LOCAL_RESCUE_MAX_ATTEMPTS + 1):
-                    await self._stop_tls_proxy(cam_id)
-                    result = await self.try_live_connection(cam_id)
+                    # force_reset: stop-old-proxy + rebuild happen atomically
+                    # under the stream lock (no external _stop_tls_proxy that
+                    # could race a concurrent renewal — 2026-06-01).
+                    result = await self.try_live_connection(cam_id, force_reset=True)
                     if result:
                         _LOGGER.info(
                             "LOCAL rescue: %s restarted as %s (attempt %d/%d)",
@@ -1536,10 +1563,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "tearing down and retrying (REMOTE will be selected)",
                 cam_id[:8],
             )
-            self._live_connections.pop(cam_id, None)
-            await self._stop_tls_proxy(cam_id)
+            # Mark fallback BEFORE the rebuild so try_live_connection picks
+            # REMOTE. force_reset stops the dead LOCAL proxy + clears live state
+            # INSIDE the stream lock — same atomic teardown as the 401 rescue, so
+            # this escalation can't race a concurrent renewal either (2026-06-01).
             self._stream_fell_back[cam_id] = True
-            result = await self.try_live_connection(cam_id)
+            result = await self.try_live_connection(cam_id, force_reset=True)
             if result:
                 _LOGGER.info(
                     "Stream worker error recovery: %s restarted as %s",
@@ -2562,6 +2591,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             )
                         else:
                             self._alert_sent_ids[newest_id] = _now_mono
+                            # Bound memory: the FCM handler prunes this dedup map
+                            # too, but it never runs when FCM is disabled, so the
+                            # polling path must prune here as well — otherwise it
+                            # grows one entry per event forever. Drop entries older
+                            # than 2× the 60s dedup window.
+                            if len(self._alert_sent_ids) > 64:
+                                _cutoff = _now_mono - 120.0
+                                for _k in [
+                                    k
+                                    for k, v in self._alert_sent_ids.items()
+                                    if v < _cutoff
+                                ]:
+                                    self._alert_sent_ids.pop(_k, None)
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
                                 cam_id,
@@ -3859,12 +3901,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # ~150 s (CAMERA_EYES outdoor: 8 retries × 13 s + 35 s min_total_wait +
         # buffer). 180 s leaves a small safety margin without holding the
         # privacy toggle hostage for 5 minutes on a stuck warm-up.
-        started = self._stream_warming_started.get(cam_id, 0)
-        if started and (_time.monotonic() - started) > 180:
+        # -inf (not 0) as the missing-key default (SENTINEL_RULE): an entry in
+        # _stream_warming with no start timestamp is an inconsistent state — treat
+        # it as stuck and clear it rather than holding the privacy toggle hostage
+        # forever (a `0` default is falsy and would skip the failsafe entirely).
+        started = self._stream_warming_started.get(cam_id, float("-inf"))
+        elapsed = _time.monotonic() - started
+        if elapsed > 180:
             _LOGGER.warning(
-                "Clearing stuck stream-warming flag for %s (warming for %.0fs)",
+                "Clearing stuck stream-warming flag for %s (warming for %s)",
                 cam_id[:8],
-                _time.monotonic() - started,
+                f"{elapsed:.0f}s" if started != float("-inf") else "unknown duration",
             )
             self._stream_warming.discard(cam_id)
             self._stream_warming_started.pop(cam_id, None)
@@ -3873,7 +3920,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
     # ── Live stream ───────────────────────────────────────────────────────────
     async def try_live_connection(
-        self, cam_id: str, is_renewal: bool = False
+        self, cam_id: str, is_renewal: bool = False, force_reset: bool = False
     ) -> dict[str, Any] | None:
         """
         Open a live proxy connection via PUT /v11/video_inputs/{id}/connection.
@@ -3892,7 +3939,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             )
             return None
         lock = self._get_stream_lock(cam_id)
-        if lock.locked() and not is_renewal:
+        # A recovery rebuild (force_reset) must WAIT for the lock, never skip:
+        # the teardown of the old proxy now happens INSIDE the lock (see
+        # _try_live_connection_inner) so a concurrent renewal/heartbeat can't
+        # publish Stream/go2rtc against a port the recovery is about to kill.
+        # is_renewal already waits. Only opportunistic (non-recovery) calls skip.
+        if lock.locked() and not is_renewal and not force_reset:
             _LOGGER.warning(
                 "try_live_connection: already in progress for %s — skipping", cam_id[:8]
             )
@@ -3905,12 +3957,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if not is_renewal:
             await self._ensure_go2rtc_schemes_fresh()
         async with lock:
-            return await self._try_live_connection_inner(cam_id, is_renewal)
+            return await self._try_live_connection_inner(
+                cam_id, is_renewal, force_reset
+            )
 
     async def _try_live_connection_inner(
-        self, cam_id: str, is_renewal: bool = False
+        self, cam_id: str, is_renewal: bool = False, force_reset: bool = False
     ) -> dict[str, Any] | None:
         """Inner implementation of try_live_connection (called under lock)."""
+        if force_reset:
+            # Recovery rebuild (401 rescue / proxy-died): tear the old session
+            # and proxy down HERE, under the per-cam stream lock, so the stop is
+            # serialized against any concurrent renewal/heartbeat that is also
+            # holding the lock to (re)build the proxy. Doing the stop in the
+            # caller (outside the lock) let a renewal publish Stream/go2rtc
+            # against the port we'd just killed → frozen image (race 2026-06-01).
+            self._live_connections.pop(cam_id, None)
+            self._stream_warming.discard(cam_id)
+            self._stream_warming_started.pop(cam_id, None)
+            await self._stop_tls_proxy(cam_id)
         token = self.token
         if not token:
             _LOGGER.warning("try_live_connection: no token available")
@@ -4073,11 +4138,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             type_val,
                             _redact_creds(result),
                         )
-                        audio_param = (
-                            "&enableaudio=1"
-                            if self._audio_enabled.get(cam_id, True)
-                            else ""
-                        )
+                        # Always request audio — switch.<cam>_audio is a synced
+                        # card-side mute now, not a stream-track toggle (see the
+                        # cred-rotation site above). 2026-06-01.
+                        audio_param = "&enableaudio=1"
                         # Extract bufferingTime for FFmpeg tuning (LOCAL=500ms, REMOTE=1000ms)
                         buffering_ms = result.get("bufferingTime", 1000)
                         result["_bufferingTime"] = buffering_ms
@@ -5511,17 +5575,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             "TLS proxy for %s died (circuit breaker) — rebuilding LOCAL session",
             cam_id[:8],
         )
-        # Clear stale state so try_live_connection's lock doesn't early-return
-        # and so a fresh PUT /connection runs end-to-end. The warm-up flag is
-        # cleared here too: the camera was demonstrably unreachable for ~30 s,
-        # so any pre-warm in flight has zero chance of succeeding and the
-        # privacy toggle deserves to be reactive again.
-        self._live_connections.pop(cam_id, None)
-        self._stream_warming.discard(cam_id)
-        self._stream_warming_started.pop(cam_id, None)
-        await self._stop_tls_proxy(cam_id)
+        # force_reset clears stale state (live-session, warm-up flags) and stops
+        # the dead proxy INSIDE the stream lock, so the teardown can't race a
+        # concurrent renewal/heartbeat rebuild. The camera was demonstrably
+        # unreachable for ~30 s, so the privacy toggle deserves to be reactive
+        # again (warm-up reset) and a fresh PUT /connection runs end-to-end.
         try:
-            result = await self.try_live_connection(cam_id)
+            result = await self.try_live_connection(cam_id, force_reset=True)
             if result:
                 _LOGGER.info(
                     "TLS proxy rebuild for %s succeeded (%s)",

@@ -1336,7 +1336,7 @@ The detailed reference for each card follows below — start with `bosch-camera-
 |--------|----------|
 | 📸 Snapshot | Force-fetch a fresh image immediately |
 | 📹 Live Stream | Toggle stream ON/OFF |
-| 🔊 Ton | Toggle audio mute/unmute during live stream |
+| 🔊 Ton | Mute / unmute live audio. Hover (desktop) or long-press (touch) reveals a volume slider. Greyed out until a live stream is playing. Both on/off and volume are backed by automatable entities and sync across all cards (see [Audio: who controls the sound](#audio-who-controls-the-sound)). |
 | 💡 Licht | Toggle camera LED light (outdoor camera) |
 | 🔒 Privat | Toggle privacy mode (covers lens) |
 | 🔔 Benachrichtigungen | Toggle push notifications |
@@ -1400,6 +1400,8 @@ show_last_event: false
 | `minimal` | `false` | `false` (default) shows the full control stack (switches + accordions) expanded with the ⋮ pre-opened; `true` collapses everything behind the ⋮ "Mehr" button until tapped. (Overview-grid tiles default to `minimal: true`.) |
 | `show_title` | `true` | Set `false` to hide the title pill entirely (clean video-only tile). |
 | `show_last_event` | `true` | Set `false` to hide the last-event badge in the bottom-right of the video. |
+| `show_audio` | `true` | Set `false` to hide the audio button (sound + volume) entirely. |
+| `use_card_audio_settings` | `false` | Decouple this card's audio from the global backend entities. `true` = mute + volume are per-browser only (`localStorage`), never touching `switch.<cam>_audio` / `number.<cam>_audio_volume` or other devices. See [Audio: who controls the sound](#audio-who-controls-the-sound). |
 | `border_radius` | *(theme)* | CSS length, e.g. `"22px"`. Overrides the card corner radius for this card only. By default the card follows your dashboard theme's `ha-card-border-radius`; set this to pin a value regardless of the theme. |
 | `box_shadow` | *(theme)* | CSS shadow, e.g. `"0 0 4px 1.5px rgba(255,255,255,.5)"`. Overrides the card shadow for this card only. By default the card follows your theme's `ha-card-box-shadow`. |
 | `auto_play` | *(integration default)* | `lan` / `always` / `never` — per-card override of the integration's auto-play behaviour. |
@@ -1408,7 +1410,28 @@ show_last_event: false
 
 > **Fullscreen toggle** — the ⛶ fullscreen button now toggles: tap it once to enter fullscreen, tap it again (or the camera name button when shown) to exit. `Esc` and a tap outside the video also exit, as before.
 
-> **Visual editor** — all the options above except the rarely-used ones are also editable in the dashboard's visual card editor (no YAML needed). The camera picker lists every `camera.*` entity on your instance, so any Bosch camera can be selected regardless of how its entity is named.
+> **Fullscreen zoom** — while in fullscreen you can zoom into the picture: pinch with two fingers (touch), scroll the mouse wheel (desktop), or double-tap / double-click to toggle 2× at that spot. Drag to pan when zoomed in. Zoom resets automatically when you leave fullscreen. Outside fullscreen the gestures are left untouched so normal page scrolling/pinch still works.
+
+> **Sound & volume** — the 🔊 button mutes/unmutes live audio; hovering it (desktop) or long-pressing it (touch) shows a volume slider. The control is greyed out until a stream is actually playing. Both the on/off and the volume are driven by **backend entities** (see below), so they are automatable and stay in sync across every open card. On iOS the volume slider is hidden because Safari does not allow scripts to change media volume.
+
+#### Audio: who controls the sound
+
+Two backend entities are the single source of truth for audio, so everything is automatable and shared across all sessions and the mobile app:
+
+| Entity | What it controls |
+|---|---|
+| `switch.bosch_<camera>_audio` | **On/off** — whether the live stream carries an audio track at all. Off = video-only, nothing to hear anywhere. Power-on default comes from the integration option **Audio on by default**. |
+| `number.bosch_<camera>_audio_volume` | **Volume 0–100** — the playback level the card applies. A virtual preference (Bosch has no volume API; loudness is a browser property), so it is automatable and shared but has no effect on iOS, where Safari makes volume read-only. Default 50. |
+
+The card 🔊 pill is just the front-end for these:
+- It **reflects** both entities and **writes** them back — dragging the volume slider calls `number.set_value`, tapping mute/unmute toggles the audio switch when needed. HA then pushes the change to every other open card.
+- **Two-way sync is live.** An automation that flips `switch.bosch_<camera>_audio` or sets `number.bosch_<camera>_audio_volume` is applied to the playing video immediately on every card. (One browser caveat: a programmatic *unmute* of a playing video may be refused by the autoplay policy until you've interacted with the page once — muting and volume changes are always honoured.)
+
+So: **automate the entities**, and the cards follow. There is deliberately no card-YAML volume or "sound on by default" option — that would be a second, conflicting source of truth for the same decision.
+
+**Opt out of the global behaviour.** If you'd rather a card *not* participate in the shared/automatable audio — e.g. one dashboard whose volume should be purely local to that browser — set `use_card_audio_settings: true` on the card (single or overview). The pill then toggles only that browser's mute and remembers its own volume in `localStorage`, and never reads or writes `switch.<cam>_audio` / `number.<cam>_audio_volume`. The backend entities keep working for every other (default) card and for automations.
+
+> **Visual editor** — all the options above except the rarely-used ones are also editable in the dashboard's visual card editor (no YAML needed). The camera picker lists every `camera.*` entity on your instance, so any Bosch camera can be selected regardless of how its entity is named. The editor and the card chrome follow your Home Assistant language: German for a `de…` UI language, English for everything else.
 
 All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist. The **Reaktion** slot in the info row reads the `buffering_time_ms` attribute exposed by the camera entity (Bosch cloud-issued, ~500 ms on LOCAL and ~1000 ms on REMOTE); it stays `—` while the stream is idle. The **Verbindung** slot reads `connection_type` and shows `LAN`, `Cloud`, or `—`.
 
@@ -1943,11 +1966,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v13.4.5** — see the GitHub release page for full notes:
-[**v13.4.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.4.5)
+Latest: **v13.5.0** — see the GitHub release page for full notes:
+[**v13.5.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.5.0)
 
 | Version | Highlights |
 |---|---|
+| **v13.5.0** | **Card in 11 languages, audio you can automate, smoother overlays.** The card editors and all in-card text now follow your Home Assistant language — English, German, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian, Ukrainian and Simplified Chinese — matching the integration's own translations. **Audio is now backend-owned and synced across devices:** a `switch.<cam>_audio` mute that toggles on every tap (so muting/unmuting syncs to every browser and is automatable) plus a new `number.<cam>_audio_volume` slider; an optional `use_card_audio_settings:` card option decouples a single card from the global audio entities if you prefer. **Fullscreen digital zoom** — pinch, mouse-wheel, double-tap and pan. **Overlay polish:** the privacy placeholder no longer stacks under a "refreshing" spinner, and a card pointed at a non-existent camera entity now says **"camera not found"** instead of a misleading re-login prompt. The hover lift is now **shadow-only** — no geometry shimmer and it never clips the fullscreen/zoom view ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)). **Backend stream-recovery hardening:** the 401 rescue / proxy-died rebuild now tears the old local proxy down and rebuilds it **atomically under one lock**, so a concurrent session renewal can no longer leave go2rtc/HA-Stream pinned to a dead port; and a cloud **444** (session quota / a freshly re-paired camera) now falls back to the local API for privacy writes. Test coverage stays at **100%**. |
 | **v13.4.5** | **Stream resilience — self-healing local sessions.** When the camera rotates its local streaming credentials the integration rebuilds the local proxy on a fresh port; the rescue now **retries with backoff (up to three attempts)** instead of giving up after a single transient refuse, so go2rtc and the HA stream are no longer left pinned to a dead port (which showed as a frozen image until a manual reload). The **card now recognises a dead go2rtc source** (connection refused, wrong user/pass, exec/rtsp, DESCRIBE 404) and forces one backend stream rebuild via the live-stream switch, with a cooldown so it stops hammering a stale source. Also folds the card-state fixes from the re-pointed v13.4.4: the **overview tile hover keeps your themed `ha-card-box-shadow`** ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)) and the **privacy/light buttons clear their marked state the instant you toggle them off** ([#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)) instead of waiting for the next status push. |
 | **v13.4.4** | **Card UX polish — hover, overview shadows, instant audio.** The single card's hover now **lifts and scales** like the overview tiles ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)). Overview tiles now show a themed **`ha-card-box-shadow`** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — the shadow moved onto the tile itself, which the corner-cropping `overflow:hidden` had been clipping. The **Ton toggle reflects audibility the instant playback starts** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)) — it reads off (muted) at stream start and a single tap unmutes, without waiting for a state update. **Internal:** mock-`hass` Playwright interaction tests (hover / privacy / audio / fullscreen), a full-E2E `hass-taste-test` smoke against a real Home Assistant, and a `docs/ci-cd.md` pipeline doc with diagrams. |
 | **v13.4.3** | **Privacy stops the live stream + sound immediately** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)). Switching a camera to Privacy while the stream was playing tore the stream down on the backend, but the card's HLS buffer kept playing video and sound for a few seconds and the controls felt stuck. The card now stops its video the instant privacy turns on. |

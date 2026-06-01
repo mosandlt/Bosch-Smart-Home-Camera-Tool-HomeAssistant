@@ -354,3 +354,23 @@ class TestLastEventTypeSensor:
         # No events → native_value is None or "unknown"
         v = s.native_value
         assert v is None or isinstance(v, str)
+
+    def test_known_event_type_lowercased(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
+
+        stub_coord.data = {CAM_ID: {"events": [{"eventType": "MOVEMENT"}]}}
+        s = BoschLastEventTypeSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == "movement"
+
+    def test_unknown_event_type_maps_to_none(self, stub_coord, stub_entry):
+        """Regression: an event type outside _attr_options (or a missing key)
+        must map onto the 'none' catch-all — returning a value not in the ENUM
+        options makes HA reject the state."""
+        from custom_components.bosch_shc_camera.sensor import BoschLastEventTypeSensor
+
+        s = BoschLastEventTypeSensor(stub_coord, CAM_ID, stub_entry)
+        stub_coord.data = {CAM_ID: {"events": [{"eventType": "TAMPER_FUTURE"}]}}
+        assert s.native_value == "none"
+        assert s.native_value in s._attr_options
+        stub_coord.data = {CAM_ID: {"events": [{"foo": "bar"}]}}  # no eventType key
+        assert s.native_value == "none"

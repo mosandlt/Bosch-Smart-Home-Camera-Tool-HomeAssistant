@@ -142,8 +142,10 @@ class TestStreamSource:
         )
 
     @pytest.mark.asyncio
-    async def test_strips_audio_param_when_audio_disabled(self):
-        """Audio param must be stripped from URL when audio switch is OFF."""
+    async def test_keeps_audio_param_when_switch_off(self):
+        """The AAC track is always kept now — switch.<cam>_audio is a card-side
+        mute, not a track toggle — so stream_source must NOT strip enableaudio=1
+        even when _audio_enabled is False (2026-06-01 always-on-audio design)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity()
@@ -153,9 +155,7 @@ class TestStreamSource:
             "_connection_type": "REMOTE",
         }
         result = await BoschCamera.stream_source(entity)
-        assert "enableaudio=1" not in result, (
-            "stream_source must strip enableaudio=1 when audio is disabled"
-        )
+        assert "enableaudio=1" in result
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_url_in_connection(self):

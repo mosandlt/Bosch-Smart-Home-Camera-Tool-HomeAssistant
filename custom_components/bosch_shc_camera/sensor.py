@@ -610,8 +610,11 @@ class BoschLastEventTypeSensor(_BoschSensorBase):
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         if not events:
             return "none"
-        latest = events[0]
-        return str(latest.get("eventType", "unknown")).lower()
+        event_type = str(events[0].get("eventType", "")).lower()
+        # ENUM device_class rejects any value outside _attr_options (HA logs a
+        # state-validation warning and drops the state), so map a missing or
+        # unrecognised event shape onto the "none" catch-all instead.
+        return event_type if event_type in self._attr_options else "none"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1418,7 +1421,6 @@ class BoschStreamStatusSensor(_BoschSensorBase):
     @property
     def native_value(self) -> str:
         fell_back = self.coordinator._stream_fell_back.get(self._cam_id, False)
-        self.coordinator._stream_error_count.get(self._cam_id, 0)
         if self.coordinator.is_stream_warming(self._cam_id):
             return "warming_up"
         live = self.coordinator._live_connections.get(self._cam_id, {})

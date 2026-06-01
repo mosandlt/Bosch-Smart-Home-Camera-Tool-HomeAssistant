@@ -303,6 +303,58 @@ class TestEventProcessing:
         )
 
     @pytest.mark.asyncio
+    async def test_new_event_prunes_stale_dedup_entries(self):
+        """When >64 dedup entries accumulate, the polling path prunes those older
+        than 2× the 60s window (__init__.py 2599-2606).
+
+        WHY: the FCM handler also prunes _alert_sent_ids, but it never runs when
+        FCM is disabled — so polling-only setups would grow the map one entry per
+        event forever. This pins the memory-bound.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        now = time_mod.monotonic()
+        # 40 stale entries (older than the 120s cutoff) + 24 fresh ones = 64.
+        # Adding the new event makes 65 (>64) → prune fires, drops the 40 stale.
+        stale = {f"STALE-{i}": now - 300.0 for i in range(40)}
+        fresh = {f"FRESH-{i}": now for i in range(24)}
+        seeded = {**stale, **fresh}
+        assert len(seeded) == 64
+
+        event_id = "EVT-PRUNE"
+        events = [
+            {
+                "id": event_id,
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
+        cam_entry = _make_cam_entry(CAM_A)
+        coord = _make_coord_full(
+            _last_events=float("-inf"),
+            _cached_events={},
+            _last_event_ids={CAM_A: "OLD-ID"},
+            _alert_sent_ids=dict(seeded),
+        )
+        session = _session_for_cam(cam_entry, events=events)
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_clientsession",
+            return_value=session,
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        # Stale entries pruned; fresh ones kept; new event recorded.
+        assert not any(k.startswith("STALE-") for k in coord._alert_sent_ids), (
+            "stale dedup entries (older than 120s) must be pruned"
+        )
+        assert all(f"FRESH-{i}" in coord._alert_sent_ids for i in range(24)), (
+            "fresh dedup entries must survive the prune"
+        )
+        assert event_id in coord._alert_sent_ids
+        assert len(coord._alert_sent_ids) == 25  # 24 fresh + the new event
+
+    @pytest.mark.asyncio
     async def test_event_dedup_suppresses_duplicate_alert(self):
         """_alert_sent_ids already contains newest event_id → no bus event fired.
 

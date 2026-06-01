@@ -546,11 +546,14 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschAudioSwitch(_BoschSwitchBase):
-    """Switch: ON = live stream includes audio (AAC), OFF = video-only.
+    """Switch: ON = live audio plays, OFF = muted. Synced across every session.
 
-    Default: OFF — silent stream. Turn ON to enable AAC-LC 16kHz mono audio.
-    If the live stream is currently active, toggling re-opens the connection
-    so the new audio setting takes effect immediately.
+    The live stream ALWAYS carries the AAC track now (≈ negligible bandwidth), so
+    this is a lightweight, automatable MUTE preference that the Lovelace card
+    applies to its <video> element (video.muted). Toggling it does NOT re-open the
+    stream and HA pushes the change to every open card, so mute/unmute is instant
+    and consistent across devices. Paired with number.<cam>_audio_volume (volume).
+    Default ON.
     """
 
     def __init__(
@@ -571,42 +574,18 @@ class BoschAudioSwitch(_BoschSwitchBase):
         return self.coordinator._audio_enabled.get(self._cam_id, True)  # type: ignore[no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable audio on the live stream."""
-        _LOGGER.info("Audio ON for %s", self._cam_title)
+        """Unmute — the card applies it to video.muted; no stream re-open."""
+        _LOGGER.info("Audio ON (unmute) for %s", self._cam_title)
         self.coordinator._audio_enabled[self._cam_id] = True
-        # Push the new state to HA immediately. is_on reads the _audio_enabled
-        # dict (not coordinator data), so without this the toggle stayed visually
-        # stale until the next coordinator refresh — which a camera pan happened
-        # to trigger, hence "can't re-enable audio until I move the camera" (#22).
+        # is_on reads the _audio_enabled dict, so write state immediately for an
+        # instant, non-stale toggle that HA then pushes to every card (#22).
         self.async_write_ha_state()
-        await self._apply_audio_change()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable audio on the live stream (video-only)."""
-        _LOGGER.info("Audio OFF for %s", self._cam_title)
+        """Mute — the card applies it to video.muted; no stream re-open."""
+        _LOGGER.info("Audio OFF (mute) for %s", self._cam_title)
         self.coordinator._audio_enabled[self._cam_id] = False
-        # See async_turn_on — write state now so the toggle reflects OFF without
-        # waiting for the next coordinator refresh (#22).
         self.async_write_ha_state()
-        await self._apply_audio_change()
-
-    async def _apply_audio_change(self) -> None:
-        """Re-open the live connection if active so the audio change takes effect."""
-        if bool(
-            self.coordinator._shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
-        ):
-            _LOGGER.warning(
-                "Audio change for %s skipped — privacy mode is active", self._cam_title
-            )
-            return
-        if self._cam_id in self.coordinator._live_connections:
-            _LOGGER.info(
-                "Re-opening live connection for %s to apply audio change",
-                self._cam_title,
-            )
-            await self.coordinator.try_live_connection(self._cam_id)
-        else:
-            self.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1374,11 +1353,13 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
-        # Read from coordinator cache if local state not yet set
-        if self._is_on is None:
-            cache = self.coordinator._motion_light_cache.get(self._cam_id, {})
-            if cache:
-                self._is_on = cache.get("lightOnMotionEnabled", False)
+        # The coordinator re-polls lighting/motion on the slow tier, so the cache
+        # is the source of truth and reflects changes made in the Bosch app. Read
+        # it fresh each time; _is_on is only the optimistic value before the cache
+        # has ever been filled (else a frozen _is_on hid external changes forever).
+        cache = self.coordinator._motion_light_cache.get(self._cam_id, {})
+        if cache:
+            return bool(cache.get("lightOnMotionEnabled", False))
         return self._is_on
 
     @property
@@ -1461,10 +1442,11 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
-        if self._is_on is None:
-            cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
-            if cache:
-                self._is_on = cache.get("ambientLightEnabled", False)
+        # Cache is the source of truth (slow-tier re-poll reflects Bosch-app
+        # changes); _is_on is only the optimistic pre-cache fallback.
+        cache = self.coordinator._ambient_lighting_cache.get(self._cam_id, {})
+        if cache:
+            return bool(cache.get("ambientLightEnabled", False))
         return self._is_on
 
     @property

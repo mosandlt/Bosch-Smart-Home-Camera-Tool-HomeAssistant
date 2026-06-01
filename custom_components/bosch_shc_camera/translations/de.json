@@ -345,6 +345,9 @@
       "speaker_level": {
         "name": "Lautsprecher-Lautstärke"
       },
+      "audio_volume": {
+        "name": "Audio-Lautstärke"
+      },
       "front_light_intensity": {
         "name": "Frontlicht-Helligkeit"
       },

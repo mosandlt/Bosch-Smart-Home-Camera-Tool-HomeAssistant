@@ -596,12 +596,23 @@ def test_motion_light_is_on_reads_from_cache():
     cache = {CAM_ID: {"lightOnMotionEnabled": True}}
     sw = _make_motion_light_switch(cache=cache)
     assert sw.is_on is True
-    assert sw._is_on is True
 
 
 def test_motion_light_is_on_none_when_no_cache():
     sw = _make_motion_light_switch(cache={})
     assert sw.is_on is None
+
+
+def test_motion_light_is_on_tracks_external_cache_change():
+    """Regression: is_on must reflect a later coordinator re-poll (Bosch-app
+    change), not freeze on the first read. Previously _is_on was cached once and
+    external OFF→ON changes stayed invisible in HA until restart."""
+    cache = {CAM_ID: {"lightOnMotionEnabled": False}}
+    sw = _make_motion_light_switch(cache=cache)
+    assert sw.is_on is False
+    # Slow-tier coordinator re-poll picks up an external change made in the app.
+    sw.coordinator._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": True}
+    assert sw.is_on is True
 
 
 @pytest.mark.asyncio

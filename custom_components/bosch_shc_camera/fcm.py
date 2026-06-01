@@ -923,11 +923,17 @@ def _on_fcm_push(
         persistent_id,
         notification.get("from", "?"),
     )
-    # Schedule immediate event fetch + snapshot refresh on the HA event loop
-    coordinator.hass.loop.call_soon_threadsafe(
-        coordinator.hass.async_create_task,
-        async_handle_fcm_push(coordinator),
-    )
+
+    # Schedule immediate event fetch + snapshot refresh on the HA event loop.
+    # Create + track the task INSIDE the threadsafe callback so it holds a strong
+    # reference in _bg_tasks — an untracked task can be GC-cancelled mid-flight on
+    # shutdown, leaving coordinator.data partially updated.
+    def _spawn_fcm_handler() -> None:
+        _t = coordinator.hass.async_create_task(async_handle_fcm_push(coordinator))
+        coordinator._bg_tasks.add(_t)
+        _t.add_done_callback(coordinator._bg_tasks.discard)
+
+    coordinator.hass.loop.call_soon_threadsafe(_spawn_fcm_handler)
 
 
 async def async_handle_fcm_push(coordinator: Any) -> None:
@@ -1087,8 +1093,11 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                         _alert_blocked = True
 
                 if not _alert_blocked:
-                    # Send alert notification (3-step: text + snapshot + video)
-                    coordinator.hass.async_create_task(
+                    # Send alert notification (3-step: text + snapshot + video).
+                    # Track in _bg_tasks: async_send_alert runs ~minutes (image
+                    # retries + clip poll/download); an untracked task can be
+                    # GC-cancelled mid-flight on shutdown, leaving partial files.
+                    _alert_task = coordinator.hass.async_create_task(
                         async_send_alert(
                             coordinator,
                             cam_name,
@@ -1100,6 +1109,8 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                             event_id=newest_id,
                         )
                     )
+                    coordinator._bg_tasks.add(_alert_task)
+                    _alert_task.add_done_callback(coordinator._bg_tasks.discard)
                 else:
                     _LOGGER.info(
                         "Alert skipped for %s (%s) — notifications disabled",

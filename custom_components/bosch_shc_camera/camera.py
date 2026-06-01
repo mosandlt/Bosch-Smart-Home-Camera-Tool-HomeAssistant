@@ -622,9 +622,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # (UDP) — forcing TCP on REMOTE breaks Gen1 Eyes Outdoor cloud streams.
         is_local = live.get("_connection_type") == "LOCAL"
         self.stream_options = {"rtsp_transport": "tcp"} if is_local else {}
-        # Strip audio param if audio switch is OFF (default)
-        if not self.coordinator._audio_enabled.get(self._cam_id, True):
-            url = url.replace("&enableaudio=1", "").replace("enableaudio=1&", "")
+        # Audio track is ALWAYS kept in the stream now — switch.<cam>_audio is a
+        # card-side mute preference (applied to video.muted), not a track toggle.
+        # Stripping it here on a muted-at-start session would leave no track to
+        # unmute. The track stays (≈ negligible bandwidth). 2026-06-01.
         return url
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────

@@ -38,6 +38,7 @@ def _stub_coord(**overrides):
         _pan_cache={},
         _lens_elevation_cache={},
         _audio_cache={},
+        _audio_volume={},
         _lighting_switch_cache={},
         _image_rotation_180={},
         last_update_success=True,
@@ -240,16 +241,93 @@ class TestFrontLightIntensityNumber:
             "Must return None when intensity not in cache"
         )
 
-    def test_always_available_when_coordinator_ok(self, stub_coord, stub_entry):
+    def test_unavailable_without_cache(self, stub_coord, stub_entry):
+        """Regression: with no front-light data cached the entity must report
+        unavailable, not 'unknown' (available=True + native_value=None). Matches
+        the cache-gating of the sibling number entities."""
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
         stub_coord._shc_state_cache[CAM_ID] = {}
         entity = BoschFrontLightIntensityNumber(stub_coord, CAM_ID, stub_entry)
-        assert entity.available is True, (
-            "FrontLightIntensity must be available without cache"
+        assert entity.available is False
+
+    def test_available_with_cache(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.number import (
+            BoschFrontLightIntensityNumber,
         )
+
+        stub_coord._shc_state_cache[CAM_ID] = {"front_light_intensity": 0.5}
+        entity = BoschFrontLightIntensityNumber(stub_coord, CAM_ID, stub_entry)
+        assert entity.available is True
+
+
+class TestAudioVolumeNumber:
+    """The virtual card-playback-volume entity: seeds a default, stores the set
+    value in the coordinator, and never calls the Bosch API (browser-side level).
+    It is the automatable source of truth the card reads + writes."""
+
+    def test_default_volume_when_unset(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        stub_coord._audio_volume = {}
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        assert e.native_value == 50.0  # default returned without pre-seeding
+
+    @pytest.mark.asyncio
+    async def test_set_value_stores_no_api_call(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        stub_coord._audio_volume = {}
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        e.async_write_ha_state = MagicMock()
+        await e.async_set_native_value(75)
+        assert stub_coord._audio_volume[CAM_ID] == 75
+        assert e.native_value == 75.0
+        # Virtual preference — no Bosch write must happen.
+        stub_coord.async_put_camera.assert_not_called()
+
+    def test_slider_metadata(self, stub_coord, stub_entry):
+        from homeassistant.components.number import NumberMode
+
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        assert e._attr_native_min_value == 0
+        assert e._attr_native_max_value == 100
+        assert e._attr_mode == NumberMode.SLIDER
+
+    def test_device_info_groups_under_camera_device(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.const import DOMAIN
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        di = e.device_info
+        assert (DOMAIN, CAM_ID) in di["identifiers"]
+        assert di["manufacturer"] == "Bosch"
+        assert di["name"].startswith("Bosch ")
+
+    def test_available_when_camera_online(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        assert e.available is True
+
+    def test_unavailable_when_camera_offline(self, stub_coord, stub_entry):
+        """Greys out together with the camera's other controls when offline."""
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        stub_coord.is_camera_online = lambda cid: False
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        assert e.available is False
+
+    def test_unavailable_when_coordinator_update_failed(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+
+        stub_coord.last_update_success = False
+        e = BoschAudioVolumeNumber(stub_coord, CAM_ID, stub_entry)
+        assert e.available is False
 
 
 # ── BoschLensElevationNumber ──────────────────────────────────────────────────

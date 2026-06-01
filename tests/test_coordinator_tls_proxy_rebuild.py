@@ -58,12 +58,14 @@ async def test_rebuild_when_local_stream_active(monkeypatch) -> None:
 
     await coord._on_tls_proxy_died(CAM_A)
 
-    coord._stop_tls_proxy.assert_awaited_once_with(CAM_A)
-    coord.try_live_connection.assert_awaited_once_with(CAM_A)
-    assert CAM_A not in coord._live_connections, (
-        "stale _live_connections entry must be cleared before rebuild — "
-        "otherwise try_live_connection's lock may early-return"
-    )
+    # Teardown (stop proxy + clear stale _live_connections / warming) now runs
+    # INSIDE try_live_connection under the per-cam stream lock, via force_reset.
+    # The proxy-died flow therefore makes NO external _stop_tls_proxy call that
+    # could race a concurrent renewal (rescue↔renewal proxy race, 2026-06-01),
+    # and force_reset=True makes the call WAIT for the lock instead of early-
+    # returning on a stale lock.
+    coord._stop_tls_proxy.assert_not_awaited()
+    coord.try_live_connection.assert_awaited_once_with(CAM_A, force_reset=True)
 
 
 # ── Skip conditions ────────────────────────────────────────────────────────

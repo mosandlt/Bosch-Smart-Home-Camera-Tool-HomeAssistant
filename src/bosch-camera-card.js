@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.6";
+const CARD_VERSION = "13.5.0";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -169,20 +169,916 @@ let _boschFsOwner = null;
 //   never  — pre-init + overlay in every session; user always taps to reveal.
 const AUTO_PLAY_MODES = ["lan", "always", "never"];
 
-// Minimal card-side i18n. Picks DE for hass.language starting with "de",
-// EN otherwise. Keep keys stable — referenced by _t() lookups.
+// Card-side i18n. Language is taken from hass.language: "de*" → German,
+// everything else → English (the universal fallback). To add a locale, add a
+// CARD_I18N["xx"] block with the same keys and extend cardLang(); any missing
+// key falls back to English, so partial translations are safe. All visible card
+// + editor chrome routes through cardT()/this._t() — no hard-coded UI language.
 const CARD_I18N = {
   en: {
+    // ── runtime chrome ──
     play_gate_label: "Start stream",
     play_gate_hint_remote: "You're on a remote connection — tap to start",
     play_gate_hint_default: "Tap to start the live stream",
+    loading: "Loading…",
+    cam_missing_title: "Camera not found",
+    cam_missing_sub: "This camera entity does not exist — check the card's camera_entity setting.",
+    delete: "Delete",
+    height: "Height",
+    pick_color: "Pick colour",
+    volume: "Volume",
+    audio_tap_for_sound: "Tap for sound",
+    audio_mute: "Mute sound",
+    audio_unmute: "Enable sound",
+    audio_available_when_live: "Sound available once the live stream is running",
+    sound_label: "Sound",
+    enable_sound: "Enable sound",
+    siren_confirm: "Really trigger the siren?",
+    siren_triggering: "Triggering siren…",
+    siren_unavailable: "Siren not available for this camera.",
+    schedules_zones: "Schedules & zones",
+    nvr_no_recordings: "No recordings for this day",
+    nvr_segments_suffix: "segment(s) — click to play",
+    nvr_load_error: "Error loading segments",
+    maint_title: "Bosch cloud maintenance in progress",
+    maint_title_planned: "Bosch cloud maintenance scheduled",
+    maint_notice: "Maintenance notice",
+    maint_details: "Details on the Bosch Community",
+    maint_body: "Live image and snapshots may be limited during this window.",
+    maint_active: "in progress",
+    maint_announced: "announced",
+    maint_check_status: "Check status: Bosch Community",
+    maint_auto_return: "The cameras come back automatically once the cloud responds.",
+    // ── editor: shared ──
+    ed_cam_entity: "Camera entity *",
+    ed_cam_entity_hint: "Required — all other entities are derived automatically from the camera name.",
+    ed_no_cams: "No Bosch cameras detected. Enter <code>camera.bosch_xxx</code> manually, or finish the Bosch integration setup first.",
+    ed_not_set: "(not set yet)",
+    ed_title: "Title",
+    ed_title_opt_single: "(optional, overrides friendly name)",
+    ed_title_opt: "(optional)",
+    ed_title_ph_single: "e.g. Garden",
+    ed_title_ph_overview: "Bosch Cameras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (for all tiles)",
+    ed_apple_style: "Apple-style glass overlay (default on)",
+    ed_theme: "Theme",
+    ed_theme_auto: "Auto (detect via user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Mode",
+    ed_mode_auto: "Auto (system light/dark)",
+    ed_mode_day: "Day",
+    ed_mode_night: "Night",
+    ed_minimal_single: "Minimal layout (more-menu hides all switches at first)",
+    ed_minimal_overview: "Minimal layout (switches behind the more-menu) — recommended for the grid",
+    ed_compact_single: "Compact tile (for overview grid: video + title pill only, no pill bar)",
+    ed_compact_overview: "Compact tile (video + title pill only, no pill bar)",
+    ed_show_title: "Show title pill (off = video only, no name overlay)",
+    ed_show_last_event: "Show last-event badge",
+    ed_show_audio: "Show audio button (sound + volume)",
+    ed_use_card_audio: "Use card audio settings (decouple from the global audio entities)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integration default (don't override)",
+    ed_autoplay_lan: "LAN (auto-start on home network only)",
+    ed_autoplay_always: "Always",
+    ed_autoplay_never: "Never (tap-to-play gate)",
+    ed_autoplay_hint: "Controls when the live stream starts on its own. Empty keeps the integration-wide default untouched; a choice overrides it per card.",
+    // ── editor: overview only ──
+    ed_columns: "Columns",
+    ed_columns_auto: "Auto (breakpoint)",
+    ed_columns_1: "1 – full width",
+    ed_breakpoint: "Breakpoint – min width per tile (px)",
+    ed_breakpoint_hint: "On Auto: 1 column below, 2+ columns above this value. Default: 650 px",
+    ed_h_display: "Display",
+    ed_show_offline: "Show offline cameras",
+    ed_bosch_sort: "Sort by Bosch app order",
+    ed_h_advanced: "Advanced",
+    ed_border_radius: "Corner radius (CSS, e.g. 16px)",
+    ed_box_shadow: "Box shadow (CSS)",
+    ed_show_motion_zones: "Show motion-zone overlay",
   },
   de: {
+    // ── runtime chrome ──
     play_gate_label: "Stream starten",
     play_gate_hint_remote: "Du bist remote — antippen zum Starten",
     play_gate_hint_default: "Antippen, um den Live-Stream zu starten",
+    loading: "Lädt…",
+    cam_missing_title: "Kamera nicht vorhanden",
+    cam_missing_sub: "Diese Kamera-Entität existiert nicht — bitte camera_entity in der Karten-Konfiguration prüfen.",
+    delete: "Löschen",
+    height: "Höhe",
+    pick_color: "Farbe wählen",
+    volume: "Lautstärke",
+    audio_tap_for_sound: "Tippen für Ton",
+    audio_mute: "Ton stummschalten",
+    audio_unmute: "Ton einschalten",
+    audio_available_when_live: "Ton verfügbar, sobald der Live-Stream läuft",
+    sound_label: "Ton",
+    enable_sound: "Ton einschalten",
+    siren_confirm: "Sirene wirklich auslösen?",
+    siren_triggering: "Sirene wird ausgelöst…",
+    siren_unavailable: "Sirene nicht verfügbar für diese Kamera.",
+    schedules_zones: "Zeitpläne & Zonen",
+    nvr_no_recordings: "Keine Aufnahmen für diesen Tag",
+    nvr_segments_suffix: "Segment(e) — klicken zum Abspielen",
+    nvr_load_error: "Fehler beim Laden der Segmente",
+    maint_title: "Bosch-Cloud-Wartung läuft",
+    maint_title_planned: "Bosch-Cloud-Wartung geplant",
+    maint_notice: "Wartungsmeldung",
+    maint_details: "Details in der Bosch Community",
+    maint_body: "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.",
+    maint_active: "läuft",
+    maint_announced: "angekündigt",
+    maint_check_status: "Status prüfen: Bosch Community",
+    maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
+    // ── editor: shared ──
+    ed_cam_entity: "Kamera-Entity *",
+    ed_cam_entity_hint: "Pflichtfeld — alle anderen Entities werden automatisch aus dem Camera-Namen abgeleitet.",
+    ed_no_cams: "Keine Bosch-Kameras erkannt. Trage <code>camera.bosch_xxx</code> manuell ein, oder schließe das Bosch-Integration-Setup zuerst ab.",
+    ed_not_set: "(noch nicht gesetzt)",
+    ed_title: "Titel",
+    ed_title_opt_single: "(optional, überschreibt Friendly-Name)",
+    ed_title_opt: "(optional)",
+    ed_title_ph_single: "z.B. Garten",
+    ed_title_ph_overview: "Bosch Kameras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (für alle Kacheln)",
+    ed_apple_style: "Apple-Style Glass-Overlay aktiv (Default an)",
+    ed_theme: "Theme",
+    ed_theme_auto: "Auto (Erkennung via User-Agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modus",
+    ed_mode_auto: "Auto (System Hell/Dunkel)",
+    ed_mode_day: "Tag",
+    ed_mode_night: "Nacht",
+    ed_minimal_single: "Minimal-Layout (Mehr-Menü versteckt zunächst alle Switches)",
+    ed_minimal_overview: "Minimal-Layout (Switches hinter dem Mehr-Menü) — empfohlen fürs Grid",
+    ed_compact_single: "Compact-Tile (für Overview-Grid: nur Video + Title-Pill, keine Pill-Bar)",
+    ed_compact_overview: "Compact-Tile (nur Video + Title-Pill, keine Pill-Bar)",
+    ed_show_title: "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)",
+    ed_show_last_event: "Letztes-Ereignis-Badge anzeigen",
+    ed_show_audio: "Audio-Button anzeigen (Ton + Lautstärke)",
+    ed_use_card_audio: "Karten-eigene Audio-Einstellungen (von den globalen Audio-Entitäten entkoppeln)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integration-Vorgabe (nicht überschreiben)",
+    ed_autoplay_lan: "LAN (Auto-Start nur im Heimnetz)",
+    ed_autoplay_always: "Immer",
+    ed_autoplay_never: "Nie (Tap-to-Play Gate)",
+    ed_autoplay_hint: "Steuert wann der Live-Stream automatisch loslegt. Leer lässt die Integration-weite Voreinstellung unangetastet; eine Auswahl überschreibt sie pro Karte.",
+    // ── editor: overview only ──
+    ed_columns: "Spalten",
+    ed_columns_auto: "Auto (Breakpoint)",
+    ed_columns_1: "1 – volle Breite",
+    ed_breakpoint: "Breakpoint – Mindestbreite pro Kachel (px)",
+    ed_breakpoint_hint: "Bei Auto: 1 Spalte unter, 2+ Spalten über diesem Wert. Standard: 650 px",
+    ed_h_display: "Anzeige",
+    ed_show_offline: "Offline-Kameras anzeigen",
+    ed_bosch_sort: "Nach Bosch-App-Reihenfolge sortieren",
+    ed_h_advanced: "Erweitert",
+    ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
+    ed_box_shadow: "Schlagschatten (CSS)",
+    ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
+  },
+
+  es: {
+    play_gate_label: "Iniciar stream",
+    play_gate_hint_remote: "Estás en una conexión remota — toca para iniciar",
+    play_gate_hint_default: "Toca para iniciar el stream en directo",
+    loading: "Cargando…",
+    cam_missing_title: "Cámara no encontrada",
+    cam_missing_sub: "Esta entidad de cámara no existe — revisa el ajuste camera_entity de la tarjeta.",
+    delete: "Eliminar",
+    height: "Altura",
+    pick_color: "Elegir color",
+    volume: "Volumen",
+    audio_tap_for_sound: "Toca para activar el sonido",
+    audio_mute: "Silenciar sonido",
+    audio_unmute: "Activar sonido",
+    audio_available_when_live: "Sonido disponible cuando el stream en directo esté activo",
+    sound_label: "Sonido",
+    enable_sound: "Activar sonido",
+    siren_confirm: "¿Activar realmente la sirena?",
+    siren_triggering: "Activando sirena…",
+    siren_unavailable: "Sirena no disponible para esta cámara.",
+    schedules_zones: "Programaciones y zonas",
+    nvr_no_recordings: "Sin grabaciones para este día",
+    nvr_segments_suffix: "segmento(s) — clic para reproducir",
+    nvr_load_error: "Error al cargar los segmentos",
+    maint_title: "Mantenimiento de Bosch Cloud en curso",
+    maint_title_planned: "Mantenimiento de Bosch Cloud programado",
+    maint_notice: "Aviso de mantenimiento",
+    maint_details: "Detalles en la Bosch Community",
+    maint_body: "La imagen en directo y los snapshots pueden estar limitados durante este período.",
+    maint_active: "en curso",
+    maint_announced: "anunciado",
+    maint_check_status: "Comprobar estado: Bosch Community",
+    maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
+    ed_cam_entity: "Entidad de cámara *",
+    ed_cam_entity_hint: "Obligatorio — el resto de entidades se derivan automáticamente del nombre de la cámara.",
+    ed_no_cams: "No se detectaron cámaras Bosch. Introduce <code>camera.bosch_xxx</code> manualmente o completa primero la configuración de la integración Bosch.",
+    ed_not_set: "(no configurado aún)",
+    ed_title: "Título",
+    ed_title_opt_single: "(opcional, reemplaza el nombre descriptivo)",
+    ed_title_opt: "(opcional)",
+    ed_title_ph_single: "p. ej. Jardín",
+    ed_title_ph_overview: "Bosch Cámaras",
+    ed_h_design: "Diseño",
+    ed_h_design_all: "Diseño (para todos los mosaicos)",
+    ed_apple_style: "Superposición de cristal estilo Apple (activo por defecto)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (detectar mediante user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modo",
+    ed_mode_auto: "Auto (claro/oscuro del sistema)",
+    ed_mode_day: "Día",
+    ed_mode_night: "Noche",
+    ed_minimal_single: "Diseño mínimo (el menú adicional oculta todos los interruptores inicialmente)",
+    ed_minimal_overview: "Diseño mínimo (interruptores en el menú adicional) — recomendado para la cuadrícula",
+    ed_compact_single: "Mosaico compacto (para cuadrícula de resumen: solo vídeo + píldora de título, sin barra de píldoras)",
+    ed_compact_overview: "Mosaico compacto (solo vídeo + píldora de título, sin barra de píldoras)",
+    ed_show_title: "Mostrar píldora de título (desactivado = solo vídeo, sin superposición de nombre)",
+    ed_show_last_event: "Mostrar insignia del último evento",
+    ed_show_audio: "Mostrar botón de audio (sonido + volumen)",
+    ed_use_card_audio: "Usar ajustes de audio de la tarjeta (desacoplar de las entidades de audio globales)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Predeterminado de la integración (sin anular)",
+    ed_autoplay_lan: "LAN (inicio automático solo en la red doméstica)",
+    ed_autoplay_always: "Siempre",
+    ed_autoplay_never: "Nunca (pantalla de toque para reproducir)",
+    ed_autoplay_hint: "Controla cuándo el stream en directo se inicia solo. Vacío mantiene el predeterminado global de la integración; una selección lo anula por tarjeta.",
+    ed_columns: "Columnas",
+    ed_columns_auto: "Auto (punto de ruptura)",
+    ed_columns_1: "1 – ancho completo",
+    ed_breakpoint: "Punto de ruptura – ancho mínimo por mosaico (px)",
+    ed_breakpoint_hint: "En Auto: 1 columna por debajo, 2+ columnas por encima de este valor. Predeterminado: 650 px",
+    ed_h_display: "Visualización",
+    ed_show_offline: "Mostrar cámaras sin conexión",
+    ed_bosch_sort: "Ordenar según el orden de la app Bosch",
+    ed_h_advanced: "Avanzado",
+    ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
+    ed_box_shadow: "Sombra (CSS)",
+    ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
+  },
+  fr: {
+    play_gate_label: "Démarrer le flux",
+    play_gate_hint_remote: "Vous êtes en connexion distante — appuyer pour démarrer",
+    play_gate_hint_default: "Appuyer pour démarrer le flux en direct",
+    loading: "Chargement…",
+    cam_missing_title: "Caméra introuvable",
+    cam_missing_sub: "Cette entité de caméra n'existe pas — vérifiez le paramètre camera_entity de la carte.",
+    delete: "Supprimer",
+    height: "Hauteur",
+    pick_color: "Choisir une couleur",
+    volume: "Volume",
+    audio_tap_for_sound: "Appuyer pour le son",
+    audio_mute: "Couper le son",
+    audio_unmute: "Activer le son",
+    audio_available_when_live: "Son disponible une fois le flux en direct actif",
+    sound_label: "Son",
+    enable_sound: "Activer le son",
+    siren_confirm: "Vraiment déclencher la sirène ?",
+    siren_triggering: "Déclenchement de la sirène…",
+    siren_unavailable: "Sirène non disponible pour cette caméra.",
+    schedules_zones: "Planifications & zones",
+    nvr_no_recordings: "Aucun enregistrement pour ce jour",
+    nvr_segments_suffix: "segment(s) — cliquer pour lire",
+    nvr_load_error: "Erreur lors du chargement des segments",
+    maint_title: "Maintenance Bosch Cloud en cours",
+    maint_title_planned: "Maintenance Bosch Cloud planifiée",
+    maint_notice: "Avis de maintenance",
+    maint_details: "Détails sur la Bosch Community",
+    maint_body: "L'image en direct et les snapshots peuvent être limités pendant cette fenêtre.",
+    maint_active: "en cours",
+    maint_announced: "annoncée",
+    maint_check_status: "Vérifier le statut : Bosch Community",
+    maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
+    ed_cam_entity: "Entité caméra *",
+    ed_cam_entity_hint: "Obligatoire — toutes les autres entités sont dérivées automatiquement du nom de la caméra.",
+    ed_no_cams: "Aucune caméra Bosch détectée. Saisir <code>camera.bosch_xxx</code> manuellement, ou terminer d'abord la configuration de l'intégration Bosch.",
+    ed_not_set: "(non défini)",
+    ed_title: "Titre",
+    ed_title_opt_single: "(optionnel, remplace le nom convivial)",
+    ed_title_opt: "(optionnel)",
+    ed_title_ph_single: "ex. Jardin",
+    ed_title_ph_overview: "Bosch Caméras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (pour toutes les tuiles)",
+    ed_apple_style: "Superposition verre style Apple (activé par défaut)",
+    ed_theme: "Thème",
+    ed_theme_auto: "Auto (détection via agent utilisateur)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Mode",
+    ed_mode_auto: "Auto (clair/sombre système)",
+    ed_mode_day: "Jour",
+    ed_mode_night: "Nuit",
+    ed_minimal_single: "Mise en page minimale (le menu plus masque tous les interrupteurs au départ)",
+    ed_minimal_overview: "Mise en page minimale (interrupteurs dans le menu plus) — recommandé pour la grille",
+    ed_compact_single: "Tuile compacte (pour la grille : vidéo + pastille de titre uniquement, sans barre de pastilles)",
+    ed_compact_overview: "Tuile compacte (vidéo + pastille de titre uniquement, sans barre de pastilles)",
+    ed_show_title: "Afficher la pastille de titre (désactivé = vidéo uniquement, sans nom)",
+    ed_show_last_event: "Afficher le badge du dernier événement",
+    ed_show_audio: "Afficher le bouton audio (son + volume)",
+    ed_use_card_audio: "Utiliser les réglages audio de la carte (découpler des entités audio globales)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Défaut de l'intégration (ne pas remplacer)",
+    ed_autoplay_lan: "LAN (démarrage automatique sur le réseau domestique uniquement)",
+    ed_autoplay_always: "Toujours",
+    ed_autoplay_never: "Jamais (appuyer pour lire)",
+    ed_autoplay_hint: "Contrôle quand le flux en direct démarre automatiquement. Vide conserve le défaut global de l'intégration ; un choix le remplace par carte.",
+    ed_columns: "Colonnes",
+    ed_columns_auto: "Auto (point de rupture)",
+    ed_columns_1: "1 – pleine largeur",
+    ed_breakpoint: "Point de rupture – largeur minimale par tuile (px)",
+    ed_breakpoint_hint: "En Auto : 1 colonne en dessous, 2+ colonnes au-dessus de cette valeur. Défaut : 650 px",
+    ed_h_display: "Affichage",
+    ed_show_offline: "Afficher les caméras hors ligne",
+    ed_bosch_sort: "Trier selon l'ordre de l'app Bosch",
+    ed_h_advanced: "Avancé",
+    ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
+    ed_box_shadow: "Ombre portée (CSS)",
+    ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
+  },
+  it: {
+    play_gate_label: "Avvia stream",
+    play_gate_hint_remote: "Connessione remota — tocca per avviare",
+    play_gate_hint_default: "Tocca per avviare il live stream",
+    loading: "Caricamento…",
+    cam_missing_title: "Telecamera non trovata",
+    cam_missing_sub: "Questa entità telecamera non esiste — controlla l'impostazione camera_entity della scheda.",
+    delete: "Elimina",
+    height: "Altezza",
+    pick_color: "Scegli colore",
+    volume: "Volume",
+    audio_tap_for_sound: "Tocca per l'audio",
+    audio_mute: "Disattiva audio",
+    audio_unmute: "Attiva audio",
+    audio_available_when_live: "Audio disponibile non appena il live stream è in esecuzione",
+    sound_label: "Audio",
+    enable_sound: "Attiva audio",
+    siren_confirm: "Attivare davvero la sirena?",
+    siren_triggering: "Attivazione sirena…",
+    siren_unavailable: "Sirena non disponibile per questa telecamera.",
+    schedules_zones: "Pianificazioni e zone",
+    nvr_no_recordings: "Nessuna registrazione per questo giorno",
+    nvr_segments_suffix: "segmento/i — clicca per riprodurre",
+    nvr_load_error: "Errore nel caricamento dei segmenti",
+    maint_title: "Manutenzione Bosch Cloud in corso",
+    maint_title_planned: "Manutenzione Bosch Cloud programmata",
+    maint_notice: "Avviso di manutenzione",
+    maint_details: "Dettagli sulla Bosch Community",
+    maint_body: "Immagine in diretta e Snapshot potrebbero essere limitati durante questa finestra.",
+    maint_active: "in corso",
+    maint_announced: "annunciata",
+    maint_check_status: "Verifica stato: Bosch Community",
+    maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
+    ed_cam_entity: "Entità telecamera *",
+    ed_cam_entity_hint: "Obbligatorio — tutte le altre entità vengono derivate automaticamente dal nome della telecamera.",
+    ed_no_cams: "Nessuna telecamera Bosch rilevata. Inserisci <code>camera.bosch_xxx</code> manualmente, oppure completa prima la configurazione dell'integrazione Bosch.",
+    ed_not_set: "(non ancora impostato)",
+    ed_title: "Titolo",
+    ed_title_opt_single: "(opzionale, sovrascrive il nome descrittivo)",
+    ed_title_opt: "(opzionale)",
+    ed_title_ph_single: "es. Giardino",
+    ed_title_ph_overview: "Bosch Telecamere",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (per tutte le celle)",
+    ed_apple_style: "Overlay vetro in stile Apple (attivo per impostazione predefinita)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (rileva tramite user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modalità",
+    ed_mode_auto: "Auto (chiaro/scuro di sistema)",
+    ed_mode_day: "Giorno",
+    ed_mode_night: "Notte",
+    ed_minimal_single: "Layout minimale (il menu «altro» nasconde tutti gli interruttori inizialmente)",
+    ed_minimal_overview: "Layout minimale (interruttori nel menu «altro») — consigliato per la griglia",
+    ed_compact_single: "Cella compatta (per la griglia: solo video + pill titolo, nessuna barra pill)",
+    ed_compact_overview: "Cella compatta (solo video + pill titolo, nessuna barra pill)",
+    ed_show_title: "Mostra pill titolo (off = solo video, nessuna sovrimpressione nome)",
+    ed_show_last_event: "Mostra badge ultimo evento",
+    ed_show_audio: "Mostra pulsante audio (suono + volume)",
+    ed_use_card_audio: "Usa le impostazioni audio della scheda (disaccoppia dalle entità audio globali)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Impostazione predefinita dell'integrazione (non sovrascrivere)",
+    ed_autoplay_lan: "LAN (avvio automatico solo sulla rete domestica)",
+    ed_autoplay_always: "Sempre",
+    ed_autoplay_never: "Mai (overlay tocca-per-riprodurre)",
+    ed_autoplay_hint: "Controlla quando il live stream si avvia autonomamente. Vuoto mantiene il valore predefinito dell'integrazione; una scelta lo sovrascrive per card.",
+    ed_columns: "Colonne",
+    ed_columns_auto: "Auto (breakpoint)",
+    ed_columns_1: "1 – larghezza piena",
+    ed_breakpoint: "Breakpoint – larghezza minima per cella (px)",
+    ed_breakpoint_hint: "Con Auto: 1 colonna sotto, 2+ colonne sopra questo valore. Predefinito: 650 px",
+    ed_h_display: "Visualizzazione",
+    ed_show_offline: "Mostra telecamere offline",
+    ed_bosch_sort: "Ordina secondo l'ordine dell'app Bosch",
+    ed_h_advanced: "Avanzate",
+    ed_border_radius: "Raggio angoli (CSS, es. 16px)",
+    ed_box_shadow: "Ombra (CSS)",
+    ed_show_motion_zones: "Mostra overlay zone di movimento",
+  },
+  nl: {
+    play_gate_label: "Stream starten",
+    play_gate_hint_remote: "U bent op een externe verbinding — tik om te starten",
+    play_gate_hint_default: "Tik om de live stream te starten",
+    loading: "Laden…",
+    cam_missing_title: "Camera niet gevonden",
+    cam_missing_sub: "Deze camera-entiteit bestaat niet — controleer de camera_entity-instelling van de kaart.",
+    delete: "Verwijderen",
+    height: "Hoogte",
+    pick_color: "Kleur kiezen",
+    volume: "Volume",
+    audio_tap_for_sound: "Tik voor geluid",
+    audio_mute: "Geluid dempen",
+    audio_unmute: "Geluid inschakelen",
+    audio_available_when_live: "Geluid beschikbaar zodra de live stream actief is",
+    sound_label: "Geluid",
+    enable_sound: "Geluid inschakelen",
+    siren_confirm: "Sirene echt activeren?",
+    siren_triggering: "Sirene wordt geactiveerd…",
+    siren_unavailable: "Sirene niet beschikbaar voor deze camera.",
+    schedules_zones: "Schema's & zones",
+    nvr_no_recordings: "Geen opnames voor deze dag",
+    nvr_segments_suffix: "segment(en) — klik om af te spelen",
+    nvr_load_error: "Fout bij laden van segmenten",
+    maint_title: "Bosch cloud-onderhoud actief",
+    maint_title_planned: "Bosch cloud-onderhoud gepland",
+    maint_notice: "Onderhoudsmelding",
+    maint_details: "Details op de Bosch Community",
+    maint_body: "Live beeld en snapshots kunnen beperkt zijn tijdens dit venster.",
+    maint_active: "actief",
+    maint_announced: "aangekondigd",
+    maint_check_status: "Status controleren: Bosch Community",
+    maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
+    ed_cam_entity: "Camera-entiteit *",
+    ed_cam_entity_hint: "Verplicht — alle andere entiteiten worden automatisch afgeleid van de cameranaam.",
+    ed_no_cams: "Geen Bosch-camera's gevonden. Voer <code>camera.bosch_xxx</code> handmatig in, of voltooi eerst de Bosch-integratieconfiguratie.",
+    ed_not_set: "(nog niet ingesteld)",
+    ed_title: "Titel",
+    ed_title_opt_single: "(optioneel, overschrijft de beschrijvende naam)",
+    ed_title_opt: "(optioneel)",
+    ed_title_ph_single: "bijv. Tuin",
+    ed_title_ph_overview: "Bosch Camera's",
+    ed_h_design: "Ontwerp",
+    ed_h_design_all: "Ontwerp (voor alle tegels)",
+    ed_apple_style: "Apple-stijl glazen overlay (standaard aan)",
+    ed_theme: "Thema",
+    ed_theme_auto: "Auto (detecteren via user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modus",
+    ed_mode_auto: "Auto (systeem licht/donker)",
+    ed_mode_day: "Dag",
+    ed_mode_night: "Nacht",
+    ed_minimal_single: "Minimale indeling (meer-menu verbergt alle schakelaars aanvankelijk)",
+    ed_minimal_overview: "Minimale indeling (schakelaars achter het meer-menu) — aanbevolen voor het raster",
+    ed_compact_single: "Compacte tegel (voor overzichtsraster: video + titelpil, geen pilbalk)",
+    ed_compact_overview: "Compacte tegel (video + titelpil, geen pilbalk)",
+    ed_show_title: "Titelpil tonen (uit = alleen video, geen naamoverlay)",
+    ed_show_last_event: "Badge laatste gebeurtenis tonen",
+    ed_show_audio: "Audioknop tonen (geluid + volume)",
+    ed_use_card_audio: "Kaart-eigen audio-instellingen (loskoppelen van de globale audio-entiteiten)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integratiestandaard (niet overschrijven)",
+    ed_autoplay_lan: "LAN (automatisch starten alleen op thuisnetwerk)",
+    ed_autoplay_always: "Altijd",
+    ed_autoplay_never: "Nooit (tik-om-te-spelen-scherm)",
+    ed_autoplay_hint: "Bepaalt wanneer de live stream vanzelf start. Leeg laat de integratiestandaard ongewijzigd; een keuze overschrijft die per kaart.",
+    ed_columns: "Kolommen",
+    ed_columns_auto: "Auto (breekpunt)",
+    ed_columns_1: "1 – volledige breedte",
+    ed_breakpoint: "Breekpunt – minimale breedte per tegel (px)",
+    ed_breakpoint_hint: "Bij Auto: 1 kolom eronder, 2+ kolommen erboven. Standaard: 650 px",
+    ed_h_display: "Weergave",
+    ed_show_offline: "Offline camera's tonen",
+    ed_bosch_sort: "Sorteren op Bosch-app-volgorde",
+    ed_h_advanced: "Geavanceerd",
+    ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
+    ed_box_shadow: "Slagschaduw (CSS)",
+    ed_show_motion_zones: "Bewegingszone-overlay tonen",
+  },
+  pl: {
+    play_gate_label: "Uruchom strumień",
+    play_gate_hint_remote: "Jesteś połączony zdalnie — dotknij, aby uruchomić",
+    play_gate_hint_default: "Dotknij, aby uruchomić transmisję na żywo",
+    loading: "Ładowanie…",
+    cam_missing_title: "Nie znaleziono kamery",
+    cam_missing_sub: "Ta encja kamery nie istnieje — sprawdź ustawienie camera_entity karty.",
+    delete: "Usuń",
+    height: "Wysokość",
+    pick_color: "Wybierz kolor",
+    volume: "Głośność",
+    audio_tap_for_sound: "Dotknij, aby włączyć dźwięk",
+    audio_mute: "Wycisz dźwięk",
+    audio_unmute: "Włącz dźwięk",
+    audio_available_when_live: "Dźwięk dostępny po uruchomieniu transmisji na żywo",
+    sound_label: "Dźwięk",
+    enable_sound: "Włącz dźwięk",
+    siren_confirm: "Na pewno uruchomić syrenę?",
+    siren_triggering: "Uruchamianie syreny…",
+    siren_unavailable: "Syrena niedostępna dla tej kamery.",
+    schedules_zones: "Harmonogramy i strefy",
+    nvr_no_recordings: "Brak nagrań dla tego dnia",
+    nvr_segments_suffix: "segment(y) — kliknij, aby odtworzyć",
+    nvr_load_error: "Błąd ładowania segmentów",
+    maint_title: "Trwa konserwacja chmury Bosch",
+    maint_title_planned: "Zaplanowana konserwacja chmury Bosch",
+    maint_notice: "Komunikat o konserwacji",
+    maint_details: "Szczegóły na Bosch Community",
+    maint_body: "Podgląd na żywo i migawki mogą być ograniczone w tym czasie.",
+    maint_active: "w toku",
+    maint_announced: "ogłoszona",
+    maint_check_status: "Sprawdź status: Bosch Community",
+    maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
+    ed_cam_entity: "Encja kamery *",
+    ed_cam_entity_hint: "Wymagane — wszystkie pozostałe encje są automatycznie wyprowadzane z nazwy kamery.",
+    ed_no_cams: "Nie wykryto kamer Bosch. Wpisz <code>camera.bosch_xxx</code> ręcznie lub najpierw zakończ konfigurację integracji Bosch.",
+    ed_not_set: "(jeszcze nie ustawiono)",
+    ed_title: "Tytuł",
+    ed_title_opt_single: "(opcjonalnie, zastępuje przyjazną nazwę)",
+    ed_title_opt: "(opcjonalnie)",
+    ed_title_ph_single: "np. Ogród",
+    ed_title_ph_overview: "Bosch Kamery",
+    ed_h_design: "Wygląd",
+    ed_h_design_all: "Wygląd (dla wszystkich kafelków)",
+    ed_apple_style: "Szklana nakładka w stylu Apple (domyślnie włączona)",
+    ed_theme: "Motyw",
+    ed_theme_auto: "Auto (wykryj na podstawie user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Tryb",
+    ed_mode_auto: "Auto (jasny/ciemny systemowy)",
+    ed_mode_day: "Dzienny",
+    ed_mode_night: "Nocny",
+    ed_minimal_single: "Minimalny układ (menu rozwijane ukrywa wszystkie przełączniki na początku)",
+    ed_minimal_overview: "Minimalny układ (przełączniki w menu rozwijanym) — zalecane dla siatki",
+    ed_compact_single: "Kompaktowy kafelek (dla siatki: tylko wideo i pasek tytułu, bez paska przycisków)",
+    ed_compact_overview: "Kompaktowy kafelek (tylko wideo i pasek tytułu, bez paska przycisków)",
+    ed_show_title: "Pokaż pasek tytułu (wył. = tylko wideo, bez nakładki nazwy)",
+    ed_show_last_event: "Pokaż znacznik ostatniego zdarzenia",
+    ed_show_audio: "Pokaż przycisk audio (dźwięk i głośność)",
+    ed_use_card_audio: "Użyj ustawień audio karty (odłącz od globalnych encji audio)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Domyślne integracji (bez nadpisania)",
+    ed_autoplay_lan: "LAN (automatyczny start tylko w sieci domowej)",
+    ed_autoplay_always: "Zawsze",
+    ed_autoplay_never: "Nigdy (brama dotyk-aby-odtworzyć)",
+    ed_autoplay_hint: "Określa, kiedy transmisja na żywo uruchamia się samoczynnie. Puste zachowuje domyślne ustawienie całej integracji; wybranie opcji nadpisuje je osobno dla tej karty.",
+    ed_columns: "Kolumny",
+    ed_columns_auto: "Auto (punkt przełamania)",
+    ed_columns_1: "1 – pełna szerokość",
+    ed_breakpoint: "Punkt przełamania — minimalna szerokość kafelka (px)",
+    ed_breakpoint_hint: "Przy Auto: 1 kolumna poniżej, 2+ kolumny powyżej tej wartości. Domyślnie: 650 px",
+    ed_h_display: "Wyświetlanie",
+    ed_show_offline: "Pokaż kamery offline",
+    ed_bosch_sort: "Sortuj według kolejności w aplikacji Bosch",
+    ed_h_advanced: "Zaawansowane",
+    ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
+    ed_box_shadow: "Cień (CSS)",
+    ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
+  },
+  pt: {
+    play_gate_label: "Iniciar stream",
+    play_gate_hint_remote: "Está numa ligação remota — toque para iniciar",
+    play_gate_hint_default: "Toque para iniciar o stream ao vivo",
+    loading: "A carregar…",
+    cam_missing_title: "Câmara não encontrada",
+    cam_missing_sub: "Esta entidade de câmara não existe — verifique a definição camera_entity do cartão.",
+    delete: "Eliminar",
+    height: "Altura",
+    pick_color: "Escolher cor",
+    volume: "Volume",
+    audio_tap_for_sound: "Toque para som",
+    audio_mute: "Desativar som",
+    audio_unmute: "Ativar som",
+    audio_available_when_live: "Som disponível assim que o stream ao vivo estiver a funcionar",
+    sound_label: "Som",
+    enable_sound: "Ativar som",
+    siren_confirm: "Ativar a sirene mesmo assim?",
+    siren_triggering: "A ativar sirene…",
+    siren_unavailable: "Sirene não disponível para esta câmara.",
+    schedules_zones: "Agendamentos e zonas",
+    nvr_no_recordings: "Sem gravações para este dia",
+    nvr_segments_suffix: "segmento(s) — clique para reproduzir",
+    nvr_load_error: "Erro ao carregar segmentos",
+    maint_title: "Manutenção da cloud Bosch em curso",
+    maint_title_planned: "Manutenção da cloud Bosch agendada",
+    maint_notice: "Aviso de manutenção",
+    maint_details: "Detalhes na Bosch Community",
+    maint_body: "A imagem ao vivo e os snapshots podem estar limitados durante esta janela.",
+    maint_active: "em curso",
+    maint_announced: "anunciada",
+    maint_check_status: "Verificar estado: Bosch Community",
+    maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
+    ed_cam_entity: "Entidade de câmara *",
+    ed_cam_entity_hint: "Obrigatório — todas as outras entidades são derivadas automaticamente do nome da câmara.",
+    ed_no_cams: "Nenhuma câmara Bosch detectada. Introduza <code>camera.bosch_xxx</code> manualmente ou conclua primeiro a configuração da integração Bosch.",
+    ed_not_set: "(não definido ainda)",
+    ed_title: "Título",
+    ed_title_opt_single: "(opcional, substitui o nome amigável)",
+    ed_title_opt: "(opcional)",
+    ed_title_ph_single: "ex. Jardim",
+    ed_title_ph_overview: "Bosch Câmaras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (para todos os mosaicos)",
+    ed_apple_style: "Sobreposição de vidro estilo Apple (ativado por predefinição)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (detetar via agente de utilizador)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modo",
+    ed_mode_auto: "Auto (claro/escuro do sistema)",
+    ed_mode_day: "Dia",
+    ed_mode_night: "Noite",
+    ed_minimal_single: "Disposição mínima (o menu adicional oculta todos os interruptores inicialmente)",
+    ed_minimal_overview: "Disposição mínima (interruptores no menu adicional) — recomendado para a grelha",
+    ed_compact_single: "Mosaico compacto (para grelha de visão geral: apenas vídeo + pílula de título, sem barra de pílulas)",
+    ed_compact_overview: "Mosaico compacto (apenas vídeo + pílula de título, sem barra de pílulas)",
+    ed_show_title: "Mostrar pílula de título (desativado = apenas vídeo, sem sobreposição de nome)",
+    ed_show_last_event: "Mostrar distintivo do último evento",
+    ed_show_audio: "Mostrar botão de áudio (som + volume)",
+    ed_use_card_audio: "Usar definições de áudio do cartão (desacoplar das entidades de áudio globais)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Predefinição da integração (não substituir)",
+    ed_autoplay_lan: "LAN (iniciar automaticamente apenas na rede doméstica)",
+    ed_autoplay_always: "Sempre",
+    ed_autoplay_never: "Nunca (ecrã de toque para reproduzir)",
+    ed_autoplay_hint: "Controla quando o stream ao vivo inicia por si mesmo. Vazio mantém a predefinição global da integração; uma opção substitui-a por cartão.",
+    ed_columns: "Colunas",
+    ed_columns_auto: "Auto (ponto de quebra)",
+    ed_columns_1: "1 – largura total",
+    ed_breakpoint: "Ponto de quebra – largura mínima por mosaico (px)",
+    ed_breakpoint_hint: "Em Auto: 1 coluna abaixo, 2+ colunas acima deste valor. Predefinição: 650 px",
+    ed_h_display: "Visualização",
+    ed_show_offline: "Mostrar câmaras offline",
+    ed_bosch_sort: "Ordenar pela ordem da app Bosch",
+    ed_h_advanced: "Avançado",
+    ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
+    ed_box_shadow: "Sombra (CSS)",
+    ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
+  },
+  ru: {
+    play_gate_label: "Запустить трансляцию",
+    play_gate_hint_remote: "Вы подключены удалённо — нажмите для запуска",
+    play_gate_hint_default: "Нажмите для запуска прямой трансляции",
+    loading: "Загрузка…",
+    cam_missing_title: "Камера не найдена",
+    cam_missing_sub: "Этот объект камеры не существует — проверьте параметр camera_entity карточки.",
+    delete: "Удалить",
+    height: "Высота",
+    pick_color: "Выбрать цвет",
+    volume: "Громкость",
+    audio_tap_for_sound: "Нажмите для звука",
+    audio_mute: "Выключить звук",
+    audio_unmute: "Включить звук",
+    audio_available_when_live: "Звук доступен после запуска прямой трансляции",
+    sound_label: "Звук",
+    enable_sound: "Включить звук",
+    siren_confirm: "Действительно активировать сирену?",
+    siren_triggering: "Активация сирены…",
+    siren_unavailable: "Сирена недоступна для этой камеры.",
+    schedules_zones: "Расписания и зоны",
+    nvr_no_recordings: "Записей за этот день нет",
+    nvr_segments_suffix: "сегмент(ов) — нажмите для воспроизведения",
+    nvr_load_error: "Ошибка загрузки сегментов",
+    maint_title: "Техническое обслуживание Bosch Cloud выполняется",
+    maint_title_planned: "Техническое обслуживание Bosch Cloud запланировано",
+    maint_notice: "Уведомление об обслуживании",
+    maint_details: "Подробности на Bosch Community",
+    maint_body: "Прямое изображение и снимки могут быть ограничены в этот период.",
+    maint_active: "выполняется",
+    maint_announced: "объявлено",
+    maint_check_status: "Проверить статус: Bosch Community",
+    maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
+    ed_cam_entity: "Сущность камеры *",
+    ed_cam_entity_hint: "Обязательно — все остальные сущности определяются автоматически по имени камеры.",
+    ed_no_cams: "Камеры Bosch не обнаружены. Введите <code>camera.bosch_xxx</code> вручную или сначала завершите настройку интеграции Bosch.",
+    ed_not_set: "(не задано)",
+    ed_title: "Заголовок",
+    ed_title_opt_single: "(необязательно, переопределяет дружественное имя)",
+    ed_title_opt: "(необязательно)",
+    ed_title_ph_single: "напр. Сад",
+    ed_title_ph_overview: "Bosch Камеры",
+    ed_h_design: "Оформление",
+    ed_h_design_all: "Оформление (для всех плиток)",
+    ed_apple_style: "Стеклянный оверлей в стиле Apple (по умолчанию включён)",
+    ed_theme: "Тема",
+    ed_theme_auto: "Auto (определить по user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Режим",
+    ed_mode_auto: "Auto (системный светлый/тёмный)",
+    ed_mode_day: "День",
+    ed_mode_night: "Ночь",
+    ed_minimal_single: "Компактный макет (дополнительное меню скрывает все переключатели)",
+    ed_minimal_overview: "Компактный макет (переключатели за дополнительным меню) — рекомендуется для сетки",
+    ed_compact_single: "Уменьшенная плитка (для сетки: только видео + плашка заголовка, без панели)",
+    ed_compact_overview: "Уменьшенная плитка (только видео + плашка заголовка, без панели)",
+    ed_show_title: "Показывать плашку заголовка (выкл = только видео, без имени)",
+    ed_show_last_event: "Показывать значок последнего события",
+    ed_show_audio: "Показывать кнопку звука (звук + громкость)",
+    ed_use_card_audio: "Использовать настройки звука карточки (отвязать от глобальных аудио-сущностей)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Настройка интеграции (не переопределять)",
+    ed_autoplay_lan: "LAN (автозапуск только в домашней сети)",
+    ed_autoplay_always: "Всегда",
+    ed_autoplay_never: "Никогда (нажать для показа)",
+    ed_autoplay_hint: "Управляет автоматическим запуском прямой трансляции. Пусто — сохраняет общую настройку интеграции; выбор переопределяет её для этой карточки.",
+    ed_columns: "Столбцы",
+    ed_columns_auto: "Auto (точка перехода)",
+    ed_columns_1: "1 — во всю ширину",
+    ed_breakpoint: "Точка перехода — мин. ширина плитки (px)",
+    ed_breakpoint_hint: "При Auto: 1 столбец ниже, 2+ столбца выше этого значения. По умолчанию: 650 px",
+    ed_h_display: "Отображение",
+    ed_show_offline: "Показывать офлайн-камеры",
+    ed_bosch_sort: "Сортировать по порядку в приложении Bosch",
+    ed_h_advanced: "Дополнительно",
+    ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
+    ed_box_shadow: "Тень (CSS)",
+    ed_show_motion_zones: "Показывать зоны движения",
+  },
+  uk: {
+    play_gate_label: "Розпочати трансляцію",
+    play_gate_hint_remote: "Ви у віддаленій мережі — торкніться для запуску",
+    play_gate_hint_default: "Торкніться, щоб розпочати пряму трансляцію",
+    loading: "Завантаження…",
+    cam_missing_title: "Камеру не знайдено",
+    cam_missing_sub: "Цей об'єкт камери не існує — перевірте параметр camera_entity картки.",
+    delete: "Видалити",
+    height: "Висота",
+    pick_color: "Вибрати колір",
+    volume: "Гучність",
+    audio_tap_for_sound: "Торкніться для звуку",
+    audio_mute: "Вимкнути звук",
+    audio_unmute: "Увімкнути звук",
+    audio_available_when_live: "Звук доступний після запуску прямої трансляції",
+    sound_label: "Звук",
+    enable_sound: "Увімкнути звук",
+    siren_confirm: "Справді активувати сирену?",
+    siren_triggering: "Активація сирени…",
+    siren_unavailable: "Сирена недоступна для цієї камери.",
+    schedules_zones: "Розклади та зони",
+    nvr_no_recordings: "Немає записів за цей день",
+    nvr_segments_suffix: "сегмент(ів) — натисніть для відтворення",
+    nvr_load_error: "Помилка завантаження сегментів",
+    maint_title: "Технічне обслуговування хмари Bosch",
+    maint_title_planned: "Заплановане технічне обслуговування хмари Bosch",
+    maint_notice: "Повідомлення про обслуговування",
+    maint_details: "Подробиці на Bosch Community",
+    maint_body: "Пряме зображення та знімки можуть бути обмежені в цей період.",
+    maint_active: "виконується",
+    maint_announced: "анонсовано",
+    maint_check_status: "Перевірити статус: Bosch Community",
+    maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
+    ed_cam_entity: "Об'єкт камери *",
+    ed_cam_entity_hint: "Обов'язково — всі інші об'єкти визначаються автоматично за назвою камери.",
+    ed_no_cams: "Камери Bosch не виявлено. Введіть <code>camera.bosch_xxx</code> вручну або спочатку завершіть налаштування інтеграції Bosch.",
+    ed_not_set: "(не задано)",
+    ed_title: "Назва",
+    ed_title_opt_single: "(необов'язково, замінює зручну назву)",
+    ed_title_opt: "(необов'язково)",
+    ed_title_ph_single: "напр. Сад",
+    ed_title_ph_overview: "Bosch Камери",
+    ed_h_design: "Дизайн",
+    ed_h_design_all: "Дизайн (для всіх плиток)",
+    ed_apple_style: "Скляне накладення у стилі Apple (увімкнено за замовчуванням)",
+    ed_theme: "Тема",
+    ed_theme_auto: "Auto (визначати через user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Режим",
+    ed_mode_auto: "Auto (системна світла/темна тема)",
+    ed_mode_day: "День",
+    ed_mode_night: "Ніч",
+    ed_minimal_single: "Мінімальний макет (додаткове меню приховує всі перемикачі спочатку)",
+    ed_minimal_overview: "Мінімальний макет (перемикачі в додатковому меню) — рекомендовано для сітки",
+    ed_compact_single: "Компактна плитка (для сітки огляду: лише відео + плашка назви, без панелі плашок)",
+    ed_compact_overview: "Компактна плитка (лише відео + плашка назви, без панелі плашок)",
+    ed_show_title: "Показувати плашку назви (вимк = лише відео, без накладення імені)",
+    ed_show_last_event: "Показувати значок останньої події",
+    ed_show_audio: "Показувати кнопку аудіо (звук + гучність)",
+    ed_use_card_audio: "Використовувати налаштування звуку картки (відв'язати від глобальних аудіосутностей)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Типове значення інтеграції (не перевизначати)",
+    ed_autoplay_lan: "LAN (автозапуск лише в домашній мережі)",
+    ed_autoplay_always: "Завжди",
+    ed_autoplay_never: "Ніколи (вікно «торкніться для відтворення»)",
+    ed_autoplay_hint: "Керує автоматичним запуском прямої трансляції. Порожньо зберігає загальне значення інтеграції; вибір перевизначає його для цієї картки.",
+    ed_columns: "Стовпці",
+    ed_columns_auto: "Auto (контрольна точка)",
+    ed_columns_1: "1 – на всю ширину",
+    ed_breakpoint: "Контрольна точка – мінімальна ширина плитки (px)",
+    ed_breakpoint_hint: "При Auto: 1 стовпець нижче, 2+ стовпці вище цього значення. За замовчуванням: 650 px",
+    ed_h_display: "Відображення",
+    ed_show_offline: "Показувати камери в режимі офлайн",
+    ed_bosch_sort: "Сортувати за порядком у додатку Bosch",
+    ed_h_advanced: "Додатково",
+    ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
+    ed_box_shadow: "Тінь (CSS)",
+    ed_show_motion_zones: "Показувати зони руху",
+  },
+  "zh-Hans": {
+    play_gate_label: "启动直播",
+    play_gate_hint_remote: "您正在远程连接 — 点击启动",
+    play_gate_hint_default: "点击启动实时直播",
+    loading: "加载中…",
+    cam_missing_title: "未找到摄像头",
+    cam_missing_sub: "此摄像头实体不存在 — 请检查卡片的 camera_entity 设置。",
+    delete: "删除",
+    height: "高度",
+    pick_color: "选择颜色",
+    volume: "音量",
+    audio_tap_for_sound: "点击开启声音",
+    audio_mute: "静音",
+    audio_unmute: "开启声音",
+    audio_available_when_live: "实时直播运行后方可使用声音",
+    sound_label: "声音",
+    enable_sound: "开启声音",
+    siren_confirm: "确定触发警报器？",
+    siren_triggering: "正在触发警报器…",
+    siren_unavailable: "此摄像头不支持警报器。",
+    schedules_zones: "计划与区域",
+    nvr_no_recordings: "当天无录像",
+    nvr_segments_suffix: "个片段 — 点击播放",
+    nvr_load_error: "加载片段出错",
+    maint_title: "Bosch 云端维护进行中",
+    maint_title_planned: "Bosch 云端维护已计划",
+    maint_notice: "维护通知",
+    maint_details: "详情见 Bosch Community",
+    maint_body: "维护期间实时画面和快照可能受限。",
+    maint_active: "进行中",
+    maint_announced: "已公告",
+    maint_check_status: "查看状态：Bosch Community",
+    maint_auto_return: "云端恢复后摄像头将自动重新连接。",
+    ed_cam_entity: "摄像头实体 *",
+    ed_cam_entity_hint: "必填 — 所有其他实体均根据摄像头名称自动派生。",
+    ed_no_cams: "未检测到 Bosch 摄像头。请手动输入 <code>camera.bosch_xxx</code>，或先完成 Bosch 集成配置。",
+    ed_not_set: "（尚未设置）",
+    ed_title: "标题",
+    ed_title_opt_single: "（可选，覆盖友好名称）",
+    ed_title_opt: "（可选）",
+    ed_title_ph_single: "例如：花园",
+    ed_title_ph_overview: "Bosch 摄像头",
+    ed_h_design: "外观",
+    ed_h_design_all: "外观（适用于所有磁贴）",
+    ed_apple_style: "Apple 风格玻璃遮罩（默认开启）",
+    ed_theme: "主题",
+    ed_theme_auto: "Auto（通过 user agent 自动检测）",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "模式",
+    ed_mode_auto: "Auto（跟随系统亮色/暗色）",
+    ed_mode_day: "白天",
+    ed_mode_night: "夜间",
+    ed_minimal_single: "简洁布局（更多菜单默认隐藏所有开关）",
+    ed_minimal_overview: "简洁布局（开关收入更多菜单）— 推荐用于网格视图",
+    ed_compact_single: "紧凑磁贴（用于概览网格：仅视频 + 标题标签，无控制栏）",
+    ed_compact_overview: "紧凑磁贴（仅视频 + 标题标签，无控制栏）",
+    ed_show_title: "显示标题标签（关闭 = 仅视频，无名称叠加）",
+    ed_show_last_event: "显示最新事件徽章",
+    ed_show_audio: "显示音频按钮（声音 + 音量）",
+    ed_use_card_audio: "使用卡片自己的音频设置（与全局音频实体解耦）",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "使用集成默认值（不覆盖）",
+    ed_autoplay_lan: "LAN（仅在家庭网络中自动启动）",
+    ed_autoplay_always: "始终",
+    ed_autoplay_never: "从不（点击播放）",
+    ed_autoplay_hint: "控制实时直播何时自动启动。留空保持集成全局默认值；选择后将逐卡覆盖。",
+    ed_columns: "列数",
+    ed_columns_auto: "Auto（断点自适应）",
+    ed_columns_1: "1 — 全宽",
+    ed_breakpoint: "断点 — 每个磁贴的最小宽度（px）",
+    ed_breakpoint_hint: "Auto 模式：低于此值时为 1 列，高于时为 2+ 列。默认：650 px",
+    ed_h_display: "显示",
+    ed_show_offline: "显示离线摄像头",
+    ed_bosch_sort: "按 Bosch 应用顺序排序",
+    ed_h_advanced: "高级",
+    ed_border_radius: "圆角半径（CSS，如 16px）",
+    ed_box_shadow: "阴影（CSS）",
+    ed_show_motion_zones: "显示移动区域叠加",
   },
 };
+
+// Module-level translator so every custom element (cards AND their separate
+// editor elements) shares one string table. cardLang() maps hass.language to a
+// table key; cardT() resolves a key with English fallback. The set of languages
+// mirrors the integration's own translations/ folder.
+const CARD_LANGS = ["de", "en", "es", "fr", "it", "nl", "pl", "pt", "ru", "uk", "zh-Hans"];
+function cardLang(hass) {
+  const l = ((hass && hass.language) || "en").toLowerCase();
+  if (l.startsWith("zh")) return "zh-Hans"; // any Chinese variant → Simplified
+  const pre = l.slice(0, 2); // strip region suffix: pt-BR → pt, en-GB → en
+  return CARD_LANGS.find((k) => k.toLowerCase() === pre) || "en";
+}
+function cardT(hass, key) {
+  const lang = cardLang(hass);
+  return (CARD_I18N[lang] && CARD_I18N[lang][key]) || CARD_I18N.en[key] || key;
+}
 
 // HLS player buffer profiles. Selected via the integration option
 // "live_buffer_mode" and exposed on camera entity attributes. Mapped to
@@ -260,6 +1156,8 @@ class BoschCameraCard extends HTMLElement {
     // is active. Cleared on first explicit Ton toggle so the entity state takes
     // over normally from that point on.
     this._androidAudioMuted = /Android/i.test(navigator.userAgent || "");
+    this._lastAudioState     = null;  // last backend audio-switch state (live-sync edge detect)
+    this._lastVolumeState    = null;  // last backend volume-entity state (live-sync edge detect)
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -280,6 +1178,13 @@ class BoschCameraCard extends HTMLElement {
     this._PRIVACY_COOLDOWN_MS = 10000;
     this._privacyCooldownUntil = 0;   // Date.now() ms when the cooldown ends
     this._privacyCooldownTimer = null;
+    // Fullscreen digital zoom (pinch / double-tap / wheel) — only active while
+    // in fullscreen. scale 1..4, tx/ty pan in px. _zoomPointers tracks active
+    // pointer ids for pinch; _zoomHandlers holds bound listeners for removal.
+    this._ZOOM_MAX = 4;
+    this._zoom = { scale: 1, tx: 0, ty: 0, prevDist: -1, lastTap: 0 };
+    this._zoomPointers = new Map();
+    this._zoomHandlers = null;
     // Bind the theme + mode broadcast handlers once so add/removeEventListener
     // use the same reference. Done in the constructor (not as class fields) so
     // older WebKit / iOS WKWebView builds without public-class-field support
@@ -314,7 +1219,7 @@ class BoschCameraCard extends HTMLElement {
     this._onFullscreenChange = () => {
       // When native fullscreen ends (Esc / swipe / system back), arm the exit
       // guard so the same gesture can't immediately re-enter another card.
-      if (!this._isNativeFullscreen()) _boschFsExitAt = Date.now();
+      if (!this._isNativeFullscreen()) { _boschFsExitAt = Date.now(); this._resetZoom(); }
       this._updateFullscreenButtonState();
     };
     document.addEventListener("fullscreenchange",       this._onFullscreenChange);
@@ -383,6 +1288,15 @@ class BoschCameraCard extends HTMLElement {
       // drops the pill-bar + status badge).
       show_title:                 config.show_title !== false,
       show_last_event:            config.show_last_event !== false,
+      // Audio pill in the control bar (tap = mute/unmute, hover = volume on
+      // desktop/Android). Default on; set show_audio:false to hide it.
+      show_audio:                 config.show_audio !== false,
+      // Decouple the pill from the global audio entities (per-browser audio).
+      use_card_audio_settings:    config.use_card_audio_settings === true,
+      // Start the live stream with sound on (best-effort: the browser forces the
+      // first autoplay frames muted, so this unmutes as soon as it is allowed —
+      // typically right after the user's first interaction with the page). A
+      // user's own last mute/volume choice (saved per browser) takes precedence.
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
     };
 
@@ -394,6 +1308,7 @@ class BoschCameraCard extends HTMLElement {
       camera:       config.camera_entity,
       switch:       config.switch_entity        || `switch.${base}_live_stream`,
       audio:        config.audio_entity         || `switch.${base}_audio`,
+      audioVolume:  config.audio_volume_entity  || `number.${base}_audio_volume`,
       light:        config.light_entity         || `switch.${base}_camera_light`,
       privacy:      config.privacy_entity       || `switch.${base}_privacy_mode`,
       notifications: config.notifications_entity || `switch.${base}_notifications`,
@@ -665,6 +1580,7 @@ class BoschCameraCard extends HTMLElement {
   // pulse, and a single tap unmutes. Called from the hass-driven update AND the
   // moment the <video> plays, so the display never lags behind a hass push.
   _refreshAudioToggle() {
+    this._refreshAudioPill();
     if (!this._liveVideoActive) return;
     const video = this.shadowRoot?.getElementById("cam-video");
     const b = this.shadowRoot?.getElementById("btn-audio");
@@ -672,8 +1588,153 @@ class BoschCameraCard extends HTMLElement {
     b.classList.toggle("on", !video.muted);
     b.classList.toggle("tap-hint", !!video.muted);
     const lbl = b.querySelector(".sw-left span");
-    if (lbl) lbl.textContent = video.muted ? "Ton einschalten" : "Ton";
-    b.setAttribute("title", video.muted ? "Tippen für Ton" : "Ton stummschalten");
+    if (lbl) lbl.textContent = video.muted ? this._t("enable_sound") : this._t("sound_label");
+    b.setAttribute("title", video.muted ? this._t("audio_tap_for_sound") : this._t("audio_mute"));
+  }
+
+  _isIOS() {
+    const ua = navigator.userAgent || "";
+    return /iPhone|iPod|iPad/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+  }
+
+  // Pointer with true hover (desktop mouse/trackpad) — gates the volume slider.
+  _hasHover() {
+    try { return window.matchMedia("(hover: hover) and (pointer: fine)").matches; }
+    catch (_) { return true; }
+  }
+
+  // Wire the apple-style audio pill. Desktop (hover): tap = mute/unmute, hover =
+  // volume slider. Mobile/touch + iOS: just tap = mute/unmute — NO slider. On
+  // touch the slider was fiddly (and on iOS volume is read-only anyway), so the
+  // pill is a clean on/off; volume lives on the number.<cam>_audio_volume entity
+  // for anyone who wants it (slider card / automation). 2026-06-01.
+  _wireAudioPill() {
+    const noSlider = this._isIOS() || !this._hasHover();
+    this.classList.toggle("audio-no-volume", noSlider);
+    // Card option to hide the whole audio control.
+    this.classList.toggle("audio-hidden", !!(this._config && this._config.show_audio === false));
+    // Drop any stale touch-dismiss listener from an earlier render/build.
+    if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
+    const slider = this.shadowRoot.getElementById("ap-vol");
+    if (slider && !noSlider) {
+      slider.addEventListener("input", (e) => this._setVideoVolume(parseFloat(e.target.value)));
+      // Sync the thumb to the live video when streaming, else to the backend
+      // volume entity (so it shows where sound will resume, not the HTML default).
+      const v = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
+      const restVol = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
+      slider.value = v ? String(v.muted ? 0 : v.volume) : String(restVol);
+    }
+    this._refreshAudioPill();
+  }
+
+  _setVideoVolume(v) {
+    if (this._isIOS()) return; // iOS: volume read-only
+    const video = this.shadowRoot.getElementById("cam-video");
+    if (video) {
+      video.volume = v;
+      video.muted = v === 0;
+      if (!video.muted && video.paused) video.play().catch(() => {});
+    }
+    // Persist to the per-browser store (decoupled) or the backend entity (synced).
+    if (this._useCardAudio()) this._cardSaveVolume(v);
+    else this._setBackendVolume(v);
+    this._refreshAudioPill();
+  }
+
+  // Audio source. By default the backend entities (switch.<cam>_audio +
+  // number.<cam>_audio_volume) are the synced, automatable source of truth.
+  // With use_card_audio_settings:true the card DECOUPLES from them and keeps
+  // mute + volume per-browser (localStorage) — for users who don't want the
+  // global/shared behaviour. 2026-06-01.
+  _useCardAudio() {
+    return !!(this._config && this._config.use_card_audio_settings);
+  }
+  _cardVolume() {
+    try { const v = parseFloat(localStorage.getItem("bosch_card_volume")); return v >= 0 && v <= 1 ? v : 0.5; }
+    catch (_) { return 0.5; }
+  }
+  _cardSaveVolume(v) { try { localStorage.setItem("bosch_card_volume", String(v)); } catch (_) { /* private mode */ } }
+  _cardWantUnmuted() {
+    try { return localStorage.getItem("bosch_card_audio_on") === "1"; } catch (_) { return false; }
+  }
+  _cardSaveUnmuted(on) { try { localStorage.setItem("bosch_card_audio_on", on ? "1" : "0"); } catch (_) { /* private mode */ } }
+
+  // ── Audio volume — the backend number.<cam>_audio_volume entity (0-100) is the
+  //    single, automatable, cross-session source of truth. _entityVolume() reads
+  //    it as a 0-1 fraction; _setBackendVolume() writes it back so HA pushes the
+  //    change to every open card. (mute/on-off is owned by switch.<cam>_audio.) ──
+  _entityVolume() {
+    const n = parseFloat(this._hass?.states[this._entities.audioVolume]?.state);
+    return n >= 0 && n <= 100 ? n / 100 : 0.5;
+  }
+  _setBackendVolume(v01) {
+    if (!this._hass || !this._entities.audioVolume) return;
+    const pct = Math.round(Math.max(0, Math.min(1, v01)) * 100);
+    // Skip a redundant write if the entity already holds this value (avoids a
+    // feedback loop with the live-sync re-apply in _update()).
+    if (parseFloat(this._hass.states[this._entities.audioVolume]?.state) === pct) return;
+    this._hass.callService("number", "set_value", {
+      entity_id: this._entities.audioVolume,
+      value: pct,
+    });
+  }
+  // Seed a freshly-started stream's audio from the BACKEND entities — the single
+  // source of truth (automatable, shared across sessions). switch.<cam>_audio ON
+  // → start unmuted (best-effort: the autoplay policy may force muted, the pill's
+  // first tap then unmutes). OFF → stay muted. Volume from the number entity.
+  _applyAudioPreference(video) {
+    if (!video || this._isIOS()) return;
+    try {
+      if (this._useCardAudio()) {
+        // Decoupled: per-browser localStorage volume + mute.
+        video.volume = this._cardVolume();
+        if (this._cardWantUnmuted()) this._tryUnmuteVideo(video);
+        return;
+      }
+      video.volume = this._entityVolume();
+      if (this._getEffectiveState(this._entities.audio) === "on") {
+        this._tryUnmuteVideo(video);
+      }
+    } catch (_) { /* volume not settable */ }
+  }
+
+  // Best-effort programmatic unmute that NEVER leaves the element paused. The
+  // autoplay policy refuses a gesture-less unmute and pauses the video ("Unmuting
+  // failed and the element was paused"); we always call play() afterwards, and if
+  // that is also refused we fall back to muted playback so the frame keeps moving
+  // (the pill's tap — a real gesture — then unmutes for good). Used on stream
+  // start + live backend-switch sync; the in-gesture pill tap unmutes directly.
+  _tryUnmuteVideo(video) {
+    if (!video) return;
+    const fallbackMuted = () => { video.muted = true; Promise.resolve(video.play()).catch(() => {}); };
+    video.muted = false;
+    // play() rejecting OR resolving-then-leaving-the-element-paused (some Android
+    // WebViews late-pause after a gesture-less unmute) both mean "couldn't keep
+    // sound on" → fall back to muted playback so the frame never freezes.
+    Promise.resolve(video.play()).then(
+      () => { if (video.paused) fallbackMuted(); },
+      fallbackMuted,
+    );
+  }
+
+  _refreshAudioPill() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-audio");
+    if (!btn) return;
+    // Audio only exists while a live stream is playing — gray the pill out
+    // otherwise (no reflow, clear "available once streaming" signal; the first
+    // tap after the stream starts enables sound anyway).
+    const live = !!this._liveVideoActive;
+    this.classList.toggle("audio-inactive", !live);
+    const video = live ? this.shadowRoot.getElementById("cam-video") : null;
+    const audible = video ? (!video.muted && video.volume > 0) : false;
+    btn.classList.toggle("on", audible);
+    btn.setAttribute("aria-pressed", String(audible));
+    btn.setAttribute("aria-disabled", String(!live));
+    const label = !live
+      ? this._t("audio_available_when_live")
+      : (audible ? this._t("audio_mute") : this._t("audio_unmute"));
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("title", label);
   }
 
   _refreshModeSwitcher() {
@@ -759,7 +1820,15 @@ class BoschCameraCard extends HTMLElement {
       this._awaitingFresh = true;
       // If cache already showed the "refreshing" overlay, this is a no-op.
       // If no cache, this shows the full spinner.
-      if (this._imageLoaded) {
+      // BUT never stack the refresh overlay on top of the privacy gate: when
+      // privacy is ON the placeholder owns the whole tile, so a cached image +
+      // "Aktualisiere…" would double-overlay (lock + spinner, #15/privacy
+      // report). _update() already showed the gate above; suppress loading here.
+      const _privacyNow =
+        this._optimistic?.[this._entities?.privacy] !== undefined
+          ? this._optimistic[this._entities.privacy] === "on"
+          : this._hass?.states?.[this._entities?.privacy]?.state === "on";
+      if (this._imageLoaded && !_privacyNow) {
         this._setLoadingOverlay(true, "Aktualisiere…");
       }
       this._triggerFreshSnapshot();
@@ -835,6 +1904,14 @@ class BoschCameraCard extends HTMLElement {
   // the loading overlay so the spinner doesn't bleed through the gate.
   _showPlayGate() {
     this._playGateActive = true;
+    // Gate owns the UX now — stop any in-flight connect poll + keepalive timers
+    // so their later ticks can't repaint the loading spinner ON TOP of the gate
+    // (the "Kamera wird aufgeweckt…" / "LAN-Stream — ca. 25–35 s" overlay bled
+    // through behind the gate on slow-warming cameras otherwise). The user's tap
+    // (_onPlayGateTap → _update) re-arms the connect from scratch.
+    this._waitingForStream = false;
+    this._streamConnecting = false;
+    if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
     this._setLoadingOverlay(false);
     const el = this.shadowRoot?.getElementById("auto-play-gate");
     if (!el) return;
@@ -904,9 +1981,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _t(key) {
-    const lang = (this._hass?.language || "en").toLowerCase();
-    const dict = lang.startsWith("de") ? CARD_I18N.de : CARD_I18N.en;
-    return dict[key] || CARD_I18N.en[key] || key;
+    return cardT(this._hass, key);
   }
 
   // Apply 180° CSS rotation to the image+video wrapper based on the
@@ -934,12 +2009,14 @@ class BoschCameraCard extends HTMLElement {
     }
     // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
     // these document-level listeners would leak via `this`-closure.
+    if (this._fsWireTimer) { clearTimeout(this._fsWireTimer); this._fsWireTimer = null; }
     if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
     if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     if (this._privacyCooldownTimer) { clearInterval(this._privacyCooldownTimer); this._privacyCooldownTimer = null; }
+    if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
     // Clear any lingering error-feedback timers set by _callServiceWithRollback
     if (this._errorFeedbackTimers) {
       Object.values(this._errorFeedbackTimers).forEach(t => clearTimeout(t));
@@ -1293,7 +2370,7 @@ class BoschCameraCard extends HTMLElement {
         :host(.fs-active) .switch-rows,
         :host(.fs-active) .quality-section,
         :host(.fs-active) .accordion { display: none !important; }
-        :host(.fs-active) .img-wrapper { aspect-ratio: unset; width: 100vw; height: 100vh; }
+        :host(.fs-active) .img-wrapper { aspect-ratio: unset; width: 100vw; height: 100vh; touch-action: none; }
         :host(.fs-active) .cam-img,
         :host(.fs-active) .cam-video { object-fit: contain; min-height: unset; }
         :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }
@@ -1310,6 +2387,13 @@ class BoschCameraCard extends HTMLElement {
         .img-wrapper:fullscreen .ap-pill-bar,
         .img-wrapper:-webkit-full-screen .ap-top,
         .img-wrapper:-webkit-full-screen .ap-pill-bar { z-index: 10000; }
+        /* Restore the control bar in fullscreen even on COMPACT (overview) tiles.
+           compact hides .ap-pill-bar in the grid; without this it stayed hidden
+           when a tile is tapped to fullscreen, so the audio / privacy / fullscreen
+           pills were unreachable on the overview card (Thomas: "beide Karten"). */
+        :host(.fs-active) .ap-pill-bar,
+        .img-wrapper:fullscreen .ap-pill-bar,
+        .img-wrapper:-webkit-full-screen .ap-pill-bar { display: flex !important; }
 
         /* Motion zones SVG overlay */
         .motion-zones-overlay {
@@ -1711,14 +2795,21 @@ class BoschCameraCard extends HTMLElement {
             box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4)));
           }
         }
-        /* Hover affordance parity with the overview tiles (issue #15.1): lift +
-           a subtle scale on pointer devices, like the grid tiles. transform-origin
-           anchors the top edge so the card grows downward (no jump). Uses transform
-           only — NOT box-shadow — so a themed --ha-card-box-shadow stays visible on
-           hover (RkcCorian, issue #15/#21). */
-        :host(.apple-style) ha-card { transition: transform .18s ease; transform-origin: top center; }
+        /* Hover affordance (issue #15.1): a soft elevation on pointer devices.
+           SHADOW-ONLY — no transform/scale — so there is zero geometry change on
+           hover: no sub-pixel edge shimmer (#15) and nothing that could become a
+           containing block for the fullscreen/zoom overlay. The themed
+           --ha-card-box-shadow shows at rest; the hover replaces it with the
+           bigger elevation (RkcCorian, #15/#21). */
+        :host(.apple-style) ha-card { transition: box-shadow .18s ease; }
         @media (hover: hover) and (pointer: fine) {
-          :host(.apple-style) ha-card:hover { transform: translateY(-2px) scale(1.01); }
+          /* Plain elevation — NOT layered onto var(--ha-card-box-shadow): when
+             that var resolves to none, a 'none, shadow' list is invalid CSS and
+             the whole declaration is dropped (no hover at all). A single
+             elevation is valid for every theme and reads as the lift. */
+          :host(.apple-style) ha-card:hover {
+            box-shadow: 0 8px 22px rgba(0,0,0,.30);
+          }
         }
         :host(.apple-style) .header,
         :host(.apple-style) .info-row,
@@ -1897,6 +2988,35 @@ class BoschCameraCard extends HTMLElement {
           border-radius: 8px; background: #ff453a; color: #fff;
           font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
         }
+        /* Audio pill: tap = mute/unmute; hover (desktop) reveals a volume slider.
+           Icon swaps speaker-waves (.on = audible) / speaker-slash (muted). On iOS
+           the slider is hidden (JS volume is read-only there) → clean mute pill. */
+        .ap-audio-wrap { position: relative; display: inline-flex; }
+        .ap-pill-btn .ap-ico-on { display: none; }
+        .ap-pill-btn.on .ap-ico-off { display: none; }
+        .ap-pill-btn.on .ap-ico-on { display: block; }
+        .ap-vol-pop {
+          position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+          background: rgba(22,22,24,.92);
+          -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
+          border: 1px solid rgba(255,255,255,.14); border-radius: 14px;
+          padding: 10px 14px; box-shadow: 0 6px 20px rgba(0,0,0,.3);
+          opacity: 0; pointer-events: none; transition: opacity .15s ease; z-index: 30;
+        }
+        /* Invisible bridge across the gap between the popup and the button, so
+           moving the mouse up to the slider never leaves the hover area and the
+           popup doesn't vanish (Thomas: "Lautstärke verschwindet beim Mausbewegen"). */
+        .ap-vol-pop::after { content: ""; position: absolute; top: 100%; left: 0; right: 0; height: 16px; }
+        .ap-audio-wrap:hover .ap-vol-pop, .ap-vol-pop.show { opacity: 1; pointer-events: auto; }
+        .ap-vol-pop input[type="range"] {
+          width: 110px; accent-color: #fff; cursor: pointer; display: block;
+        }
+        :host(.audio-no-volume) .ap-vol-pop { display: none; }
+        :host(.audio-hidden) .ap-audio-wrap { display: none; }
+        /* Audio is meaningful only while live video plays — dim + disable the
+           pill (and hide the volume popup) when there is no stream. */
+        :host(.audio-inactive) #ap-btn-audio { opacity: .4; pointer-events: none; }
+        :host(.audio-inactive) .ap-vol-pop { display: none; }
 
         /* Phone-narrow: keep all buttons visible, shrink slightly */
         @media (max-width: 380px) {
@@ -2538,8 +3658,8 @@ class BoschCameraCard extends HTMLElement {
               <line x1="12" y1="9" x2="12" y2="13"/>
               <line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <div class="auth-title">Anmeldung abgelaufen</div>
-            <div class="auth-subtitle">Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.</div>
+            <div class="auth-title" id="auth-title">Anmeldung abgelaufen</div>
+            <div class="auth-subtitle" id="auth-subtitle">Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.</div>
             <a class="auth-btn" id="auth-reauth-btn" href="/config/integrations/integration/bosch_shc_camera" target="_top">Erneut anmelden</a>
           </div>
           <div class="privacy-placeholder" id="privacy-placeholder">
@@ -2582,6 +3702,15 @@ class BoschCameraCard extends HTMLElement {
             <button class="ap-pill-btn" id="ap-btn-stream" title="Live-Stream" aria-label="Live-Stream starten oder stoppen" aria-pressed="false">
               <svg viewBox="0 0 24 24" id="ap-stream-icon"><path d="M8 5v14l11-7L8 5z"/></svg>
             </button>
+            <div class="ap-audio-wrap" id="ap-audio-wrap">
+              <button class="ap-pill-btn" id="ap-btn-audio" title="Ton" aria-label="Ton stummschalten" aria-pressed="false">
+                <svg viewBox="0 0 24 24" class="ap-ico-on"><path d="M3 9v6h4l5 5V4L7 9H3zm11 .03v5.94A4.5 4.5 0 0 0 16.5 12 4.5 4.5 0 0 0 14 9.03zM14 4.23v2.06a7 7 0 0 1 0 11.42v2.06a9 9 0 0 0 0-15.54z"/></svg>
+                <svg viewBox="0 0 24 24" class="ap-ico-off"><path d="M3 9v6h4l5 5V4L7 9H3zm13.59 3 2.7-2.7-1.42-1.42L15.17 10.6 12.46 7.88 11.05 9.3 13.76 12l-2.71 2.71 1.41 1.41 2.71-2.7 2.7 2.7 1.42-1.41z"/></svg>
+              </button>
+              <div class="ap-vol-pop" id="ap-vol-pop" role="group" aria-label="${this._t("volume")}">
+                <input type="range" id="ap-vol" min="0" max="1" step="0.05" value="1" aria-label="${this._t("volume")}" />
+              </div>
+            </div>
             <button class="ap-pill-btn" id="ap-btn-privacy" title="Privat-Modus" aria-label="Privat-Modus umschalten" aria-pressed="false">
               <svg viewBox="0 0 24 24"><path d="M12 1 4 5v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V5l-8-4z"/></svg>
             </button>
@@ -2652,16 +3781,6 @@ class BoschCameraCard extends HTMLElement {
                Defaults: theme=ios, mode=auto. -->
 
           <div class="switch-rows">
-            <div class="sw-row" id="btn-audio">
-              <div class="sw-left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                  <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
-                </svg>
-                <span>Ton</span>
-              </div>
-              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
-            </div>
             <div class="sw-row" id="btn-light">
               <div class="sw-left">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2922,7 +4041,7 @@ class BoschCameraCard extends HTMLElement {
                 </div>
                 <div class="sw-row" id="btn-status-led" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>Status-LED</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
                 <div id="mic-level-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg><span style="white-space:nowrap">Mikrofon</span><input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px"><span id="mic-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
-                <div id="lens-elev-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 22V2M5 12l7-10 7 10"/></svg><span style="white-space:nowrap">Höhe</span><input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px"><span id="lens-value" style="min-width:36px;text-align:right;color:#999">—</span></div>
+                <div id="lens-elev-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 22V2M5 12l7-10 7 10"/></svg><span style="white-space:nowrap">${this._t("height")}</span><input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px"><span id="lens-value" style="min-width:36px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
           </div>
@@ -3067,6 +4186,10 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () =>
       this._requestFullscreen()
     );
+    // Fullscreen digital zoom: attach pinch/pan/double-tap/wheel handlers to the
+    // video wrapper (re-attached each render; handlers no-op unless in fullscreen)
+    // and re-apply the current zoom transform to the freshly-rendered video/img.
+    this._wireZoom(this.shadowRoot.getElementById("img-wrapper"));
     // Overflow ⋮ toggles the `.overflow-open` class on the host. CSS does the
     // rest — no separate popup element, just progressive disclosure of the
     // already-rendered control rows/accordions.
@@ -3088,6 +4211,8 @@ class BoschCameraCard extends HTMLElement {
     apBindClick("ap-btn-privacy",    () => this._togglePrivacy());
     apBindClick("ap-btn-light",      () => this._toggleSwitchWithRollback(this._entities.light));
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
+    this._wireAudioPill();
+    apBindClick("ap-btn-audio",      () => { this._toggleAudio(); this._refreshAudioPill(); });
     apBindClick("ap-btn-more",       () => {
       this.classList.toggle("overflow-open");
       this._syncMoreButton();
@@ -3130,9 +4255,6 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Toggle buttons
-    this.shadowRoot.getElementById("btn-audio").addEventListener("click", () =>
-      this._toggleAudio()
-    );
     this.shadowRoot.getElementById("btn-light").addEventListener("click", () =>
       this._toggleSwitchWithRollback(this._entities.light)
     );
@@ -3742,6 +4864,10 @@ class BoschCameraCard extends HTMLElement {
         // NOW hide the snapshot — video is playing, no black gap
         if (img) img.style.display = "none";
         this._setLoadingOverlay(false);
+        // Restore saved volume + honour "sound on by default" only once the
+        // video is provably playing — applying it on activate (while the first
+        // play() is still pending) raced that play() and could spuriously mute.
+        this._applyAudioPreference(video);
         // Live frame is on screen — the backend source is healthy again. Clear
         // the stale-source latch + rewarm cooldown so a future creds rotation
         // can recover immediately. (live fix 2026-05-31)
@@ -3756,7 +4882,10 @@ class BoschCameraCard extends HTMLElement {
         this._markLiveBadge();
         video.removeEventListener("playing", clearOverlay);
       };
-      video.addEventListener("playing", clearOverlay);
+      // once:true — if activateVideo runs twice (e.g. two WebRTC ontrack fires)
+      // the listener self-removes after the first frame instead of stacking a
+      // second clearOverlay closure that re-runs the whole block.
+      video.addEventListener("playing", clearOverlay, { once: true });
       // Safety timeout: if video never plays after 120s, hide overlay but
       // keep snapshot visible (don't call clearOverlay which hides the image).
       // Outdoor camera can take 80s+ for first HLS frame.
@@ -4293,6 +5422,20 @@ class BoschCameraCard extends HTMLElement {
     // Clean up stream-connecting state
     this._streamConnecting = false;
     if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+    // Cancel the loading-overlay safety timeout — otherwise the 120s timer set
+    // in _setLoadingOverlay() outlives the stop and fires _setLoadingOverlay(false)
+    // on a since-idle/other-state card up to 2 min later.
+    if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    // Reset the stale-source latch so the NEXT cold start judges the source
+    // fresh; leaving it true made a healthy source's first transient WebRTC miss
+    // force an unnecessary backend rewarm instead of the normal HLS fallback.
+    this._staleSourceSeen = false;
+    // Reset the audio/volume live-sync edge-detect so the NEXT stream start
+    // re-applies the backend audio preference (else _lastAudioState still held
+    // "on" from the prior session → audioChanged=false → the autoplay-unmute on
+    // restart was silently skipped, leaving switch-on but video muted).
+    this._lastAudioState  = null;
+    this._lastVolumeState = null;
     // Hide tap-to-play overlay if stream stops before user tapped
     const tapOverlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
     if (tapOverlay) tapOverlay.classList.remove("visible");
@@ -4312,7 +5455,7 @@ class BoschCameraCard extends HTMLElement {
       spinner.id = "snapshot-spinner";
       btn.insertBefore(spinner, btn.firstChild);
     }
-    if (label) label.textContent = "Lädt…";
+    if (label) label.textContent = this._t("loading");
     this._setLoadingOverlay(true, "Aktualisiere Bild…");
 
     // If privacy mode is ON — no live image is available, show placeholder immediately
@@ -4532,16 +5675,50 @@ class BoschCameraCard extends HTMLElement {
     // covers offline-overlay (z-index 9 vs 8) so the user sees the actionable
     // re-login banner instead of a generic "offline" state.
     const camState = hass.states[ents.camera]?.state;
-    const isIntegrationDown = camState === "unavailable" || camState === undefined;
+    // Distinguish two failure modes that previously both showed the misleading
+    // "re-login" auth overlay:
+    //   • entityMissing  — the configured camera_entity does not exist at all
+    //     (typo / removed / renamed entity). Re-login won't help; tell the user
+    //     to fix the card's camera_entity. (RkcCorian/Thomas, 2026-06-01)
+    //   • isIntegrationDown — the entity exists but is `unavailable` (coordinator
+    //     auth failure / token rejected). Re-login IS the fix.
+    const entityMissing = !(ents.camera in hass.states);
+    const isIntegrationDown = camState === "unavailable";
     const authOverlay = this.shadowRoot.getElementById("auth-overlay");
-    if (authOverlay) authOverlay.classList.toggle("visible", isIntegrationDown);
+    const _authTitle = this.shadowRoot.getElementById("auth-title");
+    const _authSub   = this.shadowRoot.getElementById("auth-subtitle");
+    const _authBtn   = this.shadowRoot.getElementById("auth-reauth-btn");
+    // Capture the template's default (integration-down) text once so we can
+    // restore it after a transient entity-missing render without duplicating it.
+    if (this._authDefaults === undefined && _authTitle && _authSub) {
+      this._authDefaults = { title: _authTitle.textContent, sub: _authSub.textContent };
+    }
+    if (authOverlay) {
+      authOverlay.classList.toggle("visible", isIntegrationDown || entityMissing);
+      if (entityMissing) {
+        if (_authTitle) _authTitle.textContent = this._t("cam_missing_title");
+        if (_authSub)   _authSub.textContent   = this._t("cam_missing_sub");
+        if (_authBtn)   _authBtn.style.display  = "none";  // re-login can't fix a wrong entity id
+      } else {
+        if (_authTitle && this._authDefaults) _authTitle.textContent = this._authDefaults.title;
+        if (_authSub && this._authDefaults)   _authSub.textContent   = this._authDefaults.sub;
+        if (_authBtn)   _authBtn.style.display  = "";
+      }
+    }
 
     // Offline overlay (suppressed while auth-overlay is up to avoid double overlay)
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
-    const isOffline = !isIntegrationDown && statusState === "OFFLINE";
+    const isOffline = !isIntegrationDown && !entityMissing && statusState === "OFFLINE";
     if (offlineOverlay) {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {
+        // Camera unreachable → abandon any in-flight connect UI so the offline
+        // overlay (z8) isn't buried under the loading spinner (z10), which would
+        // otherwise hide the "Kamera Offline" message until the 15s safety timer.
+        this._waitingForStream = false;
+        this._streamConnecting = false;
+        if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+        this._setLoadingOverlay(false);
         const lastChanged = hass.states[ents.status]?.last_changed;
         // Populate the offline-overlay's camera name line (apple-style only —
         // legacy mode hides .offline-cam-name via the base display:none rule).
@@ -4598,10 +5775,17 @@ class BoschCameraCard extends HTMLElement {
     // `_liveVideoActive` wins so the badge flips to Live the moment the video
     // plays even if the backend stream_status sensor still lags; and there is no
     // premature "Live" from switch-on-without-video. 2026-05-30.
+    // Privacy ON → the placeholder owns the tile; never show a "Verbinde"/Live
+    // badge over it (legacy non-apple mode has no CSS suppression for this). Own
+    // local — the function-scope `privacyOn` is declared further down (TDZ here).
+    const badgePrivacyOn = this._optimistic[ents.privacy] !== undefined
+      ? this._optimistic[ents.privacy] === "on"
+      : this._hass?.states[ents.privacy]?.state === "on";
     const streamBadgeState = isOffline ? "offline"
+                           : (badgePrivacyOn ? "idle"
                            : (this._liveVideoActive ? "streaming"
                            : ((isStreaming || this._startingLiveVideo || sharedConnecting) ? "connecting"
-                           : "idle"));
+                           : "idle")));
     if (badge)        badge.className = "stream-badge " + streamBadgeState;
     if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
 
@@ -4764,6 +5948,11 @@ class BoschCameraCard extends HTMLElement {
     // then triggers another _update() which proceeds to start HLS).
     if (this._playGateActive) {
       this._setLoadingOverlay(false);
+      // Belt-and-suspenders: ensure no stream-ready poll keeps ticking behind the
+      // gate (the early return below would otherwise skip the off-path cleanup),
+      // which could call _startLiveVideo() and bypass the gate. _showPlayGate
+      // also clears this, but re-assert here so it can never start hidden.
+      this._waitingForStream = false;
       return;
     }
     if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
@@ -4848,7 +6037,9 @@ class BoschCameraCard extends HTMLElement {
       // pill becomes visually redundant — same info, two places. Hide the
       // pill entirely in that case. User report 2026-05-24.
       const camTimestampOverlay = !!(hass.states[ents.camera]?.attributes?.camera_timestamp_overlay);
-      apLastEvent.classList.toggle("visible", hasEvent && !camTimestampOverlay);
+      // Also hide while the tap-to-play gate is up — the badge (z4) otherwise
+      // bleeds through the gate's translucent backdrop behind the play button.
+      apLastEvent.classList.toggle("visible", hasEvent && !camTimestampOverlay && !this._playGateActive);
       // Hide-during-stream class hides via CSS while video is playing.
       apLastEvent.classList.toggle("hide-during-stream", isStreaming);
     }
@@ -5155,22 +6346,41 @@ class BoschCameraCard extends HTMLElement {
     // muted at startup. Cleared on the first explicit Ton toggle so the entity
     // state takes over normally from that point on.
     if (this._liveVideoActive) {
-      const video   = this.shadowRoot.getElementById("cam-video");
-      const audioOn = this._getEffectiveState(ents.audio) === "on";
+      const video = this.shadowRoot.getElementById("cam-video");
       if (video) {
-        // Only ever MUTE here. Unmuting requires a genuine user gesture
-        // (Chrome autoplay policy) — doing it in this programmatic, hass-driven
-        // update makes Chrome pause the element ("Unmuting failed and the
-        // element was paused instead"). The unmute lives in _toggleAudio(), the
-        // Ton-tap handler, which runs inside a real gesture. "!video.paused" is
-        // NOT a sufficient gate — a muted autoplaying video still needs a
-        // gesture to unmute. See docs/card-architecture.md.
-        if (!audioOn || this._androidAudioMuted) {
-          video.muted = true;
+        if (this._useCardAudio()) {
+          // Decoupled mode: no backend-driven sync. Android pre-gesture still
+          // forces mute until the first explicit Ton tap.
+          if (this._androidAudioMuted) video.muted = true;
+        } else {
+          const audioOn = this._getEffectiveState(ents.audio) === "on";
+          const audioChanged = this._lastAudioState !== audioOn;
+          this._lastAudioState = audioOn;
+          if (!audioOn || this._androidAudioMuted) {
+            // Backend audio OFF (or Android pre-gesture) → mute live. Muting is
+            // always allowed, so this half of the two-way sync is reliable.
+            video.muted = true;
+          } else if (audioChanged) {
+            // Backend audio just turned ON (e.g. via automation) → best-effort
+            // live UNMUTE that never leaves the element paused (autoplay policy).
+            this._tryUnmuteVideo(video);
+          }
+          // Live volume sync from the backend number.<cam>_audio_volume entity —
+          // a slider drag on another session or an automation reaches us as a
+          // hass push and is applied to this <video> here.
+          const volState = this._hass.states[ents.audioVolume]?.state;
+          if (volState !== this._lastVolumeState) {
+            this._lastVolumeState = volState;
+            if (!this._isIOS()) {
+              try { video.volume = this._entityVolume(); } catch (_) { /* read-only */ }
+            }
+            const slider = this.shadowRoot.getElementById("ap-vol");
+            if (slider) slider.value = String(video.muted ? 0 : video.volume);
+          }
         }
-        // Reflect the (muted) audibility on the Ton toggle (issue #22) — shared
-        // with the on-play path in _markLiveBadge so it never lags a hass push.
+        // Reflect audibility on both the legacy Ton toggle (#22) and the pill.
         this._refreshAudioToggle();
+        this._refreshAudioPill();
       }
     }
 
@@ -5181,6 +6391,18 @@ class BoschCameraCard extends HTMLElement {
       : (ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on");
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
+    // Privacy just turned ON → tear down THIS session's stream/connect right
+    // away. The backend tears the live connection down too, but the card's HLS
+    // buffer would otherwise keep playing video AND sound for several seconds
+    // and the controls felt stuck (RkcCorian, #22). Done BEFORE hiding the
+    // spinner so the in-flight connect flags (_streamConnecting/_waitingForStream)
+    // are already cleared — otherwise the _setLoadingOverlay(false) suppression
+    // guard blocked the hide and the spinner stuck on top of the placeholder.
+    // Covers a connect in flight, not just an already-live video.
+    if (this._lastPrivacy !== true && privacyOn &&
+        (this._liveVideoActive || this._streamConnecting || this._waitingForStream)) {
+      this._stopLiveVideo();
+    }
     // Hide the spinner overlay when privacy is ON (placeholder takes over)
     if (privacyOn) this._setLoadingOverlay(false);
 
@@ -5204,15 +6426,10 @@ class BoschCameraCard extends HTMLElement {
       this._scheduleImageLoad(6000);
       this._scheduleImageLoad(9000);
     }
-    // Privacy just turned ON → stop THIS session's <video> right away. The
-    // backend tears the live connection down (the coordinator detects privacy
-    // ON), but the card's HLS buffer would otherwise keep playing video AND
-    // SOUND for several seconds, and the controls felt stuck while a torn-down
-    // stream was still "playing" (RkcCorian, #22). Stopping the element here
-    // clears the buffered audio immediately and frees the UI.
-    if (this._lastPrivacy !== true && privacyOn && this._liveVideoActive) {
-      this._stopLiveVideo();
-    }
+    // (Privacy-ON teardown is handled earlier, before the spinner is hidden, and
+    // already covers _liveVideoActive + a connect in flight — see above. A second
+    // _stopLiveVideo() here would be dead code since the first call cleared the
+    // flag.)
     this._lastPrivacy = privacyOn;
 
     // Motion zones overlay — SVG polygons from RCP 0x0c00/0x0c0a sensor data
@@ -5392,7 +6609,7 @@ class BoschCameraCard extends HTMLElement {
                 <div class="rule-days">${days}</div>
               </div>
               <button class="rule-toggle${activeClass}" data-rule-id="${r.id}" data-cam-id="${camId}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>
-              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="Löschen">✕</button>
+              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="${this._t("delete")}">✕</button>
             </div>`;
           }).join("");
 
@@ -5513,14 +6730,14 @@ class BoschCameraCard extends HTMLElement {
 
         // Special: trigger siren (button entity)
         if (svc.svc === "_trigger_siren") {
-          if (!confirm("Sirene wirklich auslösen?")) return;
+          if (!confirm(this._t("siren_confirm"))) return;
           btn.classList.add("running");
           const sirenEntity = this._entities.siren;
           if (sirenEntity && this._hass.states[sirenEntity]) {
             this._hass.callService("button", "press", { entity_id: sirenEntity });
-            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene wird ausgelöst..."; }
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = this._t("siren_triggering"); }
           } else {
-            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = "Sirene nicht verfügbar für diese Kamera."; }
+            if (resultEl) { resultEl.style.display = ""; resultEl.textContent = this._t("siren_unavailable"); }
           }
           setTimeout(() => { btn.classList.remove("running"); }, 3000);
           return;
@@ -5608,7 +6825,7 @@ class BoschCameraCard extends HTMLElement {
     // Re-assert the loading overlay every 5s to keep the spinner alive — text
     // comes from the SHARED stream_status so it stays in sync across sessions
     // (no local time-based progression). 2026-05-30.
-    if (attempt > 0 && attempt % 5 === 0) {
+    if (attempt > 0 && attempt % 5 === 0 && !this._playGateActive) {
       this._setLoadingOverlay(true, this._streamPhaseText());
     }
 
@@ -5776,7 +6993,7 @@ class BoschCameraCard extends HTMLElement {
       // other session, instead of its own local progression. 2026-05-30.
       this._connectSteps = [3000, 7000, 12000, 20000, 28000, 40000, 52000, 65000, 78000].map(
         (ms) => setTimeout(() => {
-          if (this._streamConnecting) this._setLoadingOverlay(true, this._streamPhaseText());
+          if (this._streamConnecting && !this._playGateActive) this._setLoadingOverlay(true, this._streamPhaseText());
         }, ms),
       );
     }
@@ -5804,38 +7021,45 @@ class BoschCameraCard extends HTMLElement {
 
   _toggleAudio() {
     const entityId = this._entities.audio;
-    if (!this._hass || !entityId) return;
+    if (!this._hass) return;
     const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
-    // While the stream is playing the Ton toggle controls AUDIBILITY (local
-    // video mute), not the backend track (issue #22). The AAC track is already
-    // in the stream (audio defaults on), so a single tap unmutes instantly — no
-    // 2-tap off/on dance, no stream re-open. The video starts muted by the
-    // browser autoplay policy, so the toggle reads OFF at stream start and one
-    // tap = sound. Unmuting here is safe: we are inside the click's user gesture,
-    // the only context where Chrome allows video.muted=false without pausing.
-    if (video) {
-      this._androidAudioMuted = false;
-      const unmuting = video.muted; // muted now -> this tap turns sound ON
-      video.muted = !unmuting;
-      if (unmuting && video.paused) video.play().catch(() => {});
-      const b = this.shadowRoot.getElementById("btn-audio");
-      if (b) b.classList.toggle("on", !video.muted);
-      // If the stream is currently video-only (track disabled earlier), also
-      // enable the backend track so there is actually something to hear; the
-      // local unmute above makes it audible once the re-opened stream arrives.
-      if (unmuting && this._hass.states[entityId]?.state === "off") {
-        this._setOptimistic(entityId, "on");
-        this._callService("switch", "turn_on", { entity_id: entityId });
+    // Decoupled mode (use_card_audio_settings): toggle THIS browser's mute only,
+    // persisted to localStorage — never touch the backend switch / other devices.
+    if (this._useCardAudio()) {
+      if (video) {
+        this._androidAudioMuted = false;
+        const unmuting = video.muted;
+        video.muted = !unmuting;
+        if (unmuting && video.paused) video.play().catch(() => {});
+        this._cardSaveUnmuted(!video.muted);
+        const b = this.shadowRoot.getElementById("btn-audio");
+        if (b) b.classList.toggle("on", !video.muted);
       }
+      this._refreshAudioPill();
       return;
     }
-    // Off-stream: toggle the backend audio entity (whether the NEXT stream open
-    // carries the AAC track).
-    const state = this._hass.states[entityId]?.state;
-    if (!state || state === "unavailable" || state === "unknown") return;
-    const turningOn = state !== "on";
+    if (!entityId) return;
+    // Direction: when streaming, toggle the ACTUAL audibility (a video muted by
+    // the autoplay policy at stream start must unmute on the first tap even
+    // though the switch may already read "on"); off-stream, flip the switch.
+    const turningOn = video ? video.muted : (this._getEffectiveState(entityId) !== "on");
+    if (video) {
+      // Instant local feedback INSIDE the user gesture — the only context Chrome
+      // allows a programmatic unmute without pausing the element. The stream
+      // always carries the AAC track now, so this never re-opens the stream.
+      this._androidAudioMuted = false;
+      video.muted = !turningOn;
+      if (turningOn && video.paused) video.play().catch(() => {});
+      const b = this.shadowRoot.getElementById("btn-audio");
+      if (b) b.classList.toggle("on", !video.muted);
+    }
+    // Drive the backend switch.<cam>_audio on EVERY tap so the mute/unmute choice
+    // syncs to every device + automations: HA pushes it back and _update()
+    // applies it to the other cards' <video> live (mute reliably, unmute
+    // best-effort under their own autoplay policy). 2026-06-01.
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });
+    this._refreshAudioPill();
   }
 
   _toggleSwitch(entityId) {
@@ -6001,11 +7225,23 @@ class BoschCameraCard extends HTMLElement {
     this.classList.add("fs-active");
     this._updateFullscreenButtonState();
     document.body.style.overflow = "hidden";
-    // Tap anywhere outside the image to exit
-    this._fsClickOut = (e) => { if (!this.contains(e.target)) this._exitCssFullscreen(); };
+    // Tap anywhere outside the image to exit. Shadow-DOM-aware: this.contains()
+    // breaks when the card is nested inside the overview card's shadow root —
+    // e.target then retargets to the OVERVIEW host (an ancestor, not contained),
+    // so a pinch / tap ON this card's own video read as "outside" and exited
+    // fullscreen (mobile pinch-zoom kept closing it — Thomas). composedPath()
+    // lists every node the event crossed, across shadow boundaries.
+    this._fsClickOut = (e) => {
+      const path = e.composedPath ? e.composedPath() : [e.target];
+      if (!path.includes(this)) this._exitCssFullscreen();
+    };
     // Press Escape to exit
     this._fsKeyDown = (e) => { if (e.key === "Escape") this._exitCssFullscreen(); };
-    setTimeout(() => {
+    this._fsWireTimer = setTimeout(() => {
+      this._fsWireTimer = null;
+      // Card may have been torn down (or fullscreen already exited) within the
+      // 100ms gap — don't attach document listeners that would then outlive it.
+      if (!this.isConnected || !this.classList.contains("fs-active")) return;
       // pointerup, not click: in the mobile WebView a tap outside the card
       // (to exit CSS-fullscreen) may not reach `document` as a click. 2026-05-29.
       document.addEventListener("pointerup", this._fsClickOut);
@@ -6022,6 +7258,114 @@ class BoschCameraCard extends HTMLElement {
     document.body.style.overflow = "";
     if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
+    this._resetZoom(); // drop any digital zoom when leaving fullscreen
+  }
+
+  // ── Fullscreen digital zoom (pinch / pan / double-tap / wheel) ──────────────
+  _inFullscreen() {
+    return this.classList.contains("fs-active") || this._isNativeFullscreen();
+  }
+
+  _applyZoom() {
+    const z = this._zoom;
+    const t = z.scale > 1 ? `translate(${z.tx}px, ${z.ty}px) scale(${z.scale})` : "";
+    for (const id of ["cam-video", "cam-img"]) {
+      const el = this.shadowRoot?.getElementById(id);
+      if (el) { el.style.transform = t; el.style.transformOrigin = "center center"; }
+    }
+  }
+
+  _resetZoom() {
+    this._zoom.scale = 1; this._zoom.tx = 0; this._zoom.ty = 0; this._zoom.prevDist = -1;
+    this._zoomPointers.clear();
+    this._applyZoom();
+  }
+
+  _clampZoomPan(wrap) {
+    const z = this._zoom;
+    const maxX = ((z.scale - 1) * wrap.clientWidth) / 2;
+    const maxY = ((z.scale - 1) * wrap.clientHeight) / 2;
+    z.tx = Math.max(-maxX, Math.min(maxX, z.tx));
+    z.ty = Math.max(-maxY, Math.min(maxY, z.ty));
+  }
+
+  // Adjust pan so the zoom anchors at point (px,py) (element coords) when the
+  // scale changes from oldScale to newScale (transform-origin is center).
+  _zoomAnchor(wrap, px, py, oldScale, newScale) {
+    const z = this._zoom;
+    z.tx += (oldScale - newScale) * (px - wrap.clientWidth / 2);
+    z.ty += (oldScale - newScale) * (py - wrap.clientHeight / 2);
+    z.scale = newScale;
+    if (newScale === 1) { z.tx = 0; z.ty = 0; }
+    this._clampZoomPan(wrap);
+    this._applyZoom();
+  }
+
+  _wireZoom(wrap) {
+    if (!wrap) return;
+    const rectPt = (e) => {
+      const r = wrap.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!this._inFullscreen()) return;
+      this._zoomPointers.set(e.pointerId, e);
+      try { wrap.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
+      if (this._zoomPointers.size === 1) {
+        const now = Date.now();
+        if (now - this._zoom.lastTap < 300) {       // double-tap → toggle 2× at point
+          e.preventDefault();
+          const p = rectPt(e);
+          if (this._zoom.scale > 1) this._resetZoom();
+          else this._zoomAnchor(wrap, p.x, p.y, 1, 2);
+          this._zoom.lastTap = 0;
+        } else {
+          this._zoom.lastTap = now;
+        }
+      }
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (!this._inFullscreen() || !this._zoomPointers.has(e.pointerId)) return;
+      const prev = this._zoomPointers.get(e.pointerId);
+      this._zoomPointers.set(e.pointerId, e);
+      const z = this._zoom;
+      const pts = [...this._zoomPointers.values()];
+      if (pts.length === 2) {                        // pinch
+        const dist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        if (z.prevDist > 0) {
+          const newScale = Math.min(this._ZOOM_MAX, Math.max(1, z.scale * (dist / z.prevDist)));
+          const r = wrap.getBoundingClientRect();
+          const midX = (pts[0].clientX + pts[1].clientX) / 2 - r.left;
+          const midY = (pts[0].clientY + pts[1].clientY) / 2 - r.top;
+          this._zoomAnchor(wrap, midX, midY, z.scale, newScale);
+        }
+        z.prevDist = dist;
+        e.preventDefault();
+      } else if (pts.length === 1 && z.scale > 1) {  // pan
+        z.tx += e.clientX - prev.clientX;
+        z.ty += e.clientY - prev.clientY;
+        this._clampZoomPan(wrap);
+        this._applyZoom();
+        e.preventDefault();
+      }
+    });
+    const up = (e) => {
+      this._zoomPointers.delete(e.pointerId);
+      try { wrap.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+      if (this._zoomPointers.size < 2) this._zoom.prevDist = -1;
+    };
+    wrap.addEventListener("pointerup", up);
+    wrap.addEventListener("pointercancel", up);
+    wrap.addEventListener("wheel", (e) => {
+      if (!this._inFullscreen()) return;
+      e.preventDefault();
+      const z = this._zoom;
+      const p = rectPt(e);
+      const newScale = Math.min(this._ZOOM_MAX, Math.max(1, z.scale * (e.deltaY < 0 ? 1.15 : 0.87)));
+      this._zoomAnchor(wrap, p.x, p.y, z.scale, newScale);
+    }, { passive: false });
+    // Re-apply the current zoom after a re-render (the video/img element is new).
+    this._applyZoom();
   }
 
   _syncMoreButton() {
@@ -6161,8 +7505,19 @@ class BoschCameraCardEditor extends HTMLElement {
     this._config = config || {};
     if (this.shadowRoot) this._render();
   }
-  set hass(hass) { this._hass = hass; if (this.shadowRoot) this._render(); }
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    // HA pushes hass on every state change. Re-render only when something the
+    // editor actually shows changed (UI language or the camera list) — a blind
+    // re-render resets the title <input> and steals focus while the user types.
+    const sig = cardLang(hass) + "|" + this._bosch_cameras().join(",");
+    if (sig === this._lastHassSig) return;
+    this._lastHassSig = sig;
+    this._render();
+  }
   get hass() { return this._hass; }
+  _t(key) { return cardT(this._hass, key); }
   connectedCallback() { this._render(); }
 
   _bosch_cameras() {
@@ -6194,9 +7549,11 @@ class BoschCameraCardEditor extends HTMLElement {
     // first option without firing a change (issue #17).
     if (cfg.camera_entity && !cams.includes(cfg.camera_entity)) cams.push(cfg.camera_entity);
     cams.sort();
-    const sel = (name, val, opts) => `
-      <label>${name}
-        <select name="${name.toLowerCase().replace(/\W/g, "")}">
+    // name = stable HTML control name (NOT derived from the label, which is now
+    // translated — a DE/EN label swap would otherwise change the selector).
+    const sel = (label, name, val, opts) => `
+      <label>${label}
+        <select name="${name}">
           ${opts.map(([v,l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}
         </select>
       </label>`;
@@ -6241,30 +7598,41 @@ class BoschCameraCardEditor extends HTMLElement {
       </style>
       <div class="row">
         ${cams.length === 0 ? `
-          <div class="help">Keine Bosch-Kameras erkannt. Trage <code>camera.bosch_xxx</code> manuell ein, oder schließe das Bosch-Integration-Setup zuerst ab.</div>
+          <div class="help">${this._t("ed_no_cams")}</div>
         ` : ""}
-        <label>Kamera-Entity *
+        <label>${this._t("ed_cam_entity")}
           <select name="camera_entity">
-            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || "(noch nicht gesetzt)"}</option>`}
+            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}
           </select>
-          <span class="hint">Pflichtfeld — alle anderen Entities werden automatisch aus dem Camera-Namen abgeleitet.</span>
+          <span class="hint">${this._t("ed_cam_entity_hint")}</span>
         </label>
-        <label>Titel <small style="color:var(--secondary-text-color)">(optional, überschreibt Friendly-Name)</small>
-          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="z.B. Garten" />
+        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>
+          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />
         </label>
 
-        <h4>Design</h4>
-        ${chk("apple_style", "Apple-Style Glass-Overlay aktiv (Default an)", true)}
-        ${sel("Theme", cfg.theme || "ios", [["auto","Auto (Auto-Detect via User-Agent)"],["ios","iOS (Apple Home)"],["android","Android (Material You)"]])}
-        ${sel("Modus", cfg.mode || "auto", [["auto","Auto (System Light/Dark)"],["day","Tag"],["night","Nacht"]])}
-        ${chk("minimal", "Minimal-Layout (Mehr-Menü versteckt zunächst alle Switches)", false)}
-        ${chk("compact", "Compact-Tile (für Overview-Grid: nur Video + Title-Pill, keine Pill-Bar)", false)}
-        ${chk("show_title", "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)", true)}
-        ${chk("show_last_event", "Letztes-Ereignis-Badge anzeigen", true)}
+        <h4>${this._t("ed_h_design")}</h4>
+        ${chk("apple_style", this._t("ed_apple_style"), true)}
+        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [["auto",this._t("ed_theme_auto")],["ios",this._t("ed_theme_ios")],["android",this._t("ed_theme_android")]])}
+        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [["auto",this._t("ed_mode_auto")],["day",this._t("ed_mode_day")],["night",this._t("ed_mode_night")]])}
+        ${chk("minimal", this._t("ed_minimal_single"), false)}
+        ${chk("compact", this._t("ed_compact_single"), false)}
+        ${chk("show_title", this._t("ed_show_title"), true)}
+        ${chk("show_last_event", this._t("ed_show_last_event"), true)}
+        ${chk("show_audio", this._t("ed_show_audio"), true)}
+        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}
 
-        <h4>Auto-Play</h4>
-        ${sel("Auto-Play", cfg.auto_play || "", [["","Integration-Vorgabe (nicht überschreiben)"],["lan","LAN (Auto-Start nur im Heimnetz)"],["always","Immer"],["never","Nie (Tap-to-Play Gate)"]])}
-        <span class="hint">Steuert wann der Live-Stream automatisch loslegt. Leer lässt die Integration-weite Voreinstellung unangetastet; eine Auswahl überschreibt sie pro Karte.</span>
+        <h4>${this._t("ed_h_autoplay")}</h4>
+        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [["",this._t("ed_autoplay_default")],["lan",this._t("ed_autoplay_lan")],["always",this._t("ed_autoplay_always")],["never",this._t("ed_autoplay_never")]])}
+        <span class="hint">${this._t("ed_autoplay_hint")}</span>
+
+        <h4>${this._t("ed_h_advanced")}</h4>
+        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}
+        <label>${this._t("ed_border_radius")}
+          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />
+        </label>
+        <label>${this._t("ed_box_shadow")}
+          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />
+        </label>
       </div>`;
     const root = this.shadowRoot;
     const fire = (patch) => {
@@ -6280,6 +7648,11 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="compact"]').addEventListener("change", e => fire({ compact: e.target.checked }));
     root.querySelector('input[name="show_title"]').addEventListener("change", e => fire({ show_title: e.target.checked }));
     root.querySelector('input[name="show_last_event"]').addEventListener("change", e => fire({ show_last_event: e.target.checked }));
+    root.querySelector('input[name="show_audio"]')?.addEventListener("change", e => fire({ show_audio: e.target.checked }));
+    root.querySelector('input[name="use_card_audio_settings"]')?.addEventListener("change", e => fire({ use_card_audio_settings: e.target.checked }));
+    root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({ show_motion_zones: e.target.checked }));
+    root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
+    root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
     root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value || undefined }));
   }
 }
@@ -6316,6 +7689,7 @@ window.customCards.push({
 const OVERVIEW_VERSION = "1.3.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
+  _t(key) { return cardT(this._hass, key); }
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -6369,6 +7743,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       // show_title:false / show_last_event:false strip the title pill / badge.
       show_title:           config.show_title !== false,
       show_last_event:      config.show_last_event !== false,
+      // Audio pill, propagated to every tile via card_defaults (volume itself is
+      // the backend number.<cam>_audio_volume entity, read live by each tile).
+      show_audio:           config.show_audio !== false,
+      use_card_audio_settings: config.use_card_audio_settings === true,
       // Per-card geometry (issue #21). Applied as --bosch-card-* on the overview
       // host, which cascades into the grid cells AND the child cards (CSS custom
       // properties cross shadow boundaries). Default null = signature look.
@@ -6397,6 +7775,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       compact: this._config.compact,
       show_title: this._config.show_title,
       show_last_event: this._config.show_last_event,
+      show_audio: this._config.show_audio,
+      use_card_audio_settings: this._config.use_card_audio_settings,
       ...this._config.card_defaults,
     };
     // Apple-style class on overview host gates the CSS that drops the
@@ -6484,29 +7864,21 @@ class BoschCameraOverviewCard extends HTMLElement {
              clipped by its own overflow:hidden. Default none = unchanged look. */
           box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, none));
           opacity: 1;
-          /* Smooth scale on hover so desktop users get a clear
-             "this tile is tappable" affordance. Touch devices ignore :hover
-             so the static state stays unchanged on mobile. transform-origin:top
-             anchors the TOP edge, so the scale grows downward — the tile no
-             longer "jumps" up when the inner card expands via ⋮ (issue #15.3)
-             while keeping the scale effect RkcCorian liked. Uses transform
-             ONLY — NOT box-shadow — so a themed --ha-card-box-shadow stays
-             visible during the lift, exactly like the single card (issue #15,
-             RkcCorian: theme variables were ignored during the overview lift). */
-          transform-origin: top center;
-          transition: transform .18s ease;
-          /* NOTE: do NOT put a static transform (translateZ/will-change) on the
-             base cell. A transformed ancestor becomes the containing block for
-             position:fixed descendants, which clipped the camera's fullscreen/
-             zoom to the tile (mobile + desktop) — regression reported by Thomas,
-             reverted. The hover below uses a transient scale only (no static
-             transform), so fullscreen stays viewport-anchored. The faint #15
-             hover shimmer is the trade-off; switch to a shadow-only hover if it
-             ever needs to be perfectly boundary-stable. */
+          /* SHADOW-ONLY hover affordance: on pointer devices the tile gains a
+             soft elevation (no scale, no translate), so desktop users still get a
+             clear "this tile is tappable" cue. No geometry change means no
+             sub-pixel edge shimmer (#15, RkcCorian) and — crucially — no
+             transformed ancestor that would become the containing block for the
+             fullscreen/zoom overlay (the scale variant's trade-off, now removed).
+             Touch devices ignore :hover, so mobile is unchanged. */
+          transition: box-shadow .18s ease;
         }
         @media (hover: hover) and (pointer: fine) {
           :host(.apple-style) .bco-cell:hover {
-            transform: translateY(-2px) scale(1.012);
+            /* Plain elevation (not layered on var(...)): a 'none, shadow' list
+               is invalid CSS and would drop the whole rule. The themed base
+               shadow shows at rest; the hover replaces it with the bigger lift. */
+            box-shadow: 0 6px 18px rgba(0,0,0,.32);
             z-index: 1;
           }
         }
@@ -6789,16 +8161,16 @@ class BoschCameraOverviewCard extends HTMLElement {
     banner.className = isActive ? "bco-banner" : "bco-banner bco-banner-info";
     const t = document.createElement("div");
     t.className = "bco-banner-title";
-    t.textContent = isActive ? "Bosch-Cloud-Wartung läuft" : "Bosch-Cloud-Wartung geplant";
+    t.textContent = isActive ? this._t("maint_title") : this._t("maint_title_planned");
     const sub = document.createElement("div");
     sub.textContent = win
-      ? `${mAttr.title || "Wartungsmeldung"} · ${win}`
-      : (mAttr.title || "Wartungsmeldung");
+      ? `${mAttr.title || this._t("maint_notice")} · ${win}`
+      : (mAttr.title || this._t("maint_notice"));
     banner.appendChild(t);
     banner.appendChild(sub);
     if (isActive) {
       const note = document.createElement("div");
-      note.textContent = "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.";
+      note.textContent = this._t("maint_body");
       banner.appendChild(note);
     }
     // Validate the URL scheme before assigning it to `href`. A compromised
@@ -6809,7 +8181,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       a.href = mAttr.link;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "Details in der Bosch Community";
+      a.textContent = this._t("maint_details");
       banner.appendChild(a);
     }
     this._bannerSlot.appendChild(banner);
@@ -7091,6 +8463,19 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     this._config = config;
     if (this.shadowRoot) this._render();
   }
+  // HA pushes hass onto the editor element; store it so labels can localise.
+  // Re-render only on a UI-language change (this editor has no camera picker) —
+  // a blind re-render on every hass push would steal focus from its inputs.
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    const sig = cardLang(hass);
+    if (sig === this._lastHassSig) return;
+    this._lastHassSig = sig;
+    this._render();
+  }
+  get hass() { return this._hass; }
+  _t(key) { return cardT(this._hass, key); }
   connectedCallback() { this._render(); }
   _render() {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
@@ -7103,9 +8488,9 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     // Design/behaviour/hide sub-features mirror the single-card editor so both
     // cards expose the same options in the GUI (feature parity). These flow
     // into every tile via the overview card's card_defaults propagation.
-    const seldd = (name, val, opts) => `
-      <label>${name}
-        <select name="${name.toLowerCase().replace(/\W/g, "")}">
+    const seldd = (label, name, val, opts) => `
+      <label>${label}
+        <select name="${name}">
           ${opts.map(([v,l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}
         </select>
       </label>`;
@@ -7127,35 +8512,45 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
         [hidden]{display:none}
       </style>
       <div class="row">
-        <label>Spalten
+        <label>${this._t("ed_columns")}
           <select name="columns">
-            <option value="auto" ${sel("auto")}>Auto (Breakpoint)</option>
-            <option value="1" ${sel(1)}>1 – volle Breite</option>
+            <option value="auto" ${sel("auto")}>${this._t("ed_columns_auto")}</option>
+            <option value="1" ${sel(1)}>${this._t("ed_columns_1")}</option>
             <option value="2" ${sel(2)}>2</option>
             <option value="3" ${sel(3)}>3</option>
             <option value="4" ${sel(4)}>4</option>
           </select>
         </label>
-        <label id="minw-row" ${isAuto ? "" : "hidden"}>Breakpoint – Mindestbreite pro Kachel (px)
+        <label id="minw-row" ${isAuto ? "" : "hidden"}>${this._t("ed_breakpoint")}
           <input type="number" name="min_width" value="${minWpx}" min="200" max="900" step="10" />
-          <span class="hint">Bei Auto: 1 Spalte unter, 2+ Spalten über diesem Wert. Standard: 650 px</span>
+          <span class="hint">${this._t("ed_breakpoint_hint")}</span>
         </label>
-        <label>Titel <small style="color:var(--secondary-text-color)">(optional)</small>
-          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="Bosch Kameras" />
+        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt")}</small>
+          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_overview")}" />
         </label>
 
-        <h4>Anzeige</h4>
-        ${chk("online_offline_view", "Offline-Kameras anzeigen", true)}
-        ${chk("use_bosch_sort", "Nach Bosch-App-Reihenfolge sortieren", false)}
+        <h4>${this._t("ed_h_display")}</h4>
+        ${chk("online_offline_view", this._t("ed_show_offline"), true)}
+        ${chk("use_bosch_sort", this._t("ed_bosch_sort"), false)}
 
-        <h4>Design (für alle Kacheln)</h4>
-        ${chk("apple_style", "Apple-Style Glass-Overlay aktiv (Default an)", true)}
-        ${seldd("Theme", cfg.theme || "ios", [["auto","Auto (User-Agent)"],["ios","iOS (Apple Home)"],["android","Android (Material You)"]])}
-        ${seldd("Modus", cfg.mode || "auto", [["auto","Auto (System Light/Dark)"],["day","Tag"],["night","Nacht"]])}
-        ${chk("compact", "Compact-Tile (nur Video + Title-Pill, keine Pill-Bar)", false)}
-        ${chk("minimal", "Minimal-Layout (Switches hinter dem Mehr-Menü) — empfohlen fürs Grid", true)}
-        ${chk("show_title", "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)", true)}
-        ${chk("show_last_event", "Letztes-Ereignis-Badge anzeigen", true)}
+        <h4>${this._t("ed_h_design_all")}</h4>
+        ${chk("apple_style", this._t("ed_apple_style"), true)}
+        ${seldd(this._t("ed_theme"), "theme", cfg.theme || "ios", [["auto",this._t("ed_theme_auto")],["ios",this._t("ed_theme_ios")],["android",this._t("ed_theme_android")]])}
+        ${seldd(this._t("ed_mode"), "modus", cfg.mode || "auto", [["auto",this._t("ed_mode_auto")],["day",this._t("ed_mode_day")],["night",this._t("ed_mode_night")]])}
+        ${chk("compact", this._t("ed_compact_overview"), false)}
+        ${chk("minimal", this._t("ed_minimal_overview"), true)}
+        ${chk("show_title", this._t("ed_show_title"), true)}
+        ${chk("show_last_event", this._t("ed_show_last_event"), true)}
+        ${chk("show_audio", this._t("ed_show_audio"), true)}
+        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}
+
+        <h4>${this._t("ed_h_advanced")}</h4>
+        <label>${this._t("ed_border_radius")}
+          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />
+        </label>
+        <label>${this._t("ed_box_shadow")}
+          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />
+        </label>
       </div>`;
     const colSel = this.shadowRoot.querySelector('select[name="columns"]');
     const minwRow = this.shadowRoot.getElementById("minw-row");
@@ -7172,7 +8567,7 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
       this._fire({ ...this._config, title: e.target.value });
     });
     const onChk = (name, key) => this.shadowRoot.querySelector(`input[name="${name}"]`)
-      .addEventListener("change", e => this._fire({ ...this._config, [key]: e.target.checked }));
+      ?.addEventListener("change", e => this._fire({ ...this._config, [key]: e.target.checked }));
     onChk("online_offline_view", "online_offline_view");
     onChk("use_bosch_sort", "use_bosch_sort");
     onChk("apple_style", "apple_style");
@@ -7180,6 +8575,10 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     onChk("minimal", "minimal");
     onChk("show_title", "show_title");
     onChk("show_last_event", "show_last_event");
+    onChk("show_audio", "show_audio");
+    onChk("use_card_audio_settings", "use_card_audio_settings");
+    this.shadowRoot.querySelector('input[name="border_radius"]').addEventListener("change", e => this._fire({ ...this._config, border_radius: e.target.value || undefined }));
+    this.shadowRoot.querySelector('input[name="box_shadow"]').addEventListener("change", e => this._fire({ ...this._config, box_shadow: e.target.value || undefined }));
     this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({ ...this._config, theme: e.target.value }));
     this.shadowRoot.querySelector('select[name="modus"]').addEventListener("change", e => this._fire({ ...this._config, mode: e.target.value }));
   }
@@ -7206,6 +8605,7 @@ window.customCards.push({
 // Renders a 24-hour canvas timeline + <video> player + date navigation.
 
 class BoschNvrTimelineCard extends HTMLElement {
+  _t(key) { return cardT(this._hass, key); }
   setConfig(config) {
     if (!config.nvr_source_id) throw new Error("nvr_source_id is required");
     this._config = config;
@@ -7293,11 +8693,11 @@ class BoschNvrTimelineCard extends HTMLElement {
       this._drawTimeline();
       const status = this.shadowRoot.getElementById("status");
       status.textContent = this._segments.length
-        ? `${this._segments.length} Segment(e) — klicken zum Abspielen`
-        : "Keine Aufnahmen für diesen Tag";
+        ? `${this._segments.length} ${this._t("nvr_segments_suffix")}`
+        : this._t("nvr_no_recordings");
     } catch (err) {
       const status = this.shadowRoot.getElementById("status");
-      status.textContent = "Fehler beim Laden der Segmente";
+      status.textContent = this._t("nvr_load_error");
     }
   }
 

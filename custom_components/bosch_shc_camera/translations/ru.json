@@ -349,6 +349,9 @@
       "speaker_level": {
         "name": "Уровень динамика"
       },
+      "audio_volume": {
+        "name": "Громкость звука"
+      },
       "front_light_intensity": {
         "name": "Яркость переднего света"
       },

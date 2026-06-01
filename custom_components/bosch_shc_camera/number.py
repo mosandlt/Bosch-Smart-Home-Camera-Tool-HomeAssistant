@@ -50,6 +50,9 @@ async def async_setup_entry(
                 BoschPanNumber(coordinator, cam_id, config_entry, pan_limit)
             )
         entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
+        # Card playback volume — paired with the audio switch (registered for
+        # every camera), the automatable source of truth for the card's volume.
+        entities.append(BoschAudioVolumeNumber(coordinator, cam_id, config_entry))
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
             entities.append(
@@ -263,6 +266,82 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+class BoschAudioVolumeNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+    """Card playback volume (0–100 %) for this camera's live audio.
+
+    Virtual preference — there is NO Bosch API for volume (loudness is a browser
+    property). This entity is the automatable, cross-session source of truth that
+    the Lovelace card applies to its <video> element: the card reads it and writes
+    it back via number.set_value, and HA pushes the change to every open card. No
+    Bosch write happens here. No effect on iOS (Safari makes video.volume
+    read-only). Paired with switch.<cam>_audio (the on/off master).
+    """
+
+    DEFAULT_VOLUME = 50
+
+    _attr_icon = "mdi:volume-high"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_unit_of_measurement = "%"
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = info.get("title", cam_id)
+        self._model = info.get("hardwareVersion", "CAMERA")
+        from .models import get_display_name
+
+        self._model_name = get_display_name(self._model)
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
+
+        self._attr_name = "Audio Volume"
+        self._attr_unique_id = f"bosch_shc_audio_volume_{cam_id.lower()}"
+        self._attr_translation_key = "audio_volume"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model": self._model_name,
+            "sw_version": self._fw,
+            "connections": {("mac", self._mac)} if self._mac else set(),
+        }
+
+    @property
+    def native_value(self) -> float:
+        return float(
+            self.coordinator._audio_volume.get(self._cam_id, self.DEFAULT_VOLUME)
+        )
+
+    @property
+    def available(self) -> bool:
+        # Grey out together with the camera's other controls when it is offline,
+        # rather than staying settable on its own (the audio switch greys too).
+        return bool(self.coordinator.last_update_success) and bool(
+            self.coordinator.is_camera_online(self._cam_id)
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store the new playback volume — no Bosch API call (browser-side level).
+
+        The card reads this state to set video.volume; HA pushes the change to
+        every open card automatically.
+        """
+        self.coordinator._audio_volume[self._cam_id] = round(value)
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
     """Number entity: front light brightness (0–100%).
 
@@ -320,7 +399,15 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: 
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.last_update_success)
+        # Gate on cache presence like the other number entities — otherwise a
+        # cache-miss reports "unknown" (available + native_value None) instead of
+        # "unavailable", and automations reading the level see an undefined value.
+        return bool(self.coordinator.last_update_success) and (
+            self.coordinator._shc_state_cache.get(self._cam_id, {}).get(
+                "front_light_intensity"
+            )
+            is not None
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Set front light intensity (0-100% → 0.0-1.0 API value)."""

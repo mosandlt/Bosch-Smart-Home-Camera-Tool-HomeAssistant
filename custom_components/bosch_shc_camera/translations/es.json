@@ -349,6 +349,9 @@
       "speaker_level": {
         "name": "Nivel del altavoz"
       },
+      "audio_volume": {
+        "name": "Volumen de audio"
+      },
       "front_light_intensity": {
         "name": "Intensidad de la luz frontal"
       },
