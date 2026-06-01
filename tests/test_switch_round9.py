@@ -262,6 +262,100 @@ class TestTimestampSwitchActions:
             "Timestamp cache must be False after turn_off"
         )
 
+    @pytest.mark.asyncio
+    async def test_turn_off_keeps_cache_on_put_failure(self, stub_coord, stub_entry):
+        """Regression: a failed PUT must NOT flip the cache or stamp the write-lock.
+
+        Bug (pre-fix): async_put_camera return value was discarded, so a failed
+        cloud PUT both flipped the cache to the wrong value AND bumped
+        _timestamp_set_at — which then suppressed the coordinator's corrective
+        overwrite for the full write-lock window (~30 s), leaving the UI wrong.
+        """
+        from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
+
+        stub_coord._timestamp_cache[CAM_ID] = True  # currently ON
+        stub_coord._timestamp_set_at = {}
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
+        entity = BoschTimestampSwitch(stub_coord, CAM_ID, stub_entry)
+        entity.async_write_ha_state = MagicMock()
+        await entity.async_turn_off()  # attempt OFF, but PUT fails
+        assert stub_coord._timestamp_cache[CAM_ID] is True, (
+            "Cache must stay True when the timestamp PUT fails"
+        )
+        assert CAM_ID not in stub_coord._timestamp_set_at, (
+            "Write-lock must not be stamped on a failed PUT"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_on_keeps_cache_on_put_failure(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
+
+        stub_coord._timestamp_cache[CAM_ID] = False  # currently OFF
+        stub_coord._timestamp_set_at = {}
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
+        entity = BoschTimestampSwitch(stub_coord, CAM_ID, stub_entry)
+        entity.async_write_ha_state = MagicMock()
+        await entity.async_turn_on()  # attempt ON, but PUT fails
+        assert stub_coord._timestamp_cache[CAM_ID] is False, (
+            "Cache must stay False when the timestamp PUT fails"
+        )
+        assert CAM_ID not in stub_coord._timestamp_set_at, (
+            "Write-lock must not be stamped on a failed PUT"
+        )
+
+
+# ── BoschStatusLedSwitch turn_on / turn_off ───────────────────────────────────
+
+
+class TestStatusLedSwitchActions:
+    @pytest.mark.asyncio
+    async def test_turn_on_sets_cache_true_on_success(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+
+        stub_coord._ledlights_cache[CAM_ID] = False
+        stub_coord.async_put_camera = AsyncMock(return_value=True)
+        entity = BoschStatusLedSwitch(stub_coord, CAM_ID, stub_entry)
+        entity.async_write_ha_state = MagicMock()
+        await entity.async_turn_on()
+        assert stub_coord._ledlights_cache[CAM_ID] is True, (
+            "Status-LED cache must be True after a successful turn_on"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_off_keeps_cache_on_put_failure(self, stub_coord, stub_entry):
+        """Regression: failed PUT must not flip the cache nor stamp the write-lock."""
+        from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+
+        stub_coord._ledlights_cache[CAM_ID] = True  # currently ON
+        stub_coord._ledlights_set_at = {}
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
+        entity = BoschStatusLedSwitch(stub_coord, CAM_ID, stub_entry)
+        entity.async_write_ha_state = MagicMock()
+        await entity.async_turn_off()  # attempt OFF, but PUT fails
+        assert stub_coord._ledlights_cache[CAM_ID] is True, (
+            "Cache must stay True when the ledlights PUT fails"
+        )
+        assert CAM_ID not in stub_coord._ledlights_set_at, (
+            "Write-lock must not be stamped on a failed PUT"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_on_keeps_cache_on_put_failure(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+
+        stub_coord._ledlights_cache[CAM_ID] = False  # currently OFF
+        stub_coord._ledlights_set_at = {}
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
+        entity = BoschStatusLedSwitch(stub_coord, CAM_ID, stub_entry)
+        entity.async_write_ha_state = MagicMock()
+        await entity.async_turn_on()  # attempt ON, but PUT fails
+        assert stub_coord._ledlights_cache[CAM_ID] is False, (
+            "Cache must stay False when the ledlights PUT fails"
+        )
+        assert CAM_ID not in stub_coord._ledlights_set_at, (
+            "Write-lock must not be stamped on a failed PUT"
+        )
+
 
 # ── BoschNotificationTypeSwitch ───────────────────────────────────────────────
 

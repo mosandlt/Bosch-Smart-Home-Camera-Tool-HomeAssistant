@@ -503,3 +503,69 @@ class TestLightBaseAvailableAndBrightness:
         assert b == round(80 * 255 / 100), (
             "Brightness when off must return last_brightness scaled to HA 0-255"
         )
+
+
+# ── Write-path success-gating: a failed lighting PUT must not flip is_on ──────
+
+
+class TestLightWriteFailureGating:
+    """Regression: light turn_on/off must commit the optimistic is_on/brightness
+    only when _put_lighting_switch() succeeds. is_on returns the raw instance
+    var, so a failed PUT previously showed the light in the wrong state until the
+    next slow poll, and stamped the wallwasher write-lock."""
+
+    def _front(self, coord, entry):
+        from custom_components.bosch_shc_camera.light import BoschFrontLight
+
+        entity = BoschFrontLight(coord, CAM_ID, entry)
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=False)  # PUT FAILS
+        entity._put_switch_endpoint = AsyncMock(return_value=False)
+        return entity
+
+    def _top(self, coord, entry):
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        entity = BoschTopLedLight(coord, CAM_ID, entry)
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=False)  # PUT FAILS
+        entity._put_switch_endpoint = AsyncMock(return_value=False)
+        entity._sync_wallwasher_cache = MagicMock()
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_front_turn_off_keeps_on_when_put_fails(self, stub_coord, stub_entry):
+        entity = self._front(stub_coord, stub_entry)
+        entity._is_on = True
+        entity._brightness = 60
+        await entity.async_turn_off()
+        assert entity._is_on is True, "is_on must stay True when the off-PUT fails"
+        assert entity._brightness == 60, (
+            "brightness must be unchanged on a failed off-PUT"
+        )
+        entity._put_switch_endpoint.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_top_led_turn_off_keeps_on_when_put_fails(
+        self, stub_coord, stub_entry
+    ):
+        entity = self._top(stub_coord, stub_entry)
+        entity._is_on = True
+        entity._brightness = 70
+        await entity.async_turn_off()
+        assert entity._is_on is True, "is_on must stay True when the off-PUT fails"
+        assert entity._brightness == 70, (
+            "brightness must be unchanged on a failed off-PUT"
+        )
+        entity._put_switch_endpoint.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_front_turn_off_clears_on_success(self, stub_coord, stub_entry):
+        """Control: a successful off-PUT does flip is_on to False."""
+        entity = self._front(stub_coord, stub_entry)
+        entity._put_lighting_switch = AsyncMock(return_value=True)
+        entity._put_switch_endpoint = AsyncMock(return_value=True)
+        entity._is_on = True
+        entity._brightness = 60
+        await entity.async_turn_off()
+        assert entity._is_on is False, "is_on must be False after a successful off-PUT"

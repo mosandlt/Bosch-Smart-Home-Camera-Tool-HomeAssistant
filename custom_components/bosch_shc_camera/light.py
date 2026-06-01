@@ -16,7 +16,7 @@ Gen1 cameras use a different API (lighting_override) and are handled by switch.p
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -363,7 +363,7 @@ class _BoschRgbLedLight(_BoschLightBase):
 
     _led_key = ""
     _attr_color_mode = ColorMode.RGB
-    _attr_supported_color_modes = {ColorMode.RGB}
+    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.RGB}
 
     @property
     def rgb_color(self) -> tuple[int, int, int] | None:
@@ -448,11 +448,13 @@ class _BoschRgbLedLight(_BoschLightBase):
                 }
             }
 
-        self._brightness = api_brightness
-        self._last_brightness = api_brightness
-        self._is_on = True
-
+        # Only commit the optimistic on-state if the PUT actually succeeded —
+        # otherwise is_on/brightness (raw instance vars) would show the light ON
+        # after a failed write until the next slow poll corrects it.
         if await self._put_lighting_switch(body):
+            self._brightness = api_brightness
+            self._last_brightness = api_brightness
+            self._is_on = True
             await self._put_switch_endpoint("topdown", True)
         self._sync_wallwasher_cache()
         self.async_write_ha_state()
@@ -464,15 +466,15 @@ class _BoschRgbLedLight(_BoschLightBase):
         if self._color_hex:
             self._last_color_hex = self._color_hex
         body = {self._led_key: {"brightness": 0}}
-        self._is_on = False
-        self._brightness = 0
-        await self._put_lighting_switch(body)
-        # If BOTH top+bottom are now off, also disable topdown switch
-        lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
-        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-        if top_bri == 0 and bot_bri == 0:
-            await self._put_switch_endpoint("topdown", False)
+        if await self._put_lighting_switch(body):
+            self._is_on = False
+            self._brightness = 0
+            # If BOTH top+bottom are now off, also disable topdown switch
+            lsc = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
+            top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+            bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+            if top_bri == 0 and bot_bri == 0:
+                await self._put_switch_endpoint("topdown", False)
         self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
@@ -515,7 +517,7 @@ class BoschFrontLight(_BoschLightBase):
 
     _led_key = "frontLightSettings"
     _attr_color_mode = ColorMode.COLOR_TEMP
-    _attr_supported_color_modes = {ColorMode.COLOR_TEMP}
+    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.COLOR_TEMP}
     _attr_min_color_temp_kelvin = 2000
     _attr_max_color_temp_kelvin = 6500
 
@@ -586,23 +588,23 @@ class BoschFrontLight(_BoschLightBase):
                 "whiteBalance": wb,
             }
         }
-        self._brightness = api_brightness
-        self._last_brightness = api_brightness
-        self._is_on = True
-
         if await self._put_lighting_switch(body):
+            self._brightness = api_brightness
+            self._last_brightness = api_brightness
+            self._is_on = True
             await self._put_switch_endpoint("front", True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self._is_on = False
-        self._brightness = 0
         # Send brightness=0 to update cache + camera state (like the Bosch app does),
         # then disable via switch endpoint. Without the PUT, the cache retains the old
         # brightness, and any subsequent top/bottom LED PUT would re-enable the front light.
+        # Only commit the optimistic off-state if the PUT succeeded.
         wb = self._white_balance if self._white_balance is not None else -1.0
-        await self._put_lighting_switch(
+        if await self._put_lighting_switch(
             {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}}
-        )
-        await self._put_switch_endpoint("front", False)
+        ):
+            self._is_on = False
+            self._brightness = 0
+            await self._put_switch_endpoint("front", False)
         self.async_write_ha_state()

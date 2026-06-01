@@ -154,7 +154,7 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
     flat: dict[str, Any] = {}
     seen_section_keys: set[str] = set()
 
-    for section_key, fields in OPTIONS_SECTIONS.items():
+    for section_key, _fields in OPTIONS_SECTIONS.items():
         seen_section_keys.add(section_key)
         sec_payload = user_input.get(section_key)
         if sec_payload is None:

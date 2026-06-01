@@ -557,7 +557,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Each entry: {"device_id": str, "camera_light": bool|None, "privacy_mode": bool|None}
         self._shc_state_cache: dict[str, dict[str, Any]] = {}
         self._shc_devices_raw: list[Any] = []  # cached GET /smarthome/devices response
-        self._last_shc_fetch: float = 0.0  # last time SHC devices were fetched
+        self._last_shc_fetch: float = float(
+            "-inf"
+        )  # last SHC fetch (time.monotonic); -inf = never (SENTINEL_RULE)
         # SHC health tracking — skip SHC calls when offline to avoid latency
         self._shc_available: bool = True  # assume available until proven otherwise
         self._shc_fail_count: int = 0  # consecutive failures
@@ -1308,6 +1310,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._user_intent_streams.discard(cam_id)
         self._live_connections.pop(cam_id, None)
         self._live_opened_at.pop(cam_id, None)
+        # Clear the warm-up flag proactively. is_stream_warming() would lazily
+        # clear it (Scenario 1: no live conn), but a privacy-ON teardown is
+        # immediately followed by a privacy cooldown check that calls
+        # is_stream_warming — leaving it set risks blocking the very next
+        # privacy toggle. Discard here so the toggle is never spuriously gated.
+        self._stream_warming.discard(cam_id)
+        self._stream_warming_started.pop(cam_id, None)
         self._stream_error_count.pop(cam_id, None)
         self._stream_error_at.pop(cam_id, None)
         self._stream_fell_back.pop(cam_id, None)
@@ -1693,7 +1702,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             raise ConfigEntryAuthFailed(
                 "Refresh token invalid — please re-authenticate via the "
                 "Reconfigure button on the integration card."
-            )
+            ) from None
         except AuthServerOutageError as err:
             self._auth_outage_count += 1
             # Exponential back-off: 60s, 120s, 240s, 480s, capped at 600s (10 min)
@@ -2829,7 +2838,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         try:
                             async with asyncio.timeout(8):
                                 async with session.get(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/{endpoint}",
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/{endpoint}",  # noqa: B023 # closure awaited within the same loop iteration
                                     headers=headers,
                                 ) as r:
                                     if r.status == 200:
@@ -2839,7 +2848,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             _LOGGER.debug(
                                 "%s fetch error for %s: %s",
                                 endpoint,
-                                cam_id_key,
+                                cam_id_key,  # noqa: B023 # closure awaited within the same loop iteration
                                 BoschCameraCoordinator._err_str(err),
                             )
                             return (endpoint, 0, None)
@@ -2998,7 +3007,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 ep_data if isinstance(ep_data, dict) else {}
                             )
                             # Update MotionLightSwitch state
-                            for ent in self.hass.data.get("entity_platform", {}).get(
+                            for _ent in self.hass.data.get("entity_platform", {}).get(
                                 f"{DOMAIN}.switch", []
                             ):
                                 pass  # State synced via switch._is_on in next update
@@ -3334,12 +3343,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
             if _cloud_alert is not None:
                 self.hass.async_create_task(_cloud_alert(False))
-            raise UpdateFailed("Timeout fetching camera data from Bosch cloud")
+            raise UpdateFailed(
+                "Timeout fetching camera data from Bosch cloud"
+            ) from None
         except aiohttp.ClientError as err:
             _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
             if _cloud_alert is not None:
                 self.hass.async_create_task(_cloud_alert(False))
-            raise UpdateFailed(f"Network error: {err}")
+            raise UpdateFailed(f"Network error: {err}") from err
 
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
         """Fetch the Bosch community maintenance announcement in the background.
@@ -7405,7 +7416,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 # async_request_refresh() awaits the full coordinator tick which can
                 # take 6-22 s; blocking here freezes the card until the tick finishes.
                 hass.async_create_task(coord.async_request_refresh())
-                for cam_id, cam in coord._camera_entities.items():
+                for _cam_id, cam in coord._camera_entities.items():
                     hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
 
     async def handle_open_live_connection(call: ServiceCall) -> None:

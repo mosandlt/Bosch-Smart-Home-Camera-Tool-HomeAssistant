@@ -18,7 +18,7 @@ import logging
 import os
 import ssl
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse
 
 import aiohttp
@@ -72,8 +72,10 @@ class _FCMNoiseFilter(logging.Filter):
     """
 
     _DEDUP_WINDOW_SECONDS = 300.0
-    _SHARED_ERROR_TIMESTAMPS: list[float] = []  # any failure marker
-    _SHARED_STALENESS_TIMESTAMPS: list[float] = []  # only creds-rejection markers
+    _SHARED_ERROR_TIMESTAMPS: ClassVar[list[float]] = []  # any failure marker
+    _SHARED_STALENESS_TIMESTAMPS: ClassVar[
+        list[float]
+    ] = []  # only creds-rejection markers
 
     # Connectivity-loop markers: WAN blip / SSL reset. Library lib retries; our
     # watchdog notices via is_started()=False or ≥3 in 5 min. Credentials are

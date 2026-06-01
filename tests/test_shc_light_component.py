@@ -466,7 +466,7 @@ class TestSetLightComponentGen2:
         saved = coord._last_topdown_brightness[CAM_ID]
         assert saved == {"top": 80, "bottom": 60}
         # Request body has zeroed brightness
-        ls_url, ls_body = captured[0]
+        _ls_url, ls_body = captured[0]
         assert ls_body["topLedLightSettings"]["brightness"] == 0
         assert ls_body["bottomLedLightSettings"]["brightness"] == 0
 

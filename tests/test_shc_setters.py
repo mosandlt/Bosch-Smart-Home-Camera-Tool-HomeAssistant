@@ -512,7 +512,7 @@ class TestSchedulePrivacyOffSnapshot:
             _schedule_privacy_off_snapshot,
         )
 
-        coord, cam_entity = self._make_coord("HOME_Eyes_Outdoor")
+        coord, _cam_entity = self._make_coord("HOME_Eyes_Outdoor")
         _schedule_privacy_off_snapshot(coord, CAM_ID)
         assert coord.hass.async_create_task.called, "Must schedule a task"
         # Extract the coroutine that was passed to async_create_task

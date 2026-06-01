@@ -1536,7 +1536,7 @@ class TestStreamSmbFobjRangeErrors:
     async def test_invalid_range_header_falls_back_to_200(self):
         """Range: bytes=notanumber → ValueError caught → full 200 response."""
         payload = b"X" * 100
-        hass, view, stem, backend_mock, fake_fobj, request = (
+        _hass, view, stem, backend_mock, _fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=notanumber-")
         )
 
@@ -1564,7 +1564,7 @@ class TestStreamSmbFobjRangeErrors:
     async def test_range_end_only_no_start(self):
         """Range: bytes=-500 (end only, no start) → treated as full 200."""
         payload = b"Y" * 200
-        hass, view, stem, backend_mock, fake_fobj, request = (
+        _hass, view, stem, backend_mock, _fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=-500")
         )
 
@@ -1584,7 +1584,7 @@ class TestStreamSmbFobjRangeErrors:
     async def test_range_start_beyond_size_falls_back_to_200(self):
         """Range where start > size → invalid range → falls back to 200."""
         payload = b"Z" * 50
-        hass, view, stem, backend_mock, fake_fobj, request = (
+        _hass, view, stem, backend_mock, _fake_fobj, request = (
             self._make_smb_view_with_mock_fobj(payload, "bytes=9999-99999")
         )
 

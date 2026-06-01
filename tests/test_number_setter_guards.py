@@ -206,7 +206,7 @@ class TestWhiteBalanceJsonParseError:
         coord._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
 
-        session, resp = _make_put_session(
+        session, _resp = _make_put_session(
             status=200, json_raises=ValueError("not JSON")
         )
 
@@ -264,7 +264,7 @@ class TestLedBrightnessJsonParseError:
         )
         e._brightness = None
 
-        session, resp = _make_put_session(
+        session, _resp = _make_put_session(
             status=200, json_raises=ValueError("bad body")
         )
 
@@ -338,3 +338,63 @@ class TestDarknessThresholdAvailable:
         # Empty cache → bool({}) is False
         e = _make_entity(BoschDarknessThresholdNumber, coord=coord)
         assert e.available is False
+
+
+# ── Write-path success-gating: a failed PUT must not poison the cache ─────────
+
+
+class TestWritePathSuccessGating:
+    """Regression: number setters must gate the optimistic cache write on the
+    async_put_camera() bool result. A failed PUT previously poisoned the cache
+    with the user-entered value; native_value reads that cache, so the slider
+    showed the wrong value until the next slow-tier poll (~300 s)."""
+
+    @pytest.mark.asyncio
+    async def test_lens_elevation_cache_untouched_on_put_failure(self):
+        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+
+        coord = _stub_coord(async_put_camera=AsyncMock(return_value=False))
+        e = _make_entity(BoschLensElevationNumber, coord)
+        await e.async_set_native_value(12.0)
+        assert CAM_ID not in coord._lens_elevation_cache, (
+            "lens_elevation cache must stay empty when the PUT fails"
+        )
+
+    @pytest.mark.asyncio
+    async def test_lens_elevation_cache_set_on_success(self):
+        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+
+        coord = _stub_coord(async_put_camera=AsyncMock(return_value=True))
+        e = _make_entity(BoschLensElevationNumber, coord)
+        await e.async_set_native_value(12.0)
+        assert coord._lens_elevation_cache[CAM_ID] == 12.0
+
+    @pytest.mark.asyncio
+    async def test_mic_level_cache_untouched_on_put_failure(self):
+        from custom_components.bosch_shc_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
+
+        coord = _stub_coord(
+            async_put_camera=AsyncMock(return_value=False),
+            _audio_cache={CAM_ID: {"microphoneLevel": 30}},
+        )
+        e = _make_entity(BoschMicrophoneLevelNumber, coord)
+        await e.async_set_native_value(80.0)
+        assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 30, (
+            "mic-level cache must keep its prior value when the PUT fails"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mic_level_cache_updated_on_success(self):
+        from custom_components.bosch_shc_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
+
+        coord = _stub_coord(
+            async_put_camera=AsyncMock(return_value=True),
+            _audio_cache={CAM_ID: {"microphoneLevel": 30}},
+        )
+        e = _make_entity(BoschMicrophoneLevelNumber, coord)
+        await e.async_set_native_value(80.0)
+        assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 80

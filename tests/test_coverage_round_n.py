@@ -285,7 +285,7 @@ class TestDispatchModes:
         """push_mode='weirdvalue' → coerced to 'auto' → _fcm_push_mode='auto' on success."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
-        mock_fcm, mock_client = _mock_fcm_module()
+        mock_fcm, _mock_client = _mock_fcm_module()
         coord = _fcm_coord("weirdvalue")
 
         with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
@@ -305,7 +305,7 @@ class TestDispatchModes:
         """push_mode='android' (legacy) → coerced to 'auto' → _fcm_push_mode='auto' on success."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
-        mock_fcm, mock_client = _mock_fcm_module()
+        mock_fcm, _mock_client = _mock_fcm_module()
         coord = _fcm_coord("android")
         coord._entry = SimpleNamespace(
             data={

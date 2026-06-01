@@ -57,31 +57,28 @@ extend-exclude = ["build", "captures", "credentials", "snapshots", "events", "re
 select = ["E", "F", "W", "I", "UP", "B", "S", "C90", "RUF"]
 ignore = [
     "E501",    # line length is enforced by the formatter, not the linter
-    "B008",    # function call in argument defaults — common HA/voluptuous pattern
     "S311",    # stdlib PRNG is used for non-crypto jitter/labels only
     "C901",    # complexity is reported via mccabe below, not hard-failed inline
-    "UP038",   # isinstance tuple form kept for readability
-    "E402",    # imports after module-level constants — common HA integration layout
-    "E741",    # short loop/lambda names kept where locally unambiguous
-    "E731",    # small lambda assignments kept for readability
     "RUF001",  # ambiguous unicode in strings — intentional typography (×, –, …) + German
     "RUF002",  # ambiguous unicode in docstrings — same
     "RUF003",  # ambiguous unicode in comments — same
-    "RUF012",  # mutable class defaults are HA entity-description / dataclass idiom here
-    "RUF046",  # int() casts kept explicit for readability
-    "RUF059",  # unpacked-but-unused tuple members kept to document the shape
-    "B007",    # loop control var unused but kept for readability of the iterable
-    "B023",    # loop-var closures here are all awaited within the same iteration
     # S104/S108/S110/S112/S310 are NOT globally ignored — each known-safe site
     # carries a per-line `# noqa: S### # reason` so NEW occurrences still fail CI.
-    "S321",    # FTP usage flag — false positive (no FTP in this path)
     "S101",    # asserts are deliberate mypy type-narrowing invariants (see "narrowed by" comments) — required for mypy --strict
-    "B904",    # exception chaining (`raise ... from`) not enforced — HA does not require it
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "F401", "F811", "F841", "E402", "B011", "B017"]
 "scripts/**" = ["S", "T201"]
+# E402 stays globally enforced; these four HA-layout modules intentionally place
+# module-level imports after code: camera.py calls urllib3.disable_warnings()
+# before its homeassistant imports (private-CA TLS); __init__.py / config_flow.py
+# import sibling modules lazily after a constant + helper to avoid circular
+# imports; sensor.py defers `import re as _re_inst` to the bottom of the module.
+"custom_components/bosch_shc_camera/__init__.py" = ["E402"]
+"custom_components/bosch_shc_camera/camera.py" = ["E402"]
+"custom_components/bosch_shc_camera/config_flow.py" = ["E402"]
+"custom_components/bosch_shc_camera/sensor.py" = ["E402"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 40

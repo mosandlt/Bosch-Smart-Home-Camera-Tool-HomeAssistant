@@ -359,7 +359,7 @@ class TestAsyncCancelCoordinatorTasks:
     async def test_renewal_tasks_cancelled(self):
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
-        coord, task1, bg_task = self._make_coord()
+        coord, task1, _bg_task = self._make_coord()
         with (
             patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
             patch(f"{MODULE}.stop_all_proxies"),
@@ -373,7 +373,7 @@ class TestAsyncCancelCoordinatorTasks:
     async def test_bg_tasks_cancelled(self):
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
-        coord, task1, bg_task = self._make_coord()
+        coord, _task1, bg_task = self._make_coord()
         with (
             patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
             patch(f"{MODULE}.stop_all_proxies"),
@@ -387,7 +387,7 @@ class TestAsyncCancelCoordinatorTasks:
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
         handle = MagicMock()
-        coord, task1, bg_task = self._make_coord()
+        coord, _task1, _bg_task = self._make_coord()
         coord._token_refresh_handle = handle
         with (
             patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),

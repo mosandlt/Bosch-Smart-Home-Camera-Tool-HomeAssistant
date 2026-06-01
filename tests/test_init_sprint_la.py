@@ -375,7 +375,7 @@ class TestAutoRenewHeartbeat:
         )
 
         put_cm = _heartbeat_resp(200)
-        session_cm, session = _make_aiohttp_session_mock(put_cm)
+        session_cm, _session = _make_aiohttp_session_mock(put_cm)
 
         with (
             patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),

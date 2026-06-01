@@ -329,7 +329,7 @@ class TestHandleCreateRuleException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -356,7 +356,7 @@ class TestHandleCreateRuleException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -383,7 +383,7 @@ class TestHandleDeleteRuleException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -407,7 +407,7 @@ class TestHandleDeleteRuleException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -444,7 +444,7 @@ class TestHandleUpdateRulePutException:
             "endTime": "20:00:00",
             "weekdays": [0],
         }
-        entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
+        entry, _coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -473,7 +473,7 @@ class TestHandleGetMotionZonesException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -517,7 +517,7 @@ class TestHandleShareCameraException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -561,7 +561,7 @@ class TestHandleGetPrivacyMasksException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -585,7 +585,7 @@ class TestHandleGetPrivacyMasksException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -614,7 +614,7 @@ class TestHandleSetPrivacyMasksException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -665,7 +665,7 @@ class TestHandleDeleteMotionZoneException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -774,7 +774,7 @@ class TestHandleRenameCameraException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -818,7 +818,7 @@ class TestHandleInviteFriendException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -842,7 +842,7 @@ class TestHandleInviteFriendException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -871,7 +871,7 @@ class TestHandleListFriendsException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -895,7 +895,7 @@ class TestHandleListFriendsException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -924,7 +924,7 @@ class TestHandleRemoveFriendException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -948,7 +948,7 @@ class TestHandleRemoveFriendException:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 

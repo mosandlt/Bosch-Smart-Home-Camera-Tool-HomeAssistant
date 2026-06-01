@@ -178,11 +178,15 @@ class TestPrivacyModeSwitchActions:
         """Cooldown blocks privacy toggle during stream warm-up — the
         TLS proxy + encoder init isn't a moment to flip the shutter."""
         stub_coord.is_stream_warming = lambda cid: True
+        from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        await sw.async_turn_on()
+        # Blocked toggles now raise (visible) instead of silently returning (#27)
+        with pytest.raises(ServiceValidationError):
+            await sw.async_turn_on()
         # The cloud setter must NOT be called when blocked
         stub_coord.async_cloud_set_privacy_mode.assert_not_awaited()
         stub_coord._tear_down_live_stream.assert_not_awaited()
@@ -192,11 +196,14 @@ class TestPrivacyModeSwitchActions:
         """Two flips within 10 s must block — protects the camera firmware
         from rapid shutter toggling (red LED / reboot risk)."""
         stub_coord._privacy_set_at[CAM_ID] = time.monotonic() - 5  # 5 s ago
+        from homeassistant.exceptions import ServiceValidationError
+
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        await sw.async_turn_on()
+        with pytest.raises(ServiceValidationError):
+            await sw.async_turn_on()
         stub_coord.async_cloud_set_privacy_mode.assert_not_awaited()
 
     @pytest.mark.asyncio

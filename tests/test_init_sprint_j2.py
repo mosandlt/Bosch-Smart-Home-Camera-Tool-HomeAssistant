@@ -1045,7 +1045,7 @@ class TestRegisterGo2rtcStream:
         coord = _make_coord()
         coord.hass.config.config_dir = "/tmp"
 
-        session_mock, put_resp, check_resp = _make_go2rtc_session(
+        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
             put_status=200, check_status=200
         )
 

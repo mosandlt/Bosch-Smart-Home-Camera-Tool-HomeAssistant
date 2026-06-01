@@ -465,7 +465,7 @@ class TestAsyncDigestRequest:
             mock_session, "GET", "https://cam/snap.jpg", "u", "p"
         )
 
-        _, kwargs = mock_session.request.call_args
+        _, _kwargs = mock_session.request.call_args
         # data=None is only included if data is not None per spec, so either absent or None
         # Both are acceptable — just confirm no TypeError was raised
         assert mock_session.request.call_count == 1

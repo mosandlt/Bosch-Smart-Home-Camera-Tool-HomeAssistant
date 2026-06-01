@@ -223,6 +223,53 @@ test("privacy pill clears its marked state after privacy turns off (#27)", async
   expect(r.onAfterHassOff, "pill stays cleared once HA reports off").toBe(false);
 });
 
+// #27: after a privacy toggle the backend enforces a 10s cooldown (and now
+// rejects an early toggle). The card blocks the tap during that window and
+// shows a countdown so the user waits instead of hammering the button.
+test("privacy cooldown blocks rapid re-toggle and shows a countdown (#27)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    let calls = 0;
+    const base = { config: {}, language: "en", localize: () => "", callService: () => { calls++; return Promise.resolve(); }, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_privacy_mode": { state: "off", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    // Shorten the cooldown so the test leaves no long-lived interval running —
+    // a 10s interval kept the Playwright worker alive on the Windows runner and
+    // tripped the "worker did not exit" force-kill (CI flake, not a real bug).
+    card._PRIVACY_COOLDOWN_MS = 400;
+    const pill = () => card.shadowRoot.getElementById("ap-btn-privacy");
+    if (!pill()) return { error: "no ap-btn-privacy element" };
+    card._togglePrivacy(); // first tap → fires the service + starts the cooldown
+    await new Promise((res) => setTimeout(res, 50));
+    const callsAfterFirst = calls;
+    const cooldownClass = pill().classList.contains("cooldown");
+    const cdAttr = pill().getAttribute("data-cd");
+    const ariaDisabled = pill().getAttribute("aria-disabled");
+    card._togglePrivacy(); // second tap within the window must be blocked
+    await new Promise((res) => setTimeout(res, 50));
+    const callsAfterSecond = calls;
+    // Belt-and-suspenders cleanup: stop the interval explicitly, then remove the
+    // card (disconnectedCallback also clears it) so no timer outlives the test.
+    if (card._privacyCooldownTimer) { clearInterval(card._privacyCooldownTimer); card._privacyCooldownTimer = null; }
+    card._privacyCooldownUntil = 0;
+    card.remove();
+    return { callsAfterFirst, callsAfterSecond, cooldownClass, cdAttr, ariaDisabled };
+  });
+  expect(r.error, "card renders #ap-btn-privacy").toBeUndefined();
+  expect(r.callsAfterFirst, "first privacy toggle calls the service once").toBe(1);
+  expect(r.cooldownClass, "privacy pill enters the cooldown state").toBe(true);
+  expect(Number(r.cdAttr), "countdown badge shows remaining seconds").toBeGreaterThan(0);
+  expect(r.ariaDisabled, "pill is aria-disabled during cooldown").toBe("true");
+  expect(r.callsAfterSecond, "second toggle within cooldown is blocked (no extra call)").toBe(1);
+});
+
 // mobile fullscreen: only one card may be in the CSS-fullscreen overlay — a
 // second card entering closes the first (single-owner; part of the "closing one
 // opened another" fix).

@@ -197,7 +197,7 @@ class TestAsyncStartFcmPushClosures:
     @pytest.mark.asyncio
     async def test_on_push_delegates_to_on_fcm_push(self):
         """Line 221: _on_push closure calls _on_fcm_push with the coordinator."""
-        coord, captured = await self._run_start(push_mode="ios")
+        _coord, captured = await self._run_start(push_mode="ios")
 
         assert "callback" in captured, "FcmPushClient must receive callback"
         push_cb = captured["callback"]
@@ -219,7 +219,7 @@ class TestAsyncStartFcmPushClosures:
     @pytest.mark.asyncio
     async def test_on_push_passes_obj_argument(self):
         """Line 221: _on_push passes the optional obj kwarg through to _on_fcm_push."""
-        coord, captured = await self._run_start(push_mode="ios")
+        _coord, captured = await self._run_start(push_mode="ios")
         push_cb = captured["callback"]
 
         calls = []

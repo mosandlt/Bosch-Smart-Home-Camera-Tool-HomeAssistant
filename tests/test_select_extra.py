@@ -305,7 +305,7 @@ class TestMotionSensitivitySelect:
         await sel.async_select_option("high")
         # Must be called with UPPER-cased value
         stub_coord.async_put_camera.assert_called_once()
-        args, kwargs = stub_coord.async_put_camera.call_args
+        args, _kwargs = stub_coord.async_put_camera.call_args
         # signature: (cam_id, "motion", {"enabled":..., "motionAlarmConfiguration":...})
         body = args[2]
         assert body["motionAlarmConfiguration"] == "HIGH", (

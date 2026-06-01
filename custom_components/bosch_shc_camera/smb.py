@@ -316,7 +316,7 @@ def sync_smb_upload(
 
             # Upload snapshot
             img_url = ev.get("imageUrl")
-            if img_url:
+            if img_url and _is_safe_bosch_url(img_url):
                 smb_path = f"{smb_folder}\\{file_base}.jpg"
                 try:
                     smb_stat(smb_path)
@@ -536,7 +536,7 @@ def _ftp_connect(server: str, username: str, password: str) -> Any:
     """Open a passive-mode FTP connection. Caller closes via .quit()."""
     import ftplib
 
-    ftp = ftplib.FTP(server, timeout=30)
+    ftp = ftplib.FTP(server, timeout=30)  # noqa: S321 # FTP ist eine bewusst konfigurierbare Upload-Zieloption (smb.py FTP-Pfad)
     ftp.login(username, password)
     ftp.set_pasv(True)
     return ftp

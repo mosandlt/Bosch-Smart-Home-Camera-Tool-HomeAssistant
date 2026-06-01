@@ -239,6 +239,41 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw._check_cooldown() is True
 
+    @pytest.mark.asyncio
+    async def test_turn_off_during_cooldown_raises_not_silent(
+        self, stub_coord, stub_entry
+    ):
+        """Regression #27: a privacy toggle inside the cooldown window raises
+        ServiceValidationError (visible rejection) instead of returning
+        silently — a silent drop made the card flip to the wrong state for 8s
+        and look like the button had hung."""
+        import time as _time
+        from unittest.mock import AsyncMock
+
+        from homeassistant.exceptions import ServiceValidationError
+
+        from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
+        stub_coord._privacy_set_at[CAM_ID] = _time.monotonic()  # just toggled
+        stub_coord.async_cloud_set_privacy_mode = AsyncMock()
+        sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
+        with pytest.raises(ServiceValidationError):
+            await sw.async_turn_off()
+        stub_coord.async_cloud_set_privacy_mode.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cooldown_message_reports_remaining_seconds(
+        self, stub_coord, stub_entry
+    ):
+        import time as _time
+
+        from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
+        stub_coord._privacy_set_at[CAM_ID] = _time.monotonic()  # fresh toggle
+        sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
+        msg = sw._cooldown_message()
+        assert "wait" in msg.lower() and "s before" in msg.lower(), msg
+
 
 # ── BoschAudioSwitch ─────────────────────────────────────────────────────
 

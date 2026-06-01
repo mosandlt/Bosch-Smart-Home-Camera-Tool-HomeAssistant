@@ -1269,7 +1269,7 @@ def _sync_nvr_cleanup_local(coordinator: BoschCameraCoordinator) -> None:
 
     cutoff = time.time() - retention_days * 86400
     deleted = 0
-    for root, dirs, files in os.walk(base_path):
+    for root, _dirs, files in os.walk(base_path):
         for name in files:
             full = os.path.join(root, name)
             try:
@@ -1284,7 +1284,7 @@ def _sync_nvr_cleanup_local(coordinator: BoschCameraCoordinator) -> None:
                     _LOGGER.debug("NVR cleanup: cannot remove %s: %s", full, err)
     # Second pass: prune empty date folders (but never the camera dir or
     # base_path itself).
-    for root, dirs, files in os.walk(base_path, topdown=False):
+    for root, _dirs, _files in os.walk(base_path, topdown=False):
         if root == base_path:
             continue
         try:

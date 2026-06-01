@@ -212,6 +212,8 @@ class TestTeardownClearsIntent:
             _stream_fell_back={},
             _local_rescue_attempts={},
             _local_rescue_at={},
+            _stream_warming={CAM_ID},
+            _stream_warming_started={CAM_ID: 100.0},
             _renewal_tasks={},
             _camera_entities={},
             _live_stream_entities={},

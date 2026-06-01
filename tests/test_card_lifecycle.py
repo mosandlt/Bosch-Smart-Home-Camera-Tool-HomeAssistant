@@ -258,10 +258,12 @@ def test_card_version_matches_const_py() -> None:
     const_text = CONST_PY.read_text()
 
     src_match = [
-        l for l in src_text.splitlines() if l.startswith('const CARD_VERSION = "')
+        line
+        for line in src_text.splitlines()
+        if line.startswith('const CARD_VERSION = "')
     ]
     const_match = [
-        l for l in const_text.splitlines() if l.startswith('CARD_VERSION = "')
+        line for line in const_text.splitlines() if line.startswith('CARD_VERSION = "')
     ]
     assert len(src_match) == 1
     assert len(const_match) == 1

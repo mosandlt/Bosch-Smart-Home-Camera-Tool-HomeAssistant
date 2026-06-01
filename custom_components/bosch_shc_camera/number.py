@@ -248,7 +248,7 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
         existing audio settings are not clobbered. Uses async_put_camera for
         consistent token-refresh handling.
         """
-        level = int(round(value))
+        level = round(value)
         audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
         audio["speakerLevel"] = level
         success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
@@ -397,10 +397,11 @@ class BoschLensElevationNumber(_BoschGen2NumberBase):
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "lens_elevation", {"elevation": round(value, 2)}
         )
-        self.coordinator._lens_elevation_cache[self._cam_id] = value
+        if success:
+            self.coordinator._lens_elevation_cache[self._cam_id] = value
         self.async_write_ha_state()
 
 
@@ -445,9 +446,10 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
         ):
             return
         audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
-        audio["microphoneLevel"] = int(round(value))
-        await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
-        self.coordinator._audio_cache[self._cam_id] = audio
+        audio["microphoneLevel"] = round(value)
+        success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
+        if success:
+            self.coordinator._audio_cache[self._cam_id] = audio
         self.async_write_ha_state()
 
 
@@ -579,7 +581,7 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
         """Set brightness — sends FULL body with all 3 groups (API requirement)."""
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-        brightness = int(round(value))
+        brightness = round(value)
         # Read current state from cache, update only our group
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         body = {
@@ -702,7 +704,7 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
         cache = dict(self.coordinator._motion_light_cache.get(self._cam_id, {}))
         if not cache:
             return
-        cache["motionLightSensitivity"] = int(round(value))
+        cache["motionLightSensitivity"] = round(value)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "lighting/motion", cache
         )
@@ -802,7 +804,7 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        val = int(round(max(0, min(4, value))))
+        val = round(max(0, min(4, value)))
         success = await self.coordinator.async_put_camera(
             self._cam_id, "iconLedBrightness", {"value": val}
         )
@@ -846,7 +848,7 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
             self, "Sirenen-/Alarm-Einstellung"
         ):
             return
-        cfg[self._field] = int(round(value))
+        cfg[self._field] = round(value)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "alarm_settings", cfg
         )
@@ -959,7 +961,7 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
-        cfg["sensitivity"] = int(round(max(0, min(7, value))))
+        cfg["sensitivity"] = round(max(0, min(7, value)))
         success = await self.coordinator.async_put_camera(
             self._cam_id, "intrusionDetectionConfig", cfg
         )
@@ -1021,9 +1023,7 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
-        cfg["distance"] = int(
-            round(max(1, min(8, value)))
-        )  # API rejects > 8 (HTTP 400)
+        cfg["distance"] = round(max(1, min(8, value)))  # API rejects > 8 (HTTP 400)
         success = await self.coordinator.async_put_camera(
             self._cam_id, "intrusionDetectionConfig", cfg
         )

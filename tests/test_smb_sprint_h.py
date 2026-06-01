@@ -1003,3 +1003,70 @@ class TestEnableToggleGuards:
             _sync_ftp_cleanup(coord)
 
         fake_ftp_connect.assert_not_called()
+
+
+# ── SMB snapshot SSRF guard ─────────────────────────────────────────────────
+
+
+class TestSmbImageUrlSafetyGuard:
+    """Regression: the SMB snapshot path must reject non-Bosch imageUrls.
+
+    Bug (pre-fix): the SMB upload path fetched `imageUrl` with no
+    `_is_safe_bosch_url` check, while the FTP path, the FTP clip path and
+    `sync_local_save` all validate it. An event whose `imageUrl` pointed at an
+    attacker-controlled host would have been fetched (SSRF) with the user's
+    bearer token attached. The fix mirrors the FTP path's guard.
+    """
+
+    def test_non_bosch_image_url_is_not_fetched(self):
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch(f"{MODULE}.socket"),
+            patch(f"{MODULE}.smb_makedirs"),
+            patch(URLOPEN) as mock_urlopen,
+        ):
+            data = {
+                CAM_ID: {
+                    "info": {"title": "Terrasse"},
+                    "events": [
+                        _basic_event(image_url="https://evil.example.com/snap.jpg")
+                    ],
+                }
+            }
+            sync_smb_upload(coord, data, "tok")
+
+        # SSRF guard blocked the fetch entirely.
+        mock_urlopen.assert_not_called()
+        fake_smb.open_file.assert_not_called()
+
+    def test_bosch_image_url_is_fetched(self):
+        """Control: a legitimate *.bosch.com imageUrl still uploads normally."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+        fake_smb.open_file.return_value = MagicMock()
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch(f"{MODULE}.socket"),
+            patch(f"{MODULE}.smb_makedirs"),
+            patch(URLOPEN, return_value=_urlopen_resp(status=200, content=b"IMG")),
+        ):
+            data = {
+                CAM_ID: {
+                    "info": {"title": "Terrasse"},
+                    "events": [
+                        _basic_event(image_url="https://cdn.bosch.com/snap.jpg")
+                    ],
+                }
+            }
+            sync_smb_upload(coord, data, "tok")
+
+        # Safe Bosch URL → fetch happened.
+        fake_smb.open_file.assert_called()

@@ -465,7 +465,7 @@ class TestPipeErrnoEBADFSuppression:
         # (i.e., it is a top-level import, not deferred)
         lines = src.splitlines()
         import_line = next(
-            (i for i, l in enumerate(lines) if re.match(r"^import errno\s*$", l)),
+            (i for i, line in enumerate(lines) if re.match(r"^import errno\s*$", line)),
             None,
         )
         assert import_line is not None, "import errno must be at module level"

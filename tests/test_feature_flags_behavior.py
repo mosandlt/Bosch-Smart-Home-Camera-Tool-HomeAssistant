@@ -347,7 +347,7 @@ class TestFeatureFlagCoverage:
     referencing each flag alongside behavior-asserting keywords.
     """
 
-    FEATURE_FLAGS = [
+    FEATURE_FLAGS = [  # noqa: RUF012 # test-local constant list, not entity state
         "enable_snapshots",
         "enable_sensors",
         "enable_binary_sensors",

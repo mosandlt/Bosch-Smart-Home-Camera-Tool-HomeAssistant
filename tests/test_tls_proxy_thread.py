@@ -238,7 +238,7 @@ class TestProxyThreadLifecycle:
     def test_proxy_exits_cleanly_when_server_closed(self):
         """Start proxy then immediately stop it; thread must exit without errors."""
         cam_id = "TEST-CAM-LIFECYCLE-2"
-        port, port_cache, threads_before = _start_proxy(cam_id, "127.0.0.1", 1)
+        _port, port_cache, threads_before = _start_proxy(cam_id, "127.0.0.1", 1)
         stop_tls_proxy(cam_id, port_cache)
         _join_new_threads(threads_before)
 

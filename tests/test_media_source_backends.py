@@ -832,7 +832,7 @@ class TestViewRoutingCameraFirstLocal:
             src, "_NVR_DATE_DIR_RE.match(parts[1])"
         )
         # NVR must set kind='N' unconditionally (not via _find_source heuristic)
-        lines = [l.strip() for l in src.splitlines()]
+        lines = [line.strip() for line in src.splitlines()]
         nvr_block = False
         for line in lines:
             if "_NVR_DATE_DIR_RE.match(parts[1])" in line:

@@ -66,6 +66,8 @@ def _make_coord(**overrides):
         _stream_fell_back={},
         _local_rescue_attempts={},
         _local_rescue_at={},
+        _stream_warming=set(),
+        _stream_warming_started={},
         _renewal_tasks={},
         _bg_tasks=set(),
         _nvr_processes={},

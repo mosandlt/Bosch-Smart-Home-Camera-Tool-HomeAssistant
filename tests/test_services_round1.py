@@ -118,7 +118,7 @@ class TestHandleUpdateRuleRemaining:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord(_rules_cache={CAM_ID: []})
+        entry, _coord = _entry_with_coord(_rules_cache={CAM_ID: []})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -150,7 +150,7 @@ class TestHandleUpdateRuleRemaining:
             "endTime": "20:00:00",
             "weekdays": [0, 6],
         }
-        entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
+        entry, _coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -210,7 +210,7 @@ class TestHandleUpdateRuleRemaining:
             "endTime": "20:00:00",
             "weekdays": [],
         }
-        entry, coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
+        entry, _coord = _entry_with_coord(_rules_cache={CAM_ID: [existing]})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -232,7 +232,7 @@ class TestHandleUpdateRuleRemaining:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord(_rules_cache={CAM_ID: []})
+        entry, _coord = _entry_with_coord(_rules_cache={CAM_ID: []})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -343,7 +343,7 @@ class TestHandleSetMotionZones:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -371,7 +371,7 @@ class TestHandleSetMotionZones:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -398,7 +398,7 @@ class TestHandleSetMotionZones:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -426,7 +426,7 @@ class TestHandleGetMotionZones:
         """Empty zone list → persistent notification with 'Keine Motion-Zonen' message."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -451,7 +451,7 @@ class TestHandleGetMotionZones:
         """Non-empty zones → notification lists each zone with coordinates."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -478,7 +478,7 @@ class TestHandleGetMotionZones:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -502,7 +502,7 @@ class TestHandleGetMotionZones:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -527,7 +527,7 @@ class TestHandleShareCamera:
         """camera_ids given as string → converted to [string] before PUT."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -550,7 +550,7 @@ class TestHandleShareCamera:
         """HTTP 204 → persistent notification sent."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -577,7 +577,7 @@ class TestHandleShareCamera:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -603,7 +603,7 @@ class TestHandleShareCamera:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -636,7 +636,7 @@ class TestHandleGetPrivacyMasks:
         """Empty mask list → 'Keine Privacy-Masken' in notification."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -658,7 +658,7 @@ class TestHandleGetPrivacyMasks:
         """Non-empty mask list → coordinates appear in notification."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -683,7 +683,7 @@ class TestHandleGetPrivacyMasks:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -707,7 +707,7 @@ class TestHandleGetPrivacyMasks:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -777,7 +777,7 @@ class TestHandleSetPrivacyMasks:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -803,7 +803,7 @@ class TestHandleSetPrivacyMasks:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -833,7 +833,7 @@ class TestHandleDeleteMotionZone:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -885,7 +885,7 @@ class TestHandleDeleteMotionZone:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -921,7 +921,7 @@ class TestHandleGetLightingSchedule:
             "wallwasherInGeneralLightOn": False,
             "frontIlluminatorGeneralLightIntensity": 0.8,
         }
-        entry, coord = _entry_with_coord(_lighting_options_cache={CAM_ID: cached})
+        entry, _coord = _entry_with_coord(_lighting_options_cache={CAM_ID: cached})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -942,7 +942,7 @@ class TestHandleGetLightingSchedule:
         """No cache → GET request made, notification sent."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord(_lighting_options_cache={})
+        entry, _coord = _entry_with_coord(_lighting_options_cache={})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -977,7 +977,7 @@ class TestHandleGetLightingSchedule:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord(_lighting_options_cache={})
+        entry, _coord = _entry_with_coord(_lighting_options_cache={})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1008,7 +1008,7 @@ class TestHandleGetLightingSchedule:
             "wallwasherInGeneralLightOn": True,
             "frontIlluminatorGeneralLightIntensity": 0.5,
         }
-        entry, coord = _entry_with_coord(_lighting_options_cache={CAM_ID: cached})
+        entry, _coord = _entry_with_coord(_lighting_options_cache={CAM_ID: cached})
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1071,7 +1071,7 @@ class TestHandleRenameCamera:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1096,7 +1096,7 @@ class TestHandleInviteFriend:
         """HTTP 201 → persistent notification contains friend ID."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1123,7 +1123,7 @@ class TestHandleInviteFriend:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1145,7 +1145,7 @@ class TestHandleInviteFriend:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1170,7 +1170,7 @@ class TestHandleListFriends:
         """Empty friends list → 'Keine Freunde' in notification."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1190,7 +1190,7 @@ class TestHandleListFriends:
         """Non-empty friends → email + status + ID appear in notification."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1222,7 +1222,7 @@ class TestHandleListFriends:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1245,7 +1245,7 @@ class TestHandleRemoveFriend:
         """HTTP 204 → success, no error."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1268,7 +1268,7 @@ class TestHandleRemoveFriend:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1290,7 +1290,7 @@ class TestHandleRemoveFriend:
 
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
@@ -1310,7 +1310,7 @@ class TestHandleRemoveFriend:
         """HTTP 200 is also a valid success response."""
         from custom_components.bosch_shc_camera import _register_services
 
-        entry, coord = _entry_with_coord()
+        entry, _coord = _entry_with_coord()
         hass = _make_hass()
         hass.config_entries.async_loaded_entries.return_value = [entry]
 

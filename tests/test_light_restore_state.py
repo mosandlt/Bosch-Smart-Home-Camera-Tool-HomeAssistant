@@ -186,7 +186,7 @@ class TestPutLightingSwitchJsonParseError:
     @pytest.mark.asyncio
     async def test_json_parse_error_returns_true_with_optimistic_cache_update(self):
         light = _make_light()
-        session, resp = _make_put_session(
+        session, _resp = _make_put_session(
             status=200,
             json_raises=ValueError("not JSON"),
         )
@@ -229,7 +229,7 @@ class TestAsyncTurnOnRemembersBrightness:
         light = _make_light()
         light._is_on = False  # was_off branch
         light._last_brightness = 100  # default
-        session, resp = _make_put_session(status=200, json_payload={})
+        session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_clientsession",
@@ -251,7 +251,7 @@ class TestAsyncTurnOnRemembersBrightness:
         light = _make_light()
         light._is_on = False
         light._last_brightness = 50
-        session, resp = _make_put_session(status=200, json_payload={})
+        session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_clientsession",
@@ -279,7 +279,7 @@ class TestAsyncTurnOffRemembersColor:
         light._color_hex = "#FF8000"  # user-picked orange
         light._last_color_hex = None  # was never set before
 
-        session, resp = _make_put_session(status=200, json_payload={})
+        session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_clientsession",

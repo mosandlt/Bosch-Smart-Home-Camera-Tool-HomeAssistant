@@ -105,7 +105,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_closes_server_socket(self):
         """srv.close() must be called after MAX_BURST connect failures (lines 126-127)."""
-        srv, clients, accepted = self._run_circuit_breaker(n_clients=5)
+        srv, _clients, _accepted = self._run_circuit_breaker(n_clients=5)
 
         assert srv.close.called, (
             "Circuit breaker must call srv.close() after 5 connect failures — "
@@ -114,7 +114,7 @@ class TestCircuitBreaker:
 
     def test_all_5_client_connections_attempted(self):
         """Every accepted client must get a connect attempt before breaker fires."""
-        srv, clients, accepted = self._run_circuit_breaker(n_clients=5)
+        _srv, _clients, accepted = self._run_circuit_breaker(n_clients=5)
 
         assert accepted >= 5, (
             f"Expected ≥5 accept() calls before circuit breaker, got {accepted} — "
@@ -123,7 +123,7 @@ class TestCircuitBreaker:
 
     def test_client_sockets_closed_on_failure(self):
         """Each failing client must have its socket closed (not leaked)."""
-        srv, clients, accepted = self._run_circuit_breaker(n_clients=5)
+        _srv, clients, _accepted = self._run_circuit_breaker(n_clients=5)
 
         closed = sum(1 for c in clients if c.close.called)
         assert closed == 5, (
@@ -224,7 +224,9 @@ class TestTlsWrapFailure:
         # The bare 'raise' must follow
         lines = SRC.splitlines()
         raw_close_lines = [
-            i for i, l in enumerate(lines) if "raw.close()  # close raw socket" in l
+            i
+            for i, line in enumerate(lines)
+            if "raw.close()  # close raw socket" in line
         ]
         assert raw_close_lines, "raw.close() comment line not found in source"
         idx = raw_close_lines[0]
@@ -316,9 +318,9 @@ class TestPipeStructural:
         assert "dst.close()" in SRC, "_pipe finally must close dst socket"
         # Both in try/except to handle already-closed sockets
         close_lines = [
-            l.strip()
-            for l in SRC.splitlines()
-            if ".close()" in l and l.strip().startswith("try:")
+            line.strip()
+            for line in SRC.splitlines()
+            if ".close()" in line and line.strip().startswith("try:")
         ]
         # Structural: the finally block has 2 try/except close() pairs
         finally_idx = SRC.find(

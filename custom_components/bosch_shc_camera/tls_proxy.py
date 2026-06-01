@@ -187,8 +187,8 @@ def start_tls_proxy(
                         if not data:
                             break
                         # Debug: log first RTSP exchanges (text only, skip binary RTP)
-                        if _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":
-                            _dbg_count[0] += 1
+                        if _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":  # noqa: B023 # mutable counter shared intentionally
+                            _dbg_count[0] += 1  # noqa: B023 # mutable counter shared intentionally
                             preview = (
                                 data[:500]
                                 .decode("utf-8", errors="replace")

@@ -370,7 +370,7 @@ class TestSmbBackendScandir:
         with patch.dict(sys.modules, {"smbclient": _fake_smbclient(entries)}):
             events = b.list_events("Terrasse", "2026", "05", "07")
         assert len(events) == 1
-        preferred, image, parsed = events[0]
+        preferred, image, _parsed = events[0]
         assert preferred.endswith(".mp4")
         assert image.endswith(".jpg")
 

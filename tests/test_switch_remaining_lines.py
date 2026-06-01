@@ -150,11 +150,19 @@ async def test_wallwasher_turn_off():
 
 @pytest.mark.asyncio
 async def test_privacy_turn_off_cooldown_rejects():
+    from homeassistant.exceptions import ServiceValidationError
+
     coord = _make_coord()
-    # _check_cooldown returns False when within cooldown window
+    # _check_cooldown returns False within the cooldown window → the toggle is
+    # now rejected with ServiceValidationError so it is never silently swallowed
+    # (RkcCorian, #27 — a silent drop left the card flipped to the wrong state).
     sw = BoschPrivacyModeSwitch(coord, CAM_ID, _make_entry())
-    with patch.object(sw, "_check_cooldown", return_value=False):
-        await sw.async_turn_off()
+    with (
+        patch.object(sw, "_check_cooldown", return_value=False),
+        patch.object(sw, "_cooldown_message", return_value="cooldown active"),
+    ):
+        with pytest.raises(ServiceValidationError):
+            await sw.async_turn_off()
     coord.async_cloud_set_privacy_mode.assert_not_called()
 
 
@@ -283,7 +291,9 @@ async def test_setup_entry_auto_follow_for_pan_camera():
     entry = _make_entry()
     entry.runtime_data = coord
     added = []
-    async_add = lambda ents, **kw: added.extend(ents)
+
+    def async_add(ents, **kw):
+        return added.extend(ents)
 
     hass = MagicMock()
     await switch_mod.async_setup_entry(hass, entry, async_add)
@@ -299,7 +309,9 @@ async def test_setup_entry_audio_notification_when_sound_supported():
     entry = _make_entry()
     entry.runtime_data = coord
     added = []
-    async_add = lambda ents, **kw: added.extend(ents)
+
+    def async_add(ents, **kw):
+        return added.extend(ents)
 
     hass = MagicMock()
     await switch_mod.async_setup_entry(hass, entry, async_add)
@@ -324,7 +336,9 @@ async def test_setup_entry_gen2_indoor_alarm_switches():
     entry = _make_entry()
     entry.runtime_data = coord
     added = []
-    async_add = lambda ents, **kw: added.extend(ents)
+
+    def async_add(ents, **kw):
+        return added.extend(ents)
 
     hass = MagicMock()
     await switch_mod.async_setup_entry(hass, entry, async_add)

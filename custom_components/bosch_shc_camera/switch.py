@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -864,6 +864,27 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             return False
         return True
 
+    def _cooldown_message(self) -> str:
+        """Human-facing reason the privacy toggle is currently blocked.
+
+        Raised to the caller (and surfaced by the Lovelace card's rollback) so a
+        rejected toggle is never silently swallowed — which previously left the
+        card optimistically flipped to the wrong state for 8 s and made the
+        button look like it had hung (RkcCorian, #27).
+        """
+        if self.coordinator.is_stream_warming(self._cam_id):
+            return (
+                f"Cannot toggle privacy for {self._cam_title} yet — the live "
+                "stream is still starting. Try again in a few seconds."
+            )
+        last = self.coordinator._privacy_set_at.get(self._cam_id, 0)
+        remaining = max(1, round(self._PRIVACY_COOLDOWN - (time.monotonic() - last)))
+        return (
+            f"Privacy for {self._cam_title} was just changed — please wait "
+            f"{remaining}s before toggling again (protects the camera from "
+            "rapid switching)."
+        )
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable privacy mode — camera turns off / shutter closes.
 
@@ -878,7 +899,7 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         fallback against a camera that's returning HTTP 443 privacy-gated.
         """
         if not self._check_cooldown():
-            return
+            raise ServiceValidationError(self._cooldown_message())
         if self._cam_id in self.coordinator._live_connections:
             _LOGGER.info(
                 "Privacy ON for %s — stopping active live stream", self._cam_title
@@ -889,7 +910,7 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable privacy mode — camera turns back on."""
         if not self._check_cooldown():
-            return
+            raise ServiceValidationError(self._cooldown_message())
         await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, False)
 
 
@@ -916,7 +937,10 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
         self._attr_entity_category = EntityCategory.CONFIG
 
     # Values that map to ON state (notifications active in some form)
-    _NOTIFICATIONS_ON_STATES = {"FOLLOW_CAMERA_SCHEDULE", "ON_CAMERA_SCHEDULE"}
+    _NOTIFICATIONS_ON_STATES: ClassVar[set[str]] = {
+        "FOLLOW_CAMERA_SCHEDULE",
+        "ON_CAMERA_SCHEDULE",
+    }
 
     @property
     def is_on(self) -> bool | None:
@@ -1261,19 +1285,21 @@ class BoschTimestampSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "timestamp", {"result": True}
         )
-        self.coordinator._timestamp_cache[self._cam_id] = True
-        self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
+        if success:
+            self.coordinator._timestamp_cache[self._cam_id] = True
+            self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "timestamp", {"result": False}
         )
-        self.coordinator._timestamp_cache[self._cam_id] = False
-        self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
+        if success:
+            self.coordinator._timestamp_cache[self._cam_id] = False
+            self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
 
@@ -1308,19 +1334,21 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "ledlights", {"state": "ON"}
         )
-        self.coordinator._ledlights_cache[self._cam_id] = True
-        self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
+        if success:
+            self.coordinator._ledlights_cache[self._cam_id] = True
+            self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id, "ledlights", {"state": "OFF"}
         )
-        self.coordinator._ledlights_cache[self._cam_id] = False
-        self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
+        if success:
+            self.coordinator._ledlights_cache[self._cam_id] = False
+            self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
 

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.4.5";
+const CARD_VERSION = "13.4.6";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -273,6 +273,13 @@ class BoschCameraCard extends HTMLElement {
     this._showMotionZones   = false; // runtime toggle for motion zone overlay
     this._showPrivacyMasks  = false; // runtime toggle for privacy mask overlay
     this._lastRulesKey      = null;  // memoization key for rules list HTML
+    // Privacy toggle cooldown (mirrors the backend _PRIVACY_COOLDOWN = 10s).
+    // After a toggle the backend rejects another change for this long; we block
+    // the tap + show a countdown so the user waits instead of hammering the
+    // button (which used to flip it to the wrong state for 8s — RkcCorian #27).
+    this._PRIVACY_COOLDOWN_MS = 10000;
+    this._privacyCooldownUntil = 0;   // Date.now() ms when the cooldown ends
+    this._privacyCooldownTimer = null;
     // Bind the theme + mode broadcast handlers once so add/removeEventListener
     // use the same reference. Done in the constructor (not as class fields) so
     // older WebKit / iOS WKWebView builds without public-class-field support
@@ -932,6 +939,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
+    if (this._privacyCooldownTimer) { clearInterval(this._privacyCooldownTimer); this._privacyCooldownTimer = null; }
     // Clear any lingering error-feedback timers set by _callServiceWithRollback
     if (this._errorFeedbackTimers) {
       Object.values(this._errorFeedbackTimers).forEach(t => clearTimeout(t));
@@ -1878,6 +1886,17 @@ class BoschCameraCard extends HTMLElement {
         .ap-pill-btn.danger:hover { background: rgba(255,59,48,1); }
         .ap-pill-btn.connecting { background: rgba(255,159,10,.85); border-color: rgba(255,255,255,.22); }
         .ap-pill-btn[hidden] { display: none !important; }
+        /* Privacy cooldown (#27): dim + block + a small countdown badge so the
+           user waits the backend's 10s cooldown instead of hammering the button. */
+        .cooldown { pointer-events: none; opacity: .5; cursor: not-allowed; }
+        .ap-pill-btn.cooldown { position: relative; }
+        .ap-pill-btn.cooldown::after {
+          content: attr(data-cd) "s";
+          position: absolute; top: -5px; right: -5px;
+          min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+          border-radius: 8px; background: #ff453a; color: #fff;
+          font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+        }
 
         /* Phone-narrow: keep all buttons visible, shrink slightly */
         @media (max-width: 380px) {
@@ -3055,7 +3074,7 @@ class BoschCameraCard extends HTMLElement {
       this.classList.toggle("overflow-open");
     });
     this.shadowRoot.getElementById("btn-privacy-inline").addEventListener("click", () =>
-      this._toggleSwitchWithRollback(this._entities.privacy)
+      this._togglePrivacy()
     );
 
     // Apple-style pill-bar wiring — each maps to the same callback as the
@@ -3066,7 +3085,7 @@ class BoschCameraCard extends HTMLElement {
     };
     apBindClick("ap-btn-snapshot",   () => this._onSnapshotClick());
     apBindClick("ap-btn-stream",     () => this._toggleStream());
-    apBindClick("ap-btn-privacy",    () => this._toggleSwitchWithRollback(this._entities.privacy));
+    apBindClick("ap-btn-privacy",    () => this._togglePrivacy());
     apBindClick("ap-btn-light",      () => this._toggleSwitchWithRollback(this._entities.light));
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
     apBindClick("ap-btn-more",       () => {
@@ -3118,7 +3137,7 @@ class BoschCameraCard extends HTMLElement {
       this._toggleSwitchWithRollback(this._entities.light)
     );
     this.shadowRoot.getElementById("btn-privacy").addEventListener("click", () =>
-      this._toggleSwitchWithRollback(this._entities.privacy)
+      this._togglePrivacy()
     );
     this.shadowRoot.getElementById("btn-notifications").addEventListener("click", () =>
       this._toggleSwitch(this._entities.notifications)
@@ -4020,6 +4039,19 @@ class BoschCameraCard extends HTMLElement {
             this._waitingForStream = true;
             this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
             this._waitForStreamReady();
+          } else {
+            // Cold-start race (live fix 2026-05-31): the first attempt failed
+            // before the camera/switch entities finished loading — cam is not yet
+            // "streaming" AND the switch read is momentarily not "on". Without this
+            // branch the retry chain dead-ends with _startingLiveVideo stuck true,
+            // which permanently blocks the _update() auto-start gate (it requires
+            // !_startingLiveVideo) → the card freezes on the last event snapshot
+            // until a manual reload. Reset the flag and resume snapshot refresh so
+            // the next hass push (switch → on / cam → streaming) re-enters the gate
+            // and starts HLS on its own.
+            this._startingLiveVideo = false;
+            this._waitingForStream = false;
+            this._startRefreshTimer();
           }
         }, 1500);
       } else {
@@ -4232,6 +4264,14 @@ class BoschCameraCard extends HTMLElement {
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
+    // Stop the uptime-badge interval and the stream-ready poll chain on teardown.
+    // Both outlive the card otherwise: _uptimeTimer is only cleared in set hass()
+    // on !isStreaming (never fires if the card is disconnected mid-stream), and
+    // _waitForStreamReady() re-arms via setTimeout guarded only by
+    // _waitingForStream — which nothing reset here, so the 1s poll kept ticking
+    // (and could call _startLiveVideo) against a detached card after disconnect.
+    if (this._uptimeTimer) { clearInterval(this._uptimeTimer); this._uptimeTimer = null; }
+    this._waitingForStream = false;
     if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
     // try/catch: on page reload / WS close the subscription may already be
     // gone, so the unsubscribe rejects with "Subscription not found" — an
@@ -5827,6 +5867,62 @@ class BoschCameraCard extends HTMLElement {
     );
   }
 
+  /**
+   * Privacy toggle with a visible cooldown (#27). The backend enforces a 10s
+   * cooldown between privacy changes and now rejects an early toggle with a
+   * ServiceValidationError. To avoid the user hammering the button (and the
+   * confusing optimistic flip-back that produced the "hang"), we block the tap
+   * locally during the cooldown and show a countdown on the privacy controls.
+   */
+  _togglePrivacy() {
+    if (!this._hass) return;
+    const pid = this._entities.privacy;
+    if (!pid) return;
+    if (Date.now() < this._privacyCooldownUntil) return; // still cooling down
+    this._toggleSwitchWithRollback(pid); // triggers a synchronous _update()
+    this._startPrivacyCooldown();        // re-applies the cooldown to fresh DOM
+  }
+
+  _startPrivacyCooldown() {
+    this._privacyCooldownUntil = Date.now() + this._PRIVACY_COOLDOWN_MS;
+    if (this._privacyCooldownTimer) clearInterval(this._privacyCooldownTimer);
+    this._renderPrivacyCooldown();
+    // Wall-time-anchored interval (immune to event-loop jank) — recompute the
+    // remaining seconds each tick rather than decrementing a counter.
+    this._privacyCooldownTimer = setInterval(() => {
+      this._renderPrivacyCooldown();
+      if (Date.now() >= this._privacyCooldownUntil) {
+        clearInterval(this._privacyCooldownTimer);
+        this._privacyCooldownTimer = null;
+        this._privacyCooldownUntil = 0;
+        this._renderPrivacyCooldown(); // final pass clears the disabled state
+      }
+    }, 250);
+  }
+
+  _renderPrivacyCooldown() {
+    if (!this.shadowRoot) return;
+    const remainingMs = this._privacyCooldownUntil - Date.now();
+    const active = remainingMs > 0;
+    const secs = active ? Math.ceil(remainingMs / 1000) : 0;
+    for (const id of ["ap-btn-privacy", "btn-privacy", "btn-privacy-inline"]) {
+      const el = this.shadowRoot.getElementById(id);
+      if (!el) continue;
+      el.classList.toggle("cooldown", active);
+      if (active) {
+        // aria-disabled (not the disabled attribute) keeps the control in tab
+        // order + announced to screen readers; the tap is blocked in JS above.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("data-cd", String(secs));
+        el.setAttribute("title", `Privacy: noch ${secs}s`);
+      } else {
+        el.removeAttribute("aria-disabled");
+        el.removeAttribute("data-cd");
+        el.removeAttribute("title");
+      }
+    }
+  }
+
   _onQualityChange(option) {
     const entityId = this._entities.quality;
     if (!entityId || !this._hass) return;
@@ -6167,8 +6263,8 @@ class BoschCameraCardEditor extends HTMLElement {
         ${chk("show_last_event", "Letztes-Ereignis-Badge anzeigen", true)}
 
         <h4>Auto-Play</h4>
-        ${sel("Auto-Play", cfg.auto_play || "lan", [["lan","LAN (Auto-Start nur im Heimnetz)"],["always","Immer"],["never","Nie (Tap-to-Play Gate)"]])}
-        <span class="hint">Steuert wann der Live-Stream automatisch loslegt. Überschreibt die Integration-weite Voreinstellung.</span>
+        ${sel("Auto-Play", cfg.auto_play || "", [["","Integration-Vorgabe (nicht überschreiben)"],["lan","LAN (Auto-Start nur im Heimnetz)"],["always","Immer"],["never","Nie (Tap-to-Play Gate)"]])}
+        <span class="hint">Steuert wann der Live-Stream automatisch loslegt. Leer lässt die Integration-weite Voreinstellung unangetastet; eine Auswahl überschreibt sie pro Karte.</span>
       </div>`;
     const root = this.shadowRoot;
     const fire = (patch) => {
@@ -6184,7 +6280,7 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="compact"]').addEventListener("change", e => fire({ compact: e.target.checked }));
     root.querySelector('input[name="show_title"]').addEventListener("change", e => fire({ show_title: e.target.checked }));
     root.querySelector('input[name="show_last_event"]').addEventListener("change", e => fire({ show_last_event: e.target.checked }));
-    root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value }));
+    root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value || undefined }));
   }
 }
 customElements.define("bosch-camera-card-editor", BoschCameraCardEditor);
@@ -6399,6 +6495,14 @@ class BoschCameraOverviewCard extends HTMLElement {
              RkcCorian: theme variables were ignored during the overview lift). */
           transform-origin: top center;
           transition: transform .18s ease;
+          /* NOTE: do NOT put a static transform (translateZ/will-change) on the
+             base cell. A transformed ancestor becomes the containing block for
+             position:fixed descendants, which clipped the camera's fullscreen/
+             zoom to the tile (mobile + desktop) — regression reported by Thomas,
+             reverted. The hover below uses a transient scale only (no static
+             transform), so fullscreen stays viewport-anchored. The faint #15
+             hover shimmer is the trade-off; switch to a shadow-only hover if it
+             ever needs to be perfectly boundary-stable. */
         }
         @media (hover: hover) and (pointer: fine) {
           :host(.apple-style) .bco-cell:hover {

@@ -16,7 +16,7 @@ Creates sensor entities per camera:
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -585,7 +585,7 @@ class BoschLastEventTypeSensor(_BoschSensorBase):
 
     _attr_icon = "mdi:alert-circle-outline"
     _attr_translation_key = "last_event_type"
-    _attr_options = [
+    _attr_options: ClassVar[list[str]] = [
         "movement",
         "person",
         "audio_alarm",
@@ -699,7 +699,7 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
     _attr_icon = "mdi:bell-ring-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "push_status"
-    _attr_options = ["fcm_push", "polling", "disabled"]
+    _attr_options: ClassVar[list[str]] = ["fcm_push", "polling", "disabled"]
     _attr_device_class = SensorDeviceClass.ENUM
 
     @property
@@ -751,7 +751,14 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
     _attr_icon = "mdi:cloud-alert"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "cloud_maintenance"
-    _attr_options = ["active", "scheduled", "past", "recent", "unknown", "idle"]
+    _attr_options: ClassVar[list[str]] = [
+        "active",
+        "scheduled",
+        "past",
+        "recent",
+        "unknown",
+        "idle",
+    ]
     _attr_device_class = SensorDeviceClass.ENUM
 
     @property
