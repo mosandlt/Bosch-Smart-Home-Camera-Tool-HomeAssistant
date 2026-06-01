@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.0";
+const CARD_VERSION = "13.5.1";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -1171,13 +1171,20 @@ class BoschCameraCard extends HTMLElement {
     this._showMotionZones   = false; // runtime toggle for motion zone overlay
     this._showPrivacyMasks  = false; // runtime toggle for privacy mask overlay
     this._lastRulesKey      = null;  // memoization key for rules list HTML
-    // Privacy toggle cooldown (mirrors the backend _PRIVACY_COOLDOWN = 10s).
+    // Privacy toggle cooldown (mirrors the backend _PRIVACY_COOLDOWN = 5s).
     // After a toggle the backend rejects another change for this long; we block
     // the tap + show a countdown so the user waits instead of hammering the
     // button (which used to flip it to the wrong state for 8s — RkcCorian #27).
-    this._PRIVACY_COOLDOWN_MS = 10000;
+    this._PRIVACY_COOLDOWN_MS = 5000;
     this._privacyCooldownUntil = 0;   // Date.now() ms when the cooldown ends
     this._privacyCooldownTimer = null;
+    // Live-stream toggle cooldown (mirrors the backend _STREAM_COOLDOWN = 5s in
+    // switch.py: a turn_on within 5s of the last turn_off is rejected). Same UX
+    // as privacy — after stopping the stream we block the restart tap + show a
+    // countdown badge so the user waits the 5s instead of hammering the button.
+    this._STREAM_COOLDOWN_MS = 5000;
+    this._streamCooldownUntil = 0;
+    this._streamCooldownTimer = null;
     // Fullscreen digital zoom (pinch / double-tap / wheel) — only active while
     // in fullscreen. scale 1..4, tx/ty pan in px. _zoomPointers tracks active
     // pointer ids for pinch; _zoomHandlers holds bound listeners for removal.
@@ -2016,6 +2023,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     if (this._privacyCooldownTimer) { clearInterval(this._privacyCooldownTimer); this._privacyCooldownTimer = null; }
+    if (this._streamCooldownTimer) { clearInterval(this._streamCooldownTimer); this._streamCooldownTimer = null; }
     if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
     // Clear any lingering error-feedback timers set by _callServiceWithRollback
     if (this._errorFeedbackTimers) {
@@ -2978,7 +2986,7 @@ class BoschCameraCard extends HTMLElement {
         .ap-pill-btn.connecting { background: rgba(255,159,10,.85); border-color: rgba(255,255,255,.22); }
         .ap-pill-btn[hidden] { display: none !important; }
         /* Privacy cooldown (#27): dim + block + a small countdown badge so the
-           user waits the backend's 10s cooldown instead of hammering the button. */
+           user waits the backend's 5s cooldown instead of hammering the button. */
         .cooldown { pointer-events: none; opacity: .5; cursor: not-allowed; }
         .ap-pill-btn.cooldown { position: relative; }
         .ap-pill-btn.cooldown::after {
@@ -4863,6 +4871,21 @@ class BoschCameraCard extends HTMLElement {
       const clearOverlay = () => {
         // NOW hide the snapshot — video is playing, no black gap
         if (img) img.style.display = "none";
+        // Clear the startup-suppression flags BEFORE hiding the overlay. The
+        // "playing" event is the authoritative end-of-startup signal, but
+        // _setLoadingOverlay refuses to hide while any of these flags is set
+        // (its anti-flicker gate). _streamConnecting in particular was still
+        // true here — it used to be cleared further down, AFTER the hide call —
+        // so the gate swallowed _setLoadingOverlay(false) and the spinner stayed
+        // forever on the fresh-start path. A reload masked it only because the
+        // flag starts false (the stream was already "streaming", so the toggle
+        // path that sets _streamConnecting never ran). 2026-06-01.
+        this._startingLiveVideo = false;
+        this._waitingForStream  = false;
+        if (this._streamConnecting) {
+          this._streamConnecting = false;
+          if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+        }
         this._setLoadingOverlay(false);
         // Restore saved volume + honour "sound on by default" only once the
         // video is provably playing — applying it on activate (while the first
@@ -4873,10 +4896,6 @@ class BoschCameraCard extends HTMLElement {
         // can recover immediately. (live fix 2026-05-31)
         this._staleSourceSeen = false;
         this._lastRewarmAt    = 0;
-        if (this._streamConnecting) {
-          this._streamConnecting = false;
-          if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
-        }
         // Flip the badge to Live now — the first frame is on screen. Don't wait
         // for the next hass push (stream_status sensor can lag 10s+). 2026-05-30.
         this._markLiveBadge();
@@ -6973,6 +6992,11 @@ class BoschCameraCard extends HTMLElement {
       return;
     }
     const isOn = serverIsOn !== null ? serverIsOn : cachedIsOn;
+    // Backend cooldown (switch.py _STREAM_COOLDOWN = 5s): a turn_on within 5s of
+    // the last turn_off is rejected. Block the restart tap locally and keep the
+    // countdown badge visible instead of firing a turn_on the backend refuses
+    // (which would optimistically flip the button to "on" then snap back).
+    if (!isOn && Date.now() < this._streamCooldownUntil) return;
     // Optimistic update — badge and button update instantly
     this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
     if (isOn) {
@@ -6980,6 +7004,9 @@ class BoschCameraCard extends HTMLElement {
       this._streamConnecting = false;
       this._waitingForStream = false;
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
+      // Start the restart-cooldown countdown on the stream button (mirrors the
+      // backend's post-turn_off lockout) so the user sees the 5s wait.
+      this._startStreamCooldown();
     } else if (!this._streamConnecting) {
       // Starting stream → show loading overlay with progressive status updates
       // Timeline: PUT /connection ~2s, TLS proxy ~0.5s, pre-warm ~3s,
@@ -7014,6 +7041,14 @@ class BoschCameraCard extends HTMLElement {
           this._waitingForStream = false;
           if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
           this._setLoadingOverlay(false);
+        } else {
+          // The turn_off failed → the stream is still on. Cancel the restart
+          // cooldown we optimistically started so the user can immediately try
+          // to stop it again (the backend lockout only starts on a real
+          // turn_off, so blocking the retry here would be wrong).
+          this._streamCooldownUntil = 0;
+          if (this._streamCooldownTimer) { clearInterval(this._streamCooldownTimer); this._streamCooldownTimer = null; }
+          this._renderStreamCooldown();
         }
         this._flashEntityError(this._entities.switch);
       });
@@ -7092,7 +7127,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   /**
-   * Privacy toggle with a visible cooldown (#27). The backend enforces a 10s
+   * Privacy toggle with a visible cooldown (#27). The backend enforces a 5s
    * cooldown between privacy changes and now rejects an early toggle with a
    * ServiceValidationError. To avoid the user hammering the button (and the
    * confusing optimistic flip-back that produced the "hang"), we block the tap
@@ -7139,6 +7174,46 @@ class BoschCameraCard extends HTMLElement {
         el.setAttribute("aria-disabled", "true");
         el.setAttribute("data-cd", String(secs));
         el.setAttribute("title", `Privacy: noch ${secs}s`);
+      } else {
+        el.removeAttribute("aria-disabled");
+        el.removeAttribute("data-cd");
+        el.removeAttribute("title");
+      }
+    }
+  }
+
+  _startStreamCooldown() {
+    this._streamCooldownUntil = Date.now() + this._STREAM_COOLDOWN_MS;
+    if (this._streamCooldownTimer) clearInterval(this._streamCooldownTimer);
+    this._renderStreamCooldown();
+    // Wall-time-anchored interval (immune to event-loop jank) — recompute the
+    // remaining seconds each tick rather than decrementing a counter.
+    this._streamCooldownTimer = setInterval(() => {
+      this._renderStreamCooldown();
+      if (Date.now() >= this._streamCooldownUntil) {
+        clearInterval(this._streamCooldownTimer);
+        this._streamCooldownTimer = null;
+        this._streamCooldownUntil = 0;
+        this._renderStreamCooldown(); // final pass clears the disabled state
+      }
+    }, 250);
+  }
+
+  _renderStreamCooldown() {
+    if (!this.shadowRoot) return;
+    const remainingMs = this._streamCooldownUntil - Date.now();
+    const active = remainingMs > 0;
+    const secs = active ? Math.ceil(remainingMs / 1000) : 0;
+    for (const id of ["ap-btn-stream", "btn-stream"]) {
+      const el = this.shadowRoot.getElementById(id);
+      if (!el) continue;
+      el.classList.toggle("cooldown", active);
+      if (active) {
+        // aria-disabled (not the disabled attribute) keeps the control in tab
+        // order + announced to screen readers; the tap is blocked in JS above.
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("data-cd", String(secs));
+        el.setAttribute("title", `Stream: noch ${secs}s`);
       } else {
         el.removeAttribute("aria-disabled");
         el.removeAttribute("data-cd");

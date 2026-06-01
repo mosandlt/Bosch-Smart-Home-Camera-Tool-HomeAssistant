@@ -819,7 +819,7 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
 
     # Minimum seconds between privacy mode changes per camera.
     # Rapid toggling can stress the camera firmware (red LED / reboot).
-    _PRIVACY_COOLDOWN = 10
+    _PRIVACY_COOLDOWN = 5
 
     def _check_cooldown(self) -> bool:
         """Return True if cooldown period has passed, False if too soon."""

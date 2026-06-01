@@ -1,4 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Card source (unminified) — some regression tests assert on the ordering of
+// statements that survive intact in source but get mangled by the bundler, so
+// they read src directly rather than the served www/ bundle.
+const CARD_SRC = readFileSync(
+  fileURLToPath(new URL("../../src/bosch-camera-card.js", import.meta.url)),
+  "utf8",
+);
 
 // Remove any mounted cards after each test so their refresh timers + hls.js
 // loader stop (disconnectedCallback → _stopRefreshTimer). Leaving them running
@@ -272,7 +282,7 @@ test("privacy pill clears its marked state after privacy turns off (#27)", async
   expect(r.onAfterHassOff, "pill stays cleared once HA reports off").toBe(false);
 });
 
-// #27: after a privacy toggle the backend enforces a 10s cooldown (and now
+// #27: after a privacy toggle the backend enforces a 5s cooldown (and now
 // rejects an early toggle). The card blocks the tap during that window and
 // shows a countdown so the user waits instead of hammering the button.
 test("privacy cooldown blocks rapid re-toggle and shows a countdown (#27)", async ({ page }) => {
@@ -317,6 +327,70 @@ test("privacy cooldown blocks rapid re-toggle and shows a countdown (#27)", asyn
   expect(Number(r.cdAttr), "countdown badge shows remaining seconds").toBeGreaterThan(0);
   expect(r.ariaDisabled, "pill is aria-disabled during cooldown").toBe("true");
   expect(r.callsAfterSecond, "second toggle within cooldown is blocked (no extra call)").toBe(1);
+});
+
+// Live-stream cooldown (2026-06-01): the backend switch.py enforces a 5s
+// _STREAM_COOLDOWN — a turn_on within 5s of the last turn_off is rejected. The
+// card mirrors privacy: after a stop it blocks the restart tap for that window
+// and shows a countdown badge so the user waits instead of hammering the button.
+test("stream cooldown blocks rapid restart and shows a countdown", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    let calls = 0;
+    const base = { config: {}, language: "en", localize: () => "", callService: () => { calls++; return Promise.resolve(); }, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: {
+      "camera.test": { state: "streaming", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_live_stream": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    // Shorten the cooldown so the test leaves no long-lived interval running
+    // (same Windows-worker-teardown guard as the privacy cooldown test).
+    card._STREAM_COOLDOWN_MS = 400;
+    const pill = () => card.shadowRoot.getElementById("ap-btn-stream");
+    if (!pill()) return { error: "no ap-btn-stream element" };
+    await card._toggleStream(); // first tap = STOP → fires turn_off + starts the cooldown
+    await new Promise((res) => setTimeout(res, 50));
+    const callsAfterFirst = calls;
+    const cooldownClass = pill().classList.contains("cooldown");
+    const cdAttr = pill().getAttribute("data-cd");
+    const ariaDisabled = pill().getAttribute("aria-disabled");
+    await card._toggleStream(); // second tap (restart) within the window must be blocked
+    await new Promise((res) => setTimeout(res, 50));
+    const callsAfterSecond = calls;
+    if (card._streamCooldownTimer) { clearInterval(card._streamCooldownTimer); card._streamCooldownTimer = null; }
+    card._streamCooldownUntil = 0;
+    card.remove();
+    return { callsAfterFirst, callsAfterSecond, cooldownClass, cdAttr, ariaDisabled };
+  });
+  expect(r.error, "card renders #ap-btn-stream").toBeUndefined();
+  expect(r.callsAfterFirst, "first tap stops the stream (one service call)").toBe(1);
+  expect(r.cooldownClass, "stream pill enters the cooldown state after stopping").toBe(true);
+  expect(Number(r.cdAttr), "countdown badge shows remaining seconds").toBeGreaterThan(0);
+  expect(r.ariaDisabled, "pill is aria-disabled during cooldown").toBe("true");
+  expect(r.callsAfterSecond, "restart within cooldown is blocked (no extra call)").toBe(1);
+});
+
+// Overlay-stuck deadlock (2026-06-01): clearOverlay (fired on the video
+// "playing" event) must clear the startup-suppression flags BEFORE it calls
+// _setLoadingOverlay(false). _setLoadingOverlay refuses to hide while
+// _streamConnecting is set (anti-flicker gate); the flag used to be cleared
+// AFTER the hide call, so the gate swallowed it and the spinner stayed forever
+// on a fresh start (a reload masked it because the flag inits false). This pins
+// the ordering in source — a bundler can reorder nothing here, but a careless
+// edit could move the reset back below the hide and reintroduce the deadlock.
+test("clearOverlay clears _streamConnecting before hiding the overlay (deadlock regression)", () => {
+  const start = CARD_SRC.indexOf("const clearOverlay = () => {");
+  expect(start, "clearOverlay closure exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("video.removeEventListener(\"playing\", clearOverlay)", start));
+  const flagIdx = body.indexOf("this._streamConnecting = false");
+  const hideIdx = body.indexOf("this._setLoadingOverlay(false)");
+  expect(flagIdx, "clearOverlay resets _streamConnecting").toBeGreaterThan(-1);
+  expect(hideIdx, "clearOverlay hides the loading overlay").toBeGreaterThan(-1);
+  expect(flagIdx, "_streamConnecting is cleared BEFORE the overlay is hidden").toBeLessThan(hideIdx);
 });
 
 // mobile fullscreen: only one card may be in the CSS-fullscreen overlay — a

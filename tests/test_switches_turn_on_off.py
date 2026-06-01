@@ -193,9 +193,11 @@ class TestPrivacyModeSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_within_cooldown_blocked(self, stub_coord, stub_entry):
-        """Two flips within 10 s must block — protects the camera firmware
-        from rapid shutter toggling (red LED / reboot risk)."""
-        stub_coord._privacy_set_at[CAM_ID] = time.monotonic() - 5  # 5 s ago
+        """A second flip within the cooldown window must block — protects the
+        camera firmware from rapid shutter toggling (red LED / reboot risk).
+        Uses a just-toggled timestamp so the assertion is independent of the
+        exact _PRIVACY_COOLDOWN value (5 s as of v13.5.1, was 10 s)."""
+        stub_coord._privacy_set_at[CAM_ID] = time.monotonic()  # just toggled
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
