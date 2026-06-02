@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.2";
+const CARD_VERSION = "13.5.3";
 
 let _boschFsExitAt = 0;
 
@@ -3446,7 +3446,7 @@ class BoschCameraCard extends HTMLElement {
             const endT = r.end || r.endTime || "?";
             const activeClass = isActive ? " active" : "";
             const activeLabel = isActive ? "AN" : "AUS";
-            return `<div class="rule-row" data-rule-idx="${i}">\n              <div class="rule-info">\n                <div class="rule-name">${this._escHtml(r.name || "Regel " + (i + 1))}</div>\n                <div class="rule-time">${startT} – ${endT}</div>\n                <div class="rule-days">${days}</div>\n              </div>\n              <button class="rule-toggle${activeClass}" data-rule-id="${r.id}" data-cam-id="${camId}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>\n              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="${this._t("delete")}">✕</button>\n            </div>`;
+            return `<div class="rule-row" data-rule-idx="${i}">\n              <div class="rule-info">\n                <div class="rule-name">${this._escHtml(r.name || "Regel " + (i + 1))}</div>\n                <div class="rule-time">${this._escHtml(startT)} – ${this._escHtml(endT)}</div>\n                <div class="rule-days">${this._escHtml(days)}</div>\n              </div>\n              <button class="rule-toggle${activeClass}" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>\n              <button class="rule-delete" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" title="${this._t("delete")}">✕</button>\n            </div>`;
           }).join("");
           rulesListEl.querySelectorAll(".rule-toggle").forEach(btn => {
             btn.addEventListener("click", e => {
@@ -3511,6 +3511,9 @@ class BoschCameraCard extends HTMLElement {
     const d = document.createElement("div");
     d.textContent = str;
     return d.innerHTML;
+  }
+  _escAttr(str) {
+    return this._escHtml(str == null ? "" : String(str)).replace(/"/g, "&quot;");
   }
   _renderServiceButtons() {
     const grid = this.shadowRoot.getElementById("svc-grid");

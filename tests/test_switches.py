@@ -245,6 +245,29 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw._check_cooldown() is True
 
+    def test_check_cooldown_first_toggle_not_blocked_low_monotonic(
+        self, stub_coord, stub_entry
+    ):
+        """Regression (bug-hunt 2026-06-02): SENTINEL_RULE.
+
+        On a freshly booted host time.monotonic() can be < _PRIVACY_COOLDOWN.
+        With no _privacy_set_at entry yet (first toggle ever), a 0 default made
+        `monotonic() - 0` look like a just-happened toggle and falsely blocked
+        the very first privacy change. The default must be float('-inf').
+        """
+        from unittest.mock import patch
+
+        from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
+        stub_coord._privacy_set_at.pop(CAM_ID, None)  # never toggled
+        stub_coord.is_stream_warming = lambda cid: False
+        sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
+        with patch(
+            "custom_components.bosch_shc_camera.switch.time.monotonic",
+            return_value=2.0,  # < _PRIVACY_COOLDOWN (5s), e.g. a just-booted VM
+        ):
+            assert sw._check_cooldown() is True
+
     @pytest.mark.asyncio
     async def test_turn_off_during_cooldown_raises_not_silent(
         self, stub_coord, stub_entry

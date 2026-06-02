@@ -81,6 +81,7 @@ def _coord(
         _alarm_settings_cache=alarm_settings_cache
         if alarm_settings_cache is not None
         else {},
+        _alarm_settings_set_at={},
         _shc_state_cache=shc_state_cache
         if shc_state_cache is not None
         else {CAM_ID: {}},
@@ -422,14 +423,13 @@ async def test_white_balance_set_success():
 
 @pytest.mark.asyncio
 async def test_white_balance_set_non_200():
+    from unittest.mock import AsyncMock
+
     sw = _make_white_balance()
-    session = _mock_aiohttp_session(500)
-    with patch(
-        "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-        return_value=session,
-    ):
-        await sw.async_set_native_value(0.5)
-    # _wb_value not updated on failure
+    # Write delegates to coordinator.async_put_camera (which owns the 401-retry);
+    # a failed write must not optimistically update the value.
+    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
+    await sw.async_set_native_value(0.5)
     assert sw._wb_value is None
     sw.async_write_ha_state.assert_called()
 
@@ -507,14 +507,12 @@ async def test_top_led_set_success():
 
 @pytest.mark.asyncio
 async def test_top_led_set_non_200():
+    from unittest.mock import AsyncMock
+
     sw = _make_top_led()
-    session = _mock_aiohttp_session(500)
-    with patch(
-        "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-        return_value=session,
-    ):
-        await sw.async_set_native_value(70.0)
-    assert sw._brightness is None  # not updated
+    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
+    await sw.async_set_native_value(70.0)
+    assert sw._brightness is None  # not updated on failed write
 
 
 # ── BoschMotionLightSensitivityNumber ─────────────────────────────────────────
@@ -714,6 +712,8 @@ async def test_alarm_delay_set_updates_cache():
     body = sw.coordinator.async_put_camera.call_args[0][2]
     assert body["alarmDelayInSeconds"] == 90
     assert body["alarmMode"] == "ON"
+    # bug-hunt 2026-06-02: write-lock stamped so the slow-tier poll won't revert.
+    assert CAM_ID in sw.coordinator._alarm_settings_set_at
 
 
 @pytest.mark.asyncio

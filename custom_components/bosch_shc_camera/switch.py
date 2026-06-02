@@ -360,9 +360,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 f"Cannot start stream for {self._cam_title} — privacy mode is active. "
                 "Turn off privacy mode first.",
             )
-        last_off = getattr(self, "_last_stream_off", 0)
+        # SENTINEL_RULE: "never stopped" is float("-inf"), not 0 — the prior
+        # `last_off > 0` guard worked but was fragile; -inf makes elapsed huge
+        # so the first-ever turn-on is never falsely blocked.
+        last_off = getattr(self, "_last_stream_off", float("-inf"))
         elapsed = time.monotonic() - last_off
-        if last_off > 0 and elapsed < self._STREAM_COOLDOWN:
+        if elapsed < self._STREAM_COOLDOWN:
             _LOGGER.warning(
                 "Stream ON for %s blocked — cooldown %.0fs remaining",
                 self._cam_title,
@@ -848,7 +851,12 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             )
             return False
         # Block rapid toggles
-        last = self.coordinator._privacy_set_at.get(self._cam_id, 0)
+        # SENTINEL_RULE: "never set" must be float("-inf"), never 0 — on a freshly
+        # booted host time.monotonic() can be < _PRIVACY_COOLDOWN, and a 0 default
+        # would make `monotonic() - 0` look like a recent toggle and falsely block
+        # the very first privacy change (the stream cooldown guards this with
+        # `last_off > 0`; this path had no such guard).
+        last = self.coordinator._privacy_set_at.get(self._cam_id, float("-inf"))
         elapsed = time.monotonic() - last
         if elapsed < self._PRIVACY_COOLDOWN:
             remaining = self._PRIVACY_COOLDOWN - elapsed
@@ -873,7 +881,12 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
                 f"Cannot toggle privacy for {self._cam_title} yet — the live "
                 "stream is still starting. Try again in a few seconds."
             )
-        last = self.coordinator._privacy_set_at.get(self._cam_id, 0)
+        # SENTINEL_RULE: "never set" must be float("-inf"), never 0 — on a freshly
+        # booted host time.monotonic() can be < _PRIVACY_COOLDOWN, and a 0 default
+        # would make `monotonic() - 0` look like a recent toggle and falsely block
+        # the very first privacy change (the stream cooldown guards this with
+        # `last_off > 0`; this path had no such guard).
+        last = self.coordinator._privacy_set_at.get(self._cam_id, float("-inf"))
         remaining = max(1, round(self._PRIVACY_COOLDOWN - (time.monotonic() - last)))
         return (
             f"Privacy for {self._cam_title} was just changed — please wait "

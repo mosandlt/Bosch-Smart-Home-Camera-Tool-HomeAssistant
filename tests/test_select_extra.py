@@ -51,6 +51,8 @@ def stub_coord():
         _fcm_push_mode="auto",
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         async_put_camera=AsyncMock(return_value=True),
         async_stop_fcm_push=AsyncMock(),
         async_start_fcm_push=AsyncMock(),

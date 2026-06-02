@@ -45,6 +45,8 @@ def _make_coord() -> SimpleNamespace:
         },
         _intrusion_config_cache={CAM_ID: dict(cfg)},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         _shc_state_cache={CAM_ID: {"privacy_mode": False}},
         last_update_success=True,
         is_camera_online=lambda cid: True,

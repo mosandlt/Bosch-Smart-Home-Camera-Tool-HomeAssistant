@@ -173,15 +173,23 @@ class TestDeviceInfoReturns:
 
 
 class TestWhiteBalanceAvailable:
-    """`available` reflects coordinator.last_update_success only (no cache check
-    because the cache is populated lazily)."""
+    """`available` requires coordinator.last_update_success AND a populated
+    lighting cache — writing before the cache is populated would PUT
+    zero-defaults and clobber real settings (bug-hunt 2026-06-02)."""
 
-    def test_available_true_when_coord_ok(self):
+    def test_available_true_when_coord_ok_and_cache_populated(self):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
-        coord = _stub_coord()
+        coord = _stub_coord(_lighting_switch_cache={CAM_ID: {"frontLightSettings": {}}})
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is True
+
+    def test_available_false_when_cache_empty(self):
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord()  # _lighting_switch_cache={} by default
+        e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
+        assert e.available is False
 
     def test_available_false_when_coord_failed(self):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
@@ -194,47 +202,61 @@ class TestWhiteBalanceAvailable:
 # ── L569-570 — WhiteBalance resp.json swallow ──────────────────────────────
 
 
-class TestWhiteBalanceJsonParseError:
-    """On HTTP 200 with malformed JSON body, the white-balance setter must NOT
-    crash and must NOT update the cache (line 569-570)."""
+class TestWhiteBalanceWrite:
+    """White-balance writes delegate to coordinator.async_put_camera (which owns
+    the 401 → token-refresh + retry). Success updates the value and the local
+    cache (from the body just sent); a failed write changes neither
+    (bug-hunt 2026-06-02 — was a raw Bearer PUT that silently failed on 401)."""
 
     @pytest.mark.asyncio
-    async def test_json_error_after_200_swallowed(self):
+    async def test_success_updates_value_and_cache(self):
+        from unittest.mock import AsyncMock
+
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord()
-        coord._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
+        coord.async_put_camera = AsyncMock(return_value=True)
         e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
 
-        session, _resp = _make_put_session(
-            status=200, json_raises=ValueError("not JSON")
+        await e.async_set_native_value(0.5)
+
+        coord.async_put_camera.assert_awaited_once()
+        assert e._wb_value == 0.5
+        assert (
+            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["whiteBalance"]
+            == 0.5
         )
 
-        with patch(
-            "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-            return_value=session,
-        ):
-            # Must not raise
-            await e.async_set_native_value(0.5)
+    @pytest.mark.asyncio
+    async def test_failed_write_leaves_value_unchanged(self):
+        from unittest.mock import AsyncMock
 
-        # _wb_value got updated optimistically; cache untouched (sentinel survives)
-        assert e._wb_value == 0.5
-        assert coord._lighting_switch_cache[CAM_ID] == {"sentinel": "preserved"}
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord()
+        coord.async_put_camera = AsyncMock(return_value=False)
+        e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
+
+        await e.async_set_native_value(0.5)
+
+        assert e._wb_value is None
 
 
 # ── L601 — LedBrightness available ─────────────────────────────────────────
 
 
 class TestLedBrightnessAvailable:
-    """`available` returns just coordinator.last_update_success — the cache
-    can be empty and the slider still shows."""
+    """`available` requires last_update_success AND a populated lighting cache
+    (bug-hunt 2026-06-02 — avoids writing zero-defaults before populate)."""
 
-    def test_available_follows_coord(self):
+    def test_available_follows_coord_and_cache(self):
         from custom_components.bosch_shc_camera.number import (
             BoschTopLedBrightnessNumber,
         )
 
-        coord = _stub_coord()
+        coord = _stub_coord(
+            _lighting_switch_cache={CAM_ID: {"topLedLightSettings": {}}}
+        )
         e = _make_entity(
             BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
         )
@@ -243,55 +265,69 @@ class TestLedBrightnessAvailable:
         coord.last_update_success = False
         assert e.available is False
 
+    def test_available_false_when_cache_empty(self):
+        from custom_components.bosch_shc_camera.number import (
+            BoschTopLedBrightnessNumber,
+        )
+
+        coord = _stub_coord()  # empty lighting cache
+        e = _make_entity(
+            BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
+        )
+        assert e.available is False
+
 
 # ── L634-635 — LedBrightness resp.json swallow ─────────────────────────────
 
 
-class TestLedBrightnessJsonParseError:
-    """After a 200 PUT, `resp.json()` may raise (e.g. proxy stripped body).
-    The cache stays untouched, `_brightness` is still updated optimistically."""
+class TestLedBrightnessWrite:
+    """LED-brightness writes delegate to coordinator.async_put_camera (401-retry
+    owned there). Success updates brightness + the local cache from the body
+    sent (bug-hunt 2026-06-02 — was a raw Bearer PUT silently failing on 401)."""
 
     @pytest.mark.asyncio
-    async def test_json_error_after_200_swallowed(self):
+    async def test_success_updates_brightness_and_cache(self):
+        from unittest.mock import AsyncMock
+
         from custom_components.bosch_shc_camera.number import (
             BoschTopLedBrightnessNumber,
         )
 
         coord = _stub_coord()
-        coord._lighting_switch_cache[CAM_ID] = {"sentinel": "preserved"}
+        coord.async_put_camera = AsyncMock(return_value=True)
         e = _make_entity(
             BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
         )
         e._brightness = None
 
-        session, _resp = _make_put_session(
-            status=200, json_raises=ValueError("bad body")
-        )
+        await e.async_set_native_value(80)
 
-        with patch(
-            "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-            return_value=session,
-        ):
-            await e.async_set_native_value(80)
-
+        coord.async_put_camera.assert_awaited_once()
         assert e._brightness == 80.0
-        assert coord._lighting_switch_cache[CAM_ID] == {"sentinel": "preserved"}
+        assert (
+            coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
+            == 80
+        )
 
 
 # ── L639-640 — LedBrightness outer Exception swallow ───────────────────────
 
 
 class TestLedBrightnessRequestException:
-    """A connection / timeout error during session.put() must NOT crash the
-    setter; a warning is logged and `_brightness` stays at the prior value."""
+    """A failed write (async_put_camera returns False — it swallows the
+    connection/timeout/401 internally) must NOT crash the setter and must leave
+    `_brightness` at the prior value (no optimistic update)."""
 
     @pytest.mark.asyncio
-    async def test_session_put_exception_swallowed(self):
+    async def test_failed_write_keeps_prior_brightness(self):
+        from unittest.mock import AsyncMock
+
         from custom_components.bosch_shc_camera.number import (
             BoschBottomLedBrightnessNumber,
         )
 
         coord = _stub_coord()
+        coord.async_put_camera = AsyncMock(return_value=False)
         e = _make_entity(
             BoschBottomLedBrightnessNumber,
             coord=coord,
@@ -299,16 +335,10 @@ class TestLedBrightnessRequestException:
         )
         e._brightness = 33.0
 
-        session, _ = _make_put_session(put_raises=TimeoutError("read timeout"))
+        # Must not raise
+        await e.async_set_native_value(80)
 
-        with patch(
-            "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-            return_value=session,
-        ):
-            # Must not raise
-            await e.async_set_native_value(80)
-
-        # Optimistic update did NOT run — PUT failed before status-200 branch
+        # Failed write → no optimistic update
         assert e._brightness == 33.0
 
 
@@ -398,3 +428,43 @@ class TestWritePathSuccessGating:
         e = _make_entity(BoschMicrophoneLevelNumber, coord)
         await e.async_set_native_value(80.0)
         assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 80
+
+
+# ── bug-hunt 2026-06-02: cache-merge preserves sibling groups ──────────────────
+class TestLightingCacheMerge:
+    """A light write must merge ONLY its own group into the shared lighting
+    cache, not overwrite the whole snapshot — otherwise a concurrent sibling
+    write to another light group is clobbered."""
+
+    @pytest.mark.asyncio
+    async def test_white_balance_write_preserves_other_groups(self):
+        from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord(
+            _lighting_switch_cache={CAM_ID: {"topLedLightSettings": {"brightness": 77}}}
+        )
+        coord.async_put_camera = AsyncMock(return_value=True)
+        e = _make_entity(BoschWhiteBalanceNumber, coord=coord)
+
+        await e.async_set_native_value(0.5)
+
+        cache = coord._lighting_switch_cache[CAM_ID]
+        assert cache["frontLightSettings"]["whiteBalance"] == 0.5  # our write
+        assert cache["topLedLightSettings"]["brightness"] == 77  # sibling kept
+
+    @pytest.mark.asyncio
+    async def test_speaker_write_preserves_microphone(self):
+        from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+
+        coord = _stub_coord(_audio_cache={CAM_ID: {"microphoneLevel": 42}})
+        coord.async_put_camera = AsyncMock(return_value=True)
+        e = _make_entity(BoschSpeakerLevelNumber, coord=coord)
+
+        await e.async_set_native_value(80.0)
+
+        assert coord._audio_cache[CAM_ID]["speakerLevel"] == 80  # our write
+        assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 42  # sibling kept

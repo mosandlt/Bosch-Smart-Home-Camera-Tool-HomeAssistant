@@ -122,6 +122,14 @@ async def _run_deliver(
                     "Webhook delivery enabled but webhook_url is empty — skipping"
                 )
                 return
+            # Mirrors the http(s)-only scheme guard in production.
+            if not url.lower().startswith(("http://", "https://")):
+                import logging
+
+                logging.getLogger(MODULE).warning(
+                    "Webhook URL rejected — only http(s) schemes are allowed"
+                )
+                return
             payload: dict[str, Any] = {
                 "event_type": ev.event_type,
                 "camera": ev.data.get("camera_name", ev.data.get("camera_id", "")),
@@ -184,6 +192,31 @@ class TestWebhookDelivery:
                 options={CONF_ENABLE_WEBHOOK_DELIVERY: True, CONF_WEBHOOK_URL: ""},
                 session=session,
             )
+        session.post.assert_not_called()
+
+    # ── Mode 2b: non-http(s) scheme rejected ──────────────────────────────────
+    @pytest.mark.parametrize(
+        "bad_url",
+        [
+            "file:///etc/passwd",
+            "gopher://127.0.0.1:6379/_INFO",
+            "ftp://example.com/x",
+            "//example.com/no-scheme",
+        ],
+    )
+    async def test_non_http_scheme_rejected(self, bad_url: str) -> None:
+        """Regression (bug-hunt 2026-06-02): a webhook_url with a non-http(s)
+        scheme must be refused before any POST — blocks file://, gopher://, etc.
+        smuggled through the user option."""
+        session, _ = _make_session_mock()
+        await _run_deliver(
+            _make_event("bosch_shc_camera_motion"),
+            options={
+                CONF_ENABLE_WEBHOOK_DELIVERY: True,
+                CONF_WEBHOOK_URL: bad_url,
+            },
+            session=session,
+        )
         session.post.assert_not_called()
 
     # ── Mode 3: motion event posted ───────────────────────────────────────────

@@ -303,6 +303,68 @@ class TestStep2ImageUrlRetry:
             "empty image_url must trigger at least 3 re-fetch attempts"
         )
 
+    async def test_no_camera_match_skips_refetch(self):
+        """Regression (bug-hunt 2026-06-02): if cam_name matches no camera
+        title, the empty-image re-fetch must be SKIPPED. Querying with an empty
+        videoInputId returns every camera's events and event[0] would attach a
+        foreign camera's image to this alert."""
+        coord = _make_coord()  # only camera title is "Terrasse"
+        session = MagicMock()
+        session.get.return_value = _resp_cm(200, json_data=[])
+
+        async def _run():
+            with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+                with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                    with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                        with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
+                            await async_send_alert(
+                                coord,
+                                "UnknownCam",  # no title match
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                "",  # empty imageUrl
+                            )
+
+        await _run()
+        for gcall in session.get.call_args_list:
+            assert "videoInputId" not in str(gcall), (
+                "must not query events when no camera matches the alert title"
+            )
+
+    async def test_unsafe_image_url_not_downloaded(self):
+        """Regression (bug-hunt 2026-06-02): an imageUrl failing the Bosch
+        domain allowlist must never reach session.get (previously it was set to
+        '' but the code still fell through and attempted the fetch)."""
+        coord = _make_coord()
+        session = MagicMock()
+        session.get.return_value = _resp_cm(200, json_data=[])
+        evil = "https://evil.example.com/x.jpg"
+
+        async def _run():
+            with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+                with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                    with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                        with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
+                            await async_send_alert(
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                evil,  # unsafe imageUrl (not a Bosch domain)
+                            )
+
+        await _run()
+        for gcall in session.get.call_args_list:
+            assert evil not in str(gcall), "rejected imageUrl must not be fetched"
+
     @pytest.mark.asyncio
     async def test_empty_image_url_found_on_second_attempt_proceeds(self):
         """image_url becomes available on 2nd re-fetch → step 2 download triggered."""

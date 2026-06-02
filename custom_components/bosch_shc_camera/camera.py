@@ -899,6 +899,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # 401 in another ~10 s burning HA's outer budget. Go straight
                     # to cached image / placeholder via the final return.
                     return self._cached_image or self._PLACEHOLDER_JPEG
+            renew_after_status: int | None = None
             try:
                 async with asyncio.timeout(10):
                     async with session.get(proxy_url) as resp:
@@ -915,98 +916,16 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                 )
                                 return self._cached_image
                         elif resp.status == 404:
-                            # 404 = proxy URL expired — re-request a fresh connection and retry
-                            opened_at = self.coordinator._live_opened_at.get(
-                                self._cam_id, 0
-                            )
-                            age = time.monotonic() - opened_at
-                            _LOGGER.debug(
-                                "%s: proxy snapshot 404 (age %.0fs) — proxy URL expired, refreshing connection",
-                                self._display_name,
-                                age,
-                            )
-                            # Refresh the live connection so proxyUrl is current again
-                            new_live = await self.coordinator.try_live_connection(
-                                self._cam_id
-                            )
-                            if new_live:
-                                new_proxy_url = new_live.get("proxyUrl", "")
-                                if new_proxy_url:
-                                    try:
-                                        async with asyncio.timeout(10):
-                                            async with session.get(
-                                                new_proxy_url
-                                            ) as retry_resp:
-                                                ct2 = retry_resp.headers.get(
-                                                    "Content-Type", ""
-                                                )
-                                                if (
-                                                    retry_resp.status == 200
-                                                    and "image" in ct2
-                                                ):
-                                                    data = await retry_resp.read()
-                                                    if data:
-                                                        self._cached_image = data
-                                                        self._last_image_fetch = (
-                                                            time.monotonic()
-                                                        )
-                                                        return self._cached_image
-                                    except (TimeoutError, aiohttp.ClientError):
-                                        pass
+                            # 404 = proxy URL expired. Defer the renewal to AFTER
+                            # this snapshot timeout closes (see below).
+                            renew_after_status = 404
                         elif resp.status in (401, 403):
                             opened_at = self.coordinator._live_opened_at.get(
                                 self._cam_id, 0
                             )
                             age = time.monotonic() - opened_at
                             if age >= LIVE_SESSION_TTL:
-                                # Proxy hash expired — renew the session (same as 404 path).
-                                # Do NOT clear _live_connections: clearing makes is_streaming=False
-                                # which stops the card display ("disabled livestream").
-                                _LOGGER.debug(
-                                    "%s: proxy snapshot %d (age %.0fs) — session expired, renewing connection",
-                                    self._display_name,
-                                    resp.status,
-                                    age,
-                                )
-                                new_live = await self.coordinator.try_live_connection(
-                                    self._cam_id
-                                )
-                                if new_live:
-                                    new_proxy_url = new_live.get("proxyUrl", "")
-                                    if new_proxy_url:
-                                        try:
-                                            async with asyncio.timeout(10):
-                                                async with session.get(
-                                                    new_proxy_url
-                                                ) as retry_resp:
-                                                    ct2 = retry_resp.headers.get(
-                                                        "Content-Type", ""
-                                                    )
-                                                    if (
-                                                        retry_resp.status == 200
-                                                        and "image" in ct2
-                                                    ):
-                                                        data = await retry_resp.read()
-                                                        if data:
-                                                            self._cached_image = data
-                                                            self._last_image_fetch = (
-                                                                time.monotonic()
-                                                            )
-                                                            return self._cached_image
-                                        except (TimeoutError, aiohttp.ClientError):
-                                            pass
-                                else:
-                                    # Renewal failed — clear so is_streaming goes to False cleanly
-                                    _LOGGER.debug(
-                                        "%s: session renewal failed — clearing",
-                                        self._display_name,
-                                    )
-                                    self.coordinator._live_connections.pop(
-                                        self._cam_id, None
-                                    )
-                                    self.coordinator._live_opened_at.pop(
-                                        self._cam_id, None
-                                    )
+                                renew_after_status = resp.status
                             else:
                                 _LOGGER.debug(
                                     "%s: proxy snapshot %d (age %.0fs) — keeping session (camera requires auth for snap.jpg)",
@@ -1014,6 +933,47 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                     resp.status,
                                     age,
                                 )
+                # Renew OUTSIDE the 10s snapshot timeout: try_live_connection can
+                # take up to ~100s (PUT /connection + LOCAL pre-warm) and must not
+                # be cancelled mid-flight by the snapshot budget — which previously
+                # aborted every renewal on a slow camera (bug-hunt 2026-06-02).
+                if renew_after_status is not None:
+                    opened_at = self.coordinator._live_opened_at.get(self._cam_id, 0)
+                    age = time.monotonic() - opened_at
+                    _LOGGER.debug(
+                        "%s: proxy snapshot %d (age %.0fs) — renewing live connection",
+                        self._display_name,
+                        renew_after_status,
+                        age,
+                    )
+                    new_live = await self.coordinator.try_live_connection(self._cam_id)
+                    if new_live:
+                        new_proxy_url = new_live.get("proxyUrl", "")
+                        if new_proxy_url:
+                            try:
+                                async with asyncio.timeout(10):
+                                    async with session.get(new_proxy_url) as retry_resp:
+                                        ct2 = retry_resp.headers.get("Content-Type", "")
+                                        if retry_resp.status == 200 and "image" in ct2:
+                                            data = await retry_resp.read()
+                                            if data:
+                                                self._cached_image = data
+                                                self._last_image_fetch = (
+                                                    time.monotonic()
+                                                )
+                                                return self._cached_image
+                            except (TimeoutError, aiohttp.ClientError):
+                                pass
+                    elif renew_after_status in (401, 403):
+                        # Renewal of an expired session failed — clear so
+                        # is_streaming goes to False cleanly. (A 404 renewal that
+                        # fails keeps the connection: the URL may recover.)
+                        _LOGGER.debug(
+                            "%s: session renewal failed — clearing",
+                            self._display_name,
+                        )
+                        self.coordinator._live_connections.pop(self._cam_id, None)
+                        self.coordinator._live_opened_at.pop(self._cam_id, None)
             except (TimeoutError, aiohttp.ClientError):
                 # Any network/timeout error on the live proxy snap.jpg — try RCP thumbnail
                 rcp_thumb = await self._async_rcp_thumbnail()

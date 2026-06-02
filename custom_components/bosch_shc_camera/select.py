@@ -12,6 +12,7 @@ Provides:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
@@ -260,6 +261,9 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             motion_data["motionAlarmConfiguration"] = api_value
             if self._cam_id in self.coordinator.data:
                 self.coordinator.data[self._cam_id]["motion"] = motion_data
+            # Write-lock so the slow-tier poll doesn't revert the optimistic
+            # value before the cloud catches up.
+            self.coordinator._motion_set_at[self._cam_id] = time.monotonic()
             _LOGGER.debug(
                 "Motion sensitivity set to %s for %s", api_value, self._cam_id
             )
@@ -336,7 +340,12 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
         await self.coordinator.async_stop_fcm_push()
         self.coordinator._fcm_push_mode = "unknown"
         if self.coordinator.options.get("enable_fcm_push", False):
-            self.hass.async_create_task(self.coordinator.async_start_fcm_push())
+            # Track the restart task on the coordinator so async_unload_entry can
+            # cancel it — an untracked fire-and-forget task could otherwise keep
+            # running (and re-establish FCM) after the entry is unloaded/reloaded.
+            task = self.hass.async_create_task(self.coordinator.async_start_fcm_push())
+            self.coordinator._bg_tasks.add(task)
+            task.add_done_callback(self.coordinator._bg_tasks.discard)
         self.async_write_ha_state()
 
 
@@ -477,6 +486,9 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         )
         if success:
             self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            # Stamp the write-lock so the slow-tier poll doesn't revert the UI
+            # before the cloud reflects this change (siblings do the same).
+            self.coordinator._intrusion_config_set_at[self._cam_id] = time.monotonic()
             _LOGGER.debug(
                 "Detection mode set to %s for %s", api_value, self._cam_id[:8]
             )

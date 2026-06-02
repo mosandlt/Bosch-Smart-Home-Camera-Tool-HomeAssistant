@@ -1370,7 +1370,13 @@ class BoschAlarmStateSensor(_BoschSensorBase):
     def native_value(self) -> str:
         status = self.coordinator._alarm_status_cache.get(self._cam_id, {})
         if status:
-            return str(status.get("intrusionSystem", "unknown")).lower()
+            # Guard the ENUM: an unmapped intrusionSystem value (e.g. new
+            # firmware) would make HA discard the state and show "unknown"
+            # anyway — map it explicitly so alarm automations get a defined
+            # value, not a dropped one (same pattern as BoschLastEventTypeSensor).
+            val = str(status.get("intrusionSystem", "unknown")).lower()
+            opts = getattr(self, "_attr_options", None)
+            return val if (not opts or val in opts) else "unknown"
         armed = self.coordinator._arming_cache.get(self._cam_id)
         if armed is True:
             return "active"

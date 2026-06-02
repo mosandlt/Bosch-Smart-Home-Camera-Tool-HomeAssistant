@@ -40,6 +40,16 @@ def _is_safe_bosch_url(url: str) -> bool:
     )
 
 
+def _safe_path_segment(seg: str) -> str:
+    """Neutralise path-traversal in a filename segment.
+
+    The alert snapshot filename embeds the cloud-provided camera title, which
+    must never be able to escape the alert directory (e.g. a camera named
+    "../../config/secrets"). Strips path separators and parent-dir tokens.
+    """
+    return str(seg).replace("/", "_").replace("\\", "_").replace("..", "_")
+
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
@@ -1351,12 +1361,22 @@ async def async_send_alert(
     # cumulative — covers steady-state cloud and warm-up cases without
     # delaying the common path noticeably.
     if not image_url:
-        events_url = f"{CLOUD_API}/v11/events?videoInputId=&limit=5"
+        # Resolve THIS camera's id by title; if none matches, skip the re-fetch
+        # entirely. Querying with an empty videoInputId returns EVERY camera's
+        # events and event[0] would attach a foreign camera's image to this alert.
+        events_url = None
         for cid, cdata in coordinator.data.items():
             if cdata.get("info", {}).get("title", "") == cam_name:
                 events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
                 break
+        if events_url is None:
+            _LOGGER.debug(
+                "Alert: no camera matches title %r — skipping image re-fetch",
+                cam_name,
+            )
         for attempt, delay in enumerate((3, 7, 15), start=1):
+            if events_url is None:
+                break
             await asyncio.sleep(delay)
             try:
                 async with asyncio.timeout(10):
@@ -1383,13 +1403,23 @@ async def async_send_alert(
                 "Alert: image_url still empty after 3 retries — skipping step 2"
             )
 
+    # Reject an unsafe imageUrl BEFORE the download block so a rejected URL can
+    # never reach session.get() (previously it set image_url="" but still fell
+    # through to attempt the fetch with an empty URL).
+    if image_url and not _is_safe_bosch_url(image_url):
+        _LOGGER.warning("Alert: unsafe imageUrl rejected: %s", image_url[:60])
+        image_url = ""
+
     if image_url:
-        if not _is_safe_bosch_url(image_url):
-            _LOGGER.warning("Alert: unsafe imageUrl rejected: %s", image_url[:60])
-            image_url = ""
-        else:
-            await asyncio.sleep(5)
-        snap_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.jpg")
+        await asyncio.sleep(5)
+        # Neutralise path traversal: cam_name is the cloud-provided camera title
+        # and must never escape alert_dir (e.g. a title like "../../config/secrets").
+        # ts_safe and event_type are integration-generated, but sanitise defensively.
+        snap_path = os.path.join(
+            alert_dir,
+            f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
+            f"_{_safe_path_segment(event_type)}.jpg",
+        )
         try:
             async with asyncio.timeout(15):
                 async with session.get(image_url, headers=headers) as resp:

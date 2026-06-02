@@ -102,6 +102,8 @@ def _coord(
         if intrusion_config is not None
         else {},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         _notifications_cache=notifications_cache
         if notifications_cache is not None
         else {},

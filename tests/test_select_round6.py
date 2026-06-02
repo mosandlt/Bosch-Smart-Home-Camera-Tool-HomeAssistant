@@ -34,6 +34,8 @@ def _stub_coord(gen2: bool = True):
         _stream_type_override=None,
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
+        _alarm_settings_set_at={},
+        _motion_set_at={},
         _fcm_push_mode="unknown",
         motion_settings=lambda cam_id: {
             "motionAlarmConfiguration": "HIGH",
@@ -289,6 +291,9 @@ class TestMotionSensitivitySelect:
         assert (
             sel.coordinator.data[CAM_ID]["motion"]["motionAlarmConfiguration"] == "LOW"
         )
+        # bug-hunt 2026-06-02: write-lock stamped so the slow-tier poll won't
+        # revert the optimistic value before the cloud catches up.
+        assert CAM_ID in sel.coordinator._motion_set_at
 
     @pytest.mark.asyncio
     async def test_select_option_failure_logs_warning(self):
@@ -364,12 +369,21 @@ class TestFcmPushModeSelect:
         """Selecting a mode persists to options and restarts FCM when enabled."""
         sel = self._make(options={"enable_fcm_push": True})
         sel.coordinator.options = {"enable_fcm_push": True}
-        # Drain coroutines created via async_create_task to avoid ResourceWarning
-        sel.hass.async_create_task = lambda coro: coro.close()
+        # The restart task is now tracked on coordinator._bg_tasks (cancelled on
+        # unload) instead of fire-and-forget (bug-hunt 2026-06-02 fix C).
+        sel.coordinator._bg_tasks = set()
+
+        def _create(coro):
+            coro.close()  # avoid ResourceWarning; we only assert tracking here
+            return MagicMock()
+
+        sel.hass.async_create_task = _create
         await sel.async_select_option("android")
         sel.hass.config_entries.async_update_entry.assert_called_once()
         sel.coordinator.async_stop_fcm_push.assert_called_once()
         sel.async_write_ha_state.assert_called_once()
+        # Restart task registered for cancellation on unload.
+        assert len(sel.coordinator._bg_tasks) == 1
 
     @pytest.mark.asyncio
     async def test_select_option_no_fcm_restart_when_disabled(self):

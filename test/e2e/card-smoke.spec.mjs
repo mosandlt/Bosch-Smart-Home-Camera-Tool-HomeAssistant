@@ -696,3 +696,30 @@ test("config editors localise labels by hass.language (de/en)", async ({ page })
   expect(r.overviewDe, "overview editor in German").toContain("Spalten");
   expect(r.overviewDe).not.toContain("Columns");
 });
+
+// Regression (bug-hunt 2026-06-02): the schedule-rule list interpolates rule
+// values into innerHTML. Text values must be HTML-escaped (_escHtml) and values
+// placed inside double-quoted attributes must additionally escape the quote
+// char (_escAttr) — otherwise a malicious rule id / time / weekday from the
+// cloud API could break out and inject markup or attributes.
+test("rule-list escaping helpers neutralise HTML and attribute injection", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const r = await page.evaluate(() => {
+    const card = document.createElement("bosch-camera-card");
+    const html = card._escHtml('<img src=x onerror=alert(1)>');
+    const attr = card._escAttr('" onmouseover="alert(1)');
+    const attrNull = card._escAttr(null);
+    return { html, attr, attrNull };
+  });
+
+  // Text context: angle brackets encoded → no live element.
+  expect(r.html).not.toContain("<img");
+  expect(r.html).toContain("&lt;img");
+  // Attribute context: the double-quote that would close the attribute is encoded.
+  expect(r.attr).not.toContain('"');
+  expect(r.attr).toContain("&quot;");
+  // Null/undefined is coerced safely, never the string "null"/"undefined" markup.
+  expect(r.attrNull).toBe("");
+});

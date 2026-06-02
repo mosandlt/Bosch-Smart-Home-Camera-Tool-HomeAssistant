@@ -17,7 +17,6 @@ Creates number entities per camera:
     API rejects distance > 8 with HTTP 400 (verified FW 9.40.102). Max clamped to 8.
 """
 
-import asyncio
 import logging
 from typing import Any
 
@@ -28,7 +27,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
+from . import DOMAIN  # type: ignore[attr-defined]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -256,7 +255,11 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
         audio["speakerLevel"] = level
         success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
         if success:
-            self.coordinator._audio_cache[self._cam_id] = audio
+            # Merge only the changed field so a concurrent microphone write
+            # isn't clobbered by our stale snapshot (bug-hunt 2026-06-02).
+            self.coordinator._audio_cache.setdefault(self._cam_id, {})[
+                "speakerLevel"
+            ] = level
             _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
         else:
             _LOGGER.warning(
@@ -536,7 +539,10 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
         audio["microphoneLevel"] = round(value)
         success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
         if success:
-            self.coordinator._audio_cache[self._cam_id] = audio
+            # Merge only the changed field (see speaker-level note).
+            self.coordinator._audio_cache.setdefault(self._cam_id, {})[
+                "microphoneLevel"
+            ] = round(value)
         self.async_write_ha_state()
 
 
@@ -574,12 +580,15 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.last_update_success)
+        # Gate on the lighting cache being populated — a write during the
+        # pre-populate / failed-sub-fetch window would PUT zero-defaults and
+        # clobber the camera's real light settings (bug-hunt 2026-06-02).
+        return bool(self.coordinator.last_update_success) and bool(
+            self.coordinator._lighting_switch_cache.get(self._cam_id)
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Set white balance for front light — sends FULL body (API requirement)."""
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
         wb = round(value, 2)
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
         body = {
@@ -601,37 +610,22 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
             "whiteBalance": wb,
             "color": None,
         }
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {self.coordinator.token}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._wb_value = wb
-                        try:
-                            self.coordinator._lighting_switch_cache[
-                                self._cam_id
-                            ] = await resp.json()
-                        except Exception:  # noqa: S110 # best-effort cache refresh after white-balance write, failure non-actionable
-                            pass
-                        _LOGGER.debug(
-                            "White balance set to %.2f for %s", wb, self._cam_id[:8]
-                        )
-                    else:
-                        _LOGGER.warning(
-                            "White balance HTTP %d for %s",
-                            resp.status,
-                            self._cam_id[:8],
-                        )
-        except Exception as err:
-            _LOGGER.warning("White balance error for %s: %s", self._cam_id[:8], err)
+        # Route through the coordinator's universal writer, which handles a 401
+        # via token-refresh + retry. Previously this used a raw Bearer PUT that
+        # silently failed on an expired token (bug-hunt 2026-06-02).
+        ok = await self.coordinator.async_put_camera(
+            self._cam_id, "lighting/switch", body
+        )
+        if ok:
+            self._wb_value = wb
+            # Merge ONLY the group we changed into the live cache (not the whole
+            # snapshot) so a concurrent sibling write to a different light group
+            # isn't clobbered by our stale snapshot (bug-hunt 2026-06-02).
+            cur = self.coordinator._lighting_switch_cache.setdefault(self._cam_id, {})
+            cur["frontLightSettings"] = body["frontLightSettings"]
+            _LOGGER.debug("White balance set to %.2f for %s", wb, self._cam_id[:8])
+        else:
+            _LOGGER.warning("White balance write failed for %s", self._cam_id[:8])
         self.async_write_ha_state()
 
 
@@ -662,12 +656,14 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.last_update_success)
+        # Gate on the lighting cache (see white-balance note) — avoids writing
+        # zero-defaults that clobber real settings before the cache is populated.
+        return bool(self.coordinator.last_update_success) and bool(
+            self.coordinator._lighting_switch_cache.get(self._cam_id)
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Set brightness — sends FULL body with all 3 groups (API requirement)."""
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
         brightness = round(value)
         # Read current state from cache, update only our group
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
@@ -686,42 +682,28 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
             ),
         }
         body[self._led_key] = {**body[self._led_key], "brightness": brightness}
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        headers = {
-            "Authorization": f"Bearer {self.coordinator.token}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._brightness = float(brightness)
-                        try:
-                            self.coordinator._lighting_switch_cache[
-                                self._cam_id
-                            ] = await resp.json()
-                        except Exception:  # noqa: S110 # best-effort cache refresh after brightness write, failure non-actionable
-                            pass
-                        _LOGGER.debug(
-                            "%s brightness set to %d for %s",
-                            self._led_key,
-                            brightness,
-                            self._cam_id[:8],
-                        )
-                    else:
-                        _LOGGER.warning(
-                            "%s brightness HTTP %d for %s",
-                            self._led_key,
-                            resp.status,
-                            self._cam_id[:8],
-                        )
-        except Exception as err:
+        # Route through the coordinator's universal writer (401 → token-refresh
+        # + retry) instead of a raw Bearer PUT that silently failed on an
+        # expired token (bug-hunt 2026-06-02).
+        ok = await self.coordinator.async_put_camera(
+            self._cam_id, "lighting/switch", body
+        )
+        if ok:
+            self._brightness = float(brightness)
+            # Merge only the changed LED group (see white-balance note above).
+            cur = self.coordinator._lighting_switch_cache.setdefault(self._cam_id, {})
+            cur[self._led_key] = body[self._led_key]
+            _LOGGER.debug(
+                "%s brightness set to %d for %s",
+                self._led_key,
+                brightness,
+                self._cam_id[:8],
+            )
+        else:
             _LOGGER.warning(
-                "%s brightness error for %s: %s", self._led_key, self._cam_id[:8], err
+                "%s brightness write failed for %s",
+                self._led_key,
+                self._cam_id[:8],
             )
         self.async_write_ha_state()
 
@@ -940,7 +922,12 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
             self._cam_id, "alarm_settings", cfg
         )
         if success:
+            import time as _time
+
             self.coordinator._alarm_settings_cache[self._cam_id] = cfg
+            # Write-lock so the slow-tier poll doesn't revert this before the
+            # cloud reflects it (mirrors the intrusion-config pattern).
+            self.coordinator._alarm_settings_set_at[self._cam_id] = _time.monotonic()
         self.async_write_ha_state()
 
 

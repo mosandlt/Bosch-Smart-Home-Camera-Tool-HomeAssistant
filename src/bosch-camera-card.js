@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.2";
+const CARD_VERSION = "13.5.3";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -6651,11 +6651,11 @@ class BoschCameraCard extends HTMLElement {
             return `<div class="rule-row" data-rule-idx="${i}">
               <div class="rule-info">
                 <div class="rule-name">${this._escHtml(r.name || "Regel " + (i+1))}</div>
-                <div class="rule-time">${startT} – ${endT}</div>
-                <div class="rule-days">${days}</div>
+                <div class="rule-time">${this._escHtml(startT)} – ${this._escHtml(endT)}</div>
+                <div class="rule-days">${this._escHtml(days)}</div>
               </div>
-              <button class="rule-toggle${activeClass}" data-rule-id="${r.id}" data-cam-id="${camId}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>
-              <button class="rule-delete" data-rule-id="${r.id}" data-cam-id="${camId}" title="${this._t("delete")}">✕</button>
+              <button class="rule-toggle${activeClass}" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>
+              <button class="rule-delete" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" title="${this._t("delete")}">✕</button>
             </div>`;
           }).join("");
 
@@ -6737,6 +6737,13 @@ class BoschCameraCard extends HTMLElement {
     const d = document.createElement("div");
     d.textContent = str;
     return d.innerHTML;
+  }
+
+  // Escape a value for use inside a double-quoted HTML attribute.
+  // _escHtml() encodes < > & but NOT the quote char, so a value containing
+  // a double-quote could break out of the attribute and inject new ones.
+  _escAttr(str) {
+    return this._escHtml(str == null ? "" : String(str)).replace(/"/g, "&quot;");
   }
 
   _renderServiceButtons() {

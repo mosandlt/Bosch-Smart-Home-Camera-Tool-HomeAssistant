@@ -43,6 +43,7 @@ def _stub_coord_with_privacy(privacy_on: bool = False, hw: str = "HOME_Eyes_Indo
         _shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
         _panic_alarm_cache={},
         _alarm_settings_cache={},
+        _alarm_settings_set_at={},
         _lighting_switch_cache={},
         _light_set_at={},
         last_update_success=True,

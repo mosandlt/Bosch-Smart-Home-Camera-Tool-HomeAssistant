@@ -839,6 +839,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._intrusion_config_set_at: dict[
             str, float
         ] = {}  # intrusionDetectionConfig write
+        self._motion_set_at: dict[str, float] = {}  # motion sensitivity write
+        self._alarm_settings_set_at: dict[str, float] = {}  # alarm_settings write
         self._WRITE_LOCK_SECS = (
             30.0  # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         )
@@ -2977,7 +2979,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 "ambientLightSensorLevel"
                             )
                         elif ep == "motion":
-                            data[cam_id_key]["motion"] = ep_data
+                            # Skip within the write-lock window so a poll that
+                            # lands before the cloud reflects the user's
+                            # sensitivity change doesn't revert the UI.
+                            if not self._is_write_locked(
+                                cam_id_key, self._motion_set_at
+                            ):
+                                data[cam_id_key]["motion"] = ep_data
                         elif ep == "firmware":
                             self._firmware_cache[cam_id_key] = ep_data
                         elif ep == "recording_options":
@@ -3073,9 +3081,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     ep_data if isinstance(ep_data, dict) else {}
                                 )
                         elif ep == "alarm_settings":
-                            self._alarm_settings_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
+                            # Skip within the write-lock window (cloud
+                            # propagation) so the optimistic cache isn't reverted.
+                            if not self._is_write_locked(
+                                cam_id_key, self._alarm_settings_set_at
+                            ):
+                                self._alarm_settings_cache[cam_id_key] = (
+                                    ep_data if isinstance(ep_data, dict) else {}
+                                )
                         elif ep == "alarmStatus":
                             # Actual response format confirmed 2026-04-11:
                             #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
@@ -4103,6 +4116,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         candidates = ["REMOTE"]
                         self._stream_fell_back[cam_id] = True
 
+            # A 401 on PUT /connection means the bearer token was rotated /
+            # early-invalidated. _ensure_valid_token() is built for exactly this
+            # ("Called ONLY when we get a 401"); refresh once per call and retry
+            # the PUT rather than silently failing the whole connection.
+            token_refreshed = False
             for type_val in candidates:
                 # Reset quality params for each candidate — LOCAL override
                 # must not leak into the REMOTE fallback.
@@ -4123,6 +4141,36 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             headers=headers,
                         )
                         body = await resp.text()
+                        # Recoverable token expiry: refresh once and retry the
+                        # same candidate's PUT in-place (covered by this timeout).
+                        if resp.status == 401 and not token_refreshed:
+                            token_refreshed = True
+                            try:
+                                token = await self._ensure_valid_token()
+                            except Exception as err:
+                                _LOGGER.warning(
+                                    "try_live_connection: token refresh after 401 "
+                                    "failed for %s: %s",
+                                    cam_id,
+                                    err,
+                                )
+                            else:
+                                headers["Authorization"] = f"Bearer {token}"
+                                _LOGGER.info(
+                                    "try_live_connection: token expired (401) for "
+                                    "%s — refreshed, retrying PUT (%s)",
+                                    cam_id,
+                                    type_val,
+                                )
+                                resp = await session.put(
+                                    url,
+                                    json={
+                                        "type": type_val,
+                                        "highQualityVideo": hq,
+                                    },
+                                    headers=headers,
+                                )
+                                body = await resp.text()
                     _LOGGER.debug(
                         "PUT /connection type=%s → HTTP %d (%d bytes)",
                         type_val,
@@ -4574,7 +4622,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         return result
                     elif resp.status == 401:
                         _LOGGER.warning(
-                            "try_live_connection: token expired (401) for %s", cam_id
+                            "try_live_connection: still 401 for %s after token "
+                            "refresh — giving up",
+                            cam_id,
                         )
                         return None
                     else:
@@ -7225,6 +7275,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning(
                 "Webhook delivery enabled but webhook_url is empty — skipping"
             )
+            return
+        # Only allow http(s) — refuse file://, gopher://, etc. that could be
+        # smuggled in via the user option and abused through the shared session.
+        if not url.lower().startswith(("http://", "https://")):
+            _LOGGER.warning("Webhook URL rejected — only http(s) schemes are allowed")
             return
         payload: dict[str, Any] = {
             "event_type": event.event_type,

@@ -255,7 +255,8 @@ class TestTurnOnFailureRevertsIntent:
             coordinator=coord,
             _cam_id=CAM_ID,
             _cam_title="Terrasse",
-            _last_stream_off=0,
+            _last_stream_off=float("-inf"),  # never stopped (SENTINEL_RULE)
+            _STREAM_COOLDOWN=BoschLiveStreamSwitch._STREAM_COOLDOWN,
             async_write_ha_state=MagicMock(),
             hass=MagicMock(),
         )

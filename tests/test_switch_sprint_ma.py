@@ -85,6 +85,8 @@ def _stub_coord(**overrides):
         _global_lighting_cache={},
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         _notifications_cache={},
         _arming_cache={},
         _arming_set_at={},

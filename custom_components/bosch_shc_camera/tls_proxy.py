@@ -194,6 +194,14 @@ def start_tls_proxy(
                                 .decode("utf-8", errors="replace")
                                 .replace("\r\n", "\\r\\n")
                             )
+                            # Redact Digest/Authorization credentials — the RTSP
+                            # auth headers carry the computed Digest response and
+                            # must never land in the debug log.
+                            preview = re.sub(
+                                r"(?i)(Authorization:)[^\\]*",
+                                r"\1 <redacted>",
+                                preview,
+                            )
                             _LOGGER.debug(
                                 "TLS proxy %s [%s] %d bytes: %.500s",
                                 cam_id[:8],

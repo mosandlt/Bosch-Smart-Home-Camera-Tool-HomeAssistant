@@ -234,3 +234,60 @@ class TestFetchLiveSnapshotLocalValueError:
         ):
             out = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert out is None
+
+
+# ── camera.py REMOTE proxy snapshot renewal (bug-hunt 2026-06-02 fix G) ───────
+class TestRemoteSnapshotRenewOutsideTimeout:
+    """On a 404 (expired proxy URL) REMOTE snapshot, the live-connection
+    renewal (try_live_connection — up to ~100s with pre-warm) was previously
+    issued INSIDE the 10s snapshot asyncio.timeout and got cancelled on slow
+    cameras. The renew now runs outside that timeout; this pins that the
+    renew → retry path returns the refreshed image."""
+
+    @pytest.mark.asyncio
+    async def test_404_renews_and_returns_refreshed_image(self):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        old_url = "https://198.51.100.1/snap_old.jpg"
+        new_url = "https://198.51.100.2/snap_new.jpg"
+
+        class _Resp:
+            def __init__(self, status, body=b"", ct="image/jpeg"):
+                self.status = status
+                self._body = body
+                self.headers = {"Content-Type": ct}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def read(self):
+                return self._body
+
+            async def text(self):
+                return ""
+
+        def _get(url, *a, **k):
+            return _Resp(200, b"\xff\xd8new") if url == new_url else _Resp(404)
+
+        session = MagicMock()
+        session.get = _get
+        coord = _make_coord(
+            _live_connections={
+                CAM_ID: {"_connection_type": "REMOTE", "proxyUrl": old_url}
+            },
+            _live_opened_at={CAM_ID: 0.0},
+            try_live_connection=AsyncMock(
+                return_value={"_connection_type": "REMOTE", "proxyUrl": new_url}
+            ),
+        )
+        cam = _make_camera(coord=coord)
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+            return_value=session,
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        coord.try_live_connection.assert_awaited_once()
+        assert out == b"\xff\xd8new"

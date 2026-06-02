@@ -201,6 +201,8 @@ def _make_coord_for_update_data(**overrides):
         _global_lighting_cache={},
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         _alarm_settings_cache={},
         _alarm_status_cache={},
         _arming_cache={},

@@ -131,6 +131,8 @@ def _make_coord(**overrides):
         _gen2_private_areas_cache={},
         _intrusion_config_cache={},
         _intrusion_config_set_at={},
+        _motion_set_at={},
+        _alarm_settings_set_at={},
         _alarm_settings_cache={},
         _alarm_status_cache={},
         _privacy_sound_set_at={},
