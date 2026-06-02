@@ -468,7 +468,11 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
             config_entries.SOURCE_RECONFIGURE,
         ):
             await self.async_set_unique_id(DOMAIN)
-            self._abort_if_unique_id_configured()
+            # reload_on_update=False: combining a reloading config-flow method
+            # with our options update-listener is deprecated in HA 2026.6
+            # (error from 2026.12). We keep the listener (it guards options-only
+            # reloads); this fresh-setup abort never needs to reload anyway.
+            self._abort_if_unique_id_configured(reload_on_update=False)
 
         # Register our OAuth2 implementation (idempotent — safe to call multiple times)
         async_register_implementation(
@@ -521,15 +525,22 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         }
         # Reauth + reconfigure: update the existing entry in place (keeps
         # options, entities, automations, FCM config, SMB settings — everything).
+        # HA 2026.6 deprecates async_update_reload_and_abort when the entry also
+        # has an options update-listener (double-reload race; error from
+        # 2026.12). We keep the listener (it guards options-only reloads) and
+        # switch the flow to async_update_and_abort + an explicit schedule_reload
+        # so the refreshed credentials are still applied.
         if self.source == config_entries.SOURCE_REAUTH:
             existing = self._get_reauth_entry()
-            return self.async_update_reload_and_abort(
+            self.hass.config_entries.async_schedule_reload(existing.entry_id)
+            return self.async_update_and_abort(
                 existing,
                 data_updates=new_data,
             )
         if self.source == config_entries.SOURCE_RECONFIGURE:
             existing = self._get_reconfigure_entry()
-            return self.async_update_reload_and_abort(
+            self.hass.config_entries.async_schedule_reload(existing.entry_id)
+            return self.async_update_and_abort(
                 existing,
                 data_updates=new_data,
             )

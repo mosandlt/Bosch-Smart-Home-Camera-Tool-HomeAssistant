@@ -279,10 +279,11 @@ class TestAsyncOauthCreateEntryStructure:
         # async_oauth_create_entry must check SOURCE_REAUTH
         func_start = src.find("async def async_oauth_create_entry")
         assert func_start != -1
-        func_body = src[func_start : func_start + 800]
+        next_func = src.find("\n    async def ", func_start + 1)
+        func_body = src[func_start:next_func] if next_func != -1 else src[func_start:]
         assert "SOURCE_REAUTH" in func_body, (
-            "async_oauth_create_entry must route on SOURCE_REAUTH to call "
-            "async_update_reload_and_abort — otherwise reauth creates a duplicate entry"
+            "async_oauth_create_entry must route on SOURCE_REAUTH to update "
+            "(not recreate) the existing entry"
         )
 
     def test_reconfigure_source_routing_exists(self):

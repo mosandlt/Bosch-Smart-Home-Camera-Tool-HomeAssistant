@@ -27,4 +27,7 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          # `ignore: brands` removed 2026-06-02: hacs/action now recognises the
+          # local custom_components/<domain>/brand/ folder (HA 2026.3 brands
+          # proxy), so HACS validation passes without it. Verified green on
+          # branch test-brands-no-ignore (run 26843082038).

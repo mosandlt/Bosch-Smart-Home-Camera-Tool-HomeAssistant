@@ -252,6 +252,7 @@ class TestConfigFlowSteps:
         flow.async_show_form = MagicMock(return_value={"type": "form", "step_id": "x"})
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
         flow.async_update_reload_and_abort = MagicMock(return_value={"type": "abort"})
+        flow.async_update_and_abort = MagicMock(return_value={"type": "abort"})
         flow._get_reauth_entry = MagicMock(return_value=MagicMock())
         flow._get_reconfigure_entry = MagicMock(return_value=MagicMock())
         return flow
@@ -320,7 +321,9 @@ class TestConfigFlowSteps:
 
     @pytest.mark.asyncio
     async def test_oauth_create_entry_reauth_updates_existing(self):
-        """SOURCE_REAUTH → async_update_reload_and_abort (lines 462-466)."""
+        """SOURCE_REAUTH → async_update_and_abort + explicit schedule_reload
+        (HA 2026.6: async_update_reload_and_abort is deprecated alongside the
+        options update-listener)."""
         from homeassistant import config_entries
 
         flow = self._make_flow(source=config_entries.SOURCE_REAUTH)
@@ -329,11 +332,13 @@ class TestConfigFlowSteps:
                 "token": {"access_token": "new_at", "refresh_token": "new_rt"},
             }
         )
-        flow.async_update_reload_and_abort.assert_called_once()
+        flow.async_update_and_abort.assert_called_once()
+        flow.hass.config_entries.async_schedule_reload.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_oauth_create_entry_reconfigure_updates_existing(self):
-        """SOURCE_RECONFIGURE → async_update_reload_and_abort (lines 467-471)."""
+        """SOURCE_RECONFIGURE → async_update_and_abort + explicit schedule_reload
+        (HA 2026.6 deprecation, see reauth test)."""
         from homeassistant import config_entries
 
         flow = self._make_flow(source=config_entries.SOURCE_RECONFIGURE)
@@ -342,7 +347,8 @@ class TestConfigFlowSteps:
                 "token": {"access_token": "new_at", "refresh_token": "new_rt"},
             }
         )
-        flow.async_update_reload_and_abort.assert_called_once()
+        flow.async_update_and_abort.assert_called_once()
+        flow.hass.config_entries.async_schedule_reload.assert_called_once()
 
     def test_async_get_options_flow_returns_options_flow_instance(self):
         """async_get_options_flow must return a BoschCameraOptionsFlow (line 480)."""
