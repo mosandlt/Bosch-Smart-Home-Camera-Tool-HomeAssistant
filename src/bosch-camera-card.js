@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.1";
+const CARD_VERSION = "13.5.2";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -1300,6 +1300,12 @@ class BoschCameraCard extends HTMLElement {
       show_audio:                 config.show_audio !== false,
       // Decouple the pill from the global audio entities (per-browser audio).
       use_card_audio_settings:    config.use_card_audio_settings === true,
+      // Per-card YAML override of the START audio state, independent of the
+      // backend switch.<cam>_audio. "backend" (default) = follow the switch (the
+      // single source of truth); "on" = this card starts with sound; "off" = this
+      // card starts muted and ignores backend changes. The pill stays manually
+      // tappable in every mode (local mute toggle). 2026-06-02.
+      audio_default:              ["on", "off", "backend"].includes(config.audio_default) ? config.audio_default : "backend",
       // Start the live stream with sound on (best-effort: the browser forces the
       // first autoplay frames muted, so this unmutes as soon as it is allowed —
       // typically right after the user's first interaction with the page). A
@@ -1656,6 +1662,19 @@ class BoschCameraCard extends HTMLElement {
   _useCardAudio() {
     return !!(this._config && this._config.use_card_audio_settings);
   }
+  // Per-card YAML override of the start audio state (audio_default: on|off|
+  // backend). "backend" (default) follows switch.<cam>_audio; "on"/"off" pin
+  // this card's start mute state and opt it out of the backend live-sync.
+  _audioDefaultMode() {
+    const m = this._config && this._config.audio_default;
+    return (m === "on" || m === "off") ? m : "backend";
+  }
+  // True when this card must NOT follow the backend audio switch live — either a
+  // per-browser decoupled card (use_card_audio_settings) or a YAML-pinned card
+  // (audio_default on/off). The pill still toggles THIS browser's mute locally.
+  _audioDecoupled() {
+    return this._useCardAudio() || this._audioDefaultMode() !== "backend";
+  }
   _cardVolume() {
     try { const v = parseFloat(localStorage.getItem("bosch_card_volume")); return v >= 0 && v <= 1 ? v : 0.5; }
     catch (_) { return 0.5; }
@@ -1699,9 +1718,15 @@ class BoschCameraCard extends HTMLElement {
         return;
       }
       video.volume = this._entityVolume();
-      if (this._getEffectiveState(this._entities.audio) === "on") {
-        this._tryUnmuteVideo(video);
-      }
+      // YAML override wins over the backend switch for the START state:
+      //   on      → always start with sound
+      //   off     → always start muted (leave the element muted; never unmute)
+      //   backend → follow switch.<cam>_audio (the source of truth)
+      const mode = this._audioDefaultMode();
+      const wantOn = mode === "backend"
+        ? this._getEffectiveState(this._entities.audio) === "on"
+        : mode === "on";
+      if (wantOn) this._tryUnmuteVideo(video);
     } catch (_) { /* volume not settable */ }
   }
 
@@ -6367,9 +6392,11 @@ class BoschCameraCard extends HTMLElement {
     if (this._liveVideoActive) {
       const video = this.shadowRoot.getElementById("cam-video");
       if (video) {
-        if (this._useCardAudio()) {
-          // Decoupled mode: no backend-driven sync. Android pre-gesture still
-          // forces mute until the first explicit Ton tap.
+        if (this._audioDecoupled()) {
+          // Decoupled (use_card_audio_settings) or YAML-pinned (audio_default
+          // on/off): no backend-driven sync — the start state was seeded in
+          // _applyAudioPreference and manual pill taps own it from there. Android
+          // pre-gesture still forces mute until the first explicit Ton tap.
           if (this._androidAudioMuted) video.muted = true;
         } else {
           const audioOn = this._getEffectiveState(ents.audio) === "on";
@@ -7058,15 +7085,17 @@ class BoschCameraCard extends HTMLElement {
     const entityId = this._entities.audio;
     if (!this._hass) return;
     const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
-    // Decoupled mode (use_card_audio_settings): toggle THIS browser's mute only,
-    // persisted to localStorage — never touch the backend switch / other devices.
-    if (this._useCardAudio()) {
+    // Decoupled (use_card_audio_settings) or YAML-pinned (audio_default on/off):
+    // toggle THIS browser's mute only — never touch the backend switch / other
+    // devices. use_card_audio_settings additionally persists the choice to
+    // localStorage; a YAML-pinned card does not (its start state is the YAML).
+    if (this._audioDecoupled()) {
       if (video) {
         this._androidAudioMuted = false;
         const unmuting = video.muted;
         video.muted = !unmuting;
         if (unmuting && video.paused) video.play().catch(() => {});
-        this._cardSaveUnmuted(!video.muted);
+        if (this._useCardAudio()) this._cardSaveUnmuted(!video.muted);
         const b = this.shadowRoot.getElementById("btn-audio");
         if (b) b.classList.toggle("on", !video.muted);
       }

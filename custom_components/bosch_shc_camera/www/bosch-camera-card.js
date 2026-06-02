@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.1";
+const CARD_VERSION = "13.5.2";
 
 let _boschFsExitAt = 0;
 
@@ -1059,7 +1059,8 @@ class BoschCameraCard extends HTMLElement {
       show_title: config.show_title !== false,
       show_last_event: config.show_last_event !== false,
       show_audio: config.show_audio !== false,
-      use_card_audio_settings: config.use_card_audio_settings === true
+      use_card_audio_settings: config.use_card_audio_settings === true,
+      audio_default: [ "on", "off", "backend" ].includes(config.audio_default) ? config.audio_default : "backend"
     };
     this._storageKey = `bosch_cam_${config.camera_entity}`;
     const base = config.camera_entity.replace(/^camera\./, "");
@@ -1294,6 +1295,13 @@ class BoschCameraCard extends HTMLElement {
   _useCardAudio() {
     return !!(this._config && this._config.use_card_audio_settings);
   }
+  _audioDefaultMode() {
+    const m = this._config && this._config.audio_default;
+    return m === "on" || m === "off" ? m : "backend";
+  }
+  _audioDecoupled() {
+    return this._useCardAudio() || this._audioDefaultMode() !== "backend";
+  }
   _cardVolume() {
     try {
       const v = parseFloat(localStorage.getItem("bosch_card_volume"));
@@ -1341,9 +1349,9 @@ class BoschCameraCard extends HTMLElement {
         return;
       }
       video.volume = this._entityVolume();
-      if (this._getEffectiveState(this._entities.audio) === "on") {
-        this._tryUnmuteVideo(video);
-      }
+      const mode = this._audioDefaultMode();
+      const wantOn = mode === "backend" ? this._getEffectiveState(this._entities.audio) === "on" : mode === "on";
+      if (wantOn) this._tryUnmuteVideo(video);
     } catch (_) {}
   }
   _tryUnmuteVideo(video) {
@@ -3257,7 +3265,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._liveVideoActive) {
       const video = this.shadowRoot.getElementById("cam-video");
       if (video) {
-        if (this._useCardAudio()) {
+        if (this._audioDecoupled()) {
           if (this._androidAudioMuted) video.muted = true;
         } else {
           const audioOn = this._getEffectiveState(ents.audio) === "on";
@@ -3811,13 +3819,13 @@ class BoschCameraCard extends HTMLElement {
     const entityId = this._entities.audio;
     if (!this._hass) return;
     const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
-    if (this._useCardAudio()) {
+    if (this._audioDecoupled()) {
       if (video) {
         this._androidAudioMuted = false;
         const unmuting = video.muted;
         video.muted = !unmuting;
         if (unmuting && video.paused) video.play().catch(() => {});
-        this._cardSaveUnmuted(!video.muted);
+        if (this._useCardAudio()) this._cardSaveUnmuted(!video.muted);
         const b = this.shadowRoot.getElementById("btn-audio");
         if (b) b.classList.toggle("on", !video.muted);
       }

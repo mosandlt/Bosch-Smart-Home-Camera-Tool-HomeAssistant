@@ -21,6 +21,12 @@ import pytest
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
+async def _noop_async(self) -> None:
+    """Stand-in for super().async_added_to_hass() (skips the live-hass restore
+    registration) so RestoreEntity restore logic can be tested in isolation."""
+    return None
+
+
 @pytest.fixture
 def stub_coord():
     """Coordinator stub good enough for switch entity properties."""
@@ -62,7 +68,7 @@ def stub_coord():
         _arming_cache={},
         _rcp_privacy_cache={},
         last_update_success=True,
-        options={"audio_default_on": True},
+        options={},
         # Helper methods
         is_camera_online=lambda cid: True,
         is_session_stale=lambda cid: False,
@@ -279,8 +285,8 @@ class TestPrivacyModeSwitch:
 
 
 class TestAudioSwitch:
-    def test_is_on_default_true(self, stub_coord, stub_entry):
-        """Default audio state is ON (per coordinator init)."""
+    def test_is_on_reads_enabled_state(self, stub_coord, stub_entry):
+        """is_on reflects the _audio_enabled cache (fixture seeds CAM_ID=True)."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
@@ -294,12 +300,79 @@ class TestAudioSwitch:
         assert sw.is_on is False
 
     def test_default_when_camera_unknown(self, stub_coord, stub_entry):
-        """Camera not yet in _audio_enabled defaults to True (ON)."""
+        """A brand-new camera defaults to OFF (muted) — no forced default-on.
+
+        The switch is now the single source of truth (persisted via
+        RestoreEntity); a fresh camera that has never been toggled starts muted
+        so the stream never opens with unexpected audio.
+        """
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         stub_coord._audio_enabled = {}  # camera not yet registered
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is False
+        # __init__ seeds the default into the cache.
+        assert stub_coord._audio_enabled[CAM_ID] is False
+
+    async def test_restore_persists_off_across_restart(self, stub_coord, stub_entry):
+        """Switch OFF survives a restart: RestoreEntity replays the last state.
+
+        Regression for the 2026-06-02 report (Innenbereich) that streams always
+        started with sound: the old in-memory dict + forced default-on reset the
+        switch to ON on every restart. With RestoreEntity the user's OFF sticks.
+        """
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
+        stub_coord._audio_enabled = {}  # fresh boot: nothing seeded yet
+        sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        # Seed default = OFF before restore runs.
+        assert stub_coord._audio_enabled[CAM_ID] is False
+
+        sw.async_get_last_state = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(state="off")
+        )
+        # Skip the real super().async_added_to_hass (needs a live hass) — focus on
+        # the restore logic. _BoschSwitchBase has no override, so super() resolves
+        # to RestoreEntity (mro[2]); neutralise it on the base (mro[1]).
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert stub_coord._audio_enabled[CAM_ID] is False
+        assert sw.is_on is False
+
+    async def test_restore_persists_on_across_restart(self, stub_coord, stub_entry):
+        """Switch ON is likewise restored — existing users keep their sound on."""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
+        stub_coord._audio_enabled = {}
+        sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(state="on")
+        )
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert stub_coord._audio_enabled[CAM_ID] is True
         assert sw.is_on is True
+
+    async def test_restore_no_previous_state_keeps_default_off(
+        self, stub_coord, stub_entry
+    ):
+        """No restorable state (first ever boot) → stays at the OFF default."""
+        from unittest.mock import AsyncMock
+
+        from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
+
+        stub_coord._audio_enabled = {}
+        sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert sw.is_on is False
 
 
 # ── BoschPrivacySoundSwitch ──────────────────────────────────────────────

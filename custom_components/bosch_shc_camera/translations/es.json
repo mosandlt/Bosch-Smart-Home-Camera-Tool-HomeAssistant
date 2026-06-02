@@ -73,7 +73,6 @@
               "enable_sensors": "Sensores (Estado, WiFi, Firmware, Eventos)",
               "enable_snapshot_button": "Interruptores y botones (Stream, Privacidad, Luz)",
               "enable_binary_sensors": "Sensores de alarma de movimiento / audio",
-              "audio_default_on": "Audio activado por defecto",
               "enable_intercom": "Interfono (audio bidireccional)",
               "motion_active_window": "Sensor de movimiento: ventana activa (segundos)",
               "auto_play_default": "Reproducción automática de la tarjeta"
@@ -83,7 +82,6 @@
               "enable_sensors": "Crea entidades de sensor para el estado de la cámara, señal WiFi, firmware, eventos de hoy, último evento, etc.",
               "enable_snapshot_button": "Crea entidades de interruptor y botón: Live Stream, Audio, Modo Privacidad, Luz de cámara, Notificaciones, Actualizar.",
               "enable_binary_sensors": "Crea sensores binarios que se activan durante 30 segundos tras un evento de movimiento o alarma de audio. Útil para automatizaciones.",
-              "audio_default_on": "Activado: el interruptor de audio se inicia habilitado (stream con sonido). Desactivado: el audio se inicia silenciado. Se puede cambiar en cualquier momento desde el panel.",
               "enable_intercom": "Activa la entidad de interruptor del interfono (audio bidireccional). Desactivado por defecto. Permite enviar audio al altavoz de la cámara.",
               "motion_active_window": "Cuántos segundos permanece ACTIVADO el sensor binario de movimiento tras un evento. Rango 10-300, por defecto 90.",
               "auto_play_default": "Controla si el stream en vivo se revela automáticamente al cargar la tarjeta. `auto_play` en YAML por tarjeta tiene prioridad.\n• **Solo LAN** (recomendado): auto-revelar en la red doméstica; en remoto el stream se pre-inicializa y un overlay cubre el vídeo hasta que tocas.\n• **Siempre**: auto-revelar en cada sesión.\n• **Tocar para mostrar**: pre-inicializa el stream y muestra el overlay en cada sesión — siempre tocas una vez para mostrar el vídeo."

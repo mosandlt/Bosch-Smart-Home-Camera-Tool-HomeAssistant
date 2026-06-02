@@ -84,7 +84,7 @@ def _stub_coord(**overrides):
         _rcp_privacy_cache={},
         _hw_version={},
         last_update_success=True,
-        options={"audio_default_on": True},
+        options={},
         token="tok-A",
         is_camera_online=lambda cid: True,
         is_session_stale=lambda cid: False,

@@ -77,7 +77,7 @@ class TestConstants:
         assert AUTO_PLAY_DEFAULT_VALUES == ("lan", "always", "never")
 
     def test_in_features_section(self):
-        """The option lives in the Features section (next to audio_default_on),
+        """The option lives in the Features section (next to enable_intercom),
         not in the Stream section — keeps the streaming subsection focused on
         connection type + buffer profile."""
         assert "auto_play_default" in OPTIONS_SECTIONS["features"]

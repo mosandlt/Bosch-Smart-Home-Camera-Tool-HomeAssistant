@@ -73,7 +73,6 @@
               "enable_sensors": "Sensori (Stato, WiFi, Firmware, Eventi)",
               "enable_snapshot_button": "Interruttori e pulsanti (Stream, Privacy, Luce)",
               "enable_binary_sensors": "Sensori allarme movimento / audio",
-              "audio_default_on": "Audio attivo per impostazione predefinita",
               "enable_intercom": "Citofono (audio bidirezionale)",
               "motion_active_window": "Sensore di movimento: finestra attiva (secondi)",
               "auto_play_default": "Riproduzione automatica della scheda"
@@ -83,7 +82,6 @@
               "enable_sensors": "Crea entità sensore per stato telecamera, segnale WiFi, firmware, eventi odierni, ultimo evento, ecc.",
               "enable_snapshot_button": "Crea entità interruttori e pulsanti: Live Stream, Audio, Modalità Privacy, Luce telecamera, Notifiche, Aggiorna.",
               "enable_binary_sensors": "Crea sensori binari che si attivano per 30 secondi dopo un evento di movimento o allarme audio. Utili per le automazioni.",
-              "audio_default_on": "Attivo: l'interruttore audio si avvia abilitato (stream con audio). Disattivo: l'audio si avvia in modalità silenziosa. Può essere modificato in qualsiasi momento dalla dashboard.",
               "enable_intercom": "Abilita l'entità interruttore citofono (audio bidirezionale). Disabilitato per impostazione predefinita. Consente di inviare audio all'altoparlante della telecamera.",
               "motion_active_window": "Per quanti secondi il sensore binario di movimento rimane ATTIVO dopo un evento. Intervallo 10-300, predefinito 90.",
               "auto_play_default": "Controlla se lo stream live si avvia automaticamente al caricamento della scheda. `auto_play` in YAML per scheda ha la priorità.\n• **Solo LAN** (consigliato): autoplay nella rete domestica; in remoto lo stream è pre-inizializzato e un overlay copre il video fino al tocco.\n• **Sempre**: autoplay in ogni sessione.\n• **Tocca per mostrare**: pre-inizializza lo stream e mostra l'overlay in ogni sessione — tocchi una volta per visualizzare il video."

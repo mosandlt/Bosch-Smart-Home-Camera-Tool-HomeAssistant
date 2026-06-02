@@ -545,7 +545,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioSwitch(_BoschSwitchBase):
+class BoschAudioSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
     """Switch: ON = live audio plays, OFF = muted. Synced across every session.
 
     The live stream ALWAYS carries the AAC track now (≈ negligible bandwidth), so
@@ -553,7 +553,12 @@ class BoschAudioSwitch(_BoschSwitchBase):
     applies to its <video> element (video.muted). Toggling it does NOT re-open the
     stream and HA pushes the change to every open card, so mute/unmute is instant
     and consistent across devices. Paired with number.<cam>_audio_volume (volume).
-    Default ON.
+
+    This switch is the SINGLE source of truth for mute/unmute: its state persists
+    across restarts via RestoreEntity, so a user's choice always wins over any
+    implicit default (the card re-reads it on every stream start). There is no
+    forced default-on — a brand-new camera that has never been toggled starts
+    muted (OFF, no unexpected audio); the user's first toggle then sticks forever.
     """
 
     def __init__(
@@ -564,14 +569,26 @@ class BoschAudioSwitch(_BoschSwitchBase):
         self._attr_unique_id = f"bosch_shc_audio_{cam_id.lower()}"
         self._attr_translation_key = "audio"
         self._attr_entity_category = EntityCategory.CONFIG
-        # Default from options (configurable in integration settings)
-        opts = coordinator.options
-        audio_default = opts.get("audio_default_on", True)
-        coordinator._audio_enabled.setdefault(cam_id, audio_default)
+        # First-install seed: muted. The persisted state (restored in
+        # async_added_to_hass) overrides this for any camera the user has toggled.
+        coordinator._audio_enabled.setdefault(cam_id, False)
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator._audio_enabled.get(self._cam_id, True)  # type: ignore[no-any-return]
+        return self.coordinator._audio_enabled.get(self._cam_id, False)  # type: ignore[no-any-return]
+
+    async def async_added_to_hass(self) -> None:
+        # Restore the user's last mute/unmute choice so the switch survives
+        # restarts and remains the authoritative state (no default-on reset).
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in ("on", "off"):
+            self.coordinator._audio_enabled[self._cam_id] = last.state == "on"
+            _LOGGER.debug(
+                "audio: restored %s for %s from previous state",
+                last.state,
+                self._cam_id[:8],
+            )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Unmute — the card applies it to video.muted; no stream re-open."""

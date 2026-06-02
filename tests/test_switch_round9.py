@@ -65,7 +65,6 @@ def _stub_coord(**overrides):
         _nvr_error_state={},
         last_update_success=True,
         options={
-            "audio_default_on": True,
             "nvr_base_path": "/config/bosch_nvr",
             "nvr_retention_days": 3,
         },

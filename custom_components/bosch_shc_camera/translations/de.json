@@ -74,7 +74,6 @@
               "enable_snapshot_button": "Schalter & Buttons (Stream, Privat, Licht)",
               "enable_binary_sensors": "Bewegungs-/Audio-Sensoren",
               "motion_active_window": "Bewegungssensor: Aktiv-Fenster (Sekunden)",
-              "audio_default_on": "Audio standardmäßig an",
               "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)",
               "auto_play_default": "Card-Autoplay (Standard)"
             },
@@ -84,7 +83,6 @@
               "enable_snapshot_button": "Erstellt Schalter und Buttons: Live Stream, Audio, Privat-Modus, Kameralicht, Benachrichtigungen, Aktualisieren.",
               "enable_binary_sensors": "Binärsensoren die nach Bewegung oder Audio-Alarm für das konfigurierte Aktiv-Fenster EIN werden. Nützlich für Automationen.",
               "motion_active_window": "Wie viele Sekunden die Bewegungs-/Audio-/Person-Binärsensoren nach einem Ereignis EIN bleiben. Standard: 90 s. Bereich: 10–300 s.",
-              "audio_default_on": "Wenn AN: Audio-Schalter ist beim Start automatisch AN (Stream mit Ton). Wenn AUS: Audio startet stumm. Kann jederzeit im Dashboard umgeschaltet werden.",
               "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden.",
               "auto_play_default": "Legt fest, ob das Live-Bild beim Öffnen der Karte automatisch angezeigt wird. Pro Karte überschreibbar via YAML `auto_play`.\n• **Nur im LAN** (Empfehlung): automatisch im Heimnetzwerk; remote wird der Stream im Hintergrund initialisiert und ein Overlay verdeckt das Video, bis du antippst.\n• **Immer**: automatisch in jeder Sitzung.\n• **Immer Overlay**: Stream wird vorab initialisiert und das Overlay erscheint immer — du tippst einmal an, um das Video zu zeigen."
             }

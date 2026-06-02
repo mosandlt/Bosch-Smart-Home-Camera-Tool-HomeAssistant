@@ -68,7 +68,6 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_binary_sensors",
         "motion_active_window",
         "enable_snapshot_button",
-        "audio_default_on",
         "enable_intercom",
         "auto_play_default",
     ],
@@ -585,7 +584,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 "alert_save_snapshots",
                 "alert_delete_after_send",
                 "mark_events_read",
-                "audio_default_on",
                 "enable_intercom",
                 "enable_smb_upload",
                 "enable_nvr",
@@ -688,10 +686,6 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     vol.Optional(
                         "enable_snapshot_button",
                         default=bool(opts.get("enable_snapshot_button", True)),
-                    ): bool,
-                    vol.Optional(
-                        "audio_default_on",
-                        default=bool(opts.get("audio_default_on", True)),
                     ): bool,
                     vol.Optional(
                         "enable_intercom",

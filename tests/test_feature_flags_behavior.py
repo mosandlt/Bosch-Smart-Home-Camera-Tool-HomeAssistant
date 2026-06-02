@@ -17,7 +17,6 @@ Already covered elsewhere (not duplicated here):
   - enable_smb_upload    → test_fcm_round8.py
   - mark_events_read     → test_fcm_round8.py (called/not called)
   - alert_save_snapshots → test_fcm_round7.py
-  - audio_default_on     → test_switches.py::test_is_on_default_true
   - stream_connection_type → test_init_sprint_kd.py
 """
 
@@ -357,7 +356,6 @@ class TestFeatureFlagCoverage:
         "enable_nvr",
         "enable_smb_upload",
         "enable_go2rtc",
-        "audio_default_on",
         "mark_events_read",
         "alert_save_snapshots",
     ]

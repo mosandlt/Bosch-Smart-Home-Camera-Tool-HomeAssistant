@@ -241,6 +241,79 @@ test("decoupled audio (use_card_audio_settings) toggles locally, not the switch"
   expect(r.calls.filter((c) => c.startsWith("switch.")), "no backend switch writes in decoupled mode").toHaveLength(0);
 });
 
+// audio_default (per-card YAML override): "backend" (default) follows
+// switch.<cam>_audio (the source of truth); "on"/"off" PIN this card's start
+// mute state and opt out of the backend live-sync. Regression for the
+// 2026-06-02 request: a card declared `audio_default: off` must NEVER
+// auto-unmute on stream start even when the backend audio switch is ON.
+test("audio_default override pins the start mute state independent of the backend switch", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const probe = async (audioDefault) => {
+      const card = document.createElement("bosch-camera-card");
+      card.setConfig({ camera_entity: "camera.test", apple_style: true, audio_default: audioDefault });
+      card.hass = { config: {}, language: "en", localize: () => "",
+        callService: () => Promise.resolve(), callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        // backend audio switch is ON in EVERY case — only the YAML override decides:
+        "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "number.test_audio_volume": { state: "50", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+      document.body.appendChild(card);
+      await new Promise((res) => setTimeout(res, 200));
+      const video = card.shadowRoot.getElementById("cam-video");
+      if (!video) return { error: "no cam-video" };
+      // Decide deterministically (no real <video> playback): spy on the unmute.
+      card._isIOS = () => false;
+      let unmuteCalled = false;
+      card._tryUnmuteVideo = () => { unmuteCalled = true; };
+      card._applyAudioPreference(video);
+      return { mode: card._audioDefaultMode(), decoupled: card._audioDecoupled(), unmuteCalled };
+    };
+    return { off: await probe("off"), on: await probe("on"), backend: await probe("backend"), bad: await probe("garbage") };
+  });
+  expect(r.off?.error || r.on?.error || r.backend?.error || r.bad?.error).toBeUndefined();
+  expect(r.off.mode, "audio_default:off normalizes").toBe("off");
+  expect(r.off.decoupled, "off opts out of the backend live-sync").toBe(true);
+  expect(r.off.unmuteCalled, "audio_default:off NEVER auto-unmutes (even with backend ON)").toBe(false);
+  expect(r.on.mode).toBe("on");
+  expect(r.on.unmuteCalled, "audio_default:on auto-unmutes regardless of backend").toBe(true);
+  expect(r.backend.mode, "backend is the default mode").toBe("backend");
+  expect(r.backend.decoupled, "backend mode follows the switch (not decoupled)").toBe(false);
+  expect(r.backend.unmuteCalled, "backend mode unmutes when the switch is on").toBe(true);
+  expect(r.bad.mode, "an invalid value falls back to backend").toBe("backend");
+});
+
+// audio_default:off behaves like decoupled mode for taps — the pill toggles
+// ONLY this browser's video.muted and never writes the backend switch.
+test("audio_default:off toggles locally without touching the backend switch", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const calls = [];
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, audio_default: "off" });
+    card.hass = { config: {}, language: "en", localize: () => "",
+      callService: (d, s, data) => { calls.push(`${d}.${s}:${data?.entity_id}`); return Promise.resolve(); },
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const video = card.shadowRoot.getElementById("cam-video");
+    if (!video) return { error: "no cam-video element" };
+    card._liveVideoActive = true;
+    video.muted = true;
+    card._toggleAudio();
+    return { mutedAfter: video.muted, calls };
+  });
+  expect(r.error).toBeUndefined();
+  expect(r.mutedAfter, "tap unmutes this video locally").toBe(false);
+  expect(r.calls.filter((c) => c.startsWith("switch.")), "no backend switch writes for a YAML-pinned card").toHaveLength(0);
+});
+
 // #27: the apple-style privacy pill (#ap-btn-privacy) must clear its "on"
 // marking as soon as HA reports privacy back OFF — without a second tap. The
 // pill used to read raw hass and ignore the optimistic override, so on a Gen1

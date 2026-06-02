@@ -164,7 +164,6 @@ class TestFeaturesSection:
                     "enable_sensors": False,
                     "enable_binary_sensors": False,
                     "enable_snapshot_button": True,
-                    "audio_default_on": False,
                     "enable_intercom": True,
                 },
             },
@@ -173,7 +172,6 @@ class TestFeaturesSection:
         assert data["enable_sensors"] is False
         assert data["enable_binary_sensors"] is False
         assert data["enable_snapshot_button"] is True
-        assert data["audio_default_on"] is False
         assert data["enable_intercom"] is True
 
     @pytest.mark.asyncio
@@ -512,7 +510,6 @@ class TestFullRoundTrip:
                     "enable_sensors": True,
                     "enable_binary_sensors": True,
                     "enable_snapshot_button": False,
-                    "audio_default_on": False,
                     "enable_intercom": False,
                 },
                 "stream": {

@@ -57,7 +57,7 @@ def stub_coord():
         _arming_cache={},
         _rcp_privacy_cache={},
         last_update_success=True,
-        options={"audio_default_on": True},
+        options={},
         token="token-AAA",
         is_camera_online=lambda cid: True,
         is_session_stale=lambda cid: False,

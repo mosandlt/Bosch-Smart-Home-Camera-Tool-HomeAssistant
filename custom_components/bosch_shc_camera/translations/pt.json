@@ -73,7 +73,6 @@
               "enable_sensors": "Sensores (Estado, WiFi, Firmware, Eventos)",
               "enable_snapshot_button": "Interruptores e botões (Stream, Privacidade, Luz)",
               "enable_binary_sensors": "Sensores de movimento / alarme sonoro",
-              "audio_default_on": "Áudio activado por predefinição",
               "enable_intercom": "Intercomunicador (áudio bidirecional)",
               "motion_active_window": "Sensor de movimento: janela ativa (segundos)",
               "auto_play_default": "Reprodução automática do cartão"
@@ -83,7 +82,6 @@
               "enable_sensors": "Criar entidades de sensor para estado da câmara, sinal WiFi, firmware, eventos hoje, último evento, etc.",
               "enable_snapshot_button": "Criar entidades de interruptor e botão: Live Stream, Audio, Privacy Mode, Camera Light, Notificações, Actualizar.",
               "enable_binary_sensors": "Criar sensores binários que ficam LIGADOS durante 30 segundos após um evento de movimento ou alarme sonoro. Útil para automações.",
-              "audio_default_on": "Se LIGADO: o interruptor de áudio inicia activado (stream com som). Se DESLIGADO: o áudio inicia sem som. Pode ser alternado a qualquer momento no painel.",
               "enable_intercom": "Activar a entidade interruptor de intercomunicador (áudio bidirecional). Desactivado por predefinição. Permite enviar áudio para o altifalante da câmara.",
               "motion_active_window": "Por quantos segundos o sensor binário de movimento permanece ATIVADO após um evento. Intervalo 10-300, padrão 90.",
               "auto_play_default": "Controla se o stream ao vivo aparece automaticamente quando o cartão é carregado. `auto_play` em YAML por cartão tem prioridade.\n• **Apenas LAN** (recomendado): autoplay na rede doméstica; remotamente o stream é pré-inicializado e um overlay cobre o vídeo até você tocar.\n• **Sempre**: autoplay em todas as sessões.\n• **Tocar para mostrar**: pré-inicializa o stream e mostra o overlay em todas as sessões — você toca uma vez para exibir o vídeo."
