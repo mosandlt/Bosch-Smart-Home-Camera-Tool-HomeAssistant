@@ -15,6 +15,7 @@ No HA runtime required.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -617,3 +618,50 @@ class TestRegisterLogLevel:
         assert level == "warning", (
             f"CF-unbuffer outer exception handler must log at WARNING (not {level!r})"
         )
+
+
+# ── HLS-access tracking (idle-reaper consumer signal) ─────────────────────────
+
+
+class TestHlsAccessTracking:
+    """_note_hls_access stamps the stream token from the HLS URL; hls_access_age
+    reports recency. Gives the idle reaper a real 'is anyone fetching HLS now'
+    signal (HA's Stream.available stays True for the whole session)."""
+
+    def _cf(self):
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf
+
+        cf._HLS_ACCESS.clear()
+        return cf
+
+    def test_note_and_age_roundtrip(self):
+        cf = self._cf()
+        with patch.object(cf.time, "monotonic", return_value=1000.0):
+            cf._note_hls_access(SimpleNamespace(path="/api/hls/TOK/segment/5.m4s"))
+        with patch.object(cf.time, "monotonic", return_value=1007.0):
+            assert cf.hls_access_age("TOK") == 7.0
+
+    def test_age_none_for_unknown_token(self):
+        cf = self._cf()
+        assert cf.hls_access_age("nope") is None
+
+    def test_playlist_path_token_extracted(self):
+        cf = self._cf()
+        cf._note_hls_access(SimpleNamespace(path="/api/hls/ABC/playlist.m3u8"))
+        assert "ABC" in cf._HLS_ACCESS
+
+    def test_malformed_or_missing_request_ignored(self):
+        cf = self._cf()
+        cf._note_hls_access(SimpleNamespace(path="/api/other/x"))  # no 'hls' segment
+        cf._note_hls_access(None)  # AttributeError path
+        cf._note_hls_access(SimpleNamespace(path="/api/hls"))  # no token after 'hls'
+        assert cf._HLS_ACCESS == {}
+
+    def test_prune_caps_dict_size(self):
+        cf = self._cf()
+        for i in range(cf._HLS_ACCESS_MAX + 10):
+            with patch.object(cf.time, "monotonic", return_value=float(i)):
+                cf._note_hls_access(
+                    SimpleNamespace(path=f"/api/hls/t{i}/playlist.m3u8")
+                )
+        assert len(cf._HLS_ACCESS) <= cf._HLS_ACCESS_MAX

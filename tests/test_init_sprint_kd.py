@@ -104,6 +104,8 @@ def _make_coord(**overrides):
         _bg_tasks=set(),
         # Renewal task tracking
         _renewal_tasks={},
+        _reaper_tasks={},
+        _session_idle_since={},
         _auto_renew_generation={},
         # NVR
         _nvr_user_intent={},
@@ -117,6 +119,7 @@ def _make_coord(**overrides):
         # These return coroutines passed to hass.async_create_task — use AsyncMock so
         # the coroutine is only created when called (avoids "never awaited" warnings).
         _auto_renew_local_session=AsyncMock(return_value=None),
+        _idle_session_reaper=AsyncMock(return_value=None),
         _remote_session_terminator=AsyncMock(return_value=None),
         _refresh_rcp_state=AsyncMock(return_value=None),
         async_request_refresh=AsyncMock(return_value=None),
@@ -142,6 +145,7 @@ def _make_coord(**overrides):
         return t
 
     coord._replace_renewal_task = _replace_renewal_task
+    coord._replace_reaper_task = _replace_renewal_task
     return coord
 
 
@@ -1176,3 +1180,66 @@ class TestErrorPaths:
         assert CAM_A in call_url
         assert "/v11/video_inputs/" in call_url
         assert "/connection" in call_url
+
+
+class TestGreenItReaperGate:
+    """The Green IT idle reaper is launched only when enable_green_it is on
+    (default). With the option off, no reaper task is created for the session."""
+
+    def _local(self, options):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord(
+            _entry=SimpleNamespace(data={"bearer_token": "tok-A"}, options=options),
+            _rcp_lan_ip_cache={},
+            _local_creds_cache={},
+            _get_cam_lan_ip=MagicMock(return_value=None),
+            _start_tls_proxy=AsyncMock(return_value=12345),
+            _tls_proxy_ports={CAM_A: 12345},
+        )
+        coord._replace_reaper_task = MagicMock()  # distinct from renewal stub
+        coord._idle_session_reaper = MagicMock(return_value=object())  # not a coroutine
+        return coord, BoschCameraCoordinator, body
+
+    async def _run(self, options):
+        coord, Coord, body = self._local(options)
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                return_value=_make_session(_put_resp(200, body)),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            await Coord._try_live_connection_inner(coord, CAM_A)
+        return coord
+
+    @pytest.mark.asyncio
+    async def test_green_it_default_on_launches_reaper(self):
+        coord = await self._run({"stream_connection_type": "local"})
+        coord._replace_reaper_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_green_it_explicit_on_launches_reaper(self):
+        coord = await self._run(
+            {"stream_connection_type": "local", "enable_green_it": True}
+        )
+        coord._replace_reaper_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_green_it_off_skips_reaper(self):
+        coord = await self._run(
+            {"stream_connection_type": "local", "enable_green_it": False}
+        )
+        coord._replace_reaper_task.assert_not_called()

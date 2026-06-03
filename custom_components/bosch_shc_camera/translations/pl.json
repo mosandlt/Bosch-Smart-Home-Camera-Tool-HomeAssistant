@@ -93,7 +93,8 @@
             "data": {
               "stream_connection_type": "Typ połączenia dla transmisji",
               "live_buffer_mode": "Profil bufora odtwarzacza (HLS)",
-              "enable_go2rtc": "go2rtc WebRTC (niska latencja ~2 s)"
+              "enable_go2rtc": "go2rtc WebRTC (niska latencja ~2 s)",
+              "enable_green_it": "Green IT — automatyczne kończenie nieużywanych strumieni na żywo"
             },
             "data_description": {
               "stream_connection_type": "Domyślny typ połączenia dla transmisji na żywo.\n• **auto** (zalecane): Najpierw próba połączenia przez lokalną sieć LAN, przy błędzie automatyczne przełączenie na proxy chmury Bosch.\n• **local**: Tylko bezpośrednie LAN — bez internetu. Szybszy RTSP, ale wolniejsze migawki (~6–10 s). Sesja automatycznie odnawiana co 50 s.\n• **remote**: Zawsze przez proxy chmury Bosch. Szybsze migawki (~0.4–1.9 s). Najlepszy domyślny tryb, gdy HA nie jest w tej samej sieci LAN.\nEncja select 'Stream Mode' nadpisuje to ustawienie w czasie działania bez restartu.",

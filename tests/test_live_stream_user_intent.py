@@ -215,6 +215,8 @@ class TestTeardownClearsIntent:
             _stream_warming={CAM_ID},
             _stream_warming_started={CAM_ID: 100.0},
             _renewal_tasks={},
+            _reaper_tasks={},
+            _session_idle_since={},
             _camera_entities={},
             _live_stream_entities={},
             _stop_tls_proxy=AsyncMock(),

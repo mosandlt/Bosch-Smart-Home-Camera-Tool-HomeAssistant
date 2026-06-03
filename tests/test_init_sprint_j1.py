@@ -69,6 +69,8 @@ def _make_coord(**overrides):
         _stream_warming=set(),
         _stream_warming_started={},
         _renewal_tasks={},
+        _reaper_tasks={},
+        _session_idle_since={},
         _bg_tasks=set(),
         _nvr_processes={},
         _nvr_preroll_processes={},
@@ -373,6 +375,8 @@ class TestTearDownLiveStream:
             _nvr_user_intent={CAM_A: True},
             stop_recorder=stop_recorder,
             _renewal_tasks={},
+            _reaper_tasks={},
+            _session_idle_since={},
             _camera_entities={},  # no stream entity — skips stream.stop()
         )
 
@@ -390,6 +394,8 @@ class TestTearDownLiveStream:
             _nvr_processes={},  # cam_id NOT in dict
             stop_recorder=stop_recorder,
             _renewal_tasks={},
+            _reaper_tasks={},
+            _session_idle_since={},
             _camera_entities={},
         )
 
@@ -416,6 +422,8 @@ class TestTearDownLiveStream:
         coord = _make_coord(
             _nvr_processes={},
             _renewal_tasks={},
+            _reaper_tasks={},
+            _session_idle_since={},
             _camera_entities={CAM_A: cam_entity},
         )
 
@@ -446,6 +454,8 @@ class TestTearDownLiveStream:
         coord = _make_coord(
             _nvr_processes={},
             _renewal_tasks={},
+            _reaper_tasks={},
+            _session_idle_since={},
             _camera_entities={CAM_A: cam_entity},
         )
 

@@ -447,6 +447,9 @@ from .const import (
     LIVE_SESSION_TTL,  # noqa: F401  # re-exported for tests
     SHC_MAX_FAILS,
     SHC_RETRY_INTERVAL,
+    STREAM_HLS_FRESH_SEC,
+    STREAM_IDLE_REAP_CHECK_SEC,
+    STREAM_IDLE_REAP_SEC,
     TIMEOUT_PUT_CONNECTION,
     TIMEOUT_SNAP,
 )
@@ -527,6 +530,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._auto_renew_tasks: dict[str, asyncio.Task[None]] = {}
         self._renewal_tasks: dict[str, asyncio.Task[None]] = {}
         self._auto_renew_generation: dict[str, int] = {}
+        # Idle-session reaper tasks (one per LOCAL session, generation-tracked
+        # like _renewal_tasks) + the monotonic timestamp at which a switch-OFF
+        # session was first observed with no consumer. See _idle_session_reaper.
+        self._reaper_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_idle_since: dict[str, float] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict[str, Any] = {}
         # Live-stream switch entity references — registered by
@@ -1327,6 +1335,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         task = self._renewal_tasks.pop(cam_id, None)
         if task and not task.done():
             task.cancel()
+        # Cancel the idle reaper too. When the reaper itself triggers teardown
+        # it has already returned (it schedules teardown as a separate task), so
+        # this cancel is a no-op in that path; for all other teardown triggers
+        # (switch off, privacy on, REMOTE fallback) it stops the reaper loop.
+        reaper = self._reaper_tasks.pop(cam_id, None)
+        if reaper and not reaper.done():
+            reaper.cancel()
         # Step 1 — clear visible state FIRST. BoschLiveStreamSwitch.is_on
         # reads from `_user_intent_streams`; if anything below raises (NVR
         # child gone, file lock, ...) the user-visible switch would otherwise
@@ -1337,6 +1352,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._user_intent_streams.discard(cam_id)
         self._live_connections.pop(cam_id, None)
         self._live_opened_at.pop(cam_id, None)
+        self._session_idle_since.pop(cam_id, None)
         # Clear the warm-up flag proactively. is_stream_warming() would lazily
         # clear it (Scenario 1: no live conn), but a privacy-ON teardown is
         # immediately followed by a privacy cooldown check that calls
@@ -1602,6 +1618,165 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
         return task  # type: ignore[no-any-return]
+
+    def _replace_reaper_task(
+        self, cam_id: str, coro: Coroutine[Any, Any, None]
+    ) -> asyncio.Task[None]:
+        """Cancel any existing idle reaper for cam_id, then create and track the new one.
+
+        Mirrors `_replace_renewal_task`: the reaper is a `while True` loop that
+        only returns on stream-off / teardown, so it must be a background task
+        (otherwise HA's startup-wait phase blocks on it).
+        """
+        old = self._reaper_tasks.get(cam_id)
+        if old and not old.done():
+            old.cancel()
+        task = self.hass.async_create_background_task(
+            coro, f"bosch_shc_camera_reaper_{cam_id[:8]}"
+        )
+        self._reaper_tasks[cam_id] = task
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task  # type: ignore[no-any-return]
+
+    async def _go2rtc_consumer_count(self, cam_id: str) -> int | None:
+        """Best-effort count of active go2rtc consumers for this camera's stream.
+
+        go2rtc tracks every reader (WebRTC, RTSP, MSE) of a registered stream
+        in `consumers`. Returns the count, or None when go2rtc cannot be
+        reached on any known port (HA-bundled 11984 / legacy 1984) — None means
+        "unknown", which the idle reaper treats as "no confirmed consumer".
+        """
+        cam_entity = self._camera_entities.get(cam_id)
+        if cam_entity is not None and cam_entity.entity_id:
+            stream_name = cam_entity.entity_id
+        else:
+            stream_name = f"bosch_shc_cam_{cam_id.lower()}"
+        for url in (
+            "http://localhost:11984/api/streams",
+            "http://localhost:1984/api/streams",
+        ):
+            try:
+                async with asyncio.timeout(3):
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(url, params={"src": stream_name}) as resp:
+                            if resp.status != 200:
+                                continue
+                            data = await resp.json(content_type=None)
+            except (TimeoutError, aiohttp.ClientError, ValueError):
+                continue
+            consumers = data.get("consumers") if isinstance(data, dict) else None
+            return len(consumers) if isinstance(consumers, list) else 0
+        return None
+
+    async def _has_active_consumer(self, cam_id: str) -> bool:
+        """True if anything is actively consuming the live stream.
+
+        Three signals, in cheap-to-expensive order:
+          1. An active Mini-NVR recorder — it reads the TLS proxy DIRECTLY (not
+             via HLS/go2rtc, see _nvr_processes), so it must be checked
+             explicitly or the reaper would tear a recording's session down.
+          2. A live HLS viewer — a playlist/segment was fetched within
+             STREAM_HLS_FRESH_SEC (clients refetch every few seconds; tracked by
+             cf_unbuffer). HA's `Stream.available` is deliberately NOT used: it
+             means "can serve", not "is serving", and stays True for the whole
+             session once HLS was ever requested — which pinned a long-abandoned
+             session as "watched" and stopped the reaper from ever firing (live
+             bug found 2026-06-03, HLS/mobile session never reaped).
+          3. go2rtc reporting ≥1 consumer (WebRTC / RTSP / MSE).
+
+        Used by the idle reaper to avoid tearing down a session that someone —
+        a viewer or an automation — is still using.
+        """
+        from .cf_unbuffer import hls_access_age
+
+        if cam_id in self._nvr_processes:
+            return True
+        cam_entity = self._camera_entities.get(cam_id)
+        stream = getattr(cam_entity, "stream", None) if cam_entity is not None else None
+        token = getattr(stream, "access_token", None) if stream is not None else None
+        if token:
+            age = hls_access_age(token)
+            if age is not None and age < STREAM_HLS_FRESH_SEC:
+                return True
+        return bool(await self._go2rtc_consumer_count(cam_id))
+
+    async def _idle_session_reaper(self, cam_id: str, generation: int) -> None:
+        """Tear down a LOCAL session once nobody is consuming it.
+
+        A live session — opened by a card view, a Cast, camera.play_stream,
+        camera.record or a media-browser preview — keeps the camera's LOCAL
+        RTSP session alive through the keepalive loop until the
+        maxSessionDuration recycle (effectively forever). When the consumer
+        goes away (browser tab closed / navigated away / Cast stopped) nothing
+        ends it: the live-stream switch stays where it was and the camera stays
+        occupied — the "ghost" session. This reaper polls every
+        STREAM_IDLE_REAP_CHECK_SEC and, once there has been no consumer for
+        STREAM_IDLE_REAP_SEC, runs the shared teardown so the camera drops its
+        session (LED off) and the switch flips OFF.
+
+        Reaping is driven purely by consumer presence, NOT by the switch state.
+        Anything actually using the stream — a viewer (HLS/WebRTC) or an
+        automation (Mini-NVR recording, Cast) — counts as a consumer
+        (`_has_active_consumer`) and keeps the session alive, so automations
+        that rely on the stream are unaffected. A switch that is ON but that
+        nobody is watching is itself the ghost and gets reaped. Generation-
+        tracked exactly like `_auto_renew_local_session`: an OFF→ON cycle or
+        full renewal bumps the generation and this loop exits.
+        """
+        self._session_idle_since.pop(cam_id, None)
+        try:
+            while True:
+                await asyncio.sleep(STREAM_IDLE_REAP_CHECK_SEC)
+                if self._auto_renew_generation.get(cam_id, 0) != generation:
+                    return  # OFF→ON / renewal started a newer session
+                live = self._live_connections.get(cam_id)
+                if not live or live.get("_connection_type") != "LOCAL":
+                    return  # session gone or no longer LOCAL — nothing to reap
+                if await self._has_active_consumer(cam_id):
+                    if cam_id in self._session_idle_since:
+                        _LOGGER.debug(
+                            "Idle reaper: %s — consumer back, idle timer reset",
+                            cam_id[:8],
+                        )
+                    self._session_idle_since.pop(cam_id, None)
+                    continue
+                now = time.monotonic()
+                since = self._session_idle_since.get(cam_id)
+                if since is None:
+                    self._session_idle_since[cam_id] = now
+                    _LOGGER.debug(
+                        "Idle reaper: %s — no consumer, arming idle timer (%ds grace)",
+                        cam_id[:8],
+                        STREAM_IDLE_REAP_SEC,
+                    )
+                    continue
+                _LOGGER.debug(
+                    "Idle reaper: %s — still no consumer (%.0fs/%ds)",
+                    cam_id[:8],
+                    now - since,
+                    STREAM_IDLE_REAP_SEC,
+                )
+                if now - since >= STREAM_IDLE_REAP_SEC:
+                    _LOGGER.info(
+                        "Idle reaper: %s — no stream consumer for %.0fs — "
+                        "tearing down LOCAL session",
+                        cam_id[:8],
+                        now - since,
+                    )
+                    self._session_idle_since.pop(cam_id, None)
+                    # Schedule teardown in its own task: _tear_down_live_stream
+                    # cancels _reaper_tasks[cam_id] (i.e. THIS task), so awaiting
+                    # it directly would deliver CancelledError mid-teardown. A
+                    # fresh task runs teardown to completion; cancelling this
+                    # (already-returning) reaper is then a no-op.
+                    self.hass.async_create_task(
+                        self._tear_down_live_stream(cam_id),
+                        f"bosch_shc_camera_reap_teardown_{cam_id[:8]}",
+                    )
+                    return
+        finally:
+            self._session_idle_since.pop(cam_id, None)
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -4568,6 +4743,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             self._replace_renewal_task(
                                 cam_id, self._auto_renew_local_session(cam_id, gen)
                             )
+                            # Green IT idle reaper: tears the session down once
+                            # nobody consumes it (tab closed / navigated away /
+                            # Cast stopped), regardless of switch state. An active
+                            # viewer or recorder counts as a consumer. Opt-out via
+                            # the "enable_green_it" option (default on).
+                            if self._entry.options.get("enable_green_it", True):
+                                self._replace_reaper_task(
+                                    cam_id, self._idle_session_reaper(cam_id, gen)
+                                )
                         # ── REMOTE session lifetime watchdog ─────────────
                         # The relay drops the RTSP TCP at the URL's
                         # maxSessionDuration boundary with a hard reset, which
@@ -7398,6 +7582,11 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
         if not task.done():
             task.cancel()
     coord._renewal_tasks.clear()
+    # Idle reaper tasks (same lifecycle as the renewal tasks above).
+    for task in coord._reaper_tasks.values():
+        if not task.done():
+            task.cancel()
+    coord._reaper_tasks.clear()
     # Cancel tracked fire-and-forget background tasks (snapshot refreshes
     # from FCM pushes, renewal tasks registered above, go2rtc registration,
     # etc.). Await them so cancellation actually propagates before HA

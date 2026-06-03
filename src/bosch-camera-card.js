@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.5";
+const CARD_VERSION = "13.5.6";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -3171,6 +3171,8 @@ class BoschCameraCard extends HTMLElement {
         .ap-pill-btn.danger { background: rgba(255,59,48,.85); border-color: rgba(255,255,255,.22); }
         .ap-pill-btn.danger:hover { background: rgba(255,59,48,1); }
         .ap-pill-btn.connecting { background: rgba(255,159,10,.85); border-color: rgba(255,255,255,.22); }
+        .ap-pill-btn:disabled { opacity: .4; cursor: default; }
+        .ap-pill-btn:disabled:hover { background: rgba(255,255,255,.12); }
         .ap-pill-btn[hidden] { display: none !important; }
         /* Privacy cooldown (#27): dim + block + a small countdown badge so the
            user waits the backend's 5s cooldown instead of hammering the button. */
@@ -6080,6 +6082,9 @@ class BoschCameraCard extends HTMLElement {
       apBtnStream.classList.toggle("connecting", streamBadgeState === "connecting");
       apBtnStream.setAttribute("aria-pressed", isStreaming ? "true" : "false");
       apBtnStream.setAttribute("title", isStreaming ? "Live-Stream stoppen" : "Live-Stream starten");
+      // Privacy ON → starting a stream is blocked backend-side; grey out + disable
+      // the pill so the user can't tap into the error (see btn-stream above).
+      apBtnStream.disabled = badgePrivacyOn;
       // Swap the SVG path between play (▶) and stop (■) icons
       if (apStreamIcon) {
         apStreamIcon.innerHTML = isStreaming
@@ -6114,10 +6119,22 @@ class BoschCameraCard extends HTMLElement {
       btnStream.className = "btn btn-stream"
         + (isStreaming ? " active" : "")
         + (streamPending ? " pending" : "");
+      // Privacy ON → the camera shutter is closed; starting a stream is blocked
+      // backend-side (ServiceValidationError). Grey out + disable the button so
+      // the user can't tap into that error. `.btn:disabled` styles the rest.
+      btnStream.disabled = badgePrivacyOn;
       // Register DOM-id so _flashEntityError can find this element on failure
       this._entityToBtnId[ents.switch] = "btn-stream";
     }
     if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
+
+    // Privacy ON → the shutter is closed, so a snapshot only returns the privacy
+    // placeholder (no live image). Grey out + disable the Snapshot button too.
+    // Don't fight the in-flight loading-disable that _onSnapshotClick sets.
+    const btnSnap = this.shadowRoot.getElementById("btn-snapshot");
+    if (btnSnap && !btnSnap.classList.contains("loading")) btnSnap.disabled = badgePrivacyOn;
+    const apBtnSnap = this.shadowRoot.getElementById("ap-btn-snapshot");
+    if (apBtnSnap) apBtnSnap.disabled = badgePrivacyOn;
 
     // Connection-type badge — show ONLY when actually streaming via the
     // Bosch cloud relay. LAN is the configured-default for this setup, so

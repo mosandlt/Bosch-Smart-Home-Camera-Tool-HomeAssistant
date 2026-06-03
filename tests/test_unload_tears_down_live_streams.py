@@ -32,6 +32,7 @@ def _make_minimal_coord(active_cam_ids: list[str]) -> SimpleNamespace:
     coord.async_stop_fcm_push = AsyncMock()
     coord._token_refresh_handle = None
     coord._renewal_tasks = {}
+    coord._reaper_tasks = {}
     coord._bg_tasks = set()
     coord._nvr_drain_task = None
     coord._tls_proxy_ports = {}

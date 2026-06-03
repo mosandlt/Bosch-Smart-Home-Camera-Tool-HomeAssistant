@@ -86,6 +86,8 @@ def _make_cancel_coord(**overrides):
         async_stop_fcm_push=AsyncMock(),
         _token_refresh_handle=None,
         _renewal_tasks={},
+        _reaper_tasks={},
+        _session_idle_since={},
         _bg_tasks=set(),
         _nvr_drain_task=None,
         _tls_proxy_ports={},

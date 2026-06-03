@@ -55,6 +55,7 @@ Sources:
 from __future__ import annotations
 
 import logging
+import time
 from functools import wraps
 from typing import Any
 
@@ -64,6 +65,39 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 _FLUSH_PREFIX = "text/event-stream; x-actual="
+
+# ── Live HLS-consumer tracking ────────────────────────────────────────────────
+# Every wrapped playlist/segment request stamps the stream's access token here,
+# giving the idle-session reaper a REAL "is anyone fetching HLS right now" signal.
+# This is needed because HA's `Stream.available` stays True for the whole session
+# once HLS was ever used (it means "can serve", not "is serving") — so it cannot
+# tell a watched stream from an abandoned one. Keyed by the Stream access_token
+# embedded in the HLS URL (/api/hls/<token>/...). See __init__.py
+# _has_active_consumer.
+_HLS_ACCESS: dict[str, float] = {}
+_HLS_ACCESS_MAX = 64  # cap — tokens rotate per session; prune oldest beyond this
+
+
+def _note_hls_access(request: web.Request | None) -> None:
+    """Stamp `now` against the stream token in an HLS request path."""
+    try:
+        parts = request.path.split("/")  # type: ignore[union-attr]
+        token = parts[parts.index("hls") + 1]
+    except (AttributeError, ValueError, IndexError):
+        return
+    if not token:
+        return
+    _HLS_ACCESS[token] = time.monotonic()
+    if len(_HLS_ACCESS) > _HLS_ACCESS_MAX:
+        oldest = min(_HLS_ACCESS, key=_HLS_ACCESS.__getitem__)
+        _HLS_ACCESS.pop(oldest, None)
+
+
+def hls_access_age(token: str) -> float | None:
+    """Seconds since the last HLS request for `token`, or None if never seen."""
+    last = _HLS_ACCESS.get(token)
+    return None if last is None else time.monotonic() - last
+
 
 _PLAYLIST_VIEW_CLASSES = (
     "HlsMasterPlaylistView",
@@ -123,6 +157,8 @@ _PATCHED = False
 def _make_playlist_wrapper(orig_handle: Any) -> Any:
     @wraps(orig_handle)
     async def _wrapped(self: Any, *args: Any, **kwargs: Any) -> web.Response | None:
+        if args:
+            _note_hls_access(args[0])  # args[0] is the aiohttp request
         response = await orig_handle(self, *args, **kwargs)
         return _wrap_playlist_response(response)
 
@@ -135,6 +171,7 @@ def _make_segment_wrapper(orig_handle: Any) -> Any:
     async def _wrapped(
         self: Any, request: web.Request, *args: Any, **kwargs: Any
     ) -> web.StreamResponse | web.Response | None:
+        _note_hls_access(request)
         response = await orig_handle(self, request, *args, **kwargs)
         if response is None or not isinstance(response, web.Response):
             return response

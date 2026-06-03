@@ -39,6 +39,8 @@ def _make_coord(stream_obj=None):
         _stream_warming={CAM_ID},
         _stream_warming_started={CAM_ID: 100.0},
         _renewal_tasks={},
+        _reaper_tasks={},
+        _session_idle_since={},
         _camera_entities={CAM_ID: cam_entity},
         _live_stream_entities={},  # bug fix 2026-05-19 (teardown state-write)
         _stop_tls_proxy=AsyncMock(),
@@ -104,6 +106,19 @@ class TestTearDownLiveStream:
         coord._renewal_tasks[CAM_ID] = task
         await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
         task.cancel.assert_called_once()
+
+    async def test_cancels_idle_reaper_task_if_present(self):
+        """A running idle-reaper task must be cancelled and dropped on teardown."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, _ = _make_coord()
+        reaper = MagicMock()
+        reaper.done = MagicMock(return_value=False)
+        reaper.cancel = MagicMock()
+        coord._reaper_tasks[CAM_ID] = reaper
+        await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
+        reaper.cancel.assert_called_once()
+        assert CAM_ID not in coord._reaper_tasks
 
     @pytest.mark.asyncio
     async def test_does_not_cancel_completed_task(self):
@@ -204,6 +219,7 @@ class TestTearDownLiveStream:
         coord._local_rescue_attempts = {}
         coord._local_rescue_at = {}
         coord._renewal_tasks = {}
+        coord._reaper_tasks = {}
         await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
         # Still calls the cleanup hooks (idempotent at the proxy/go2rtc level)
         coord._stop_tls_proxy.assert_called_once_with(CAM_ID)

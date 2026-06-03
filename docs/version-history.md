@@ -2,6 +2,15 @@
 
 Recent releases. For the full changelog see [`CHANGELOG.md`](../CHANGELOG.md) at the repo root or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v13.5.6 — 2026-06-03
+
+Minor release — a new **Green IT** power-saving option, a fix for streams lingering after mobile/HLS viewing, and privacy-mode button greying.
+
+- **Green IT (new, on by default).** The integration now automatically ends a camera's live session once nobody is watching it any more — when no app, dashboard or Cast has fetched the stream for about three minutes. This stops the camera from continuously encoding and streaming video to no one: it saves Wi-Fi bandwidth and camera power/heat, turns the camera's live LED off, and leaves the session cleanly ready for the next viewer. Pressing Stop still ends a stream instantly; this only catches the "closed the app / navigated away without pressing Stop" case. An active viewer (HLS or WebRTC) or a running Mini-NVR recording always counts as a consumer and is never interrupted, and watching again resets the timer. Toggle under Options → Live stream → "Green IT"; it is an umbrella flag that future power-saving behaviours will hang off.
+- **Fix: streams opened in the mobile app could linger after closing.** The idle detector relied on HA's `Stream.available`, which reports "can serve", not "is serving", and stays true for the whole session once HLS was ever used — so a stream watched on mobile and then closed was never recognised as idle. Consumer presence is now read from real HLS playlist/segment fetch recency (plus go2rtc consumers and active recordings), so an abandoned mobile/HLS session is torn down about three minutes after the last fetch.
+- **Privacy mode greys out the stream and snapshot buttons.** While privacy mode is on the camera shutter is closed, so starting a stream or taking a snapshot cannot work; both buttons are now disabled and greyed in the card (classic and Apple-style layouts) instead of letting the tap fail.
+- Internal: new idle-session reaper with full test coverage, HLS-access tracking added to the cf_unbuffer HLS view wrappers, e2e tests for the privacy button greying, and forward-compatibility verified against the upcoming HA 2026.6 beta.
+
 ## v13.3.1 — 2026-05-29
 
 Patch release — two card-rendering fixes, two interaction improvements, a deprecated watchdog resource, and internal test and API-limit cleanup.

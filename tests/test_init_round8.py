@@ -50,6 +50,7 @@ def _stub_coord(**kwargs):
         _auto_renew_generation={},
         _session_stale={},
         _renewal_tasks={},
+        _reaper_tasks={},
         _auto_renew_tasks={},
         _last_schemes_refresh=float("-inf"),
         _last_go2rtc_reload=float("-inf"),
@@ -282,6 +283,7 @@ class TestAutoRenewLocalSession:
                 _auto_renew_generation={CAM_ID: 1},
                 _live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
                 _renewal_tasks={CAM_ID: MagicMock()},
+                _reaper_tasks={},
             )
         )
         coord.get_model_config.return_value = self._model_cfg()
@@ -298,6 +300,7 @@ class TestAutoRenewLocalSession:
                 _auto_renew_generation={CAM_ID: 2},  # current gen=2, task gen=1
                 _live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
                 _renewal_tasks={},
+                _reaper_tasks={},
             )
         )
         coord.get_model_config.return_value = self._model_cfg()
@@ -312,6 +315,7 @@ class TestAutoRenewLocalSession:
                 _auto_renew_generation={CAM_ID: 1},
                 _live_connections={},  # cam not in live_connections
                 _renewal_tasks={},
+                _reaper_tasks={},
             )
         )
         coord.get_model_config.return_value = self._model_cfg()
@@ -326,6 +330,7 @@ class TestAutoRenewLocalSession:
                 _auto_renew_generation={CAM_ID: 1},
                 _live_connections={CAM_ID: {"_connection_type": "REMOTE"}},
                 _renewal_tasks={},
+                _reaper_tasks={},
             )
         )
         coord.get_model_config.return_value = self._model_cfg()
@@ -348,6 +353,7 @@ class TestAsyncCancelCoordinatorTasks:
             async_stop_fcm_push=AsyncMock(),
             _token_refresh_handle=None,
             _renewal_tasks={"cam1": task1},
+            _reaper_tasks={},
             _bg_tasks={bg_task},
             _nvr_drain_task=None,
             _tls_proxy_ports={},
@@ -368,6 +374,24 @@ class TestAsyncCancelCoordinatorTasks:
             await _async_cancel_coordinator_tasks(coord)
         task1.cancel.assert_called_once()
         assert coord._renewal_tasks == {}
+
+    @pytest.mark.asyncio
+    async def test_reaper_tasks_cancelled(self):
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _task1, _bg_task = self._make_coord()
+        reaper = MagicMock()
+        reaper.done.return_value = False
+        reaper.cancel = MagicMock()
+        coord._reaper_tasks = {"cam1": reaper}
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+        reaper.cancel.assert_called_once()
+        assert coord._reaper_tasks == {}
 
     @pytest.mark.asyncio
     async def test_bg_tasks_cancelled(self):

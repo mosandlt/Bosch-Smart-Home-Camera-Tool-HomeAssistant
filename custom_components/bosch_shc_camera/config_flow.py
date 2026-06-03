@@ -75,6 +75,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "stream_connection_type",
         "live_buffer_mode",
         "enable_go2rtc",
+        "enable_green_it",
         "use_mjpeg_snapshot",
     ],
     "fcm": [
@@ -599,6 +600,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 "enable_smb_upload",
                 "enable_nvr",
                 "enable_go2rtc",
+                "enable_green_it",
                 CONF_ENABLE_WEBHOOK_DELIVERY,
                 CONF_ENABLE_PTZ_CONTROLS,
                 "use_mjpeg_snapshot",
@@ -774,6 +776,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     vol.Optional(
                         "enable_go2rtc",
                         default=bool(opts.get("enable_go2rtc", True)),
+                    ): bool,
+                    vol.Optional(
+                        "enable_green_it",
+                        default=bool(opts.get("enable_green_it", True)),
                     ): bool,
                     vol.Optional(
                         "use_mjpeg_snapshot",

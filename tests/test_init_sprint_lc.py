@@ -942,6 +942,8 @@ def _make_coord_live(**overrides):
         _camera_entities={},
         _bg_tasks=set(),
         _renewal_tasks={},
+        _reaper_tasks={},
+        _session_idle_since={},
         _auto_renew_generation={},
         _nvr_user_intent={},
         _nvr_processes={},
@@ -953,6 +955,7 @@ def _make_coord_live(**overrides):
         _register_go2rtc_stream=AsyncMock(),
         _check_and_recover_webrtc=AsyncMock(),
         _auto_renew_local_session=AsyncMock(return_value=None),
+        _idle_session_reaper=AsyncMock(return_value=None),
         _remote_session_terminator=AsyncMock(return_value=None),
         _refresh_rcp_state=AsyncMock(return_value=None),
         async_request_refresh=AsyncMock(return_value=None),
@@ -976,6 +979,7 @@ def _make_coord_live(**overrides):
         return t
 
     coord._replace_renewal_task = _replace_renewal_task
+    coord._replace_reaper_task = _replace_renewal_task
     return coord
 
 
@@ -1515,6 +1519,7 @@ class TestNvrSidecarLocal:
             data={},
         )
         coord._replace_renewal_task = lambda cam_id, coro: _create_task(coro)
+        coord._replace_reaper_task = lambda cam_id, coro: _create_task(coro)
 
         local_body = json.dumps(
             {
@@ -1578,6 +1583,7 @@ class TestNvrSidecarRemote:
             data={},
         )
         coord._replace_renewal_task = lambda cam_id, coro: _create_task(coro)
+        coord._replace_reaper_task = lambda cam_id, coro: _create_task(coro)
 
         remote_body = json.dumps(
             {

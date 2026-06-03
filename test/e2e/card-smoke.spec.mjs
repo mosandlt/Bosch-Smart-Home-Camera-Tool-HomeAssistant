@@ -180,6 +180,46 @@ test("privacy ON stops the live video (mock hass)", async ({ page }) => {
   expect(stopCalled, "privacy ON triggers _stopLiveVideo").toBe(true);
 });
 
+// Privacy ON → the Live-Stream button must be greyed out + disabled (starting a
+// stream is blocked backend-side while the shutter is closed). Both layouts.
+test("privacy ON disables the live-stream button (mock hass)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const res = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const mk = (priv) => ({ ...base, states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_live_stream": { state: "off", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_privacy_mode": { state: priv, attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } });
+    const probe = async (streamId, snapId, appleStyle) => {
+      const card = document.createElement("bosch-camera-card");
+      card.setConfig({ camera_entity: "camera.test", apple_style: appleStyle });
+      card.hass = mk("off");
+      document.body.appendChild(card);
+      await new Promise((r) => setTimeout(r, 300));
+      const off = { stream: card.shadowRoot.getElementById(streamId)?.disabled, snap: card.shadowRoot.getElementById(snapId)?.disabled };
+      card.hass = mk("on");
+      await new Promise((r) => setTimeout(r, 200));
+      const on = { stream: card.shadowRoot.getElementById(streamId)?.disabled, snap: card.shadowRoot.getElementById(snapId)?.disabled };
+      card.remove();
+      return { off, on };
+    };
+    return {
+      legacy: await probe("btn-stream", "btn-snapshot", false),
+      apple: await probe("ap-btn-stream", "ap-btn-snapshot", true),
+    };
+  });
+  expect(res.legacy.off.stream, "privacy OFF → legacy stream button enabled").toBe(false);
+  expect(res.legacy.on.stream, "privacy ON → legacy stream button disabled").toBe(true);
+  expect(res.legacy.off.snap, "privacy OFF → legacy snapshot button enabled").toBe(false);
+  expect(res.legacy.on.snap, "privacy ON → legacy snapshot button disabled").toBe(true);
+  expect(res.apple.off.stream, "privacy OFF → apple stream pill enabled").toBe(false);
+  expect(res.apple.on.stream, "privacy ON → apple stream pill disabled").toBe(true);
+  expect(res.apple.off.snap, "privacy OFF → apple snapshot pill enabled").toBe(false);
+  expect(res.apple.on.snap, "privacy ON → apple snapshot pill disabled").toBe(true);
+});
+
 // #22: while streaming, one tap on the Ton toggle unmutes the <video> instantly
 // (audibility toggle) — no 2-tap off/on dance.
 test("audio toggle unmutes the playing video (mock hass)", async ({ page }) => {

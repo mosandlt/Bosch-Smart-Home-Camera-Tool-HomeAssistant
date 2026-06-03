@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.5.5"
+CARD_VERSION = "13.5.6"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -52,6 +52,21 @@ SHC_RETRY_INTERVAL = 120  # seconds — retry SHC after this long while offline
 DEFAULT_MOTION_ACTIVE_WINDOW = 90  # seconds — see binary_sensor.py for rationale
 MOTION_ACTIVE_WINDOW_MIN = 10  # seconds
 MOTION_ACTIVE_WINDOW_MAX = 300  # seconds
+
+# Idle-session reaper. A LOCAL session (card view, Cast, camera.play_stream,
+# camera.record, media-browser preview) is torn down after STREAM_IDLE_REAP_SEC
+# with no consumer, freeing the camera's LOCAL RTSP session (Bosch caps LOCAL
+# sessions at 60 min) instead of lingering until the maxSessionDuration recycle.
+# Reaping is driven by consumer presence, not by the switch: an active viewer or
+# Mini-NVR recorder counts as a consumer and is never reaped, so automations that
+# use the stream are unaffected. See __init__.py _idle_session_reaper.
+STREAM_IDLE_REAP_SEC = 180  # no-consumer grace before tearing a session down
+STREAM_IDLE_REAP_CHECK_SEC = 30  # reaper poll interval
+# An HLS stream counts as actively watched if a playlist/segment was fetched
+# within this window (clients refetch every few seconds). Used instead of HA's
+# unreliable Stream.available (which stays True for the whole session). See
+# cf_unbuffer.hls_access_age + __init__.py _has_active_consumer.
+STREAM_HLS_FRESH_SEC = 30
 
 DEFAULT_OPTIONS = {
     "scan_interval": 60,
@@ -113,6 +128,13 @@ DEFAULT_OPTIONS = {
     "nvr_preroll_seconds": 0,
     "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",  # noqa: S108 # default tmpfs cache dir, overridable via config options
     "enable_go2rtc": True,
+    # Green IT (power/bandwidth saving). Currently: the idle-session reaper tears
+    # a camera's live session down once nobody is watching it for
+    # STREAM_IDLE_REAP_SEC, so the camera stops encoding+streaming video to no
+    # one (saves WLAN bandwidth + camera power/heat, turns the live LED off,
+    # frees Bosch's per-camera 60-min session slot). Umbrella flag — future
+    # power-saving behaviours hang off the same toggle. Default ON.
+    "enable_green_it": True,
     "enable_webhook_delivery": False,
     "webhook_url": "",
     # PTZ controls (pan presets) — opt-in. CAMERA_360 indoor only; default off
