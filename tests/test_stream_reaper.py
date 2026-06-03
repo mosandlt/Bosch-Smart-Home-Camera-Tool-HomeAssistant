@@ -301,8 +301,21 @@ class TestHasActiveConsumer:
             assert await BoschCameraCoordinator._has_active_consumer(c, CAM) is True
 
     @pytest.mark.asyncio
-    async def test_false_when_go2rtc_unreachable(self):
+    async def test_true_when_go2rtc_unreachable_unknown_keeps_alive(self):
+        # go2rtc unreachable (None) means we CANNOT confirm the session is idle.
+        # Treating unknown as "no consumer" used to reap LIVE WebRTC viewers on
+        # setups where go2rtc answers on a non-default port (consumer invisible
+        # to us) — the stream "just died" every grace window. Unknown ⇒ keep
+        # alive; only a confirmed 0 may reap. Regression: 2026-06-03 reaper fix.
         c = self._coord(token=None, go2rtc_count=None)
+        with patch(f"{MOD}.cf_unbuffer.hls_access_age", return_value=None):
+            assert await BoschCameraCoordinator._has_active_consumer(c, CAM) is True
+
+    @pytest.mark.asyncio
+    async def test_false_when_go2rtc_confirms_zero_consumers(self):
+        # A CONFIRMED 0 (go2rtc reachable, registered, but nobody reading) is the
+        # only consumer signal that permits reaping — the genuine ghost session.
+        c = self._coord(token=None, go2rtc_count=0)
         with patch(f"{MOD}.cf_unbuffer.hls_access_age", return_value=None):
             assert await BoschCameraCoordinator._has_active_consumer(c, CAM) is False
 

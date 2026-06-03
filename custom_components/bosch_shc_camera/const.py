@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.5.7"
+CARD_VERSION = "13.5.8"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -133,8 +133,15 @@ DEFAULT_OPTIONS = {
     # STREAM_IDLE_REAP_SEC, so the camera stops encoding+streaming video to no
     # one (saves WLAN bandwidth + camera power/heat, turns the live LED off,
     # frees Bosch's per-camera 60-min session slot). Umbrella flag — future
-    # power-saving behaviours hang off the same toggle. Default ON.
-    "enable_green_it": True,
+    # power-saving behaviours hang off the same toggle.
+    # DEFAULT OFF / UNDER DEVELOPMENT (2026-06-03): the idle reaper's consumer
+    # detection cannot reliably see a live WebRTC viewer — HA's go2rtc-backed
+    # WebRTC session does not surface as a go2rtc `consumers` entry on every
+    # setup (verified live: real WebRTC viewer → consumers:null), so the reaper
+    # false-negatives and tears down a stream someone is actively watching.
+    # Parked behind an opt-in, off by default, until viewer-presence detection
+    # is reworked. The 60-min Bosch session recycle still bounds any ghost.
+    "enable_green_it": False,
     "enable_webhook_delivery": False,
     "webhook_url": "",
     # PTZ controls (pan presets) — opt-in. CAMERA_360 indoor only; default off

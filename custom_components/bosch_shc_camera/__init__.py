@@ -1699,7 +1699,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             age = hls_access_age(token)
             if age is not None and age < STREAM_HLS_FRESH_SEC:
                 return True
-        return bool(await self._go2rtc_consumer_count(cam_id))
+        count = await self._go2rtc_consumer_count(cam_id)
+        # None == go2rtc could not be reached on ANY known port (11984/1984) →
+        # we CANNOT confirm the session is idle. Treating that "unknown" as
+        # "no consumer" tore down LIVE viewers on any setup where go2rtc answers
+        # on a different port — the WebRTC consumer is real but invisible to us,
+        # so the reaper killed the stream every grace window (the user's "stream
+        # just dies"). A lingering ghost while go2rtc is unreachable is far less
+        # harmful than reaping an active live view, so unknown ⇒ keep alive.
+        # Only a CONFIRMED count of 0 permits reaping. 2026-06-03 reaper fix.
+        if count is None:
+            return True
+        return count > 0
 
     async def _idle_session_reaper(self, cam_id: str, generation: int) -> None:
         """Tear down a LOCAL session once nobody is consuming it.
@@ -4746,9 +4757,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # Green IT idle reaper: tears the session down once
                             # nobody consumes it (tab closed / navigated away /
                             # Cast stopped), regardless of switch state. An active
-                            # viewer or recorder counts as a consumer. Opt-out via
-                            # the "enable_green_it" option (default on).
-                            if self._entry.options.get("enable_green_it", True):
+                            # viewer or recorder counts as a consumer.
+                            # OPT-IN / default OFF (under development): WebRTC
+                            # viewers don't reliably surface as go2rtc consumers,
+                            # so the reaper can false-negative and kill a watched
+                            # stream — parked until detection is reworked. Match
+                            # the const.py DEFAULT_OPTIONS default (False).
+                            if self._entry.options.get("enable_green_it", False):
                                 self._replace_reaper_task(
                                     cam_id, self._idle_session_reaper(cam_id, gen)
                                 )

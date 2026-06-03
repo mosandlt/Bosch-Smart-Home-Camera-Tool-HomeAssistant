@@ -1183,8 +1183,10 @@ class TestErrorPaths:
 
 
 class TestGreenItReaperGate:
-    """The Green IT idle reaper is launched only when enable_green_it is on
-    (default). With the option off, no reaper task is created for the session."""
+    """The Green IT idle reaper is launched only when enable_green_it is on.
+    It is OFF by default (under development — WebRTC viewers aren't reliably
+    seen as consumers, so the reaper would false-negative and kill a watched
+    stream; 2026-06-03), so the default-options session creates NO reaper."""
 
     def _local(self, options):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
@@ -1226,9 +1228,10 @@ class TestGreenItReaperGate:
         return coord
 
     @pytest.mark.asyncio
-    async def test_green_it_default_on_launches_reaper(self):
+    async def test_green_it_default_off_skips_reaper(self):
+        # Default (no enable_green_it key) is now OFF → no reaper task created.
         coord = await self._run({"stream_connection_type": "local"})
-        coord._replace_reaper_task.assert_called_once()
+        coord._replace_reaper_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_green_it_explicit_on_launches_reaper(self):

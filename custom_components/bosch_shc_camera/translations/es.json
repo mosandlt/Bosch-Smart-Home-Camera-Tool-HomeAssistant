@@ -94,7 +94,7 @@
               "stream_connection_type": "Tipo de conexión del stream",
               "live_buffer_mode": "Perfil de búfer del reproductor (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (streaming de baja latencia ~2 s)",
-              "enable_green_it": "Green IT — finalizar automáticamente los streams en vivo inactivos"
+              "enable_green_it": "Green IT — finalizar automáticamente los streams en vivo inactivos (experimental, en desarrollo)"
             },
             "data_description": {
               "stream_connection_type": "Tipo de conexión predeterminado para streams en directo.\n• **auto** (recomendado): Intentar primero la LAN local y, en caso de fallo, cambiar automáticamente al proxy de Bosch Cloud.\n• **local**: Solo LAN directa — no requiere internet. RTSP más rápido, pero snapshots más lentos (~6–10 s). La sesión se renueva automáticamente cada 50 s.\n• **remote**: Siempre a través del proxy de Bosch Cloud. Snapshots más rápidos (~0,4–1,9 s). Mejor opción predeterminada cuando HA no está en la misma LAN.\nLa entidad de selección 'Modo Stream' anula este ajuste en tiempo de ejecución sin reinicio.",

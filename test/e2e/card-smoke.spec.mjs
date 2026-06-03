@@ -304,25 +304,33 @@ test("audio_default override pins the start mute state independent of the backen
       await new Promise((res) => setTimeout(res, 200));
       const video = card.shadowRoot.getElementById("cam-video");
       if (!video) return { error: "no cam-video" };
-      // Decide deterministically (no real <video> playback): spy on the unmute.
       card._isIOS = () => false;
-      let unmuteCalled = false;
-      card._tryUnmuteVideo = () => { unmuteCalled = true; };
+      video.muted = true;  // element starts muted (autoplay policy)
+      // _applyAudioPreference must seed VOLUME only and NEVER programmatically
+      // unmute — a gesture-less unmute makes Chrome pause the live stream
+      // ("Unmuting failed and the element was paused instead"). Sound is only
+      // enabled by a real pill tap (gesture). 2026-06-03 stream-drop fix.
       card._applyAudioPreference(video);
-      return { mode: card._audioDefaultMode(), decoupled: card._audioDecoupled(), unmuteCalled };
+      return { mode: card._audioDefaultMode(), decoupled: card._audioDecoupled(),
+               mutedAfter: video.muted, vol: video.volume };
     };
     return { off: await probe("off"), on: await probe("on"), backend: await probe("backend"), bad: await probe("garbage") };
   });
   expect(r.off?.error || r.on?.error || r.backend?.error || r.bad?.error).toBeUndefined();
   expect(r.off.mode, "audio_default:off normalizes").toBe("off");
   expect(r.off.decoupled, "off opts out of the backend live-sync").toBe(true);
-  expect(r.off.unmuteCalled, "audio_default:off NEVER auto-unmutes (even with backend ON)").toBe(false);
   expect(r.on.mode).toBe("on");
-  expect(r.on.unmuteCalled, "audio_default:on auto-unmutes regardless of backend").toBe(true);
   expect(r.backend.mode, "backend is the default mode").toBe("backend");
   expect(r.backend.decoupled, "backend mode follows the switch (not decoupled)").toBe(false);
-  expect(r.backend.unmuteCalled, "backend mode unmutes when the switch is on").toBe(true);
   expect(r.bad.mode, "an invalid value falls back to backend").toBe("backend");
+  // The element stays MUTED on start in EVERY mode — no auto-unmute, regardless
+  // of the backend switch being ON. Sound is gesture-only (stream-drop fix).
+  expect(r.off.mutedAfter, "off stays muted on start").toBe(true);
+  expect(r.on.mutedAfter, "on stays muted on start (no gesture-less unmute)").toBe(true);
+  expect(r.backend.mutedAfter, "backend stays muted on start (no gesture-less unmute)").toBe(true);
+  // Volume IS seeded from the backend number entity (50 → 0.5) for the sync modes.
+  expect(r.backend.vol, "backend seeds volume from the number entity").toBeCloseTo(0.5, 2);
+  expect(r.on.vol, "on seeds volume from the number entity").toBeCloseTo(0.5, 2);
 });
 
 // audio_default:off behaves like decoupled mode for taps — the pill toggles
@@ -645,6 +653,39 @@ test("fullscreen double-tap zooms the video and exit resets it", async ({ page }
   expect(r.vt.includes("scale(2"), "video carries the zoom transform").toBe(true);
   expect(r.scaleAfterExit, "exit resets zoom to 1x").toBe(1);
   expect(r.vtAfter, "transform cleared on exit").toBe("");
+});
+
+test("fullscreen: double-tap ON an overlay control does NOT zoom (button click survives) (#16)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const wrap = card.shadowRoot.getElementById("img-wrapper");
+    const btn = card.shadowRoot.getElementById("ap-btn-fullscreen");
+    if (!wrap || !btn) return { error: "no wrapper/button" };
+    card._enterCssFullscreen();
+    // Two quick taps that ORIGINATE on the fullscreen pill button. They bubble
+    // up to the wrapper's zoom pointerdown listener — which must IGNORE them
+    // (control target) so the wrapper never captures the pointer (the click that
+    // exits fullscreen would otherwise retarget to the wrapper) and a double-tap
+    // on the button never toggles the digital zoom. 2026-06-03 (#16 / zoom).
+    const fire = (type, id) => btn.dispatchEvent(new PointerEvent(type, { pointerId: id, clientX: 10, clientY: 10, bubbles: true, cancelable: true }));
+    fire("pointerdown", 1); fire("pointerup", 1);
+    fire("pointerdown", 2); fire("pointerup", 2);
+    const scale = card._zoom.scale;
+    const captured = card._zoomPointers.size;
+    card._exitCssFullscreen();
+    card.remove();
+    return { scale, captured };
+  });
+  expect(r.error, "card renders wrapper + fullscreen button").toBeUndefined();
+  expect(r.scale, "double-tap on the button must NOT zoom").toBe(1);
+  expect(r.captured, "the wrapper must not capture the button's pointer").toBe(0);
 });
 
 // Audio pill: renders in the pill bar, reflects the backend audio state, the tap

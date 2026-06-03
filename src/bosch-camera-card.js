@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.7";
+const CARD_VERSION = "13.5.8";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -1224,6 +1224,7 @@ class BoschCameraCard extends HTMLElement {
     this._androidAudioMuted = /Android/i.test(navigator.userAgent || "");
     this._lastAudioState     = null;  // last backend audio-switch state (live-sync edge detect)
     this._lastVolumeState    = null;  // last backend volume-entity state (live-sync edge detect)
+    this._stoppingLiveVideo  = false; // true only during _stopLiveVideo() so the pause-guard doesn't fight our own teardown
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -1730,9 +1731,11 @@ class BoschCameraCard extends HTMLElement {
       slider.addEventListener("input", (e) => this._setVideoVolume(parseFloat(e.target.value)));
       // Sync the thumb to the live video when streaming, else to the backend
       // volume entity (so it shows where sound will resume, not the HTML default).
+      // Always reflect the actual VOLUME level — muting must NOT snap the slider
+      // to 0 (the level is preserved; only the user moves it). 2026-06-03.
       const v = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
       const restVol = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
-      slider.value = v ? String(v.muted ? 0 : v.volume) : String(restVol);
+      slider.value = v ? String(v.volume) : String(restVol);
     }
     this._refreshAudioPill();
   }
@@ -1807,43 +1810,18 @@ class BoschCameraCard extends HTMLElement {
   // first tap then unmutes). OFF → stay muted. Volume from the number entity.
   _applyAudioPreference(video) {
     if (!video || this._isIOS()) return;
+    // Seed the playback VOLUME only — NEVER programmatically unmute here.
+    // Chrome's autoplay policy pauses a <video> that is unmuted without a real,
+    // *synchronous* user gesture ("Unmuting failed and the element was paused
+    // instead"), which froze the live stream. A gesture does not survive into a
+    // Promise/setTimeout callback either, so there is no safe place to auto-unmute
+    // outside the click handler. The element therefore stays muted on start; the
+    // first tap on the audio pill (a genuine gesture in _toggleAudio) enables
+    // sound for good. The pill shows a "tap for sound" hint while muted.
+    // 2026-06-03 stream-drop fix (was: _tryUnmuteVideo on every (re)start/sync).
     try {
-      if (this._useCardAudio()) {
-        // Decoupled: per-browser localStorage volume + mute.
-        video.volume = this._cardVolume();
-        if (this._cardWantUnmuted()) this._tryUnmuteVideo(video);
-        return;
-      }
-      video.volume = this._entityVolume();
-      // YAML override wins over the backend switch for the START state:
-      //   on      → always start with sound
-      //   off     → always start muted (leave the element muted; never unmute)
-      //   backend → follow switch.<cam>_audio (the source of truth)
-      const mode = this._audioDefaultMode();
-      const wantOn = mode === "backend"
-        ? this._getEffectiveState(this._entities.audio) === "on"
-        : mode === "on";
-      if (wantOn) this._tryUnmuteVideo(video);
+      video.volume = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
     } catch (_) { /* volume not settable */ }
-  }
-
-  // Best-effort programmatic unmute that NEVER leaves the element paused. The
-  // autoplay policy refuses a gesture-less unmute and pauses the video ("Unmuting
-  // failed and the element was paused"); we always call play() afterwards, and if
-  // that is also refused we fall back to muted playback so the frame keeps moving
-  // (the pill's tap — a real gesture — then unmutes for good). Used on stream
-  // start + live backend-switch sync; the in-gesture pill tap unmutes directly.
-  _tryUnmuteVideo(video) {
-    if (!video) return;
-    const fallbackMuted = () => { video.muted = true; Promise.resolve(video.play()).catch(() => {}); };
-    video.muted = false;
-    // play() rejecting OR resolving-then-leaving-the-element-paused (some Android
-    // WebViews late-pause after a gesture-less unmute) both mean "couldn't keep
-    // sound on" → fall back to muted playback so the frame never freezes.
-    Promise.resolve(video.play()).then(
-      () => { if (video.paused) fallbackMuted(); },
-      fallbackMuted,
-    );
   }
 
   _refreshAudioPill() {
@@ -5132,6 +5110,31 @@ class BoschCameraCard extends HTMLElement {
       // the listener self-removes after the first frame instead of stacking a
       // second clearOverlay closure that re-runs the whole block.
       video.addEventListener("playing", clearOverlay, { once: true });
+
+      // Pause-guard: a live stream must never silently freeze. If the <video>
+      // gets paused by anything OTHER than our own _stopLiveVideo() — Chrome
+      // autoplay enforcement, a background-tab throttle, an OS interruption — we
+      // resume it (keeping the current muted state). Attached once per element.
+      // Since all gesture-less unmutes were removed, the element only ever plays
+      // muted unless the user tapped (valid activation), so this never loops.
+      // 2026-06-03 stream-drop fix.
+      if (!video._boschPauseGuard) {
+        video._boschPauseGuard = true;
+        video.addEventListener("pause", () => {
+          if (this._stoppingLiveVideo || !this._liveVideoActive || !this.isConnected) return;
+          if (!video.srcObject && !video.currentSrc && !video.getAttribute("src")) return;
+          // An unexpected pause is almost always Chrome refusing gesture-less
+          // playback — e.g. right after an unmute without valid user activation,
+          // which pauses the element. The ONLY reliable resume is to RE-MUTE
+          // first, then play() (muted playback is always allowed). Resuming
+          // without re-muting gets refused again and the frame stays frozen.
+          // The user re-enables sound with another tap. 2026-06-03.
+          video.muted = true;
+          Promise.resolve(video.play()).catch(() => {});
+          this._refreshAudioToggle();
+          this._refreshAudioPill();
+        });
+      }
       // Safety timeout: if video never plays after 120s, hide overlay but
       // keep snapshot visible (don't call clearOverlay which hides the image).
       // Outdoor camera can take 80s+ for first HLS frame.
@@ -5635,6 +5638,9 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _stopLiveVideo() {
+    // Mark teardown so the <video> pause-guard (added in activateVideo) doesn't
+    // auto-resume the stream we are intentionally stopping here. 2026-06-03.
+    this._stoppingLiveVideo = true;
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
@@ -5677,14 +5683,14 @@ class BoschCameraCard extends HTMLElement {
     // force an unnecessary backend rewarm instead of the normal HLS fallback.
     this._staleSourceSeen = false;
     // Reset the audio/volume live-sync edge-detect so the NEXT stream start
-    // re-applies the backend audio preference (else _lastAudioState still held
-    // "on" from the prior session → audioChanged=false → the autoplay-unmute on
-    // restart was silently skipped, leaving switch-on but video muted).
+    // re-seeds the backend volume + mute state cleanly from scratch.
     this._lastAudioState  = null;
     this._lastVolumeState = null;
     // Hide tap-to-play overlay if stream stops before user tapped
     const tapOverlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
     if (tapOverlay) tapOverlay.classList.remove("visible");
+    // Teardown done — re-arm the pause-guard for the next stream.
+    this._stoppingLiveVideo = false;
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
@@ -6620,17 +6626,18 @@ class BoschCameraCard extends HTMLElement {
           if (this._androidAudioMuted) video.muted = true;
         } else {
           const audioOn = this._getEffectiveState(ents.audio) === "on";
-          const audioChanged = this._lastAudioState !== audioOn;
           this._lastAudioState = audioOn;
           if (!audioOn || this._androidAudioMuted) {
             // Backend audio OFF (or Android pre-gesture) → mute live. Muting is
             // always allowed, so this half of the two-way sync is reliable.
             video.muted = true;
-          } else if (audioChanged) {
-            // Backend audio just turned ON (e.g. via automation) → best-effort
-            // live UNMUTE that never leaves the element paused (autoplay policy).
-            this._tryUnmuteVideo(video);
           }
+          // Backend audio ON → do NOT programmatically unmute in this sync pass.
+          // A gesture-less unmute makes Chrome pause the element and the live
+          // stream freezes ("Unmuting failed and the element was paused instead"),
+          // and a periodic sync that re-sets muted=false re-kills it every push.
+          // The element stays muted; the user enables sound with a pill tap
+          // (a real gesture, handled synchronously in _toggleAudio). 2026-06-03.
           // Live volume sync from the backend number.<cam>_audio_volume entity —
           // a slider drag on another session or an automation reaches us as a
           // hass push and is applied to this <video> here.
@@ -6641,7 +6648,8 @@ class BoschCameraCard extends HTMLElement {
               try { video.volume = this._entityVolume(); } catch (_) { /* read-only */ }
             }
             const slider = this.shadowRoot.getElementById("ap-vol");
-            if (slider) slider.value = String(video.muted ? 0 : video.volume);
+            // Reflect the actual volume level, not 0 — mute must not move the thumb.
+            if (slider) slider.value = String(video.volume);
           }
         }
         // Reflect audibility on both the legacy Ton toggle (#22) and the pill.
@@ -7658,6 +7666,14 @@ class BoschCameraCard extends HTMLElement {
     };
     wrap.addEventListener("pointerdown", (e) => {
       if (!this._inFullscreen()) return;
+      // Don't hijack taps that land on an overlay CONTROL (pill-bar buttons incl.
+      // the fullscreen-exit button, pan edge-arrows, volume slider). These live
+      // inside .img-wrapper so they survive the Fullscreen API — but capturing
+      // their pointer on the wrapper retargets the synthesized click to the
+      // wrapper, so the button's own click never fired (the exit button did
+      // nothing) and a double-tap on a button toggled the digital zoom instead.
+      // Let those events reach the control untouched. 2026-06-03 (#16 / zoom).
+      if (e.target.closest && e.target.closest("button, input, a, .ap-pill-bar, .pan-overlay, .ap-top, .ap-vol-pop")) return;
       this._zoomPointers.set(e.pointerId, e);
       try { wrap.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
       if (this._zoomPointers.size === 1) {

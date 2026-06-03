@@ -779,7 +779,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     ): bool,
                     vol.Optional(
                         "enable_green_it",
-                        default=bool(opts.get("enable_green_it", True)),
+                        default=bool(opts.get("enable_green_it", False)),
                     ): bool,
                     vol.Optional(
                         "use_mjpeg_snapshot",
