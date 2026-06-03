@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.9";
+const CARD_VERSION = "13.5.10";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -2751,6 +2751,13 @@ class BoschCameraCard extends HTMLElement {
            carries a privacy button (apple-style). The pill button + this row
            drive the same entity, so showing both is redundant. */
         :host(.dedupe-privacy) .switch-rows > .privacy-row { display: none; }
+        /* Keep the dedupe in the minimal overflow-open tray too. The
+           minimal.overflow-open .sw-row reveal above (specificity 0,5,0)
+           otherwise out-specifies the dedupe rule (0,4,0) and brings the
+           "Privat" row back when the overflow menu is opened on an overview
+           tile / minimal card. This guard is 0,6,0, so it wins.
+           #15/#27 (RkcCorian: row still showed via the overflow tray). */
+        :host(.dedupe-privacy.minimal.overflow-open) .switch-rows > .privacy-row { display: none; }
         .btn-overflow { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }
         :host(.minimal) .btn-overflow { display: inline-flex; }
         :host(.minimal.overflow-open) .btn-overflow { background: rgba(10,132,255,.18); color: #0a84ff; }

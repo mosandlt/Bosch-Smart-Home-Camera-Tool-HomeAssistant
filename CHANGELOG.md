@@ -5,6 +5,171 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.10] - 2026-06-03
+
+Patch release — a card-only CSS fix for the redundant privacy row.
+
+- **The redundant "Privat" row no longer reappears in the ⋮ overflow tray.** With `hide_redundant_privacy` on (the default), the standalone Privat switch row is dropped because the Apple-style pill bar already carries a privacy button. On a minimal overview tile, though, the row came back the moment the ⋮ (More) tray was opened: the tray-reveal rule out-specified the dedupe rule in CSS. A higher-specificity guard now keeps the Privat row hidden in the open tray too, while every other switch row still appears. Card-only change, no backend impact ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15) / [#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)).
+
+## [v13.5.9] - 2026-06-03
+
+Patch release — Stop button reachability and a short remote WebRTC attempt.
+
+- **Stop button reachable while the start/loading overlay is showing.** The control pill bar sat below the full-cover overlays (the remote "antippen zum Starten" gate, the warming-up spinner), which swallowed taps on the Stop button so a stream couldn't be ended from the card. The pill bar now sits above them and stays tappable.
+- **Remote / VPN: try WebRTC instead of forcing HLS.** For the Home Assistant app or a mobile browser on an external address, the card used to skip WebRTC and go straight to HLS. It now attempts WebRTC with a short (~2.5 s) timeout and falls back to HLS if it doesn't connect — the attempt itself is the reachability check, so a client that can reach the stream directly (VPN or LAN) gets low-latency WebRTC while a true-remote client falls back quickly. The "HLS mode" banner now appears only on an actual HLS fallback.
+
+## [v13.5.8] - 2026-06-03
+
+Patch release — live-stream drop fix, fullscreen exit, volume slider.
+
+- **Live stream no longer drops / freezes.** The browser autoplay policy pauses a `<video>` that is unmuted without a real tap. The card previously auto-unmuted on stream start and on every state sync, which froze the stream. Sound is now enabled only by tapping the audio pill (a real gesture); otherwise the stream stays muted and playing, and a new pause-guard re-mutes and resumes the video if anything else pauses it.
+- **Green IT idle-stream reaper is now opt-in and OFF by default.** Marked experimental: its viewer detection could not reliably see a live WebRTC viewer on every setup, so it could tear down a stream you were watching. Idle sessions are still bounded by the 60-minute session recycle; when enabled it only reaps on a confirmed zero consumers, never on an "unknown" reading.
+- **Fullscreen & controls.** The fullscreen exit button works again, and double-tapping a control no longer triggers the digital zoom ([#16](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/16)). Pointer events on the pill buttons, pan arrows and volume slider are no longer captured by the zoom handler.
+- **Volume slider** reflects the actual level — muting no longer snaps it to 0.
+
+## [v13.5.7] - 2026-06-03
+
+Maintenance patch — no user-facing behaviour change.
+
+- **CI on Node-24-native action majors.** `github/codeql-action` v3 → v4 (the v3 line stops running on the new runner image from 2026-06-16) and `actions/checkout` v4 → v5 across the remaining workflows. The gates check exactly the same things.
+- **Test-dependency security pins.** `pytest-homeassistant-custom-component` bumped (pulls `zeroconf 0.149.16`) and `idna >= 3.15` pinned, clearing four transitive advisories in the test toolchain. These are dev/CI-only dependencies and never ship to an installation.
+- **Card bundle cleanup.** Removed two unused variables and a stale lint directive; the bundle is a little smaller. Behaviour is identical.
+
+## [v13.5.6] - 2026-06-03
+
+Minor release — a Green IT power-saving option, an idle-stream fix, and privacy-mode button greying.
+
+- **Green IT (new).** The integration ends a camera's live session once nobody has fetched the stream for about three minutes, so the camera stops encoding and streaming to no one — saving Wi-Fi bandwidth and camera power/heat, turning the live LED off, and leaving the session ready for the next viewer. Pressing Stop still ends a stream instantly; an active HLS/WebRTC viewer or a running Mini-NVR recording always counts as a consumer. Toggle under Options → Live stream → "Green IT".
+- **Fix: streams opened in the mobile app could linger after closing.** Consumer presence is now read from real HLS playlist/segment fetch recency (plus go2rtc consumers and active recordings), so an abandoned mobile/HLS session is torn down about three minutes after the last fetch instead of never.
+- **Privacy mode greys out the stream and snapshot buttons.** While privacy mode is on the shutter is closed, so both buttons are now disabled and greyed in the card (classic and Apple-style) instead of letting the tap fail.
+
+## [v13.5.5] - 2026-06-03
+
+Card-focused release — on-video pan arrows and a cleaner privacy control. No backend changes, nothing breaking.
+
+- **Pan arrows on the video ([#33](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/33)).** 360° cameras get large left/right pan arrows directly on the picture, so the view can be changed without leaving the card — and crucially while in fullscreen, where the menu's `◀◀ ◀ ■ ▶ ▶▶` row is hidden by the browser. Each tap moves one step, a badge shows the new angle, and the arrows grey out at the ends of travel. New option `pan_overlay: auto | always | never` (default `auto`). The arrows appear only on cameras that expose a pan position.
+- **Cleaner privacy control ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15) / [#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)).** New option `hide_redundant_privacy` (on by default) removes the duplicate "Privat" switch row when the Apple-style pill bar already shows a privacy button. The legacy layout keeps the labelled row.
+- **Localised HLS banner.** The "HLS mode" hint over the video was hardcoded in German and missed the card's 11-language localisation; it now shows in your language with clearer wording. The README gains a short WebRTC-vs-HLS troubleshooting checklist.
+
+## [v13.5.4] - 2026-06-02
+
+Maintenance release — Home Assistant 2026.6 readiness; no user-facing changes, no new entities, drop-in upgrade.
+
+- **HA 2026.6 config-flow deprecation handled.** The reauth/reconfigure flow no longer uses `async_update_reload_and_abort`, which HA 2026.6 deprecates (and would make a hard error in 2026.12) when an integration also has an options update listener. Credentials are still applied via an explicit reload; the "reload only when options actually change" behaviour is unchanged.
+- **HACS validation no longer needs `ignore: brands`.** Since HA 2026.3 the integration ships its own brand icons in `custom_components/bosch_shc_camera/brand/`, and the HACS validation action now recognises them, so the workflow validates cleanly without the ignore flag.
+
+## [v13.5.3] - 2026-06-02
+
+Reliability and security hardening release — no new entities, no breaking changes.
+
+- **Live stream recovers from an expired token.** A `401` on the connection PUT now triggers a token refresh and one retry instead of silently failing, so a rotated token no longer leaves a dead stream.
+- **Settings no longer snap back.** Changing detection mode, motion sensitivity, or alarm delays no longer briefly reverts in the UI; a short write-lock is held for each, matching the other controls. Changing two sibling controls simultaneously (e.g. speaker and microphone level) no longer lets one overwrite the other in the local cache.
+- **Security hardening.** The schedule-rule list is now fully HTML- and attribute-escaped. Event-alert snapshots never attach the wrong camera's image and never fetch a URL that fails the Bosch-domain check; alert filenames are sanitised against path traversal. The optional webhook only accepts `http(s)` URLs. Camera Digest credentials no longer appear in debug logs.
+- **Snapshot renewal no longer cut short on slow cameras.** The on-demand snapshot used to renew the live connection inside its own 10-second budget; it now runs outside that budget.
+- **Alarm-state sensor maps unknown values correctly.** An unrecognised alarm state now maps to `unknown` instead of being discarded by Home Assistant.
+
+## [v13.5.2] - 2026-06-02
+
+Audio mute is now persistent and backend-owned — your mute choice survives Home Assistant restarts and is the single source of truth across every browser and automation.
+
+- **`switch.<cam>_audio` is a `RestoreEntity`.** Mute state is no longer lost on HA restart. A brand-new camera starts muted; the first toggle sticks for good. The old `audio_default_on` integration option is removed.
+- **New per-card option `audio_default`.** A card can declare its own start mute state independently of the backend switch: `backend` (default, follows `switch.<cam>_audio`), `on`, or `off`. Useful for a wall-tablet card that should always start silent regardless of the global switch.
+
+## [v13.5.1] - 2026-06-01
+
+Small card-only release fixing a stuck loading overlay and adding a visible stream cooldown.
+
+- **Loading overlay no longer sticks after the stream starts.** The overlay-hide call ran while the "still connecting" flag was technically still set, so the anti-flicker guard swallowed it. The flag is now cleared first, so the overlay hides reliably the moment the first frame arrives.
+- **Stream start/stop button shows a cooldown badge.** The backend needs a few seconds after stopping before it will accept a new start. The button now shows the same brief countdown badge the privacy button already uses, so you can see exactly when it is ready.
+
+## [v13.5.0] - 2026-06-01
+
+Major card and integration release — 11-language card, automatable audio entities, fullscreen digital zoom, and several overlay and recovery fixes.
+
+- **Card in 11 languages.** Both config editors and all in-card text follow the Home Assistant language: English, German, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian, Ukrainian, and Simplified Chinese (English fallback).
+- **Automatable audio entities.** Each camera now has `switch.<cam>_audio` (shared mute across all browsers, automatable) and `number.<cam>_audio_volume` (0–100 virtual volume preference). Toggling sound no longer re-opens the stream. Set `use_card_audio_settings: false` on a card to keep its sound independent.
+- **Fullscreen digital zoom.** Pinch, mouse-wheel, double-tap, and pan inside the fullscreen view.
+- **Overlay and recovery fixes.** The privacy placeholder no longer stacks under a "refreshing" spinner. A card pointed at a non-existent camera entity now shows "camera not found" instead of the misleading "session expired" prompt. The 401 rescue / proxy-died rebuild now tears the old local proxy down and rebuilds it atomically under one lock, preventing go2rtc / HA-Stream from being pinned to a dead port. A cloud `444` response (session quota) now falls back to the local API for privacy writes.
+- **Hover lift is now shadow-only.** No sub-pixel edge shimmer, and the lift no longer becomes a containing block that clips the fullscreen/zoom overlay ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)).
+
+## [v13.4.6] - 2026-06-01
+
+Stability and polish round — cold-start stream fix, privacy cooldown indicator, write-path hardening, and card timer cleanup.
+
+- **Cold-start race fixed.** Opening the dashboard with a stream already active could leave the card stuck on the last event snapshot instead of starting live video. The card now self-heals: if the first stream attempt fails before the camera and switch entities have finished loading, it resets and retries on the next state update.
+- **Privacy cooldown now visible ([#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)).** The camera enforces a short cooldown between privacy changes; a toggle inside that window was previously dropped silently, leaving the button looking stuck. The privacy button now shows a countdown and is disabled during the cooldown.
+- **Camera-setting writes are now confirmed before updating state.** LED, timestamp overlay, lens elevation, microphone level, and light writes only update the displayed value once the camera confirms the change; a failed write no longer flips the control to the wrong state until the next poll.
+- **Card visual editor auto-play fix.** The editor no longer silently pins Auto-Play to "LAN" when you open and save without touching that field; there is now an explicit "use the integration default" option.
+- **Security.** The SMB snapshot-upload path now validates event image URLs against a Bosch-domain allowlist before fetching, matching the other upload paths.
+
+## [v13.4.5] - 2026-05-31
+
+Hardens the local LAN streaming path against mid-session credential rotation by the camera.
+
+- **Local session rescue retries with backoff.** When a Bosch camera re-issues its local RTSP credentials, the integration rebuilds the local TLS proxy on a fresh port. A single transient `SSL UNEXPECTED_EOF` or connection reset previously made the one-shot rescue give up, leaving go2rtc and the HA stream pinned to the now-dead port (visible as a frozen image until a manual reload). The rescue now retries up to three times with backoff.
+- **Card classifies dead go2rtc sources.** A persistently stale source (connection refused, wrong credentials, DESCRIBE 404) is now classified distinctly from a benign stream-type race, and the card forces one backend stream rebuild via the live-stream switch (with a cooldown) instead of hammering a source that will never recover.
+- **Overview tile hover preserves themed shadow ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)).** The hover lift no longer overwrites `ha-card-box-shadow` on overview tiles.
+- **Privacy and light buttons clear their state instantly ([#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)).** The marked state clears the moment you toggle off, instead of waiting for the next status push — most noticeable on a Gen1 camera over LAN.
+
+## [v13.4.4] - 2026-05-31
+
+Card polish release — hover lift on the single card, box-shadow on overview tiles, and instant audio toggle at stream start.
+
+- **Single-card hover lift ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)).** The standalone card now lifts and scales on hover like the overview tiles, anchored at the top edge so it grows without jumping.
+- **Overview tile shadows ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)).** A themed `ha-card-box-shadow` now shows on overview tiles; the inner card's shadow was previously clipped by `overflow:hidden` on the tile.
+- **Instant audio toggle ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)).** The audio toggle now reflects audibility the moment playback starts — reads as off/muted at stream start; a single tap unmutes — instead of briefly showing a stale "on".
+
+## [v13.4.3] - 2026-05-31
+
+Small fix: privacy mode now immediately stops the live stream and silences audio in the card.
+
+- **Privacy stops video and audio instantly ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)).** When switching a camera to privacy while the live stream was playing, the backend tore the stream down but the card's HLS buffer kept playing video and sound for several seconds, and the controls felt stuck. The card now stops its video element the moment privacy turns on.
+
+## [v13.4.2] - 2026-05-30
+
+Follow-up release — a sensible audio toggle, single-owner mobile fullscreen, and theme-aware card geometry.
+
+- **Audio toggle reflects what you actually hear ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)).** Browsers start video muted by autoplay policy, so the toggle now reads off at stream start with a subtle pulse, and a single tap unmutes immediately (the AAC track is already in the stream — no two-tap dance, no reconnect).
+- **Mobile fullscreen is single-owner.** Closing one card's fullscreen on a multi-camera dashboard could immediately open a sibling card's fullscreen because the closing tap landed on the sibling's tap-to-play video. Fullscreen is now single-owner across all cards, with a short guard after any exit.
+- **Theme-aware card geometry ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)).** Cards now follow standard HA theme variables (`ha-card-border-radius`, `ha-card-box-shadow`, `ha-card-border-width`) by default. Override per card with `border_radius:` and `box_shadow:` options.
+
+## [v13.4.1] - 2026-05-30
+
+Card controls cleanup — design/mode toggles moved to YAML-only, instant "Live" badge, overview grid overflow fix, and new CI/CD quality gates.
+
+- **In-card Design and Modus switchers removed.** The iOS/Android Design and Day/Night Mode in-card toggles are gone; both are set purely in YAML (`theme: ios | android | auto`, `mode: auto | day | night`) and stay out of the control menu.
+- **"Live" badge is instant.** The badge now flips to green Live the moment the video is actually playing, instead of lingering on orange "Verbinde" while the backend status caught up.
+- **Overview grid no longer overflows narrow columns.** Tiles are capped to the container width so they do not overflow when the card sits in a narrow dashboard column.
+- **Theme-variable support ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)).** New optional card options `border_radius:` and `box_shadow:` let the card match a themed dashboard; a theme setting `ha-card-border-radius: 0` no longer strips the card's own rounding.
+- **360° Indoor audio toggle fix ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)).** The Audio toggle now writes its new state to HA immediately instead of staying visually stuck until the next pan event.
+- **CI hardened.** CodeQL (SAST), gitleaks (secret scanning), least-privilege workflow permissions, ruff/mypy/ESLint/codespell quality gates, and a cross-OS Playwright smoke matrix added.
+
+## [v13.4.0] - 2026-05-30
+
+Live-stream lifecycle is now driven by the shared backend `stream_status`, syncing state across all browser sessions.
+
+- **Cross-session stream state sync.** HA pushes `stream_status` (idle → connecting → warming_up → streaming) to every connected client. A card opened in a second browser or device now shows the same connecting/waking-up/Live state as the session that started the stream, instead of a stale "idle" that caused a second-session tap to tear down the first session's stream.
+- **"Live" badge reflects the real video.** Green only when your video is actually playing; orange "Verbinde" while connecting; never a premature "Live" just because the switch is on.
+- **Connecting overlay clears on first frame.** The overlay clears the moment the video plays, even if the backend status sensor lags a few seconds. All sessions show the same message, taken from the shared status.
+- **Design/Mode menu mirrors your config.** A card set to `theme: ios` or `mode: night` now shows that option selected in the menu instead of always showing "Auto".
+- **Cross-OS robustness.** An `os-<name>` host class (Windows/macOS/iOS/Android/Linux) and a cross-platform `system-ui`/Segoe UI font fallback are added for OS-targeted styling and correct rendering on Windows/Edge and Linux.
+
+## [v13.3.3] - 2026-05-30
+
+Small cleanup release — removes the development diagnostics line from the top of the card.
+
+- **On-card debug line removed.** The `Card vX | fresh … | 1920×1080` diagnostics line at the top of the card (a development aid) is removed. It lived inside the card's otherwise-hidden header, so on the default Apple-style layout this has no visible or functional effect. All other behaviour — streaming, controls, camera picker, fullscreen, and the hide options from v13.3.2 — is unchanged.
+
+## [v13.3.2] - 2026-05-29
+
+Card rework fixing three reported issues — camera picker, fullscreen toggle, and new hide options — plus a behaviour change making the control stack expanded by default.
+
+- **Camera picker no longer sticks to one camera ([#17](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/17)).** The picker used to default to a hard-coded entity and the visual editor's dropdown stayed empty for cameras not named "bosch". The picker now derives its default from the cameras on your instance and lists every `camera.*` entity.
+- **Fullscreen button toggles correctly ([#16](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/16)).** A second tap on the fullscreen button now exits fullscreen instead of doing nothing. The detection now reads `shadowRoot.fullscreenElement` so the old "already fullscreen?" check that never matched is fixed.
+- **New `show_title` and `show_last_event` options ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)).** Set `show_title: false` or `show_last_event: false` to strip the title pill and last-event badge; combine with `compact: true` for a clean video-only tile. Both options are available in YAML and the visual editor.
+- **Controls expanded by default.** A standalone single card now shows its full control stack expanded by default. Set `minimal: true` to keep everything collapsed behind the "Mehr" button as before. Overview-grid tiles default to `minimal: true` so the grid stays glanceable.
+- **Offline camera layout cleaned up.** Offline cameras drop the redundant title pill (which overlapped the centred "Offline" label) and hide the unusable control stack, keeping only attached automations.
+
 ## [v13.3.1] - 2026-05-29
 
 Patch release — two card-rendering fixes, two interaction improvements, a deprecated watchdog resource, and an internal test and API-limit cleanup.

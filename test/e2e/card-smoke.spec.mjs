@@ -684,6 +684,44 @@ test("tap-to-play / loading overlay sits UNDER the control pill bar (Stop stays 
   expect(r.hitInPill, "a tap at the Stop button reaches the pill bar, not the overlay").toBe(true);
 });
 
+test("dedupe: 'Privat' row stays hidden in the minimal ⋮ overflow tray (#15/#27 RkcCorian)", async ({ page }) => {
+  // Regression: an overview tile (minimal, apple-style, hide_redundant_privacy)
+  // hid the redundant Privat row until the user tapped ⋮. The overflow-open
+  // reveal `:host(.minimal.overflow-open) .switch-rows > .sw-row {display:flex}`
+  // (0,5,0) out-specified the dedupe rule (0,4,0), bringing the row back. A
+  // 0,6,0 guard now keeps it hidden in the tray too. Both reporter screenshots
+  // had ⋮ open. 2026-06-03.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, minimal: true, hide_redundant_privacy: true });
+    card.hass = { ...base, states: {
+      "camera.test":               { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_privacy_mode":  { state: "off", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      "switch.test_notifications": { state: "on",  attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+    } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const sr = card.shadowRoot;
+    const pr = sr.querySelector(".privacy-row");
+    const notif = sr.getElementById("btn-notifications");
+    if (!pr || !notif) return { error: "missing privacy/notif row" };
+    const hasDedupe = card.classList.contains("dedupe-privacy");
+    // Open the ⋮ overflow tray — exactly what the user taps on a minimal tile.
+    card.classList.add("overflow-open");
+    const prOpen = getComputedStyle(pr).display;
+    const notifOpen = getComputedStyle(notif).display;
+    card.remove();
+    return { hasDedupe, prOpen, notifOpen };
+  });
+  expect(r.error, "card renders privacy + notifications rows").toBeUndefined();
+  expect(r.hasDedupe, "dedupe-privacy applies for a minimal apple-style card").toBe(true);
+  expect(r.prOpen, "Privat row stays hidden even with the ⋮ tray open (#15/#27)").toBe("none");
+  expect(r.notifOpen, "other switch rows still appear in the ⋮ tray").toBe("flex");
+});
+
 test("fullscreen: double-tap ON an overlay control does NOT zoom (button click survives) (#16)", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
