@@ -12,5 +12,5 @@
   "quality_scale": "platinum",
   "requirements": ["defusedxml>=0.7.1", "firebase-messaging>=0.4.5,<1", "smbprotocol>=1.10.0,<2"],
   "single_config_entry": true,
-  "version": "13.5.6"
+  "version": "13.5.7"
 }

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.6";
+const CARD_VERSION = "13.5.7";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -6173,7 +6173,6 @@ class BoschCameraCard extends HTMLElement {
 
     // shouldVideo: always use HLS video when stream is ON.
     // Audio toggle only controls mute/unmute — no more snapshot-polling mode.
-    const isAudioOn   = this._getEffectiveState(ents.audio) === "on";
     const shouldVideo = isStreaming;
 
     // Stream just stopped → stop video, fetch fresh snapshot for current + next session.
@@ -8040,7 +8039,6 @@ window.customCards.push({
 //                                 #   mirror of GET /v11/video_inputs.priority).
 //                                 #   Default false: alphabetic ordering.
 // ─────────────────────────────────────────────────────────────────────────────
-const OVERVIEW_VERSION = "1.3.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
   _t(key) { return cardT(this._hass, key); }
@@ -8840,7 +8838,6 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
   _render() {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     const cfg = this._config || {};
-    // eslint-disable-next-line eqeqeq
     const sel = v => (cfg.columns == v || (v === "auto" && (cfg.columns === "auto" || cfg.columns == null))) ? "selected" : "";
     const isAuto = cfg.columns === "auto" || cfg.columns == null;
     const minW = cfg.min_width || "650px";

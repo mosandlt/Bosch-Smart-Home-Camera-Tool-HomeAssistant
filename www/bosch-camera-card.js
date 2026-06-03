@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.6";
+const CARD_VERSION = "13.5.7";
 
 let _boschFsExitAt = 0;
 
@@ -3033,7 +3033,6 @@ class BoschCameraCard extends HTMLElement {
         this._uptimeTimer = null;
       }
     }
-    const isAudioOn = this._getEffectiveState(ents.audio) === "on";
     const shouldVideo = isStreaming;
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
@@ -4478,8 +4477,6 @@ window.customCards.push({
   description: "Bosch Smart Home cameras with streaming state, loading indicator and controls",
   preview: false
 });
-
-const OVERVIEW_VERSION = "1.3.0";
 
 class BoschCameraOverviewCard extends HTMLElement {
   _t(key) {

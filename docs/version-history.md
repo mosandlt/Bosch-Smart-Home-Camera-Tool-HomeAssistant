@@ -2,6 +2,14 @@
 
 Recent releases. For the full changelog see [`CHANGELOG.md`](../CHANGELOG.md) at the repo root or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v13.5.7 — 2026-06-03
+
+Maintenance patch — no user-facing behaviour change. CI hardening ahead of GitHub's 2026-06-16 Node-24 action cutover, test-only dependency security pins, and dead-code removal in the card bundle.
+
+- **CI on Node-24-native action majors.** `github/codeql-action` `v3 → v4` (the v3 line stops running on the new runner image) and `actions/checkout` `v4 → v5` across the remaining workflows. No change to what the gates check — only the action runtimes.
+- **Test-dependency security pins.** `pytest-homeassistant-custom-component` bumped (pulls `zeroconf 0.149.16`) and `idna >= 3.15` pinned, clearing four transitive advisories in the test toolchain. These are dev/CI-only dependencies and never ship to your installation. Four `pyjwt` advisories remain pinned to Home Assistant core's exact `PyJWT==2.12.1` and will clear when core itself bumps.
+- **Card bundle cleanup.** Removed two unused variables and a stale lint directive; the bundle is a little smaller. Behaviour is identical.
+
 ## v13.5.6 — 2026-06-03
 
 Minor release — a new **Green IT** power-saving option, a fix for streams lingering after mobile/HLS viewing, and privacy-mode button greying.
