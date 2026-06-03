@@ -655,6 +655,35 @@ test("fullscreen double-tap zooms the video and exit resets it", async ({ page }
   expect(r.vtAfter, "transform cleared on exit").toBe("");
 });
 
+test("tap-to-play / loading overlay sits UNDER the control pill bar (Stop stays tappable)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    card.style.width = "400px"; card.style.display = "block";
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const sr = card.shadowRoot;
+    const pill = sr.querySelector(".ap-pill-bar");
+    const overlay = sr.getElementById("tap-to-play-overlay");
+    const stream = sr.getElementById("ap-btn-stream");
+    if (!pill || !overlay || !stream) return { error: "missing pill/overlay/button" };
+    // Show the remote tap-to-play gate (the "antippen zum Starten" overlay).
+    overlay.classList.add("visible");
+    const z = (el) => parseInt(getComputedStyle(el).zIndex || "0", 10);
+    const rect = stream.getBoundingClientRect();
+    const hit = sr.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const hitInPill = !!(hit && hit.closest && hit.closest(".ap-pill-bar"));
+    return { pillZ: z(pill), overlayZ: z(overlay), hitTag: hit && hit.tagName, hitInPill };
+  });
+  expect(r.error, "card renders pill bar + overlay + stream button").toBeUndefined();
+  expect(r.pillZ, "pill bar sits above the tap-to-play overlay").toBeGreaterThan(r.overlayZ);
+  expect(r.hitInPill, "a tap at the Stop button reaches the pill bar, not the overlay").toBe(true);
+});
+
 test("fullscreen: double-tap ON an overlay control does NOT zoom (button click survives) (#16)", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });

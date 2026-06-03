@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.8";
+const CARD_VERSION = "13.5.9";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -1193,8 +1193,13 @@ class BoschCameraCard extends HTMLElement {
     //       endpoint — cellular networks deploy carrier-grade NAT and often
     //       proxy/strip UDP, so STUN returns unusable candidates and ICE
     //       fails. Same 5 s wait + visible "stream failed" toast.
-    // Desktop browsers external and any client on LAN/.local continue to
-    // attempt WebRTC normally.
+    // NOTE: despite the legacy name, this flag NO LONGER skips WebRTC. It marks
+    // the Companion/mobile-on-external case where WebRTC is less likely (UDP over
+    // tunnel / cellular CGNAT). We still TRY WebRTC but with a SHORT timeout
+    // (~2.5s) and fall back to HLS fast — so a VPN- or otherwise-reachable client
+    // gets direct WebRTC instead of being forced onto HLS, while a true-remote
+    // client only waits ~2.5s before HLS. Desktop-external + LAN/.local use the
+    // normal 5s attempt. 2026-06-03 (was: hard skip). Detection below unchanged.
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
       const isCompanion = /Home\s?Assistant/i.test(ua);
@@ -1225,6 +1230,7 @@ class BoschCameraCard extends HTMLElement {
     this._lastAudioState     = null;  // last backend audio-switch state (live-sync edge detect)
     this._lastVolumeState    = null;  // last backend volume-entity state (live-sync edge detect)
     this._stoppingLiveVideo  = false; // true only during _stopLiveVideo() so the pause-guard doesn't fight our own teardown
+    this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -3218,8 +3224,13 @@ class BoschCameraCard extends HTMLElement {
         /* Belt-and-braces: keep overlay z-index low — the wrapper's new
            stacking context confines them anyway, but a low value protects
            against future ancestors that might break isolation. */
-        :host(.apple-style) .ap-top,
-        :host(.apple-style) .ap-pill-bar { z-index: 2; }
+        :host(.apple-style) .ap-top { z-index: 2; }
+        /* The control pill bar must stay TAPPABLE above the full-cover overlays
+           (tap-to-play 9, loading 10, pinned-reveal 11) — otherwise those
+           overlays swallowed taps on the Stop button and the user could not end
+           a stream while it showed "antippen zum Starten" / was warming up
+           (reported 2026-06-03). Only the re-auth overlay (13) sits above it. */
+        :host(.apple-style) .ap-pill-bar { z-index: 12; }
 
         /* ========================================================
          * Material You (Android / M3) theme overrides
@@ -5063,9 +5074,9 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
-      // Show HLS-fallback banner when streaming starts on a remote-skip path
-      // (Companion+external or mobile-browser+external — see _remoteSkipWebRTC).
-      if (this._remoteSkipWebRTC) {
+      // Show the HLS-mode banner ONLY when the remote/mobile path actually fell
+      // back to HLS — not when the short WebRTC attempt succeeded (e.g. on VPN).
+      if (this._remoteSkipWebRTC && this._streamTransport === "hls") {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) {
           const bt = banner.querySelector("#ios-hls-banner-text");
@@ -5203,11 +5214,15 @@ class BoschCameraCard extends HTMLElement {
     // external host (not RFC1918/.local), skip WebRTC entirely and go
     // straight to HLS. Browser-on-LAN and desktop-browser-external still
     // try WebRTC.
-    const _skipWebRTC = this._remoteSkipWebRTC;
-    if (_skipWebRTC) {
-      console.debug("bosch-camera-card: remote endpoint + Companion/mobile-browser — skipping WebRTC, using HLS");
+    // Always ATTEMPT WebRTC — the ICE attempt is itself the reachability probe:
+    // a VPN/LAN-reachable client connects in <2.5s and gets direct WebRTC; a
+    // true-remote client fails fast (ICE failed / short timeout) and falls back
+    // to HLS below. `_remoteSkipWebRTC` now only SHORTENS the attempt timeout
+    // (see _startWebRTC). 2026-06-03 (was: hard skip for Companion/mobile+ext).
+    if (this._remoteSkipWebRTC) {
+      console.debug("bosch-camera-card: remote endpoint — short WebRTC attempt, HLS fallback if it doesn't connect fast");
     }
-    if (!_skipWebRTC) try {
+    try {
       try {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
@@ -5243,6 +5258,9 @@ class BoschCameraCard extends HTMLElement {
     } catch (outer) { /* paranoia */ }
 
     // ── HLS via camera/stream (fallback) ────────────────────────────────
+    // Mark the active transport so the HLS-mode banner shows ONLY when we
+    // actually fell back to HLS (not when the short WebRTC attempt succeeded).
+    this._streamTransport = "hls";
     try {
       const result = await this._hass.callWS({
         type:      "camera/stream",
@@ -5488,6 +5506,7 @@ class BoschCameraCard extends HTMLElement {
     pc.ontrack = (ev) => {
       remoteStream.addTrack(ev.track);
       if (video.srcObject !== remoteStream) {
+        this._streamTransport = "webrtc";
         video.srcObject = remoteStream;
         video.muted = true;
         video.play().catch(() => {});
@@ -5554,7 +5573,10 @@ class BoschCameraCard extends HTMLElement {
     // kicks in fast.
     await new Promise((resolve, reject) => {
       webrtcReject = reject;
-      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within 5s")), 5000);
+      // Short attempt on the remote/mobile path so HLS fallback kicks in fast;
+      // normal 5s elsewhere. The ICE attempt doubles as the reachability probe.
+      const attemptMs = this._remoteSkipWebRTC ? 2500 : 5000;
+      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
       pc.addEventListener("iceconnectionstatechange", () => {
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
@@ -5566,6 +5588,7 @@ class BoschCameraCard extends HTMLElement {
         clearTimeout(timeout);
         remoteStream.addTrack(ev.track);
         if (video.srcObject !== remoteStream) {
+          this._streamTransport = "webrtc";
           video.srcObject = remoteStream;
           video.muted = true;
           video.play().catch(() => {});
@@ -5691,6 +5714,9 @@ class BoschCameraCard extends HTMLElement {
     if (tapOverlay) tapOverlay.classList.remove("visible");
     // Teardown done — re-arm the pause-guard for the next stream.
     this._stoppingLiveVideo = false;
+    // Clear the transport so a stale value can't flash the HLS banner before the
+    // next stream picks its transport.
+    this._streamTransport = null;
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
@@ -5837,14 +5863,21 @@ class BoschCameraCard extends HTMLElement {
     const hass = this._hass;
     const ents = this._entities;
 
-    // Sync HLS-fallback banner visibility with live video state — only on
-    // the remote-skip-WebRTC paths (Companion+ext or mobile-browser+ext).
-    if (this._remoteSkipWebRTC) {
+    // Sync HLS-mode banner visibility with the ACTIVE transport — show it only
+    // when the remote/mobile path actually fell back to HLS, hide it when the
+    // short WebRTC attempt connected (e.g. over VPN). Always managed so it never
+    // lingers from a previous HLS session after a WebRTC reconnect.
+    {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) {
-        const bt = banner.querySelector("#ios-hls-banner-text");
-        if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
-        banner.classList.toggle("visible", !!this._liveVideoActive);
+        const showHls = this._remoteSkipWebRTC
+          && this._streamTransport === "hls"
+          && !!this._liveVideoActive;
+        if (showHls) {
+          const bt = banner.querySelector("#ios-hls-banner-text");
+          if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
+        }
+        banner.classList.toggle("visible", showHls);
       }
     }
 
