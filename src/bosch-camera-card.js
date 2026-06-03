@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.3";
+const CARD_VERSION = "13.5.5";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -181,6 +181,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "You're on a remote connection — tap to start",
     play_gate_hint_default: "Tap to start the live stream",
     loading: "Loading…",
+    hls_mode_banner: "HLS mode · higher latency (no WebRTC over remote tunnel)",
     cam_missing_title: "Camera not found",
     cam_missing_sub: "This camera entity does not exist — check the card's camera_entity setting.",
     delete: "Delete",
@@ -237,6 +238,11 @@ const CARD_I18N = {
     ed_show_title: "Show title pill (off = video only, no name overlay)",
     ed_show_last_event: "Show last-event badge",
     ed_show_audio: "Show audio button (sound + volume)",
+    ed_pan_overlay: "Pan arrows on the video (360 cameras)",
+    ed_pan_overlay_auto: "Auto (on hover, touch and fullscreen)",
+    ed_pan_overlay_always: "Always visible",
+    ed_pan_overlay_never: "Hidden (use the menu row)",
+    ed_hide_redundant_privacy: "Hide the redundant privacy row (already on the pill bar)",
     ed_use_card_audio: "Use card audio settings (decouple from the global audio entities)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Integration default (don't override)",
@@ -264,6 +270,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Du bist remote — antippen zum Starten",
     play_gate_hint_default: "Antippen, um den Live-Stream zu starten",
     loading: "Lädt…",
+    hls_mode_banner: "HLS-Modus · höhere Latenz (kein WebRTC über Remote-Tunnel)",
     cam_missing_title: "Kamera nicht vorhanden",
     cam_missing_sub: "Diese Kamera-Entität existiert nicht — bitte camera_entity in der Karten-Konfiguration prüfen.",
     delete: "Löschen",
@@ -320,6 +327,11 @@ const CARD_I18N = {
     ed_show_title: "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)",
     ed_show_last_event: "Letztes-Ereignis-Badge anzeigen",
     ed_show_audio: "Audio-Button anzeigen (Ton + Lautstärke)",
+    ed_pan_overlay: "Schwenk-Pfeile auf dem Video (360-Grad-Kameras)",
+    ed_pan_overlay_auto: "Automatisch (bei Hover, Touch und Vollbild)",
+    ed_pan_overlay_always: "Immer sichtbar",
+    ed_pan_overlay_never: "Ausgeblendet (Menü-Reihe nutzen)",
+    ed_hide_redundant_privacy: "Redundante Privat-Schalterzeile ausblenden (schon in der Pill-Bar)",
     ed_use_card_audio: "Karten-eigene Audio-Einstellungen (von den globalen Audio-Entitäten entkoppeln)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Integration-Vorgabe (nicht überschreiben)",
@@ -347,6 +359,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Estás en una conexión remota — toca para iniciar",
     play_gate_hint_default: "Toca para iniciar el stream en directo",
     loading: "Cargando…",
+    hls_mode_banner: "Modo HLS · mayor latencia (sin WebRTC por túnel remoto)",
     cam_missing_title: "Cámara no encontrada",
     cam_missing_sub: "Esta entidad de cámara no existe — revisa el ajuste camera_entity de la tarjeta.",
     delete: "Eliminar",
@@ -402,6 +415,11 @@ const CARD_I18N = {
     ed_show_title: "Mostrar píldora de título (desactivado = solo vídeo, sin superposición de nombre)",
     ed_show_last_event: "Mostrar insignia del último evento",
     ed_show_audio: "Mostrar botón de audio (sonido + volumen)",
+    ed_pan_overlay: "Flechas de giro sobre el vídeo (cámaras 360)",
+    ed_pan_overlay_auto: "Automático (al pasar el ratón, táctil y pantalla completa)",
+    ed_pan_overlay_always: "Siempre visible",
+    ed_pan_overlay_never: "Oculto (usar la fila del menú)",
+    ed_hide_redundant_privacy: "Ocultar la fila de privacidad redundante (ya en la barra)",
     ed_use_card_audio: "Usar ajustes de audio de la tarjeta (desacoplar de las entidades de audio globales)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Predeterminado de la integración (sin anular)",
@@ -427,6 +445,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Vous êtes en connexion distante — appuyer pour démarrer",
     play_gate_hint_default: "Appuyer pour démarrer le flux en direct",
     loading: "Chargement…",
+    hls_mode_banner: "Mode HLS · latence plus élevée (pas de WebRTC via le tunnel distant)",
     cam_missing_title: "Caméra introuvable",
     cam_missing_sub: "Cette entité de caméra n'existe pas — vérifiez le paramètre camera_entity de la carte.",
     delete: "Supprimer",
@@ -482,6 +501,11 @@ const CARD_I18N = {
     ed_show_title: "Afficher la pastille de titre (désactivé = vidéo uniquement, sans nom)",
     ed_show_last_event: "Afficher le badge du dernier événement",
     ed_show_audio: "Afficher le bouton audio (son + volume)",
+    ed_pan_overlay: "Flèches de panoramique sur la vidéo (caméras 360)",
+    ed_pan_overlay_auto: "Auto (au survol, tactile et plein écran)",
+    ed_pan_overlay_always: "Toujours visible",
+    ed_pan_overlay_never: "Masqué (utiliser la rangée du menu)",
+    ed_hide_redundant_privacy: "Masquer la ligne de confidentialité redondante (déjà dans la barre)",
     ed_use_card_audio: "Utiliser les réglages audio de la carte (découpler des entités audio globales)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Défaut de l'intégration (ne pas remplacer)",
@@ -507,6 +531,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Connessione remota — tocca per avviare",
     play_gate_hint_default: "Tocca per avviare il live stream",
     loading: "Caricamento…",
+    hls_mode_banner: "Modalità HLS · latenza maggiore (niente WebRTC sul tunnel remoto)",
     cam_missing_title: "Telecamera non trovata",
     cam_missing_sub: "Questa entità telecamera non esiste — controlla l'impostazione camera_entity della scheda.",
     delete: "Elimina",
@@ -562,6 +587,11 @@ const CARD_I18N = {
     ed_show_title: "Mostra pill titolo (off = solo video, nessuna sovrimpressione nome)",
     ed_show_last_event: "Mostra badge ultimo evento",
     ed_show_audio: "Mostra pulsante audio (suono + volume)",
+    ed_pan_overlay: "Frecce di rotazione sul video (telecamere 360)",
+    ed_pan_overlay_auto: "Auto (al passaggio del mouse, tocco e schermo intero)",
+    ed_pan_overlay_always: "Sempre visibile",
+    ed_pan_overlay_never: "Nascosto (usa la riga del menu)",
+    ed_hide_redundant_privacy: "Nascondi la riga privacy ridondante (già nella barra)",
     ed_use_card_audio: "Usa le impostazioni audio della scheda (disaccoppia dalle entità audio globali)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Impostazione predefinita dell'integrazione (non sovrascrivere)",
@@ -587,6 +617,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "U bent op een externe verbinding — tik om te starten",
     play_gate_hint_default: "Tik om de live stream te starten",
     loading: "Laden…",
+    hls_mode_banner: "HLS-modus · hogere latentie (geen WebRTC via externe tunnel)",
     cam_missing_title: "Camera niet gevonden",
     cam_missing_sub: "Deze camera-entiteit bestaat niet — controleer de camera_entity-instelling van de kaart.",
     delete: "Verwijderen",
@@ -642,6 +673,11 @@ const CARD_I18N = {
     ed_show_title: "Titelpil tonen (uit = alleen video, geen naamoverlay)",
     ed_show_last_event: "Badge laatste gebeurtenis tonen",
     ed_show_audio: "Audioknop tonen (geluid + volume)",
+    ed_pan_overlay: "Draaipijlen op de video (360-camera's)",
+    ed_pan_overlay_auto: "Automatisch (bij hover, touch en volledig scherm)",
+    ed_pan_overlay_always: "Altijd zichtbaar",
+    ed_pan_overlay_never: "Verborgen (gebruik de menurij)",
+    ed_hide_redundant_privacy: "Verberg de overbodige privacyrij (al in de pillenbalk)",
     ed_use_card_audio: "Kaart-eigen audio-instellingen (loskoppelen van de globale audio-entiteiten)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Integratiestandaard (niet overschrijven)",
@@ -667,6 +703,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Jesteś połączony zdalnie — dotknij, aby uruchomić",
     play_gate_hint_default: "Dotknij, aby uruchomić transmisję na żywo",
     loading: "Ładowanie…",
+    hls_mode_banner: "Tryb HLS · większe opóźnienie (brak WebRTC przez zdalny tunel)",
     cam_missing_title: "Nie znaleziono kamery",
     cam_missing_sub: "Ta encja kamery nie istnieje — sprawdź ustawienie camera_entity karty.",
     delete: "Usuń",
@@ -722,6 +759,11 @@ const CARD_I18N = {
     ed_show_title: "Pokaż pasek tytułu (wył. = tylko wideo, bez nakładki nazwy)",
     ed_show_last_event: "Pokaż znacznik ostatniego zdarzenia",
     ed_show_audio: "Pokaż przycisk audio (dźwięk i głośność)",
+    ed_pan_overlay: "Strzałki obrotu na wideo (kamery 360)",
+    ed_pan_overlay_auto: "Automatycznie (po najechaniu, dotyk i pełny ekran)",
+    ed_pan_overlay_always: "Zawsze widoczne",
+    ed_pan_overlay_never: "Ukryte (użyj wiersza menu)",
+    ed_hide_redundant_privacy: "Ukryj zbędny wiersz prywatności (już na pasku)",
     ed_use_card_audio: "Użyj ustawień audio karty (odłącz od globalnych encji audio)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Domyślne integracji (bez nadpisania)",
@@ -747,6 +789,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Está numa ligação remota — toque para iniciar",
     play_gate_hint_default: "Toque para iniciar o stream ao vivo",
     loading: "A carregar…",
+    hls_mode_banner: "Modo HLS · maior latência (sem WebRTC pelo túnel remoto)",
     cam_missing_title: "Câmara não encontrada",
     cam_missing_sub: "Esta entidade de câmara não existe — verifique a definição camera_entity do cartão.",
     delete: "Eliminar",
@@ -802,6 +845,11 @@ const CARD_I18N = {
     ed_show_title: "Mostrar pílula de título (desativado = apenas vídeo, sem sobreposição de nome)",
     ed_show_last_event: "Mostrar distintivo do último evento",
     ed_show_audio: "Mostrar botão de áudio (som + volume)",
+    ed_pan_overlay: "Setas de rotação no vídeo (câmaras 360)",
+    ed_pan_overlay_auto: "Automático (ao passar o rato, toque e ecrã inteiro)",
+    ed_pan_overlay_always: "Sempre visível",
+    ed_pan_overlay_never: "Oculto (usar a linha do menu)",
+    ed_hide_redundant_privacy: "Ocultar a linha de privacidade redundante (já na barra)",
     ed_use_card_audio: "Usar definições de áudio do cartão (desacoplar das entidades de áudio globais)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Predefinição da integração (não substituir)",
@@ -827,6 +875,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Вы подключены удалённо — нажмите для запуска",
     play_gate_hint_default: "Нажмите для запуска прямой трансляции",
     loading: "Загрузка…",
+    hls_mode_banner: "Режим HLS · выше задержка (без WebRTC через удалённый туннель)",
     cam_missing_title: "Камера не найдена",
     cam_missing_sub: "Этот объект камеры не существует — проверьте параметр camera_entity карточки.",
     delete: "Удалить",
@@ -882,6 +931,11 @@ const CARD_I18N = {
     ed_show_title: "Показывать плашку заголовка (выкл = только видео, без имени)",
     ed_show_last_event: "Показывать значок последнего события",
     ed_show_audio: "Показывать кнопку звука (звук + громкость)",
+    ed_pan_overlay: "Стрелки поворота на видео (камеры 360)",
+    ed_pan_overlay_auto: "Авто (при наведении, касании и полном экране)",
+    ed_pan_overlay_always: "Всегда видимы",
+    ed_pan_overlay_never: "Скрыто (использовать строку меню)",
+    ed_hide_redundant_privacy: "Скрыть дублирующую строку приватности (уже на панели)",
     ed_use_card_audio: "Использовать настройки звука карточки (отвязать от глобальных аудио-сущностей)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Настройка интеграции (не переопределять)",
@@ -907,6 +961,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "Ви у віддаленій мережі — торкніться для запуску",
     play_gate_hint_default: "Торкніться, щоб розпочати пряму трансляцію",
     loading: "Завантаження…",
+    hls_mode_banner: "Режим HLS · більша затримка (без WebRTC через віддалений тунель)",
     cam_missing_title: "Камеру не знайдено",
     cam_missing_sub: "Цей об'єкт камери не існує — перевірте параметр camera_entity картки.",
     delete: "Видалити",
@@ -962,6 +1017,11 @@ const CARD_I18N = {
     ed_show_title: "Показувати плашку назви (вимк = лише відео, без накладення імені)",
     ed_show_last_event: "Показувати значок останньої події",
     ed_show_audio: "Показувати кнопку аудіо (звук + гучність)",
+    ed_pan_overlay: "Стрілки повороту на відео (камери 360)",
+    ed_pan_overlay_auto: "Авто (під час наведення, дотику та повного екрана)",
+    ed_pan_overlay_always: "Завжди видимі",
+    ed_pan_overlay_never: "Приховано (використовуйте рядок меню)",
+    ed_hide_redundant_privacy: "Сховати дубльований рядок приватності (уже на панелі)",
     ed_use_card_audio: "Використовувати налаштування звуку картки (відв'язати від глобальних аудіосутностей)",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "Типове значення інтеграції (не перевизначати)",
@@ -987,6 +1047,7 @@ const CARD_I18N = {
     play_gate_hint_remote: "您正在远程连接 — 点击启动",
     play_gate_hint_default: "点击启动实时直播",
     loading: "加载中…",
+    hls_mode_banner: "HLS 模式 · 延迟更高（远程隧道无 WebRTC）",
     cam_missing_title: "未找到摄像头",
     cam_missing_sub: "此摄像头实体不存在 — 请检查卡片的 camera_entity 设置。",
     delete: "删除",
@@ -1042,6 +1103,11 @@ const CARD_I18N = {
     ed_show_title: "显示标题标签（关闭 = 仅视频，无名称叠加）",
     ed_show_last_event: "显示最新事件徽章",
     ed_show_audio: "显示音频按钮（声音 + 音量）",
+    ed_pan_overlay: "视频上的转向箭头（360 摄像头）",
+    ed_pan_overlay_auto: "自动（悬停、触摸和全屏时）",
+    ed_pan_overlay_always: "始终显示",
+    ed_pan_overlay_never: "隐藏（使用菜单行）",
+    ed_hide_redundant_privacy: "隐藏多余的隐私行（药丸栏中已有）",
     ed_use_card_audio: "使用卡片自己的音频设置（与全局音频实体解耦）",
     ed_h_autoplay: "Auto-Play",
     ed_autoplay_default: "使用集成默认值（不覆盖）",
@@ -1298,6 +1364,26 @@ class BoschCameraCard extends HTMLElement {
       // Audio pill in the control bar (tap = mute/unmute, hover = volume on
       // desktop/Android). Default on; set show_audio:false to hide it.
       show_audio:                 config.show_audio !== false,
+      // Pan edge-arrows directly on the video (#33): big left/right chevrons
+      // overlaid on the picture so a 360° camera can be swivelled without
+      // leaving the card — and, crucially, while in FULLSCREEN. The existing
+      // ◀◀ ◀ ■ ▶ ▶▶ row lives in the menu *outside* the fullscreen element, so
+      // it disappears in fullscreen; this overlay is a child of .img-wrapper
+      // (the element that goes fullscreen) and therefore survives it. Only
+      // rendered when number.<cam>_pan_position exists (gated in _update), so
+      // non-360 cameras never see it. Works in BOTH designs (apple + legacy)
+      // and BOTH cards (single + overview tiles). Values:
+      //   "auto"   (default) — fade in on hover, always on touch + fullscreen
+      //   "always"           — permanently visible
+      //   "never"            — hidden (use the menu row instead)
+      pan_overlay:                ["auto", "always", "never"].includes(config.pan_overlay) ? config.pan_overlay : "auto",
+      // Hide the redundant "Privat" switch row when the apple-style pill bar
+      // already exposes a privacy button (#15/#27 — RkcCorian: "the Privat
+      // toggle is the only redundant to the button"). Default true. The pill
+      // button and this row drive the same switch.<cam>_privacy_mode, so in
+      // apple-style they duplicate each other. Legacy (apple_style:false) has
+      // no pill bar, so the labelled row always stays there regardless.
+      hide_redundant_privacy:     config.hide_redundant_privacy !== false,
       // Decouple the pill from the global audio entities (per-browser audio).
       use_card_audio_settings:    config.use_card_audio_settings === true,
       // Per-card YAML override of the START audio state, independent of the
@@ -1398,6 +1484,17 @@ class BoschCameraCard extends HTMLElement {
     // Element-hiding flags (issue #15): :host(.no-title)/:host(.no-last-event).
     this.classList.toggle("no-title", !this._config.show_title);
     this.classList.toggle("no-last-event", !this._config.show_last_event);
+    // Pan edge-arrow overlay visibility (#33): "always" pins it, "never" hides
+    // it; default "auto" leaves it to the hover/touch/fullscreen CSS.
+    this.classList.toggle("pan-overlay-always", this._config.pan_overlay === "always");
+    this.classList.toggle("pan-overlay-never", this._config.pan_overlay === "never");
+    // Dedupe the "Privat" switch row against the pill-bar privacy button
+    // (#15/#27) — only meaningful when the pill bar is actually shown
+    // (apple-style, non-compact). Legacy / compact keep their existing rows.
+    this.classList.toggle(
+      "dedupe-privacy",
+      this._config.hide_redundant_privacy && this._config.apple_style && !this._config.compact,
+    );
     // OS host class (:host(.os-windows) etc.) for OS-targeted CSS. Development
     // happens on macOS only, so this gives a hook to correct platform-specific
     // rendering (Segoe-UI metrics, ClearType weight, scrollbar width) reported
@@ -2049,6 +2146,7 @@ class BoschCameraCard extends HTMLElement {
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     if (this._privacyCooldownTimer) { clearInterval(this._privacyCooldownTimer); this._privacyCooldownTimer = null; }
     if (this._streamCooldownTimer) { clearInterval(this._streamCooldownTimer); this._streamCooldownTimer = null; }
+    if (this._panPosTimer) { clearTimeout(this._panPosTimer); this._panPosTimer = null; }
     if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
     // Clear any lingering error-feedback timers set by _callServiceWithRollback
     if (this._errorFeedbackTimers) {
@@ -2428,6 +2526,66 @@ class BoschCameraCard extends HTMLElement {
         .img-wrapper:fullscreen .ap-pill-bar,
         .img-wrapper:-webkit-full-screen .ap-pill-bar { display: flex !important; }
 
+        /* ── Pan edge-arrow overlay (#33) ──────────────────────────────────
+           Big left/right chevrons on the video edges. Inside .img-wrapper so
+           the Fullscreen API keeps them (only the fullscreened node + its
+           descendants paint). Reveal logic: fade in on hover (desktop), always
+           on touch-only devices, always in fullscreen, always when pinned via
+           pan_overlay:"always". Hidden entirely via pan_overlay:"never". */
+        .pan-overlay {
+          position: absolute; inset: 0; z-index: 9;
+          pointer-events: none; opacity: 0;
+          transition: opacity .2s ease;
+        }
+        .img-wrapper:hover .pan-overlay { opacity: 1; }
+        @media (hover: none) { .pan-overlay { opacity: 1; } }
+        :host(.pan-overlay-always) .pan-overlay { opacity: 1; }
+        :host(.pan-overlay-never) .pan-overlay { display: none !important; }
+        .pan-edge {
+          position: absolute; top: 50%; transform: translateY(-50%);
+          width: 44px; height: 64px; padding: 0; border: none; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          pointer-events: auto; color: #fff;
+          background: rgba(0,0,0,.34);
+          -webkit-backdrop-filter: blur(8px) saturate(1.4);
+          backdrop-filter: blur(8px) saturate(1.4);
+          border-radius: 14px;
+          transition: background .15s ease, transform .1s ease, opacity .15s ease;
+        }
+        .pan-edge svg { width: 26px; height: 26px; }
+        .pan-edge-left { left: 10px; }
+        .pan-edge-right { right: 10px; }
+        .pan-edge:hover { background: rgba(0,0,0,.52); }
+        .pan-edge:active { transform: translateY(-50%) scale(.9); }
+        .pan-edge[disabled] { opacity: .25; pointer-events: none; cursor: default; }
+        /* Day-mode chrome: lighter glass so the dark icon stays legible. */
+        :host(.apple-style.mode-day) .pan-edge { background: rgba(255,255,255,.42); color: #1c1c1e; }
+        :host(.apple-style.mode-day) .pan-edge:hover { background: rgba(255,255,255,.62); }
+        .pan-overlay-pos {
+          position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%);
+          padding: 3px 11px; border-radius: 999px;
+          background: rgba(0,0,0,.5); color: #fff;
+          font-size: 13px; font-weight: 600; letter-spacing: .3px;
+          -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+          opacity: 0; transition: opacity .25s ease; pointer-events: none;
+        }
+        .pan-overlay-pos.flash { opacity: 1; }
+        /* Compact (overview) tiles: edge-arrows only get in the way at tile
+           size, so show them ONLY once a tile is opened to fullscreen. */
+        :host(.compact) .pan-overlay { display: none; }
+        :host(.compact.fs-active) .pan-overlay { display: block; }
+        /* In fullscreen: bump above the video layer (iOS pushes <video> up),
+           keep visible, and enlarge the hit targets for touch. */
+        :host(.fs-active) .pan-overlay,
+        .img-wrapper:fullscreen .pan-overlay,
+        .img-wrapper:-webkit-full-screen .pan-overlay { z-index: 10000; opacity: 1; }
+        :host(.fs-active) .pan-edge,
+        .img-wrapper:fullscreen .pan-edge,
+        .img-wrapper:-webkit-full-screen .pan-edge { width: 54px; height: 88px; }
+        :host(.fs-active) .pan-edge svg,
+        .img-wrapper:fullscreen .pan-edge svg,
+        .img-wrapper:-webkit-full-screen .pan-edge svg { width: 32px; height: 32px; }
+
         /* Motion zones SVG overlay */
         .motion-zones-overlay {
           position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5;
@@ -2605,6 +2763,10 @@ class BoschCameraCard extends HTMLElement {
         .btn-privacy-inline.on { background: rgba(255,69,58,.18); color: #ff453a; }
         :host(.minimal) .btn-privacy-inline { display: inline-flex; }
         :host(.minimal) .switch-rows > .privacy-row { display: none; }
+        /* Dedupe (#15/#27): drop the "Privat" row when the pill bar already
+           carries a privacy button (apple-style). The pill button + this row
+           drive the same entity, so showing both is redundant. */
+        :host(.dedupe-privacy) .switch-rows > .privacy-row { display: none; }
         .btn-overflow { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }
         :host(.minimal) .btn-overflow { display: inline-flex; }
         :host(.minimal.overflow-open) .btn-overflow { background: rgba(10,132,255,.18); color: #0a84ff; }
@@ -3649,7 +3811,7 @@ class BoschCameraCard extends HTMLElement {
           <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />
           <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>
           <div class="ios-hls-banner" id="ios-hls-banner">
-            <span>ℹ HLS-Modus (kein WebRTC über Tunnel)</span>
+            <span id="ios-hls-banner-text">ℹ HLS-Modus (kein WebRTC über Tunnel)</span>
           </div>
           <div class="tap-to-play-overlay" id="tap-to-play-overlay">
             <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -3755,6 +3917,22 @@ class BoschCameraCard extends HTMLElement {
             </button>
             <button class="ap-pill-btn" id="ap-btn-more" title="Mehr Optionen" aria-label="Mehr Optionen" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg>
+            </button>
+          </div>
+
+          <!-- Pan edge-arrows (#33) — large glass chevrons on the left/right
+               edge of the video. A child of .img-wrapper so they survive the
+               Fullscreen API (only the fullscreened element + its descendants
+               render). Gated to cameras with a pan entity (_update toggles
+               display + disables the end stops at ±120°). Layout-agnostic:
+               works in apple + legacy designs and single + overview tiles. -->
+          <div class="pan-overlay" id="pan-overlay" style="display:none">
+            <button class="pan-edge pan-edge-left" id="pan-edge-left" title="Nach links schwenken" aria-label="Kamera nach links schwenken">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <span class="pan-overlay-pos" id="pan-overlay-pos" aria-hidden="true">0°</span>
+            <button class="pan-edge pan-edge-right" id="pan-edge-right" title="Nach rechts schwenken" aria-label="Kamera nach rechts schwenken">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
         </div>
@@ -4603,6 +4781,24 @@ class BoschCameraCard extends HTMLElement {
     this.shadowRoot.getElementById("pan-right")     ?.addEventListener("click", () => setPan(getCurPan() + PAN_STEP));
     this.shadowRoot.getElementById("pan-full-right")?.addEventListener("click", () => setPan(120));
 
+    // Pan edge-arrows on the video (#33) — reuse the same setPan() so behaviour
+    // (clamp, snapshot refresh) is identical to the menu row. Each tap = one
+    // 30° step; a transient angle badge flashes so you can see where you are.
+    const flashPanPos = (val) => {
+      const badge = this.shadowRoot.getElementById("pan-overlay-pos");
+      if (!badge) return;
+      badge.textContent = `${val > 0 ? "+" : ""}${val}°`;
+      badge.classList.add("flash");
+      clearTimeout(this._panPosTimer);
+      this._panPosTimer = setTimeout(() => badge.classList.remove("flash"), 1500);
+    };
+    this.shadowRoot.getElementById("pan-edge-left")?.addEventListener("click", () => {
+      const v = Math.max(-120, getCurPan() - PAN_STEP); setPan(v); flashPanPos(v);
+    });
+    this.shadowRoot.getElementById("pan-edge-right")?.addEventListener("click", () => {
+      const v = Math.min(120, getCurPan() + PAN_STEP); setPan(v); flashPanPos(v);
+    });
+
     // Quality dropdown
     const qualitySel = this.shadowRoot.getElementById("quality-select");
     if (qualitySel) {
@@ -4891,7 +5087,11 @@ class BoschCameraCard extends HTMLElement {
       // (Companion+external or mobile-browser+external — see _remoteSkipWebRTC).
       if (this._remoteSkipWebRTC) {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
-        if (banner) banner.classList.add("visible");
+        if (banner) {
+          const bt = banner.querySelector("#ios-hls-banner-text");
+          if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
+          banner.classList.add("visible");
+        }
       }
       const clearOverlay = () => {
         // NOW hide the snapshot — video is playing, no black gap
@@ -5633,7 +5833,11 @@ class BoschCameraCard extends HTMLElement {
     // the remote-skip-WebRTC paths (Companion+ext or mobile-browser+ext).
     if (this._remoteSkipWebRTC) {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
-      if (banner) banner.classList.toggle("visible", !!this._liveVideoActive);
+      if (banner) {
+        const bt = banner.querySelector("#ios-hls-banner-text");
+        if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
+        banner.classList.toggle("visible", !!this._liveVideoActive);
+      }
     }
 
     // Clear optimistic states that have been confirmed by HA
@@ -6489,6 +6693,22 @@ class BoschCameraCard extends HTMLElement {
     if (panSection) {
       const hasPan = panState && panState.state && panState.state !== "unavailable" && panState.state !== "unknown";
       panSection.style.display = hasPan ? "" : "none";
+      // Pan edge-arrow overlay (#33): same support gate. Disable the end stops
+      // at ±120° and keep the badge text current for screen readers.
+      const panOverlay = this.shadowRoot.getElementById("pan-overlay");
+      if (panOverlay) {
+        panOverlay.style.display = hasPan ? "" : "none";
+        if (hasPan) {
+          const cur = parseFloat(panState.state) || 0;
+          const edgeL = this.shadowRoot.getElementById("pan-edge-left");
+          const edgeR = this.shadowRoot.getElementById("pan-edge-right");
+          if (edgeL) edgeL.toggleAttribute("disabled", cur <= -120);
+          if (edgeR) edgeR.toggleAttribute("disabled", cur >= 120);
+          const posBadge = this.shadowRoot.getElementById("pan-overlay-pos");
+          if (posBadge && !posBadge.classList.contains("flash"))
+            posBadge.textContent = `${cur > 0 ? "+" : ""}${cur}°`;
+        }
+      }
       if (hasPan) {
         const posEl = this.shadowRoot.getElementById("pan-position");
         if (posEl) posEl.textContent = `${panState.state}°`;
@@ -6520,6 +6740,8 @@ class BoschCameraCard extends HTMLElement {
       }
       const panSec = this.shadowRoot.getElementById("pan-section");
       if (panSec) panSec.style.display = "none";
+      const panOv = this.shadowRoot.getElementById("pan-overlay");
+      if (panOv) panOv.style.display = "none";
       const qualSec = this.shadowRoot.getElementById("quality-section");
       if (qualSec) qualSec.style.display = "none";
     }
@@ -7731,6 +7953,8 @@ class BoschCameraCardEditor extends HTMLElement {
         ${chk("show_last_event", this._t("ed_show_last_event"), true)}
         ${chk("show_audio", this._t("ed_show_audio"), true)}
         ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}
+        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}
+        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [["auto",this._t("ed_pan_overlay_auto")],["always",this._t("ed_pan_overlay_always")],["never",this._t("ed_pan_overlay_never")]])}
 
         <h4>${this._t("ed_h_autoplay")}</h4>
         ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [["",this._t("ed_autoplay_default")],["lan",this._t("ed_autoplay_lan")],["always",this._t("ed_autoplay_always")],["never",this._t("ed_autoplay_never")]])}
@@ -7761,6 +7985,8 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="show_last_event"]').addEventListener("change", e => fire({ show_last_event: e.target.checked }));
     root.querySelector('input[name="show_audio"]')?.addEventListener("change", e => fire({ show_audio: e.target.checked }));
     root.querySelector('input[name="use_card_audio_settings"]')?.addEventListener("change", e => fire({ use_card_audio_settings: e.target.checked }));
+    root.querySelector('input[name="hide_redundant_privacy"]')?.addEventListener("change", e => fire({ hide_redundant_privacy: e.target.checked }));
+    root.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => fire({ pan_overlay: e.target.value }));
     root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({ show_motion_zones: e.target.checked }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
@@ -7857,6 +8083,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       // Audio pill, propagated to every tile via card_defaults (volume itself is
       // the backend number.<cam>_audio_volume entity, read live by each tile).
       show_audio:           config.show_audio !== false,
+      // Pan edge-arrows (#33) + redundant-privacy dedupe (#15/#27), propagated
+      // to every tile via card_defaults so the whole overview behaves the same.
+      pan_overlay:          ["auto", "always", "never"].includes(config.pan_overlay) ? config.pan_overlay : "auto",
+      hide_redundant_privacy: config.hide_redundant_privacy !== false,
       use_card_audio_settings: config.use_card_audio_settings === true,
       // Per-card geometry (issue #21). Applied as --bosch-card-* on the overview
       // host, which cascades into the grid cells AND the child cards (CSS custom
@@ -7887,6 +8117,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       show_title: this._config.show_title,
       show_last_event: this._config.show_last_event,
       show_audio: this._config.show_audio,
+      pan_overlay: this._config.pan_overlay,
+      hide_redundant_privacy: this._config.hide_redundant_privacy,
       use_card_audio_settings: this._config.use_card_audio_settings,
       ...this._config.card_defaults,
     };
@@ -8654,6 +8886,8 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
         ${chk("show_last_event", this._t("ed_show_last_event"), true)}
         ${chk("show_audio", this._t("ed_show_audio"), true)}
         ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}
+        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}
+        ${seldd(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [["auto",this._t("ed_pan_overlay_auto")],["always",this._t("ed_pan_overlay_always")],["never",this._t("ed_pan_overlay_never")]])}
 
         <h4>${this._t("ed_h_advanced")}</h4>
         <label>${this._t("ed_border_radius")}
@@ -8688,6 +8922,8 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     onChk("show_last_event", "show_last_event");
     onChk("show_audio", "show_audio");
     onChk("use_card_audio_settings", "use_card_audio_settings");
+    onChk("hide_redundant_privacy", "hide_redundant_privacy");
+    this.shadowRoot.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => this._fire({ ...this._config, pan_overlay: e.target.value }));
     this.shadowRoot.querySelector('input[name="border_radius"]').addEventListener("change", e => this._fire({ ...this._config, border_radius: e.target.value || undefined }));
     this.shadowRoot.querySelector('input[name="box_shadow"]').addEventListener("change", e => this._fire({ ...this._config, box_shadow: e.target.value || undefined }));
     this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({ ...this._config, theme: e.target.value }));

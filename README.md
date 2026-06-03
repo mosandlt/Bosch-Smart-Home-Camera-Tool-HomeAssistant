@@ -459,6 +459,16 @@ On stream start, the integration automatically registers the RTSP URL with go2rt
 - On stream stop, the registration is removed from go2rtc
 - If WebRTC fails (go2rtc not running, network issue), falls back to HLS automatically
 
+**Stream looks delayed? You are on HLS, not WebRTC.**
+A few seconds of lag is the HLS fallback buffering (~8–12 s) rather than WebRTC (~2 s). The card may also show a small `HLS mode` banner over the video when it deliberately skips WebRTC (see below). Work through this checklist:
+
+1. **Check the building blocks.** WebRTC here needs three core integrations active: `go2rtc`, `webrtc`, and `stream`. On Home Assistant OS / Supervised they are part of `default_config`; on a **Container or Core** install you may have to add them. Settings → Devices & Services — confirm all three are present and not in an error state.
+2. **Reload go2rtc after adding the camera.** Settings → Devices & Services → go2rtc → Reload, then hard-refresh the dashboard (`Ctrl`/`⌘`+`Shift`+`R`).
+3. **Are you local or remote?** WebRTC needs a path the browser can reach directly. On the **same LAN** it should connect peer-to-peer. **Over the internet** (Nabu Casa / reverse proxy / Cloudflare tunnel) a direct WebRTC path often is not available, so the card intentionally uses HLS and shows the `HLS mode` banner — this is expected and not a bug. Note: opening HA via its *external* URL while sitting at home still counts as remote; use the internal `http://<ha-ip>:8123` URL to get the LAN WebRTC path.
+4. **Confirm what is actually happening.** Turn on the integration's debug logging (the integration → Configure → *Debug logging*), open the stream for ~30 s, and look for the `go2rtc` / `TLS proxy` lines. They show whether the WebRTC handshake is attempted and whether it succeeds or falls back.
+
+If WebRTC is loaded, you are on the LAN, and it still falls back, please open a [GitHub issue](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/new) with that debug excerpt, your HA version + install type, and your browser.
+
 ### Stream Watchdog
 
 A separate JavaScript resource (`bosch-camera-autoplay-fix.js`) monitors all camera cards and auto-recovers from common issues:
