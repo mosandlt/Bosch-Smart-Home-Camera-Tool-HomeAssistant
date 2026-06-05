@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.10";
+const CARD_VERSION = "13.5.11";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -5141,16 +5141,27 @@ class BoschCameraCard extends HTMLElement {
         video.addEventListener("pause", () => {
           if (this._stoppingLiveVideo || !this._liveVideoActive || !this.isConnected) return;
           if (!video.srcObject && !video.currentSrc && !video.getAttribute("src")) return;
-          // An unexpected pause is almost always Chrome refusing gesture-less
-          // playback — e.g. right after an unmute without valid user activation,
-          // which pauses the element. The ONLY reliable resume is to RE-MUTE
-          // first, then play() (muted playback is always allowed). Resuming
-          // without re-muting gets refused again and the frame stays frozen.
-          // The user re-enables sound with another tap. 2026-06-03.
-          video.muted = true;
-          Promise.resolve(video.play()).catch(() => {});
-          this._refreshAudioToggle();
-          this._refreshAudioPill();
+          // If the user has sound ON (unmuted via a valid tap), a transient
+          // pause — buffering, tab-throttle, a brief network gap, go2rtc
+          // keyframe gap — can usually be resumed WITHOUT muting, because the
+          // earlier tap left the element with sticky activation. Try that first
+          // so we don't silently kill the sound the user asked for every few
+          // minutes. Only if Chrome still refuses (play() rejects) do we fall
+          // back to the guaranteed muted resume. We NEVER set muted=false here:
+          // that would be a gesture-less unmute, which Chrome punishes by
+          // pausing the element — the v13.5.8 "stream geht aus" regression.
+          // 2026-06-05 (mute-after-1-5-min fix).
+          const reMuteAndResume = () => {
+            video.muted = true;
+            Promise.resolve(video.play()).catch(() => {});
+            this._refreshAudioToggle();
+            this._refreshAudioPill();
+          };
+          if (!video.muted) {
+            Promise.resolve(video.play()).catch(reMuteAndResume);
+            return;
+          }
+          reMuteAndResume();
         });
       }
       // Safety timeout: if video never plays after 120s, hide overlay but
@@ -5671,6 +5682,7 @@ class BoschCameraCard extends HTMLElement {
     // Mark teardown so the <video> pause-guard (added in activateVideo) doesn't
     // auto-resume the stream we are intentionally stopping here. 2026-06-03.
     this._stoppingLiveVideo = true;
+    this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
@@ -6671,13 +6683,19 @@ class BoschCameraCard extends HTMLElement {
             // Backend audio OFF (or Android pre-gesture) → mute live. Muting is
             // always allowed, so this half of the two-way sync is reliable.
             video.muted = true;
+            this._disarmAutoUnmute();
+          } else if (video.muted) {
+            // Backend audio ON but the element loaded / (re)started muted — Chrome
+            // forces every <video> muted until a real gesture. We must NOT unmute
+            // here: a gesture-less unmute pauses the element and freezes the live
+            // stream ("Unmuting failed and the element was paused instead"), and a
+            // periodic sync re-killing it every push was the v13.5.8 freeze bug.
+            // Instead arm a one-shot listener that unmutes on the user's FIRST
+            // interaction anywhere on the page (the FB/YouTube muted-autoplay
+            // pattern) — any click counts, so the user no longer has to find the
+            // audio pill to restore sound after a load/reload/restart. 2026-06-05.
+            this._armAutoUnmute();
           }
-          // Backend audio ON → do NOT programmatically unmute in this sync pass.
-          // A gesture-less unmute makes Chrome pause the element and the live
-          // stream freezes ("Unmuting failed and the element was paused instead"),
-          // and a periodic sync that re-sets muted=false re-kills it every push.
-          // The element stays muted; the user enables sound with a pill tap
-          // (a real gesture, handled synchronously in _toggleAudio). 2026-06-03.
           // Live volume sync from the backend number.<cam>_audio_volume entity —
           // a slider drag on another session or an automation reaches us as a
           // hass push and is applied to this <video> here.
@@ -7377,6 +7395,9 @@ class BoschCameraCard extends HTMLElement {
   _toggleAudio() {
     const entityId = this._entities.audio;
     if (!this._hass) return;
+    // User is taking explicit control of audio — retire any armed auto-unmute
+    // listener so it can't double-fire on this same gesture.
+    this._disarmAutoUnmute();
     const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
     // Decoupled (use_card_audio_settings) or YAML-pinned (audio_default on/off):
     // toggle THIS browser's mute only — never touch the backend switch / other
@@ -7417,6 +7438,48 @@ class BoschCameraCard extends HTMLElement {
     this._setOptimistic(entityId, turningOn ? "on" : "off");
     this._callService("switch", turningOn ? "turn_on" : "turn_off", { entity_id: entityId });
     this._refreshAudioPill();
+  }
+
+  // ── Auto-unmute on first user gesture ──────────────────────────────────────
+  // Chrome 2026 strict autoplay only lets a <video> unmute inside a real user
+  // gesture; a gesture-less unmute pauses the element (the v13.5.8 freeze). So
+  // when the backend audio switch is ON but the element loaded/(re)started muted
+  // (every page load, reload or stream restart), we arm a one-shot document-level
+  // listener and unmute on the user's FIRST interaction anywhere — any click or
+  // keypress counts, so they no longer have to hunt for the audio pill. Never
+  // touches the backend switch (already ON) and never unmutes outside a gesture.
+  // 2026-06-05.
+  _armAutoUnmute() {
+    if (this._autoUnmuteHandler) return;  // already armed — keep a single listener
+    const handler = (e) => {
+      // The audio pill / Ton toggle own their own gesture via _toggleAudio; if the
+      // first interaction lands on them, step aside and let that path do the work.
+      const onAudioCtrl = !!(e.composedPath && e.composedPath().some(
+        (el) => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
+      this._disarmAutoUnmute();
+      if (onAudioCtrl) return;
+      const video = this._liveVideoActive
+        ? this.shadowRoot && this.shadowRoot.getElementById("cam-video")
+        : null;
+      if (!video || !video.muted || this._androidAudioMuted) return;
+      if (this._audioDecoupled()) return;
+      if (this._getEffectiveState(this._entities.audio) !== "on") return;
+      // Inside a real user gesture → Chrome allows the unmute without pausing.
+      video.muted = false;
+      if (video.paused) Promise.resolve(video.play()).catch(() => {});
+      this._refreshAudioToggle();
+      this._refreshAudioPill();
+    };
+    this._autoUnmuteHandler = handler;
+    document.addEventListener("pointerdown", handler, { capture: true });
+    document.addEventListener("keydown", handler, { capture: true });
+  }
+
+  _disarmAutoUnmute() {
+    if (!this._autoUnmuteHandler) return;
+    document.removeEventListener("pointerdown", this._autoUnmuteHandler, { capture: true });
+    document.removeEventListener("keydown", this._autoUnmuteHandler, { capture: true });
+    this._autoUnmuteHandler = null;
   }
 
   _toggleSwitch(entityId) {
@@ -8068,11 +8131,28 @@ class BoschCameraCardEditor extends HTMLElement {
 customElements.define("bosch-camera-card-editor", BoschCameraCardEditor);
 
 window.customCards = window.customCards || [];
+
+// ── Card-picker entity suggestions (HA 2026.6+) ──────────────────────────────
+// The new card picker calls getEntitySuggestion(hass, entityId) on each custom
+// card when a user picks an entity, and lists the returned configs in the
+// picker's "Community" section. Return null to stay out of it. We only suggest
+// for Bosch camera entities (camera.* + attributes.brand === "Bosch") so the
+// picker stays quiet for everything else (per HA's "don't be noisy" guidance).
+const _isBoschCameraEntity = (hass, entityId) => {
+  if (!entityId || entityId.slice(0, 7) !== "camera.") return false;
+  const st = hass && hass.states && hass.states[entityId];
+  return !!(st && st.attributes && st.attributes.brand === "Bosch");
+};
+
 window.customCards.push({
   type:        "bosch-camera-card",
   name:        "Bosch Camera Card",
   description: "Bosch Smart Home cameras with streaming state, loading indicator and controls",
   preview:     false,
+  getEntitySuggestion: (hass, entityId) =>
+    _isBoschCameraEntity(hass, entityId)
+      ? { config: { type: "custom:bosch-camera-card", camera_entity: entityId } }
+      : null,
 });
 
 
@@ -9013,6 +9093,12 @@ window.customCards.push({
   name:        "Bosch Camera Overview",
   description: "Auto-discovers all Bosch Smart Home cameras and renders them in a responsive grid (online first, offline after).",
   preview:     false,
+  // Overview auto-discovers every Bosch camera, so the picked entity is only a
+  // trigger — the emitted config carries no entity (the card finds them itself).
+  getEntitySuggestion: (hass, entityId) =>
+    _isBoschCameraEntity(hass, entityId)
+      ? { config: { type: "custom:bosch-camera-overview-card" } }
+      : null,
 });
 
 // ── Phase 5: NVR Timeline Card ────────────────────────────────────────────────

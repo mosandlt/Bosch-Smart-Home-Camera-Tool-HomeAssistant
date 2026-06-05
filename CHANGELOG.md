@@ -5,6 +5,13 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.11] - 2026-06-05
+
+Patch release — card-picker entity suggestions (HA 2026.6) and an audio-mute fix.
+
+- **The Bosch cards now show up in the new card picker (HA 2026.6).** When you add a card to a dashboard and pick a Bosch camera entity, the *Bosch Camera Card* and *Bosch Camera Overview* appear directly in the picker's Community section — no more typing `custom:` by hand. The suggestion is offered only for Bosch camera entities (a `camera.*` entity whose brand is "Bosch"), so the picker stays quiet for everything else. Built on the new `getEntitySuggestion` hook introduced in [HA 2026.6](https://www.home-assistant.io/blog/2026/06/03/release-20266/). Card-only change.
+- **Audio no longer mutes itself, and comes back with a single click.** A transient pause of the live video — buffering, a background-tab throttle, a brief network gap — used to make the pause-guard re-mute the stream, silencing the sound you had switched on. When sound is on, the guard now resumes the video *without* muting first, and only falls back to a muted resume if the browser actually refuses playback. And because browsers force every `<video>` to start muted (no sound without a real gesture), the card now restores sound on your **first click anywhere on the page** whenever the audio switch is on — after a page load, a reload or a stream restart you no longer have to hunt for the audio button; any click counts (the muted-autoplay pattern used by YouTube/Instagram). The card still never unmutes without a real gesture, so the v13.5.8 stream-freeze safeguard is fully preserved.
+
 ## [v13.5.10] - 2026-06-03
 
 Patch release — a card-only CSS fix for the redundant privacy row.

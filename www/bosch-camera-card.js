@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.10";
+const CARD_VERSION = "13.5.11";
 
 let _boschFsExitAt = 0;
 
@@ -2287,10 +2287,17 @@ class BoschCameraCard extends HTMLElement {
         video.addEventListener("pause", () => {
           if (this._stoppingLiveVideo || !this._liveVideoActive || !this.isConnected) return;
           if (!video.srcObject && !video.currentSrc && !video.getAttribute("src")) return;
-          video.muted = true;
-          Promise.resolve(video.play()).catch(() => {});
-          this._refreshAudioToggle();
-          this._refreshAudioPill();
+          const reMuteAndResume = () => {
+            video.muted = true;
+            Promise.resolve(video.play()).catch(() => {});
+            this._refreshAudioToggle();
+            this._refreshAudioPill();
+          };
+          if (!video.muted) {
+            Promise.resolve(video.play()).catch(reMuteAndResume);
+            return;
+          }
+          reMuteAndResume();
         });
       }
       if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
@@ -2641,6 +2648,7 @@ class BoschCameraCard extends HTMLElement {
   }
   _stopLiveVideo() {
     this._stoppingLiveVideo = true;
+    this._disarmAutoUnmute();
     if (this._hls) {
       this._hls.destroy();
       this._hls = null;
@@ -3381,6 +3389,9 @@ class BoschCameraCard extends HTMLElement {
           this._lastAudioState = audioOn;
           if (!audioOn || this._androidAudioMuted) {
             video.muted = true;
+            this._disarmAutoUnmute();
+          } else if (video.muted) {
+            this._armAutoUnmute();
           }
           const volState = this._hass.states[ents.audioVolume]?.state;
           if (volState !== this._lastVolumeState) {
@@ -3942,6 +3953,7 @@ class BoschCameraCard extends HTMLElement {
   _toggleAudio() {
     const entityId = this._entities.audio;
     if (!this._hass) return;
+    this._disarmAutoUnmute();
     const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
     if (this._audioDecoupled()) {
       if (video) {
@@ -3970,6 +3982,39 @@ class BoschCameraCard extends HTMLElement {
       entity_id: entityId
     });
     this._refreshAudioPill();
+  }
+  _armAutoUnmute() {
+    if (this._autoUnmuteHandler) return;
+    const handler = e => {
+      const onAudioCtrl = !!(e.composedPath && e.composedPath().some(el => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
+      this._disarmAutoUnmute();
+      if (onAudioCtrl) return;
+      const video = this._liveVideoActive ? this.shadowRoot && this.shadowRoot.getElementById("cam-video") : null;
+      if (!video || !video.muted || this._androidAudioMuted) return;
+      if (this._audioDecoupled()) return;
+      if (this._getEffectiveState(this._entities.audio) !== "on") return;
+      video.muted = false;
+      if (video.paused) Promise.resolve(video.play()).catch(() => {});
+      this._refreshAudioToggle();
+      this._refreshAudioPill();
+    };
+    this._autoUnmuteHandler = handler;
+    document.addEventListener("pointerdown", handler, {
+      capture: true
+    });
+    document.addEventListener("keydown", handler, {
+      capture: true
+    });
+  }
+  _disarmAutoUnmute() {
+    if (!this._autoUnmuteHandler) return;
+    document.removeEventListener("pointerdown", this._autoUnmuteHandler, {
+      capture: true
+    });
+    document.removeEventListener("keydown", this._autoUnmuteHandler, {
+      capture: true
+    });
+    this._autoUnmuteHandler = null;
   }
   _toggleSwitch(entityId) {
     if (!this._hass || !entityId) return;
@@ -4472,11 +4517,23 @@ customElements.define("bosch-camera-card-editor", BoschCameraCardEditor);
 
 window.customCards = window.customCards || [];
 
+const _isBoschCameraEntity = (hass, entityId) => {
+  if (!entityId || entityId.slice(0, 7) !== "camera.") return false;
+  const st = hass && hass.states && hass.states[entityId];
+  return !!(st && st.attributes && st.attributes.brand === "Bosch");
+};
+
 window.customCards.push({
   type: "bosch-camera-card",
   name: "Bosch Camera Card",
   description: "Bosch Smart Home cameras with streaming state, loading indicator and controls",
-  preview: false
+  preview: false,
+  getEntitySuggestion: (hass, entityId) => _isBoschCameraEntity(hass, entityId) ? {
+    config: {
+      type: "custom:bosch-camera-card",
+      camera_entity: entityId
+    }
+  } : null
 });
 
 class BoschCameraOverviewCard extends HTMLElement {
@@ -5025,7 +5082,12 @@ window.customCards.push({
   type: "bosch-camera-overview-card",
   name: "Bosch Camera Overview",
   description: "Auto-discovers all Bosch Smart Home cameras and renders them in a responsive grid (online first, offline after).",
-  preview: false
+  preview: false,
+  getEntitySuggestion: (hass, entityId) => _isBoschCameraEntity(hass, entityId) ? {
+    config: {
+      type: "custom:bosch-camera-overview-card"
+    }
+  } : null
 });
 
 class BoschNvrTimelineCard extends HTMLElement {
