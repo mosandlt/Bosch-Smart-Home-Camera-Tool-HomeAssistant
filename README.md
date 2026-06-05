@@ -1,8 +1,8 @@
 # Bosch Smart Home Camera — Home Assistant Integration
 
-Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully featured entities in Home Assistant. Ships with two custom **Lovelace cards** — one detailed view per camera and a multi-camera grid — plus live streaming, controls, snapshot retrieval, and event-driven notifications.
+Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured entities in Home Assistant. Ships with two custom **Lovelace cards** — one detailed view per camera and a multi-camera grid — plus live streaming, controls, snapshot retrieval, and event-driven notifications.
 
-**Supported models:** Eyes Außenkamera (Gen1), Eyes Außenkamera II (Gen2), 360 Innenkamera (Gen1), Eyes Innenkamera II (Gen2) — model-specific timing and configuration is automatic.
+**Supported models:** Eyes Outdoor (Gen1), Eyes Outdoor II (Gen2), 360 Indoor (Gen1), Eyes Indoor II (Gen2) — model-specific timing and configuration is automatic.
 
 > **No official API.** This integration uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
 
@@ -59,7 +59,7 @@ Adds your Bosch Smart Home cameras (Eyes Außenkamera, 360 Innenkamera) as fully
   - [Dashboard examples](#dashboard-examples)
   - [Admin / Health Dashboard Example](#admin--health-dashboard-example)
 - [Requirements](#requirements)
-- [Alarmanlage / Automation Setup](#alarmanlage--automation-setup)
+- [Alarm System / Automation Setup](#alarm-system--automation-setup)
 - [Apple HomeKit / Apple Home Integration](#apple-homekit--apple-home-integration)
 - [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
 - [Roadmap](#roadmap) — parked features and what's under consideration
@@ -125,10 +125,10 @@ All four current Bosch Smart Home cameras are supported. Click any camera name f
 
 | Camera | Generation | Type | Codec / FW seen | Highlights |
 |---|---|---|---|---|
-| [**360° Innenkamera**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/360-grad-innenkamera/) | Gen1 | Indoor | H.264 + AAC · FW 7.91.x | Pan/tilt motor, autofollow, IR night vision, mechanical privacy shutter |
-| [**Eyes Innenkamera II**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-innenkamera-2/) | Gen2 | Indoor | H.264 + AAC · FW 9.40.x | Built-in 75 dB siren, Audio+ glass-break / smoke / CO, ZONES detection mode, RGB LEDs, retractable head (Privacy hardware button) |
-| [**Eyes Außenkamera**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-aussenkamera/) | Gen1 | Outdoor (IP66) | H.264 + AAC · FW 7.91.x | Front spotlight, motion-triggered light, ambient-light sensor, schedule-driven illumination |
-| [**Eyes Außenkamera II**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-aussenkamera-2/) | Gen2 | Outdoor (IP66) | H.264 + AAC · FW 9.40.x | Front + Top + Bottom RGB LED groups, DualRadar (motion + intrusion), wallwasher mode, mounting-elevation parameter |
+| [**360° Indoor**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/360-grad-innenkamera/) | Gen1 | Indoor | H.264 + AAC · FW 7.91.x | Pan/tilt motor, autofollow, IR night vision, mechanical privacy shutter |
+| [**Eyes Indoor II**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-innenkamera-2/) | Gen2 | Indoor | H.264 + AAC · FW 9.40.x | Built-in 75 dB siren, Audio+ glass-break / smoke / CO, ZONES detection mode, RGB LEDs, retractable head (Privacy hardware button) |
+| [**Eyes Outdoor**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-aussenkamera/) | Gen1 | Outdoor (IP66) | H.264 + AAC · FW 7.91.x | Front spotlight, motion-triggered light, ambient-light sensor, schedule-driven illumination |
+| [**Eyes Outdoor II**](https://www.bosch-smarthome.com/de/de/produkte/sicherheitsprodukte/eyes-aussenkamera-2/) | Gen2 | Outdoor (IP66) | H.264 + AAC · FW 9.40.x | Front + Top + Bottom RGB LED groups, DualRadar (motion + intrusion), wallwasher mode, mounting-elevation parameter |
 
 > Camera images: see the linked product pages above.
 
@@ -162,9 +162,9 @@ Before adding a camera to this integration, it **must** be fully set up in the o
 > **Tip:** If you're replacing an existing camera (e.g. upgrading from Gen1 to Gen2), rename the new camera in the Bosch app to match the old name before setting up the integration. This way Home Assistant creates entities with the expected names.
 
 For more help with camera setup, see:
-- [Eyes Außenkamera II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-aussenkamera-2/)
-- [Eyes Innenkamera II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-innenkamera-2/)
-- [Firmware Update dauert lange — Bosch Community](https://community.bosch-smarthome.com/t5/technische-probleme/wie-lange-dauert-das-update-der-software-bei-mir-l%C3%A4uft-es-seit-%C3%BCber-20-minuten/td-p/71764)
+- [Eyes Outdoor II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-aussenkamera-2/)
+- [Eyes Indoor II — Bosch Support](https://www.bosch-smarthome.com/de/de/support/hilfe/hilfe-zum-produkt/hilfe-zur-eyes-innenkamera-2/)
+- [Firmware update takes a long time — Bosch Community](https://community.bosch-smarthome.com/t5/technische-probleme/wie-lange-dauert-das-update-der-software-bei-mir-l%C3%A4uft-es-seit-%C3%BCber-20-minuten/td-p/71764)
 
 ---
 
@@ -253,7 +253,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 | **SMB Server** | IP or hostname of the share (e.g. `192.168.1.1`). | empty |
 | **SMB Share** | Share name (e.g. `FRITZ.NAS`, `cameras`). | empty |
 | **SMB Username** / **SMB Password** | SMB authentication credentials. | empty |
-| **SMB Base Path** | Base folder on the share (e.g. `Bosch-Kameras`). | empty |
+| **SMB Base Path** | Base folder on the share (e.g. `Bosch-Cameras`). | empty |
 | **SMB Folder Pattern** | Subfolder pattern with `{camera}` / `{year}` / `{month}` / `{day}`. | `{camera}/{year}/{month}/{day}` |
 | **SMB File Pattern** | File-naming pattern with `{camera}` / `{date}` / `{time}` / `{type}` / `{id}`. | `{camera}_{date}_{time}_{type}_{id}` |
 | **Retention period (days)** | Auto-delete files older than N days. `0` = keep forever. | 180 |
@@ -263,7 +263,7 @@ Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. E
 
 | Setting | Description | Default |
 |---|---|---|
-| **Stream connection type** | `Auto` (try LOCAL → fall back to REMOTE), `Local` (LAN only), `Remote` (cloud only). Can also be changed at runtime via the per-camera **Stream Modus** select entity. | Auto |
+| **Stream connection type** | `Auto` (try LOCAL → fall back to REMOTE), `Local` (LAN only), `Remote` (cloud only). Can also be changed at runtime via the per-camera **Stream Mode** select entity. | Auto |
 | **HLS player buffer profile** (`live_buffer_mode`) | Three hls.js buffer presets that trade latency for smoothness: **Latency** (~4-6 s), **Balanced** (~8-10 s, default), **Stable** (~12-15 s). See [HLS Buffer Tuning](#hls-buffer-tuning). | Balanced |
 | **Stream quality** | Per-camera quality preset for cloud/REMOTE streams: `Auto` (~7.5 Mbps), `High` (30 Mbps), `Low` (1.9 Mbps). LAN streams always use maximum quality regardless of this setting. Configurable at runtime via the **Video Quality** select entity (persists across restarts). | Auto |
 | **Audio default ON** | Whether the per-camera audio switch starts ON (stream with sound) or OFF (muted). | ON |
@@ -282,7 +282,7 @@ Both cards are auto-registered since **v10.3.19** — no manual Lovelace resourc
 ```yaml
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
-title: Garten
+title: Garden
 ```
 
 See the [single-camera card reference](#bosch-camera-card--single-camera) for all options.
@@ -294,7 +294,7 @@ See the [single-camera card reference](#bosch-camera-card--single-camera) for al
 
 ```yaml
 type: custom:bosch-camera-overview-card
-title: Kameras
+title: Cameras
 use_bosch_sort: true
 ```
 
@@ -405,7 +405,7 @@ How the integration brings a live stream up and keeps it alive — connection ty
 
 ### Stream Connection Types
 
-The integration supports three connection modes, configurable in **Settings → Configure → Stream connection type** or at runtime via the **Stream Modus** select entity:
+The integration supports three connection modes, configurable in **Settings → Configure → Stream connection type** or at runtime via the **Stream Mode** select entity:
 
 | Mode | Description |
 |------|-------------|
@@ -434,10 +434,10 @@ The card badge progresses `idle` → `warming_up` / `connecting` (yellow) → `s
 | Camera / mode | Typical time to first frame | Why |
 |---|---|---|
 | Any camera · **Remote (Cloud)** | **~5–10 s** | `PUT /connection REMOTE` → cloud proxy URL exposed immediately → FFmpeg opens `rtsps://proxy-NN.live.cbs.boschsecurity.com:443/...` → first HLS segment in 3–5 s. No pre-warm. |
-| **Gen1 360 Innenkamera** · Local | ~30–35 s | `min_total_wait = 25 s` from `PUT /connection LOCAL` before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer. |
-| **Gen2 Eyes Innenkamera II** · Local | ~30–35 s | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s`). |
-| **Gen1 Eyes Außenkamera** · Local | ~40–45 s | Outdoor encoder is slower; `min_total_wait = 35 s` + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer. |
-| **Gen2 Eyes Außenkamera II** · Local | ~40–45 s | Same outdoor profile (`HOME_Eyes_Outdoor`). |
+| **Gen1 360 Indoor** · Local | ~30–35 s | `min_total_wait = 25 s` from `PUT /connection LOCAL` before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer. |
+| **Gen2 Eyes Indoor II** · Local | ~30–35 s | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s`). |
+| **Gen1 Eyes Outdoor** · Local | ~40–45 s | Outdoor encoder is slower; `min_total_wait = 35 s` + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer. |
+| **Gen2 Eyes Outdoor II** · Local | ~40–45 s | Same outdoor profile (`HOME_Eyes_Outdoor`). |
 | Any camera · **Auto** with working LAN | same as Local | Auto picks LOCAL when LAN is reachable. |
 | Any camera · **Auto**, LAN **un**reachable | **~100 s outdoor**, **~40 s indoor**, then + ~5 s for REMOTE | `pre_warm_rtsp()` tries each retry with a ~10 s TLS-handshake timeout plus `pre_warm_retry_wait` between attempts, so the worst case is `pre_warm_retries × (~10 s TLS timeout + pre_warm_retry_wait)`: outdoor `8 × (10 + 5) = ~120 s`, indoor `3 × (10 + 3) = ~39 s`. On exhaustion `_try_live_connection_inner` tears LOCAL down, sets `_stream_fell_back[cam_id]`, and `continue`s to REMOTE (v10.3.2+). Measured end-to-end on a live HA 2026.4.3: patched Gen2 Outdoor target IP to `192.0.2.1` (RFC 5737 TEST-NET) → user-visible fallback after 101 s with `WARNING: LOCAL pre-warm failed … Falling back to REMOTE.`. |
 | Any camera · Any mode, **after 2 failed 60-s watchdog ticks** | ~2 min recovery | If FFmpeg opens LOCAL cleanly but the stream goes half-dead later, `_stream_health_watchdog` saturates the error counter on the second failing tick and forces the next `try_live_connection` to REMOTE. Worst-case end-to-end recovery ~2 min (v10.3.2+). |
@@ -502,7 +502,7 @@ The first coordinator tick after HA restart **skips events and slow-tier API cal
 
 Camera timing and behavior is configured per model via `CameraModelConfig`. Indoor cams keep an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), while Gen1/Gen2 outdoor cams have heartbeat disabled (`= renewal_interval`) because the Outdoor firmware rotates digest creds on every PUT and would invalidate the running RTSP session.
 
-| Parameter | 360 Innenkamera (Gen1) | Eyes Innenkamera II (Gen2) | Eyes Außenkamera (Gen1) | Eyes Außenkamera II (Gen2) | Purpose |
+| Parameter | 360 Indoor (Gen1) | Eyes Indoor II (Gen2) | Eyes Outdoor (Gen1) | Eyes Outdoor II (Gen2) | Purpose |
 |---|---|---|---|---|---|
 | Heartbeat interval | 30 s | 30 s | 3600 s (≈ off) | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
 | Pre-warm delay | 1 s | 1 s | 2 s | 2 s | Wait before first RTSP DESCRIBE |
@@ -525,7 +525,7 @@ The card's HLS.js configuration is tuned to prevent HA's stream component from k
 - **HLS keepalive timer (20 s)** — Periodically calls `hls.startLoad()` as a safety net.
 - **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
 
-The player buffer profile is independent of the **Reaktion** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
+The player buffer profile is independent of the **Response** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
 
 ## Quality Scale: Platinum
 
@@ -674,7 +674,7 @@ sequenceDiagram
     Coord->>Coord: consecutive_failures ≥ 60 s?
     Coord->>Coord: maintenance window active? → suppress
     Coord->>Alert: cloud_down event
-    Alert->>Notify: "Cloud nicht erreichbar — LAN aktiv"
+    Alert->>Notify: "Cloud unreachable — LAN active"
     Note over Coord,Notify: recovery: same path, cloud_up event
 ```
 
@@ -710,7 +710,7 @@ sequenceDiagram
 | Audio alarm threshold | `number` | disabled by default |
 | Speaker level (intercom volume) | `number` | disabled by default (0–100) |
 | Stream quality | `select` | Auto (~7.5 Mbps) / High (30 Mbps) / Low (1.9 Mbps). LAN always uses max quality; setting only affects REMOTE/cloud streams. Persists across restarts. |
-| Stream mode | `select` | Auto (Lokal → Cloud) / Nur Lokal / Nur Cloud |
+| Stream mode | `select` | Auto (Local → Cloud) / Local only / Cloud only |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
 | FCM Push mode | `select` | Auto / Polling |
 | Motion detected | `binary_sensor` | disabled by default |
@@ -756,9 +756,9 @@ sequenceDiagram
 
 No automations needed — the integration sends alerts directly:
 
-1. **Instant text:** `📷 Kamera: Bewegung (10:31:56)` — sent immediately
-2. **Snapshot image:** `📸 Kamera Snapshot` + JPEG — sent ~5s later
-3. **Video clip:** `🎬 Kamera Video (245 KB)` + MP4 — sent ~30-90s later (polls until Bosch uploads the clip)
+1. **Instant text:** `📷 Camera: Motion (10:31:56)` — sent immediately
+2. **Snapshot image:** `📸 Camera Snapshot` + JPEG — sent ~5s later
+3. **Video clip:** `🎬 Camera Video (245 KB)` + MP4 — sent ~30-90s later (polls until Bosch uploads the clip)
 
 ```mermaid
 flowchart TD
@@ -766,7 +766,7 @@ flowchart TD
     Int --> Gate{notification<br/>switches}
     Gate -->|master OFF or<br/>type-specific OFF| Skip[suppress alerts<br/>event still tracked]
     Gate -->|enabled| S1
-    S1["Step 1: instant text<br/>📷 Bewegung HH:MM:SS"] -->|~5 s| S2
+    S1["Step 1: instant text<br/>📷 Motion HH:MM:SS"] -->|~5 s| S2
     S2["Step 2: snapshot JPEG<br/>📸 inline image"] -->|poll until clip ready<br/>~30–90 s| S3
     S3["Step 3: video clip MP4<br/>🎬 attachment"]
     S1 -.->|alert_notify_information<br/>or alert_notify_service| Notify1["notify.signal_messenger<br/>notify.mobile_app_xxx<br/>..."]
@@ -863,8 +863,8 @@ Upload event snapshots and video clips directly to a SMB/CIFS network share (FRI
 
 Example file path on NAS (default camera-first layout):
 ```
-\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\Garten\2026\03\25\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.jpg
-\\192.168.1.1\FRITZ.NAS\Bosch-Kameras\Garten\2026\03\25\Garten_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
+\\192.168.1.1\FRITZ.NAS\Bosch-Cameras\Garden\2026\03\25\Garden_2026-03-25_14-32-05_MOVEMENT_abc123.jpg
+\\192.168.1.1\FRITZ.NAS\Bosch-Cameras\Garden\2026\03\25\Garden_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
 ```
 
 > Requires the `smbprotocol` Python package, which is auto-installed via `manifest.json`.
@@ -874,14 +874,14 @@ Example file path on NAS (default camera-first layout):
 To use your FRITZ!Box as a NAS for camera event storage:
 
 1. **Enable NAS on FRITZ!Box:**
-   - Open `http://fritz.box` → **Heimnetz → USB / Speicher → USB-Speicher**
-   - Enable **Speicher (NAS) aktiv**
+   - Open `http://fritz.box` → **Home Network → USB / Storage → USB Storage**
+   - Enable **Storage (NAS) active**
    - Note the share name (default: `FRITZ.NAS`)
 
 2. **Create a FRITZ!Box user with NAS access:**
-   - **System → FRITZ!Box-Benutzer → Benutzer hinzufügen**
+   - **System → FRITZ!Box Users → Add user**
    - Give the user a username and password
-   - Under **Berechtigungen**, enable **Zugang zu NAS-Inhalten**
+   - Under **Permissions**, enable **Access to NAS contents**
 
 3. **Configure in Home Assistant:**
    - Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**
@@ -894,13 +894,13 @@ To use your FRITZ!Box as a NAS for camera event storage:
    | SMB Share | NAS share name | `FRITZ.NAS` |
    | SMB Username | FRITZ!Box NAS user | `nas_user` |
    | SMB Password | User password | `your_password` |
-   | SMB Base Path | Folder on NAS | `Bosch-Kameras` |
+   | SMB Base Path | Folder on NAS | `Bosch-Cameras` |
    | SMB Folder Pattern | Subfolder structure | `{camera}/{year}/{month}/{day}` |
    | SMB File Pattern | File naming | `{camera}_{date}_{time}_{type}_{id}` |
    | Retention (days) | Delete files older than N days | `180` (6 months) |
    | Low disk warning (MB) | Alert below this free space | `5120` (5 GB) |
 
-4. **Verify:** After the next camera event, check your NAS at `FRITZ.NAS/Bosch-Kameras/` — snapshots (.jpg) and video clips (.mp4) should appear automatically.
+4. **Verify:** After the next camera event, check your NAS at `FRITZ.NAS/Bosch-Cameras/` — snapshots (.jpg) and video clips (.mp4) should appear automatically.
 
 > **Tip:** Works with any SMB-compatible device. For Synology, use the share name from **Control Panel → Shared Folder**. For Windows, use the shared folder name (e.g. `\\PC-NAME\SharedFolder`).
 
@@ -941,16 +941,16 @@ All configured backends appear side by side — no filter option needed:
 
 | Backend | When shown |
 |---------|-----------|
-| **Lokal** | `Local save folder` is set (even if local saving is currently off — already-saved files remain visible) |
+| **Local** | `Local save folder` is set (even if local saving is currently off — already-saved files remain visible) |
 | **NAS** | `Upload to NAS` is enabled and server + share are configured (works with both SMB and FTP upload protocols) |
-| **Aufnahmen** (NVR) | `Mini-NVR` is enabled |
+| **Recordings** (NVR) | `Mini-NVR` is enabled |
 
 **Tree shape**
 - *Camera-first (default):* `Camera → Year → Month → Day → Event`
 - *Year-first (legacy):* `2026 → Month → Day → Event` — folders named with a 4-digit year at the NAS/local root are automatically detected and fully browseable without any restructuring
 - *NVR:* `Camera → Date → Event`
 
-Each event shows `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garten)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. If only a JPEG exists for an event (no video clip), the image is shown directly. macOS resource-fork files (`._*`) are filtered out.
+Each event shows `HH:MM:SS — TYPE (Camera)`, e.g. `09:15:23 — MOVEMENT (Garden)`. MP4 clips play inline with HTTP `Range` support so the player can seek; the matching JPEG snapshot doubles as a thumbnail. If only a JPEG exists for an event (no video clip), the image is shown directly. macOS resource-fork files (`._*`) are filtered out.
 
 Files are served by an authenticated `/api/bosch_shc_camera/event/…` view; path-traversal is blocked, only `image/jpeg` and `video/mp4` are returned. NAS files are streamed on demand via `smbprotocol` — no local cache, no HA disk usage.
 
@@ -1021,12 +1021,12 @@ Set to `0` (default) to disable pre-roll.
 
 ```
 /config/bosch_nvr/
-├── Terrasse/              ← finalized segments
+├── Terrace/               ← finalized segments
 │   └── 2026-05-08/
 │       ├── 21-07.mp4      ← wall-aligned 5-min segments
 │       └── 21-10.mp4
 └── _staging/              ← FFmpeg writes here first (incomplete segments)
-    └── Terrasse/2026-05-08/
+    └── Terrace/2026-05-08/
 ```
 
 Segments are moved from `_staging/` to the final tree only when complete. Incomplete segments from a crash or restart are cleaned up on next startup.
@@ -1064,7 +1064,7 @@ Requires `nvr_preroll_seconds > 0`. The main continuous recorder is skipped — 
 **Away-mode: start recording when leaving home**
 
 ```yaml
-alias: "NVR bei Abwesenheit"
+alias: "NVR when away"
 trigger:
   - platform: state
     entity_id: person.thomas
@@ -1078,7 +1078,7 @@ action:
 **Alarm mode: arm all NVR switches with the alarm panel**
 
 ```yaml
-alias: "NVR mit Alarmanlage"
+alias: "NVR with Alarm System"
 trigger:
   - platform: state
     entity_id: alarm_control_panel.home_alarm
@@ -1096,7 +1096,7 @@ action:
 **Disarm: stop recording when coming home**
 
 ```yaml
-alias: "NVR aus bei Zuhause"
+alias: "NVR off when home"
 trigger:
   - platform: state
     entity_id: alarm_control_panel.home_alarm
@@ -1112,7 +1112,7 @@ action:
 **Motion-only clip via sensor attribute** (verify pre-roll is running before sending alert)
 
 ```yaml
-alias: "Prüfe Pre-Roll vor Alarm"
+alias: "Check Pre-Roll before Alarm"
 trigger:
   - platform: event
     event_type: bosch_shc_camera_motion
@@ -1125,7 +1125,7 @@ condition:
 action:
   - service: notify.signal_kamera
     data:
-      message: "Bewegung erkannt – Pre-Roll aktiv, Clip wird erstellt."
+      message: "Motion detected – Pre-Roll active, clip being created."
 ```
 
 → More examples: [`examples/automations/`](examples/automations/) — bilingual EN+DE, covers presence, alarm, privacy, NVR, and notification patterns.
@@ -1148,7 +1148,7 @@ The integration fires events on the HA event bus for custom automations:
 
 Event data: `camera_id`, `camera_name`, `timestamp`, `image_url`, `event_id`, `source` (`fcm_push` / `polling`).
 
-To inspect events live, open **Developer Tools → Events** (HA ≥ 2026.4: **Entwicklerwerkzeuge → Ereignisse → Ereignisse abonnieren**), type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
+To inspect events live, open **Developer Tools → Events** (HA ≥ 2026.4: **Developer Tools → Events → Subscribe to events**), type `bosch_shc_camera_motion` (the custom event names do not appear in the dropdown — you have to enter them by hand) and click **Start listening**.
 
 ```yaml
 # Example: notify on every motion at one specific camera
@@ -1161,7 +1161,7 @@ trigger:
 action:
   - service: notify.mobile_app_xxx
     data:
-      title: "Bewegung erkannt"
+      title: "Motion detected"
       message: "{{ trigger.event.data.camera_name }} – {{ trigger.event.data.timestamp }}"
 ```
 
@@ -1220,7 +1220,7 @@ All services are available in **Developer Tools → Services** (or via automatio
 service: bosch_shc_camera.rename_camera
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  new_name: "Garten Kamera"
+  new_name: "Garden Camera"
 
 # Invite a friend to share cameras
 service: bosch_shc_camera.invite_friend
@@ -1302,9 +1302,9 @@ The integration ships **two custom cards**, both auto-registered (since v10.3.19
 | Card | Use case | Versioning |
 |---|---|---|
 | `custom:bosch-camera-card` | **One Bosch camera per card.** The full feature surface — live HLS / WebRTC video, snapshot, stream/audio/light/privacy/notifications switches, pan controls (360 only), notification-type accordion, motion-zone overlay, schedule editor, alarm controls (Gen2 Indoor II only). | Shared bundle — tracks the integration version |
-| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Privat → Offline**. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Shared bundle — tracks the integration version |
+| `custom:bosch-camera-overview-card` | **All Bosch cameras at once.** Auto-discovers every camera via `attributes.brand === "Bosch"` and renders a responsive tile grid. Sort order is **Live → Private → Offline**. Each tile is a full `bosch-camera-card` underneath, so per-camera overrides work the same way. | Shared bundle — tracks the integration version |
 
-> **Since v13.0.0 — Apple-style redesign + theme switcher (iOS / Material You).** Glass title pill with camera name + green/orange/grey status dot overlays the top of the video; semantic status badge (LIVE / PRIVAT / Verbinde / Offline) sits in the top-right. Glass pill-bar with six circular buttons (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom — the More button reveals the Audio toggle and every other switch / accordion. The card auto-detects iOS vs Android user-agent and renders in the matching design language; a three-state switcher (Auto / iOS / Android) inside the More menu lets the user override, with the choice persisted in `localStorage` and broadcast to every Bosch card on the page. Opt out of the redesign entirely with `apple_style: false`; pin a theme via YAML with `theme: ios | android | auto` (default `ios`).
+> **Since v13.0.0 — Apple-style redesign + theme switcher (iOS / Material You).** Glass title pill with camera name + green/orange/grey status dot overlays the top of the video; semantic status badge (LIVE / PRIVATE / Connecting / Offline) sits in the top-right. Glass pill-bar with six circular buttons (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom — the More button reveals the Audio toggle and every other switch / accordion. The card auto-detects iOS vs Android user-agent and renders in the matching design language; a three-state switcher (Auto / iOS / Android) inside the More menu lets the user override, with the choice persisted in `localStorage` and broadcast to every Bosch card on the page. Opt out of the redesign entirely with `apple_style: false`; pin a theme via YAML with `theme: ios | android | auto` (default `ios`).
 
 The detailed reference for each card follows below — start with `bosch-camera-card` (the building block) and jump to [`bosch-camera-overview-card`](#bosch-camera-overview-card--multi-camera-grid) at the bottom. Dashboards combining several cards are under [Dashboard examples](#dashboard-examples).
 
@@ -1318,21 +1318,21 @@ The detailed reference for each card follows below — start with `bosch-camera-
 
 ```
 ┌──────────────────────────────────┐
-│ ● Garten              [streaming]│
+│ ● Garden              [streaming]│
 │  ┌────────────────────────────┐  │
 │  │   Live video / snapshot    │  │
 │  │ Last: 2026-03-19 09:32     │  │
 │  └────────────────────────────┘  │
 │  [ 📸 Snapshot ] [ 📹 Stream ] [ ⛶ ] │
-│  [ 🔊 ton / video ] [ 💡 Licht ] [ 🔒 Privat ] │
-│  [ 🔔 Benachrichtigungen ]            │
-│  [ 🎙 Gegensprechanlage ]             │
+│  [ 🔊 Sound / video ] [ 💡 Light ] [ 🔒 Private ] │
+│  [ 🔔 Notifications ]            │
+│  [ 🎙 Intercom ]             │
 │  [ ◀ ] [     ■     ] [ ▶ ]  ← pan    │
-│  Qualität: [Auto ▼]                   │
-│  ▼ Benachrichtigungs-Typen            │
-│  ▼ Erweitert                          │
-│  ▼ Diagnose                           │
-│  ▼ Zeitpläne & Zonen                  │
+│  Quality: [Auto ▼]                   │
+│  ▼ Notification Types            │
+│  ▼ Advanced                          │
+│  ▼ Diagnostics                           │
+│  ▼ Schedules & Zones                  │
 └──────────────────────────────────┘
 ```
 
@@ -1349,18 +1349,18 @@ The detailed reference for each card follows below — start with `bosch-camera-
 |--------|----------|
 | 📸 Snapshot | Force-fetch a fresh image immediately |
 | 📹 Live Stream | Toggle stream ON/OFF |
-| 🔊 Ton | Mute / unmute live audio. Hover (desktop) or long-press (touch) reveals a volume slider. Greyed out until a live stream is playing. Both on/off and volume are backed by automatable entities and sync across all cards (see [Audio: who controls the sound](#audio-who-controls-the-sound)). |
-| 💡 Licht | Toggle camera LED light (outdoor camera) |
-| 🔒 Privat | Toggle privacy mode (covers lens) |
-| 🔔 Benachrichtigungen | Toggle push notifications |
-| 🎙 Gegensprechanlage | Toggle intercom / two-way audio |
+| 🔊 Sound | Mute / unmute live audio. Hover (desktop) or long-press (touch) reveals a volume slider. Greyed out until a live stream is playing. Both on/off and volume are backed by automatable entities and sync across all cards (see [Audio: who controls the sound](#audio-who-controls-the-sound)). |
+| 💡 Light | Toggle camera LED light (outdoor camera) |
+| 🔒 Private | Toggle privacy mode (covers lens) |
+| 🔔 Notifications | Toggle push notifications |
+| 🎙 Intercom | Toggle intercom / two-way audio |
 | ◀ ▶ Pan | Pan left/right (CAMERA_360 only) |
 
 **Collapsible accordion sections** (auto-hidden when entities not available):
-- **Benachrichtigungs-Typen** — per-type notification toggles: movement, person, audio, trouble, camera alarm
-- **Erweitert** — timestamp overlay, auto-follow, motion detection, record sound, privacy sound
-- **Diagnose** — WiFi signal %, firmware version, ambient light %, movement/audio events today
-- **Zeitpläne & Zonen** — schedule rules list with AN/AUS toggle per rule + delete button, motion zone overlay toggle, motion zone count (RCP)
+- **Notification Types** — per-type notification toggles: movement, person, audio, trouble, camera alarm
+- **Advanced** — timestamp overlay, auto-follow, motion detection, record sound, privacy sound
+- **Diagnostics** — WiFi signal %, firmware version, ambient light %, movement/audio events today
+- **Schedules & Zones** — schedule rules list with ON/OFF toggle per rule + delete button, motion zone overlay toggle, motion zone count (RCP)
 
 #### Card YAML
 
@@ -1372,15 +1372,15 @@ camera_entity: camera.bosch_garten
 # With optional title
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
-title: Garten
+title: Garden
 
 # Compact "minimal layout" — hides all advanced controls behind the ⋮ button.
-# Visible: image + info row (Status / Verbindung / Reaktion) + primary buttons
+# Visible: image + info row (Status / Connection / Response) + primary buttons
 # (Snapshot, Live Stream, ⋮ Overflow, Fullscreen) + Privacy toggle.
 # Tap ⋮ to progressively reveal audio/light/notifications/accordions/pan/etc.
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_garten
-title: Garten
+title: Garden
 minimal: true
 
 # Clean Apple-Home-style tile — same look the overview-card grid uses, on a
@@ -1410,7 +1410,7 @@ show_last_event: false
 | `theme` | `ios` | `ios` / `android` / `auto` (resolve from user-agent). |
 | `mode` | `auto` | Card chrome day/night: `auto` / `day` / `night`. |
 | `compact` | `false` | Apple-Home tile: hides the bottom pill-bar + top-right status badge (video + title pill only). Always collapsed (no controls) — for overview grids. |
-| `minimal` | `false` | `false` (default) shows the full control stack (switches + accordions) expanded with the ⋮ pre-opened; `true` collapses everything behind the ⋮ "Mehr" button until tapped. (Overview-grid tiles default to `minimal: true`.) |
+| `minimal` | `false` | `false` (default) shows the full control stack (switches + accordions) expanded with the ⋮ pre-opened; `true` collapses everything behind the ⋮ "More" button until tapped. (Overview-grid tiles default to `minimal: true`.) |
 | `show_title` | `true` | Set `false` to hide the title pill entirely (clean video-only tile). |
 | `show_last_event` | `true` | Set `false` to hide the last-event badge in the bottom-right of the video. |
 | `show_audio` | `true` | Set `false` to hide the audio button (sound + volume) entirely. |
@@ -1446,7 +1446,7 @@ So: **automate the entities**, and the cards follow. There is deliberately no ca
 
 > **Visual editor** — all the options above except the rarely-used ones are also editable in the dashboard's visual card editor (no YAML needed). The camera picker lists every `camera.*` entity on your instance, so any Bosch camera can be selected regardless of how its entity is named. The editor and the card chrome follow your Home Assistant language: German for a `de…` UI language, English for everything else.
 
-All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist. The **Reaktion** slot in the info row reads the `buffering_time_ms` attribute exposed by the camera entity (Bosch cloud-issued, ~500 ms on LOCAL and ~1000 ms on REMOTE); it stays `—` while the stream is idle. The **Verbindung** slot reads `connection_type` and shows `LAN`, `Cloud`, or `—`.
+All entity IDs are auto-derived from `camera_entity`. Buttons and sections are hidden automatically when entities don't exist. The **Response** slot in the info row reads the `buffering_time_ms` attribute exposed by the camera entity (Bosch cloud-issued, ~500 ms on LOCAL and ~1000 ms on REMOTE); it stays `—` while the stream is idle. The **Connection** slot reads `connection_type` and shows `LAN`, `Cloud`, or `—`.
 
 > Dashboards mixing several cards (two-up, full grids) are documented under [Dashboard examples](#dashboard-examples) below, after the overview card.
 
@@ -1460,13 +1460,13 @@ Introduced in v10.3.0. Auto-discovers every Bosch camera on the HA instance (`at
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Kameras                                                4/4  │
+│  Cameras                                                4/4  │
 │  ┌─────────────────────┐  ┌─────────────────────┐            │
-│  │ ● Terrasse          │  │ ● Innenbereich      │  ← green   │
+│  │ ● Terrace           │  │ ● Indoor            │  ← green   │
 │  │ [live tile]         │  │ [live tile]         │  outline   │
 │  └─────────────────────┘  └─────────────────────┘            │
 │  ┌─────────────────────┐  ┌─────────────────────┐            │
-│  │ 🔒 Eingang          │  │ ○ Garten            │  ← orange  │
+│  │ 🔒 Entrance         │  │ ○ Garden            │  ← orange  │
 │  │ [privacy on]        │  │ [offline]           │    & grey  │
 │  └─────────────────────┘  └─────────────────────┘            │
 └──────────────────────────────────────────────────────────────┘
@@ -1480,7 +1480,7 @@ Introduced in v10.3.0. Auto-discovers every Bosch camera on the HA instance (`at
 
 #### Tile sort order
 
-Two-level sort: tiers come first (always live → privat → offline), then within each tier either alphabetic (default) or Bosch-app-priority (since v10.4.10).
+Two-level sort: tiers come first (always live → private → offline), then within each tier either alphabetic (default) or Bosch-app-priority (since v10.4.10).
 
 | Mode | YAML | Behavior |
 |---|---|---|
@@ -1500,7 +1500,7 @@ overrides:
       - automation.alarmanlage
   camera.bosch_garten:
     refresh_interval_streaming: 3
-    title: Eingang (Gen1)
+    title: Entrance (Gen1)
     minimal: true                    # compact layout for this tile only
 ```
 
@@ -1514,7 +1514,7 @@ type: custom:bosch-camera-overview-card
 
 # Full options
 type: custom:bosch-camera-overview-card
-title: Kameras                  # optional header
+title: Cameras                  # optional header
 online_offline_view: true       # default true; false = hide offline tier
 columns: auto                   # "auto" | 1 | 2 | 3 | 4   (default "auto")
 min_width: 650px                # cell min-width when columns: auto (default 650px)
@@ -1583,10 +1583,10 @@ columns: 2
 cards:
   - type: custom:bosch-camera-card
     camera_entity: camera.bosch_garten
-    title: Garten
+    title: Garden
   - type: custom:bosch-camera-card
     camera_entity: camera.bosch_kamera
-    title: Kamera
+    title: Camera
 ```
 
 #### A full camera dashboard view
@@ -1606,7 +1606,7 @@ sections:
         heading: Single camera
       - type: custom:bosch-camera-card          # full glass chrome, controls expanded
         camera_entity: camera.bosch_terrasse
-        title: Terrasse
+        title: Terrace
         grid_options: {columns: 12}
       - type: custom:bosch-camera-card          # clean Apple-Home tile
         camera_entity: camera.bosch_innenbereich
@@ -1692,7 +1692,7 @@ sections:
   - type: grid
     cards:
       - type: heading
-        heading: Terrasse (Gen2 Outdoor)
+        heading: Terrace (Gen2 Outdoor)
         heading_style: title
         icon: mdi:weather-sunny
       - type: tile
@@ -1767,9 +1767,9 @@ Repeat the per-camera grid for each camera you have. The view uses the standard 
 
 ---
 
-## Alarmanlage / Automation Setup
+## Alarm System / Automation Setup
 
-The Eyes Innenkamera II (Gen2) adds a built-in alarm system with integrated 75 dB siren. Here's how to wire it into a typical HA alarm automation alongside your existing cameras:
+The Eyes Indoor II (Gen2) adds a built-in alarm system with integrated 75 dB siren. Here's how to wire it into a typical HA alarm automation alongside your existing cameras:
 
 ### Entities for the alarm system (v9.1.10+, Gen2 Indoor II only)
 
@@ -1796,12 +1796,12 @@ When privacy is ON, the Bosch cloud API returns HTTP 443 `"sh:camera.in.privacy.
 
 **Note on event clips:** Bosch records clips only when the camera is actively monitoring. If all cameras are in privacy mode, `videoClipUploadStatus=Unavailable` is returned for every event — you'll get the text + snapshot alert but no video attachment. This is not a bug in the integration.
 
-### Example: Integrate the Gen2 Indoor II into an existing Alarmanlage automation
+### Example: Integrate the Gen2 Indoor II into an existing Alarm System automation
 
 If you already have an alarm automation that toggles `privacy_mode` on your other cameras based on presence / schedule / garage door, just add the new camera's privacy switch alongside:
 
 ```yaml
-- alias: "Alle weg → Alarmanlage aktivieren + Kameras freigeben"
+- alias: "Everyone away → arm Alarm System + release cameras"
   sequence:
     - action: switch.turn_off
       target:
@@ -1817,7 +1817,7 @@ If you already have an alarm automation that toggles `privacy_mode` on your othe
 ### Example: Intrusion event → notify + optional siren
 
 ```yaml
-- alias: "Innenkamera → Person erkannt"
+- alias: "Indoor camera → Person detected"
   triggers:
     - platform: state
       entity_id: binary_sensor.bosch_innen_person
@@ -1829,7 +1829,7 @@ If you already have an alarm automation that toggles `privacy_mode` on your othe
   actions:
     - action: notify.mobile_app_xxx   # replace with your notify service
       data:
-        message: "🚨 Person im Innenbereich erkannt"
+        message: "🚨 Person detected indoors"
     # Optional: fire the siren (remove this line to silent-alarm)
     # - action: switch.turn_on
     #   target:
@@ -1838,12 +1838,12 @@ If you already have an alarm automation that toggles `privacy_mode` on your othe
 
 ### Card config for the alarm system
 
-The custom Lovelace card automatically shows the new alarm rows (Alarmanlage, Sirene, Pre-Alarm, Power-LED) when the alarm entities exist and the alarm system is gated behind the presence of `switch.{base}_alarmanlage`. No card config changes needed:
+The custom Lovelace card automatically shows the new alarm rows (Alarm System, Siren, Pre-Alarm, Power-LED) when the alarm entities exist and the alarm system is gated behind the presence of `switch.{base}_alarmanlage`. No card config changes needed:
 
 ```yaml
 type: custom:bosch-camera-card
 camera_entity: camera.bosch_innenbereich
-title: "Eyes Innenkamera II"
+title: "Eyes Indoor II"
 ```
 
 Everything renders automatically when the integration detects a Gen2 Indoor II.
@@ -1919,13 +1919,13 @@ homekit:
       - binary_sensor.bosch_*_motion
   entity_config:
     camera.bosch_terrasse:
-      name: "Terrasse"
+      name: "Terrace"
     camera.bosch_innenbereich:
-      name: "Innenbereich"
+      name: "Indoor"
     camera.bosch_kamera:
-      name: "360 Kamera"
+      name: "360 Camera"
     camera.bosch_eingang:
-      name: "Eingang"
+      name: "Entrance"
 ```
 
 After adding this, restart HA and pair using the QR code or PIN shown in the HomeKit Bridge integration card.
@@ -1986,31 +1986,31 @@ Latest: **v13.5.12** — see the GitHub release page for full notes:
 |---|---|
 | **v13.5.12** | **The live stream starts with sound again when the audio switch is on.** Browsers force every video to begin muted, so the card now treats your *start-stream* tap as the unlock: when you start the stream and the audio switch is on, sound comes on by itself as the first frame appears — no second tap on the audio button needed. After a reload the stream still starts muted (no page may play sound before you interact with it), but your **first click anywhere** now reliably restores it. For sound *immediately* after a reload, install the dashboard as an app (Chrome ⋮ → *Install app*) or use the Companion App — installed apps are allowed to play sound on load. The card still never unmutes without a real user gesture, so the stream cannot freeze. Card-only change. |
 | **v13.5.11** | **Cards show up in the new card picker (HA 2026.6), plus audio fixes.** Picking a Bosch camera entity in the *Add card* dialog now suggests the *Bosch Camera Card* and *Bosch Camera Overview* directly under the Community section — no more typing `custom:` by hand (uses the new `getEntitySuggestion` hook; offered only for Bosch camera entities). And audio no longer mutes itself after a few minutes — a transient pause (buffering, tab throttle, brief network gap) used to re-mute the stream; it now resumes without muting when sound is on. Because browsers force every video to start muted, the card now also restores sound on your **first click anywhere** whenever the audio switch is on, so after a load/reload/restart you no longer have to find the audio button. The card still never unmutes without a real gesture. Card-only change. |
-| **v13.5.10** | **Card: the redundant "Privat" row no longer reappears in the ⋮ overflow menu.** With `hide_redundant_privacy` on (default), the standalone Privat switch row is correctly dropped because the pill bar already carries a privacy button — but on a minimal overview tile it came back the moment you opened the ⋮ (More) tray. A CSS specificity fix keeps it hidden in the tray too, while every other switch row still appears. Card-only change. |
+| **v13.5.10** | **Card: the redundant "Private" row no longer reappears in the ⋮ overflow menu.** With `hide_redundant_privacy` on (default), the standalone Private switch row is correctly dropped because the pill bar already carries a privacy button — but on a minimal overview tile it came back the moment you opened the ⋮ (More) tray. A CSS specificity fix keeps it hidden in the tray too, while every other switch row still appears. Card-only change. |
 | **v13.5.9** | **Stop button reachable over overlays, plus a short remote WebRTC attempt.** The control pill bar now sits above the start/loading overlays, so Stop stays tappable while the "tap to start" gate or the warming-up spinner is showing. On an external address the card now briefly attempts WebRTC (~2.5 s) before falling back to HLS — a client that can reach the stream directly (VPN or LAN) gets low-latency WebRTC, while a true-remote client falls back quickly. The HLS banner shows only on an actual fallback. |
 | **v13.5.8** | **Live stream no longer drops/freezes, fullscreen exit + volume slider fixed.** Sound is now enabled only by a real tap on the audio pill (browser autoplay rules pause a gesture-lessly unmuted video, which froze the stream); a pause-guard re-mutes and resumes if anything else pauses it. The "Green IT" idle reaper is now opt-in and OFF by default (experimental). The fullscreen exit button works again, double-tap no longer triggers zoom ([#16](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/16)), and the volume slider reflects the real level instead of snapping to 0 on mute. |
 | **v13.5.7** | **Maintenance patch — no user-facing change.** CI hardened ahead of GitHub's 2026-06-16 Node-24 runner cutover (`codeql-action` v3→v4, `checkout` v4→v5), test-only dependencies pinned away from known advisories, and two unused variables plus a stale lint directive removed from the card bundle. |
 | **v13.5.6** | **Green IT idle-stream reaper, mobile/HLS idle fix, privacy button greying.** A new power-saving option ends a camera's live session once nobody has watched it for about three minutes (an active HLS/WebRTC viewer or a Mini-NVR recording always counts as a consumer). Streams opened in the mobile app are now correctly recognised as idle via real HLS fetch recency. While privacy mode is on, the stream and snapshot buttons are disabled and greyed instead of failing the tap. |
-| **v13.5.5** | **On-video pan arrows + cleaner privacy control.** 360° cameras get large left/right pan arrows on the picture that work in fullscreen ([#33](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/33)), via a new `pan_overlay: auto \| always \| never` option; they appear only on cameras that expose a pan position. New `hide_redundant_privacy` option (on by default) drops the duplicate "Privat" row when the pill bar already shows a privacy button ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15) / [#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)). The "HLS mode" banner is now localised across all 11 card languages. |
+| **v13.5.5** | **On-video pan arrows + cleaner privacy control.** 360° cameras get large left/right pan arrows on the picture that work in fullscreen ([#33](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/33)), via a new `pan_overlay: auto \| always \| never` option; they appear only on cameras that expose a pan position. New `hide_redundant_privacy` option (on by default) drops the duplicate "Private" row when the pill bar already shows a privacy button ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15) / [#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)). The "HLS mode" banner is now localised across all 11 card languages. |
 | **v13.5.4** | **Maintenance: Home Assistant 2026.6 readiness.** No user-facing changes. Internally, the reauth/reconfigure flow no longer uses a config-flow reload method that Home Assistant 2026.6 deprecates when combined with an options update listener (it would become an error in 2026.12) — credentials are still applied via an explicit reload, and the careful "reload only when options actually change" behaviour is unchanged. Also drops the now-unnecessary `ignore: brands` from the HACS validation workflow, since HACS recognises the integration's bundled `brand/` icons (HA 2026.3 brands proxy). |
 | **v13.5.3** | **Reliability & security hardening across the integration.** The live stream now recovers from an expired token (refresh + retry) and snapshot renewal is no longer cut short on slow cameras; light, white-balance and audio writes survive a token rotation. Settings you change — detection mode, motion sensitivity, alarm delays, lighting and audio — no longer briefly snap back before the cloud catches up, and changing two sibling controls at once no longer lets one overwrite the other. Hardening: the schedule-rule list is fully HTML/attribute-escaped, alert filenames are sanitised, event alerts never attach the wrong camera's image or fetch a rejected URL, the webhook is restricted to `http(s)`, and Digest credentials no longer appear in debug logs. No new entities or breaking changes. |
 | **v13.5.2** | **Mute now sticks across restarts, and a card can pin its own audio default.** The audio mute is now backend-owned and persistent: your mute/unmute choice is restored after a Home Assistant restart instead of every stream coming back with sound. A brand-new camera now starts **muted**, and your first toggle sticks for good (the old forced "default on" is gone). New per-card `audio_default: backend \| on \| off` option — by default the card follows the `switch.<cam>_audio` mute, or you can pin a single card to always start muted (or always unmuted) regardless of the backend switch. |
 | **v13.5.1** | **Loading overlay no longer sticks after the stream starts, plus a visible stream cooldown.** Starting the live stream sometimes left the "loading…" spinner on screen even though the picture was already playing — only an app reload cleared it. The overlay now hides reliably the moment the first frame arrives. And the stream start/stop button now shows the same short **cooldown countdown** as the privacy button: after you stop a stream the backend needs a few seconds before it will start it again, so the button briefly shows the remaining seconds instead of letting a too-early tap bounce back. |
 | **v13.5.0** | **Card in 11 languages, audio you can automate, smoother overlays.** The card editors and all in-card text now follow your Home Assistant language — English, German, Spanish, French, Italian, Dutch, Polish, Portuguese, Russian, Ukrainian and Simplified Chinese — matching the integration's own translations. **Audio is now backend-owned and synced across devices:** a `switch.<cam>_audio` mute that toggles on every tap (so muting/unmuting syncs to every browser and is automatable) plus a new `number.<cam>_audio_volume` slider; an optional `use_card_audio_settings:` card option decouples a single card from the global audio entities if you prefer. **Fullscreen digital zoom** — pinch, mouse-wheel, double-tap and pan. **Overlay polish:** the privacy placeholder no longer stacks under a "refreshing" spinner, and a card pointed at a non-existent camera entity now says **"camera not found"** instead of a misleading re-login prompt. The hover lift is now **shadow-only** — no geometry shimmer and it never clips the fullscreen/zoom view ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)). **Backend stream-recovery hardening:** the 401 rescue / proxy-died rebuild now tears the old local proxy down and rebuilds it **atomically under one lock**, so a concurrent session renewal can no longer leave go2rtc/HA-Stream pinned to a dead port; and a cloud **444** (session quota / a freshly re-paired camera) now falls back to the local API for privacy writes. Test coverage stays at **100%**. |
 | **v13.4.5** | **Stream resilience — self-healing local sessions.** When the camera rotates its local streaming credentials the integration rebuilds the local proxy on a fresh port; the rescue now **retries with backoff (up to three attempts)** instead of giving up after a single transient refuse, so go2rtc and the HA stream are no longer left pinned to a dead port (which showed as a frozen image until a manual reload). The **card now recognises a dead go2rtc source** (connection refused, wrong user/pass, exec/rtsp, DESCRIBE 404) and forces one backend stream rebuild via the live-stream switch, with a cooldown so it stops hammering a stale source. Also folds the card-state fixes from the re-pointed v13.4.4: the **overview tile hover keeps your themed `ha-card-box-shadow`** ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)) and the **privacy/light buttons clear their marked state the instant you toggle them off** ([#27](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/27)) instead of waiting for the next status push. |
-| **v13.4.4** | **Card UX polish — hover, overview shadows, instant audio.** The single card's hover now **lifts and scales** like the overview tiles ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)). Overview tiles now show a themed **`ha-card-box-shadow`** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — the shadow moved onto the tile itself, which the corner-cropping `overflow:hidden` had been clipping. The **Ton toggle reflects audibility the instant playback starts** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)) — it reads off (muted) at stream start and a single tap unmutes, without waiting for a state update. **Internal:** mock-`hass` Playwright interaction tests (hover / privacy / audio / fullscreen), a full-E2E `hass-taste-test` smoke against a real Home Assistant, and a `docs/ci-cd.md` pipeline doc with diagrams. |
+| **v13.4.4** | **Card UX polish — hover, overview shadows, instant audio.** The single card's hover now **lifts and scales** like the overview tiles ([#15](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/15)). Overview tiles now show a themed **`ha-card-box-shadow`** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — the shadow moved onto the tile itself, which the corner-cropping `overflow:hidden` had been clipping. The **Sound toggle reflects audibility the instant playback starts** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)) — it reads off (muted) at stream start and a single tap unmutes, without waiting for a state update. **Internal:** mock-`hass` Playwright interaction tests (hover / privacy / audio / fullscreen), a full-E2E `hass-taste-test` smoke against a real Home Assistant, and a `docs/ci-cd.md` pipeline doc with diagrams. |
 | **v13.4.3** | **Privacy stops the live stream + sound immediately** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)). Switching a camera to Privacy while the stream was playing tore the stream down on the backend, but the card's HLS buffer kept playing video and sound for a few seconds and the controls felt stuck. The card now stops its video the instant privacy turns on. |
-| **v13.4.2** | **Audio toggle that makes sense, mobile fullscreen, theme-aware geometry.** The **Ton (sound) toggle now reflects whether you actually hear sound**: a live stream starts muted (browser autoplay policy), so the toggle reads off with a "tap for sound" hint and a **single tap unmutes instantly** — no more "on but silent", and no off/on workaround. **Mobile fullscreen** — closing one camera's fullscreen no longer immediately opens another camera's (single-owner rule + a short exit guard). **Theme-aware card geometry** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — the cards now follow your dashboard's standard `ha-card-border-radius` / `ha-card-box-shadow` / `ha-card-border-width` theme variables by default (one theme change styles every card), with optional per-card `border_radius:` / `box_shadow:` overrides; applies to both the single card and the overview grid. Hover lifts now use a transform so a themed card shadow stays visible on hover. |
-| **v13.4.1** | **Card controls simplified + theme-friendly.** The in-card **Design (iOS/Android) and Modus (Tag/Nacht) switcher buttons were removed** — both are now set purely in YAML (`theme: ios \| android \| auto`, default iOS; `mode: auto \| day \| night`, default auto), keeping the control menu clean. **Overview card respects its column width** — tiles no longer overflow a narrow dashboard column (the grid track is capped to the container width). **No jump on expand** — an overview tile no longer shifts upward when you open its ⋮ menu, and the single card now gets the same subtle hover lift for consistency. **Theme variable support** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — new `border_radius:` and `box_shadow:` card options let the cards match a themed dashboard; they default to the signature Apple-style look, and a dashboard theme that zeroes `ha-card-border-radius` no longer strips the card's rounding. **"Live" badge is instant** — it flips to green "Live" the moment the video actually plays instead of lingering on orange "Verbinde" for several seconds while the backend status caught up. **Audio toggle fix on the 360° Indoor** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)) — switching Audio off then on again now takes effect immediately; previously the toggle stayed visually stuck until the camera was panned. **Internal:** added CodeQL + gitleaks CI, ruff/mypy/ESLint/codespell quality gates, cross-OS Playwright smoke, and format-robust regression tests. |
-| **v13.4.0** | **Live-stream state syncs across browser sessions.** The stream lifecycle is now driven by the shared backend `stream_status` (idle → connecting → warming_up → streaming), pushed by HA to every client — so a card opened in a second browser/device shows the *same* "connecting / waking up / Live" state as the one that started the stream, instead of a stale "idle". This removes a bug where the second session looked idle, the user tapped start again, and that re-toggle tore down the first session's stream. The connecting overlay text comes from the shared status too, so all sessions show the same message. The **"Live" badge now reflects the actual video** — green only when *your* video is really playing, "Verbinde" (orange) while connecting, never a premature "Live" just because the switch is on; and the "Kamera wird aufgeweckt…" overlay clears the moment the video plays even if the backend status lags. **Design/Modus switcher now mirrors the config** — a card with `theme: ios` / `mode: night` shows that option selected in the menu instead of always "Auto". **Cross-OS robustness** — added an `os-<name>` host class (Windows/macOS/iOS/Android/Linux) for OS-targeted CSS and a cross-platform `system-ui` / Segoe UI font fallback (the card is developed on macOS; this hardens rendering on Windows/Edge and Linux). |
+| **v13.4.2** | **Audio toggle that makes sense, mobile fullscreen, theme-aware geometry.** The **Sound toggle now reflects whether you actually hear sound**: a live stream starts muted (browser autoplay policy), so the toggle reads off with a "tap for sound" hint and a **single tap unmutes instantly** — no more "on but silent", and no off/on workaround. **Mobile fullscreen** — closing one camera's fullscreen no longer immediately opens another camera's (single-owner rule + a short exit guard). **Theme-aware card geometry** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — the cards now follow your dashboard's standard `ha-card-border-radius` / `ha-card-box-shadow` / `ha-card-border-width` theme variables by default (one theme change styles every card), with optional per-card `border_radius:` / `box_shadow:` overrides; applies to both the single card and the overview grid. Hover lifts now use a transform so a themed card shadow stays visible on hover. |
+| **v13.4.1** | **Card controls simplified + theme-friendly.** The in-card **Design (iOS/Android) and Mode (Day/Night) switcher buttons were removed** — both are now set purely in YAML (`theme: ios \| android \| auto`, default iOS; `mode: auto \| day \| night`, default auto), keeping the control menu clean. **Overview card respects its column width** — tiles no longer overflow a narrow dashboard column (the grid track is capped to the container width). **No jump on expand** — an overview tile no longer shifts upward when you open its ⋮ menu, and the single card now gets the same subtle hover lift for consistency. **Theme variable support** ([#21](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/21)) — new `border_radius:` and `box_shadow:` card options let the cards match a themed dashboard; they default to the signature Apple-style look, and a dashboard theme that zeroes `ha-card-border-radius` no longer strips the card's rounding. **"Live" badge is instant** — it flips to green "Live" the moment the video actually plays instead of lingering on orange "Connecting" for several seconds while the backend status caught up. **Audio toggle fix on the 360° Indoor** ([#22](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/22)) — switching Audio off then on again now takes effect immediately; previously the toggle stayed visually stuck until the camera was panned. **Internal:** added CodeQL + gitleaks CI, ruff/mypy/ESLint/codespell quality gates, cross-OS Playwright smoke, and format-robust regression tests. |
+| **v13.4.0** | **Live-stream state syncs across browser sessions.** The stream lifecycle is now driven by the shared backend `stream_status` (idle → connecting → warming_up → streaming), pushed by HA to every client — so a card opened in a second browser/device shows the *same* "connecting / waking up / Live" state as the one that started the stream, instead of a stale "idle". This removes a bug where the second session looked idle, the user tapped start again, and that re-toggle tore down the first session's stream. The connecting overlay text comes from the shared status too, so all sessions show the same message. The **"Live" badge now reflects the actual video** — green only when *your* video is really playing, "Connecting" (orange) while connecting, never a premature "Live" just because the switch is on; and the "Camera waking up…" overlay clears the moment the video plays even if the backend status lags. **Design/Mode switcher now mirrors the config** — a card with `theme: ios` / `mode: night` shows that option selected in the menu instead of always "Auto". **Cross-OS robustness** — added an `os-<name>` host class (Windows/macOS/iOS/Android/Linux) for OS-targeted CSS and a cross-platform `system-ui` / Segoe UI font fallback (the card is developed on macOS; this hardens rendering on Windows/Edge and Linux). |
 | **v13.3.3** | **Removed the on-card debug line** — the small `Card vX | fresh … | WxH` diagnostics line at the top of the card is gone (it lived inside the otherwise-hidden header). No functional change. If the card looks unchanged after updating, your browser is serving a cached copy — force a refresh (Safari: ⌘+⌥+R "Reload From Origin"; HA Companion app: Settings → Companion App → Debug → Reset frontend cache; Chrome/Edge/Firefox: Ctrl/⌘+Shift+R). |
-| **v13.3.2** | **Fullscreen button now closes fullscreen again** — on desktop/Android the ⛶ button entered fullscreen but a second tap did nothing (only `Esc` exited). The card requests fullscreen on an element inside its shadow root, where `document.fullscreenElement` retargets to the shadow host, so the old "already fullscreen?" check never matched; detection now reads `shadowRoot.fullscreenElement` and the button toggles in and out. **New card no longer stuck on one camera** — a freshly added `bosch-camera-card` defaulted to a hard-coded entity (`camera.bosch_garten`) that only exists on the author's instance, and the visual editor's camera picker stayed empty when entity names didn't contain "bosch". The picker now derives its default from your own cameras and lists every `camera.*` entity, and keeps the configured value selected. **Two new hide options** — `show_title: false` and `show_last_event: false` strip the title pill and last-event badge for a clean video-only tile (pairs with `compact: true` to match the overview-card grid look); both default to on, available in YAML and the visual editor. Applies to single cards and to overview-grid tiles via `card_defaults`. **`minimal` is now meaningful in the default (Apple-style) layout** — a standalone card shows its full control stack (switches + accordions) expanded by default with the ⋮ "Mehr" button pre-opened; `minimal: true` keeps everything collapsed behind ⋮. Overview-grid tiles default to `minimal: true` so the grid stays glanceable (tap a tile's ⋮ to reveal its controls). The overview editor now exposes the same Design / hide sub-features as the single card. **Offline cameras show less chrome** — the garbled overlapping label on offline tiles is fixed (the redundant top title-pill is hidden; the centered "Kamera Offline" pill is the single source of truth), and in the expanded layout an offline camera now hides the unusable control stack (keeping only attached automations). **White strip below the video removed** — collapsed control rows left ~20 px of `padding`/`border` showing under `max-height:0`; now zeroed so the card sizes exactly to the video. |
+| **v13.3.2** | **Fullscreen button now closes fullscreen again** — on desktop/Android the ⛶ button entered fullscreen but a second tap did nothing (only `Esc` exited). The card requests fullscreen on an element inside its shadow root, where `document.fullscreenElement` retargets to the shadow host, so the old "already fullscreen?" check never matched; detection now reads `shadowRoot.fullscreenElement` and the button toggles in and out. **New card no longer stuck on one camera** — a freshly added `bosch-camera-card` defaulted to a hard-coded entity (`camera.bosch_garten`) that only exists on the author's instance, and the visual editor's camera picker stayed empty when entity names didn't contain "bosch". The picker now derives its default from your own cameras and lists every `camera.*` entity, and keeps the configured value selected. **Two new hide options** — `show_title: false` and `show_last_event: false` strip the title pill and last-event badge for a clean video-only tile (pairs with `compact: true` to match the overview-card grid look); both default to on, available in YAML and the visual editor. Applies to single cards and to overview-grid tiles via `card_defaults`. **`minimal` is now meaningful in the default (Apple-style) layout** — a standalone card shows its full control stack (switches + accordions) expanded by default with the ⋮ "More" button pre-opened; `minimal: true` keeps everything collapsed behind ⋮. Overview-grid tiles default to `minimal: true` so the grid stays glanceable (tap a tile's ⋮ to reveal its controls). The overview editor now exposes the same Design / hide sub-features as the single card. **Offline cameras show less chrome** — the garbled overlapping label on offline tiles is fixed (the redundant top title-pill is hidden; the centered "Camera Offline" pill is the single source of truth), and in the expanded layout an offline camera now hides the unusable control stack (keeping only attached automations). **White strip below the video removed** — collapsed control rows left ~20 px of `padding`/`border` showing under `max-height:0`; now zeroed so the card sizes exactly to the video. |
 | **v13.3.1** | **Privacy/light toggle no longer interrupts streams on other cameras** — toggling privacy mode or the camera light on one camera triggered a coordinator-wide state broadcast that briefly flashed a reconnecting/HLS overlay on every other camera on the same dashboard; each card now skips the re-render path for unrelated entities. **Loading spinner centered in HA mobile app** — `inset` CSS shorthand unsupported on older iOS WebViews caused the spinner to anchor bottom-right instead of center; replaced with explicit four-side properties. **Tap reliability improved** — tap-to-play and fullscreen overlay touch handling improved for mobile. **`bosch-camera-autoplay-fix.js` deprecated** — the separate autoplay-watchdog resource is now a no-op; the card self-heals on its own; the resource is auto-removed on next HA restart, no action needed. **Internal:** intrusion-detection `distance` maximum aligned to API limit (8 m); test coverage expanded for switch on/off modes. |
-| **v13.2.5** | **WebRTC race on first stream-start fixed** — `BoschCamera.is_streaming` returned True the moment `try_live_connection` populated `_live_connections`, BEFORE the 25-35 s pre-warm wrote `rtspsUrl`. Card's `_waitForStreamReady` saw `cam.state === "streaming"`, immediately fired `camera/webrtc/offer`, HA's go2rtc rejected with `Camera has no stream source`, card 5-s-timed-out and fell back to HLS — making WebRTC look like "only works after a browser reload." `is_streaming` now mirrors `stream_source`'s gate (entry present AND has `rtspsUrl`/`rtspUrl`). WebRTC succeeds on first stream-start; TLS-proxy logs show `User-Agent: go2rtc/1.9.14` confirming the actual transport. **Loading overlay leaks during privacy on/off closed.** Five layered fixes for paths where "Aktualisiere…" / "Bild wird geladen…" stuck while the shutter was closed or during the 12 s post-off re-snapshot grace: `_setLoadingOverlay` entry-guard, `_update` privacy-on force-clear, gated direct-DOM paths in `_restoreCachedImage` and `_onImageLoaded`, gated `set hass` firstHass block, and a pre-pass at the TOP of `_update` that sets `_privacyOffSuppressUntil` BEFORE the same-tick stream-stopped + backend-waiting overlay shows could fire. **Stuck "Verbinde" badge** when the card mounted on an already-active stream now self-heals: video-element `!paused && currentTime > 0 && readyState >= 2` force-clears the stale `_startingLiveVideo` flag + dismisses the overlay (the `playing`-event listener that would normally do it is no longer in scope). **Loading overlay stacked on OFFLINE** for ~15 s of HTTP retries — stream-OFF transition's snapshot-fetch + overlay-show now gated on `!_isOffline`. **Card 404 noise eliminated** — `_pullFreshSwitchStates` filters by `id in hass.states` before the REST call (Gen2 LED rings live under `light.*`, but the default fallback fabricated `switch.X_camera_light`). |
+| **v13.2.5** | **WebRTC race on first stream-start fixed** — `BoschCamera.is_streaming` returned True the moment `try_live_connection` populated `_live_connections`, BEFORE the 25-35 s pre-warm wrote `rtspsUrl`. Card's `_waitForStreamReady` saw `cam.state === "streaming"`, immediately fired `camera/webrtc/offer`, HA's go2rtc rejected with `Camera has no stream source`, card 5-s-timed-out and fell back to HLS — making WebRTC look like "only works after a browser reload." `is_streaming` now mirrors `stream_source`'s gate (entry present AND has `rtspsUrl`/`rtspUrl`). WebRTC succeeds on first stream-start; TLS-proxy logs show `User-Agent: go2rtc/1.9.14` confirming the actual transport. **Loading overlay leaks during privacy on/off closed.** Five layered fixes for paths where "Refreshing…" / "Loading image…" stuck while the shutter was closed or during the 12 s post-off re-snapshot grace: `_setLoadingOverlay` entry-guard, `_update` privacy-on force-clear, gated direct-DOM paths in `_restoreCachedImage` and `_onImageLoaded`, gated `set hass` firstHass block, and a pre-pass at the TOP of `_update` that sets `_privacyOffSuppressUntil` BEFORE the same-tick stream-stopped + backend-waiting overlay shows could fire. **Stuck "Connecting" badge** when the card mounted on an already-active stream now self-heals: video-element `!paused && currentTime > 0 && readyState >= 2` force-clears the stale `_startingLiveVideo` flag + dismisses the overlay (the `playing`-event listener that would normally do it is no longer in scope). **Loading overlay stacked on OFFLINE** for ~15 s of HTTP retries — stream-OFF transition's snapshot-fetch + overlay-show now gated on `!_isOffline`. **Card 404 noise eliminated** — `_pullFreshSwitchStates` filters by `id in hass.states` before the REST call (Gen2 LED rings live under `light.*`, but the default fallback fabricated `switch.X_camera_light`). |
 | **v13.2.4** | **Live-stream stutter fix (Lovelace card).** Card was re-asserting `video.muted = false` on every Home Assistant state update, even when the element was already unmuted. Chrome's autoplay policy treats every such assignment as a fresh unmute attempt and, without a user gesture in scope, pauses the video — producing visible 1-2 s stutters every time *any* tracked entity changed (observed ~11×/refresh in real logs). Now sets `muted` only on actual state transitions and gates unmute on a user-gesture flag (`pointerdown`/`keydown`/`touchstart` once-listener registered at card mount). **Stream-worker auth-rescue lowered to 1 error for 401.** HTTP 401 from the LOCAL TLS proxy is an unambiguous "Bosch rotated session creds" signal; the existing rescue path waited for `max_stream_errors` (5) errors before re-issuing `PUT /connection`, but HA's stream component coalesces identical worker errors so the counter could plateau at 4 indefinitely and the rescue never fired (frozen image until manual restart). Auth errors now bypass the threshold and trigger the rescue on the first occurrence; non-auth errors keep the original 5-error gate. **FCM diagnostic visibility.** `_LOGGER.warning("FCM registration failed: %s", err)` was being swallowed by `_FCMNoiseFilter` whenever `str(err)` contained one of the noise markers (`PHONE_REGISTRATION_ERROR`, `Unable to complete gcm auth request`, `Unable to establish subscription`), starving operators of insight into why the heal ladder kept tripping. Marker substrings are now masked in the diagnostic line so it passes the filter. **Card 404 noise eliminated.** `_pullFreshSwitchStates` no longer issues REST `GET /api/states/<id>` for entities that aren't tracked in `hass.states` (typical case: Gen2 LED ring lives under `light.*`, but card default fell back to `switch.X_camera_light` and 404'd every refresh cycle). |
 | **v13.1.2** | Patch — **FCM push during setup no longer crashes** (`async_handle_fcm_push` was reading `coordinator.data.keys()` before the first refresh populated it, raising `AttributeError: NoneType.keys()` four times per boot in live logs); guard added matching the existing `__init__.py:1576` pattern. **HA startup no longer waits five minutes on the LOCAL session keepalive** — `_replace_renewal_task` was scheduling `_auto_renew_local_session` (a `while True` loop) through `hass.async_create_task`, which made HA's startup-wrap-up phase block until the 5 min timeout and emit *"Something is blocking Home Assistant from wrapping up the start up phase"*. Switched to `hass.async_create_background_task` (the documented HA API for permanent loops). +4 regression tests pinning both fixes; full suite stays green. |
 | **v13.1.1** | **FCM two-stage self-heal** — soft (preserve credentials, library uses lightweight `gcm_check_in()` refresh) on listener death, hard (purge + fresh register) only when credentials are proven stale by recent `PHONE_REGISTRATION_ERROR`-class markers or actually missing. Previously every watchdog trigger purged credentials, forcing fresh `gcm_register()` and hitting Google's transient PHONE_REGISTRATION_ERROR cascade that paused the heal ladder for 24 h. Now soft escalates to hard only if the restart did not bring the listener back. **UPDATING UX** — `sensor.bosch_<cam>_status` gets new enum value `updating`, and `camera`, `light`, `privacy switch`, `live-stream switch` entities flip to `unavailable` during a firmware install so dashboards do not show stale data and automations do not try to control a rebooting endpoint. New attribute `camera_timestamp_overlay` on the camera entity; **card hides the redundant last-event glass pill** when the camera burns its own date/time into the video. **FW-update Signal alert template** (three automations — available / install-started / install-complete) shipped at `automation_fw_update_alert.yaml`. +14 regression tests, full suite 4459. |
-| **v13.1.0** | Day/Night card-chrome mode (Auto / Tag / Nacht switcher in the Mehr menu, parallel to the iOS / Android theme); visual editor for the single card (`bosch-camera-card-editor` — covers camera_entity, title, apple_style, theme, mode, minimal, compact, auto_play); compact tile mode (`compact: true` hides pill-bar + status badge for Apple-Home-style grid tiles); last-event glass pill in the bottom-right of every video with smart time format (`HH:MM` today, weekday+date for older events); hover scale + drop shadow on overview-grid tiles (desktop only); privacy dot recolored from amber to systemPurple (Apple "shielded" convention); light active state recolored from systemRed to amber (lamp metaphor, breaks the "everything red" collision); offline state redesign with the camera name on its own line below the OFFLINE pill; mobile scroll-flicker fix via `transform: translateZ(0)` GPU layer hint on glass elements; Android theme specificity fix (`:host(.X.mode-day:not(.theme-android))` syntax); focus-visible rings on all interactive elements; `prefers-reduced-motion: reduce` + `prefers-contrast: more` rules; WCAG AA contrast fixes on three places (connecting badge text, toggle chip text, Android offline badge). |
+| **v13.1.0** | Day/Night card-chrome mode (Auto / Day / Night switcher in the More menu, parallel to the iOS / Android theme); visual editor for the single card (`bosch-camera-card-editor` — covers camera_entity, title, apple_style, theme, mode, minimal, compact, auto_play); compact tile mode (`compact: true` hides pill-bar + status badge for Apple-Home-style grid tiles); last-event glass pill in the bottom-right of every video with smart time format (`HH:MM` today, weekday+date for older events); hover scale + drop shadow on overview-grid tiles (desktop only); privacy dot recolored from amber to systemPurple (Apple "shielded" convention); light active state recolored from systemRed to amber (lamp metaphor, breaks the "everything red" collision); offline state redesign with the camera name on its own line below the OFFLINE pill; mobile scroll-flicker fix via `transform: translateZ(0)` GPU layer hint on glass elements; Android theme specificity fix (`:host(.X.mode-day:not(.theme-android))` syntax); focus-visible rings on all interactive elements; `prefers-reduced-motion: reduce` + `prefers-contrast: more` rules; WCAG AA contrast fixes on three places (connecting badge text, toggle chip text, Android offline badge). |
 | **v13.0.0** | **Major: Apple-style card redesign + theme switcher.** Glass title pill + semantic status badge overlay the top of the video; glass six-button pill-bar (Snapshot, Live, Privacy, Light, Fullscreen, More) overlays the bottom; the More menu reveals every other switch and the Auto / iOS / Android theme selector. iOS theme uses the SF-Pro / glass-blur look; Android theme switches to Material You / M3 (solid surface-variant containers, 28 px container radius, tonal buttons, M3 dark color tokens). Theme is detected from the user-agent on first load, overridable via the in-card switcher (persisted in `localStorage` and broadcast to every Bosch card on the page), or pinned via YAML `theme: ios | android | auto`. `apple_style: false` keeps the legacy chrome. Integration and card now share version 13.0.0 so feature parity is visible at a glance. This release also bundles every reliability, connectivity, and feature improvement delivered across the 40+ v12.x patches — see `docs/version-history.md` for the full breakdown. |
 | **v12.8.4** | FCM self-heal hardening: (a) purges every `fcm_*` key from entry data (was only two), recovering from `PHONE_REGISTRATION_ERROR` loops where stale `fcm_config` / `fcm_registered_device_type` markers blocked a fresh checkin; (b) exponential cool-down ladder (30 min → 1 h → 3 h → 6 h → 24 h) with ±20 % jitter and a 6-step ceiling, replacing the fixed 30 min cadence; (c) registration storms (`PHONE_REGISTRATION_ERROR`, "Unable to complete gcm auth request", "Unable to establish subscription") now count toward the watchdog's storm trigger, not just connectivity drops; (d) `asyncio.Lock` collapses the setup-time start vs first self-heal race that registered two device tokens in 2 s. Card v2.16.10: status dot + offline overlay now case-insensitive so offline cameras render red instead of grey. +6 regression tests pinning purge-scope, race, marker set, and case-fix. |
 | **v12.8.3** | FCM push watchdog recovery gap closed: when a previous self-heal failed (e.g. Google returns `PHONE_REGISTRATION_ERROR` during a transient IP rate-limit), event detection used to stay on polling until the next HA restart. The watchdog now retries the self-heal once the 30 min cool-down expires, so push detection recovers automatically. +4 regression tests pinning the retry / cool-down / opt-out / happy-path branches. |
