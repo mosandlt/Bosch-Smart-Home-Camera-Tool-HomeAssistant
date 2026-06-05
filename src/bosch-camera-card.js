@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.11";
+const CARD_VERSION = "13.5.12";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -1830,6 +1830,46 @@ class BoschCameraCard extends HTMLElement {
     } catch (_) { /* volume not settable */ }
   }
 
+  // Called SYNCHRONOUSLY inside the user's stream-START gesture (stream pill /
+  // btn-stream / tap-to-play). Restores "sound on at start" (the pre-v13.5.8
+  // behaviour Thomas missed) WITHOUT the gesture-less unmute that Chrome
+  // punishes: the stream warms up ~15-35s after the tap, long after the tap's
+  // transient activation has expired, so we cannot just unmute when it plays.
+  // The bridge is the YouTube/Howler "audio unlock" pattern — resume an
+  // AudioContext inside the gesture. Once the page owns a *running*
+  // AudioContext, Chrome treats it as "already producing audio" and permits the
+  // WebRTC <video> to be unmuted when it starts, without a second tap. The
+  // actual unmute happens at the `playing` event via _tryStartUnmute(); if
+  // Chrome still refuses and pauses the element, the pause-guard resumes it
+  // muted — so this can only ever ADD sound, never freeze the stream. 2026-06-05.
+  _armStartUnmute() {
+    if (this._isIOS() || this._androidAudioMuted) return;  // iOS/Android pre-gesture never auto-unmute
+    if (this._audioDecoupled()) return;                    // card-audio prefs own their own seed
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        let ctx = BoschCameraCard._audioUnlockCtx;
+        if (!ctx) { ctx = new Ctx(); BoschCameraCard._audioUnlockCtx = ctx; }
+        if (ctx.state !== "running") Promise.resolve(ctx.resume()).catch(() => {});
+      }
+    } catch (_) { /* AudioContext unavailable — falls back to pill tap */ }
+    this._unmuteOnStart = true;
+  }
+
+  // Applied at the `playing` event (video provably on screen) when the start
+  // gesture armed _unmuteOnStart and the backend Ton switch is ON. Safe by
+  // construction: a refused unmute pauses the element → the pause-guard resumes
+  // it muted (no freeze). 2026-06-05.
+  _tryStartUnmute(video) {
+    if (!video || !video.muted || this._isIOS() || this._androidAudioMuted) return;
+    if (this._audioDecoupled()) return;
+    if (this._getEffectiveState(this._entities.audio) !== "on") return;
+    video.muted = false;
+    if (video.paused) Promise.resolve(video.play()).catch(() => {});
+    this._refreshAudioToggle();
+    this._refreshAudioPill();
+  }
+
   _refreshAudioPill() {
     const btn = this.shadowRoot?.getElementById("ap-btn-audio");
     if (!btn) return;
@@ -2051,6 +2091,7 @@ class BoschCameraCard extends HTMLElement {
   // stream is running, so we never need to turn the switch on here —
   // it's already on by definition.)
   _onPlayGateTap() {
+    this._armStartUnmute();   // this tap is the gesture — bank it for "sound on at start"
     this._hidePlayGate();
     this._update();
   }
@@ -5114,6 +5155,13 @@ class BoschCameraCard extends HTMLElement {
         // video is provably playing — applying it on activate (while the first
         // play() is still pending) raced that play() and could spuriously mute.
         this._applyAudioPreference(video);
+        // If the user started this stream by tapping (gesture armed the
+        // AudioContext bridge in _armStartUnmute), restore sound now that the
+        // first frame is playing — "audio on at start" without a second tap.
+        if (this._unmuteOnStart) {
+          this._unmuteOnStart = false;
+          this._tryStartUnmute(video);
+        }
         // Live frame is on screen — the backend source is healthy again. Clear
         // the stale-source latch + rewarm cooldown so a future creds rotation
         // can recover immediately. (live fix 2026-05-31)
@@ -5713,6 +5761,9 @@ class BoschCameraCard extends HTMLElement {
     if (img) img.style.display = "block";
     this._liveVideoActive   = false;
     this._startingLiveVideo = false;
+    // Clear any pending start-unmute so a stale flag can't auto-unmute a LATER
+    // (e.g. auto-play) stream outside a gesture. 2026-06-05.
+    this._unmuteOnStart     = false;
     // Clean up stream-connecting state
     this._streamConnecting = false;
     if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
@@ -7297,6 +7348,10 @@ class BoschCameraCard extends HTMLElement {
   }
 
   async _toggleStream() {
+    // Bank the audio-unlock SYNCHRONOUSLY while we are still inside the tap's
+    // user gesture (the await below would lose it). Best-effort on the cached
+    // streaming state: only when starting, never when stopping. 2026-06-05.
+    if (!this._isStreaming()) this._armStartUnmute();
     // Defensive pre-check: pull authoritative state from the server before
     // sending turn_on/turn_off. The HA-Companion-App's WebSocket subscription
     // can go stale after backgrounding or a Wi-Fi/Mobile-data switch, in
@@ -7458,17 +7513,21 @@ class BoschCameraCard extends HTMLElement {
         (el) => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
       this._disarmAutoUnmute();
       if (onAudioCtrl) return;
+      // Route through the SAME proven bridge as the start gesture: unlock the
+      // AudioContext inside this real gesture so the unmute sticks (a raw
+      // muted=false here was getting punished + re-muted within seconds on
+      // WebRTC). This is the reload path — auto-start replays muted, the user's
+      // first click anywhere then restores sound. 2026-06-05.
+      this._armStartUnmute();
       const video = this._liveVideoActive
         ? this.shadowRoot && this.shadowRoot.getElementById("cam-video")
         : null;
-      if (!video || !video.muted || this._androidAudioMuted) return;
-      if (this._audioDecoupled()) return;
-      if (this._getEffectiveState(this._entities.audio) !== "on") return;
-      // Inside a real user gesture → Chrome allows the unmute without pausing.
-      video.muted = false;
-      if (video.paused) Promise.resolve(video.play()).catch(() => {});
-      this._refreshAudioToggle();
-      this._refreshAudioPill();
+      if (video && !video.paused) {
+        // Stream already playing → unmute now. If mid-reconnect (paused),
+        // _unmuteOnStart stays armed and the next `playing` event applies it.
+        this._unmuteOnStart = false;
+        this._tryStartUnmute(video);
+      }
     };
     this._autoUnmuteHandler = handler;
     document.addEventListener("pointerdown", handler, { capture: true });

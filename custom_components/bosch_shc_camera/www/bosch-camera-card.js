@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.11";
+const CARD_VERSION = "13.5.12";
 
 let _boschFsExitAt = 0;
 
@@ -1419,6 +1419,31 @@ class BoschCameraCard extends HTMLElement {
       video.volume = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
     } catch (_) {}
   }
+  _armStartUnmute() {
+    if (this._isIOS() || this._androidAudioMuted) return;
+    if (this._audioDecoupled()) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        let ctx = BoschCameraCard._audioUnlockCtx;
+        if (!ctx) {
+          ctx = new Ctx;
+          BoschCameraCard._audioUnlockCtx = ctx;
+        }
+        if (ctx.state !== "running") Promise.resolve(ctx.resume()).catch(() => {});
+      }
+    } catch (_) {}
+    this._unmuteOnStart = true;
+  }
+  _tryStartUnmute(video) {
+    if (!video || !video.muted || this._isIOS() || this._androidAudioMuted) return;
+    if (this._audioDecoupled()) return;
+    if (this._getEffectiveState(this._entities.audio) !== "on") return;
+    video.muted = false;
+    if (video.paused) Promise.resolve(video.play()).catch(() => {});
+    this._refreshAudioToggle();
+    this._refreshAudioPill();
+  }
   _refreshAudioPill() {
     const btn = this.shadowRoot?.getElementById("ap-btn-audio");
     if (!btn) return;
@@ -1543,6 +1568,7 @@ class BoschCameraCard extends HTMLElement {
     if (el) el.classList.remove("visible");
   }
   _onPlayGateTap() {
+    this._armStartUnmute();
     this._hidePlayGate();
     this._update();
   }
@@ -2274,6 +2300,10 @@ class BoschCameraCard extends HTMLElement {
         }
         this._setLoadingOverlay(false);
         this._applyAudioPreference(video);
+        if (this._unmuteOnStart) {
+          this._unmuteOnStart = false;
+          this._tryStartUnmute(video);
+        }
         this._staleSourceSeen = false;
         this._lastRewarmAt = 0;
         this._markLiveBadge();
@@ -2692,6 +2722,7 @@ class BoschCameraCard extends HTMLElement {
     if (img) img.style.display = "block";
     this._liveVideoActive = false;
     this._startingLiveVideo = false;
+    this._unmuteOnStart = false;
     this._streamConnecting = false;
     if (this._connectSteps) {
       this._connectSteps.forEach(t => clearTimeout(t));
@@ -3891,6 +3922,7 @@ class BoschCameraCard extends HTMLElement {
     }
   }
   async _toggleStream() {
+    if (!this._isStreaming()) this._armStartUnmute();
     let serverIsOn = null;
     if (this._hass && this._entities.switch) {
       try {
@@ -3989,14 +4021,12 @@ class BoschCameraCard extends HTMLElement {
       const onAudioCtrl = !!(e.composedPath && e.composedPath().some(el => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
       this._disarmAutoUnmute();
       if (onAudioCtrl) return;
+      this._armStartUnmute();
       const video = this._liveVideoActive ? this.shadowRoot && this.shadowRoot.getElementById("cam-video") : null;
-      if (!video || !video.muted || this._androidAudioMuted) return;
-      if (this._audioDecoupled()) return;
-      if (this._getEffectiveState(this._entities.audio) !== "on") return;
-      video.muted = false;
-      if (video.paused) Promise.resolve(video.play()).catch(() => {});
-      this._refreshAudioToggle();
-      this._refreshAudioPill();
+      if (video && !video.paused) {
+        this._unmuteOnStart = false;
+        this._tryStartUnmute(video);
+      }
     };
     this._autoUnmuteHandler = handler;
     document.addEventListener("pointerdown", handler, {

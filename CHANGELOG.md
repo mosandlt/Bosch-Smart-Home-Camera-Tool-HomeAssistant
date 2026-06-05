@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.12] - 2026-06-05
+
+Patch release — the live stream starts with sound again when the audio switch is on.
+
+- **Starting the stream now turns sound on by itself.** Browsers force every `<video>` to begin muted and only allow un-muting inside a real user gesture — but the stream warms up for ~15-35 s after you tap *start*, long after that tap's activation has expired, so the card could not simply un-mute when the picture appeared. The card now banks your start tap the way YouTube and audio-heavy web apps do: it resumes a short-lived `AudioContext` synchronously inside the tap, which keeps sound permitted while the WebRTC stream connects. The moment the first frame plays, sound comes on by itself (when the audio switch is on) — no second tap on the audio button. If the browser still refuses, the existing pause-guard resumes the stream muted, so it can never freeze (the v13.5.8 safeguard is fully preserved).
+- **First click after a reload reliably restores sound.** A page reload auto-starts the stream without any user gesture, so it must begin muted — no browser (YouTube included, outside its own privileged origin) may play sound before you interact with the page. Your first click anywhere now routes through the same `AudioContext` bridge, so the un-mute sticks instead of being re-muted a few seconds later.
+- **Want sound immediately after a reload?** Install the dashboard as an app — Chrome ⋮ → *Install app*, or use the Companion App. Installed apps in standalone mode are allowed to play sound on load, which a normal browser tab is not. Card-only change.
+
 ## [v13.5.11] - 2026-06-05
 
 Patch release — card-picker entity suggestions (HA 2026.6) and an audio-mute fix.
