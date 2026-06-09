@@ -45,6 +45,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Installation](#installation)
 - [Setup](#setup)
 - [Architecture](#architecture)
+  - [Network Connectivity](#network-connectivity) — required ports, VLAN/subnet pitfalls
 - [Streaming & Reliability](#streaming--reliability)
 - [Quality Scale: Platinum](#quality-scale-platinum)
 - [Features](#features)
@@ -343,6 +344,70 @@ graph LR
 ```
 
 Since **v10.3.24** the same Python TLS proxy carries both LOCAL and REMOTE — FFmpeg and go2rtc always connect to `rtsp://127.0.0.1:N`, the proxy decides whether to terminate TLS to the camera (LOCAL) or to the Bosch cloud proxy (REMOTE). Symmetric path means there's no scheme-switching trick (`rtspx://` etc.) on the consumer side, and the cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` is handled in one place.
+
+### Network Connectivity
+
+Home Assistant must be able to reach each camera's IP on the LAN. The integration auto-discovers the camera IP via the Bosch cloud, but the actual stream/snapshot/RCP traffic flows directly from the HA host to the camera. If a firewall, VLAN boundary, or guest network blocks that path, snapshots stay stale and live streams silently fall back to cloud HLS (slower, internet-routed).
+
+#### Required ports
+
+| Direction | Protocol / Port | Purpose | Required |
+|---|---|---|---|
+| HA host → camera IP | **TCP/443** | Snapshots, camera REST API, RTSPS live stream (everything tunnels through one TLS connection) | **Yes** |
+| HA host → `*.boschsecurity.com` | TCP/443 | OAuth token refresh, REMOTE/cloud fallback stream, FCM push registration | Yes |
+| HA host → `fcm.googleapis.com` / `mtalk.google.com` | TCP/5228 | FCM push notifications (auto-falls-back to 30 s polling if blocked) | Optional |
+| Browser → HA host | TCP/8123 | Lovelace card, HLS playlist, WebRTC signaling | Yes |
+| Browser ↔ HA host | TCP+UDP **8555** | go2rtc WebRTC signaling + media (UDP preferred, falls back to TCP) | Optional, only for WebRTC |
+
+The integration itself **only needs TCP/443 from HA to the camera**. No UDP, no extra ports, no inbound port-forward on your router.
+
+#### Topology
+
+```mermaid
+flowchart LR
+    Browser["Browser /<br/>HA Companion"]
+    HA["Home Assistant<br/>:8123"]
+    Cam["Bosch Camera<br/>192.168.x.y"]
+    Cloud["Bosch Cloud<br/>*.boschsecurity.com"]
+    FCM["Google FCM<br/>:5228"]
+
+    Browser <-->|"HTTPS / WSS<br/>TCP/8123"| HA
+    Browser <-.->|"WebRTC<br/>TCP+UDP/8555"| HA
+    HA ==>|"REQUIRED<br/>TCP/443<br/>RTSPS + REST"| Cam
+    HA -->|"TCP/443<br/>OAuth, cloud fallback"| Cloud
+    HA -.->|"TCP/5228<br/>push (optional)"| FCM
+
+    classDef req stroke:#d33,stroke-width:3px;
+    class Cam req;
+```
+
+#### Common pitfalls
+
+- **Camera in a different subnet/VLAN than HA** — e.g. cameras on `192.168.168.x` and HA on `192.168.1.x`. The router/firewall must allow HA's IP outbound to the camera's IP on TCP/443.
+- **IoT/guest network isolation** — many routers (FRITZ!Box "Gastzugang", Unifi guest network) block all LAN-to-LAN traffic by default. Move the camera off the guest network or add an explicit allow-rule.
+- **Camera reachable from the Bosch app but not from HA** — the app talks to the camera through the Bosch cloud, so this proves nothing about LAN reachability. The cloud path always works; the LAN path is what matters here.
+- **Privacy mode is ON** — the camera shutter is closed and snapshots are deliberately not refreshed. The last frame stays cached. This is by design, not a network issue.
+
+#### Quick check from the HA host
+
+SSH into HA (or use the "Advanced SSH & Web Terminal" add-on) and probe TCP/443 to the camera:
+
+```bash
+nc -vz 192.168.x.y 443
+# or
+curl -k -v --connect-timeout 5 https://192.168.x.y/
+```
+
+If both time out or return "connection refused", the issue is between HA and the camera (network/firewall), not the integration. Typical log lines you will see in that case:
+
+```
+WARNING ... TLS proxy <ID>: failed to connect to 192.168.x.y:443
+            _ssl.c:1063: The handshake operation timed out
+WARNING ... LOCAL pre-warm failed for <ID> without REMOTE fallback
+DEBUG   ... TLS proxy [C->CAM] pipe error: [Errno 104] Connection reset by peer
+```
+
+The integration handles this gracefully — it falls back to cloud HLS so you still get a stream — but for LAN-quality latency and offline operation, fix the network path.
 
 ### Stream connection state machine
 
