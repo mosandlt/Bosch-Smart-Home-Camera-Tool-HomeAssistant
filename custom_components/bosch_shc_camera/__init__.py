@@ -698,6 +698,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # polling-fallback carries the integration.
         self._fcm_self_heal_failures: int = 0
         self._fcm_self_heal_paused_logged: bool = False
+        # Soft-heal escalation streak: counts consecutive soft-heals (socket
+        # restart, creds reused) that have NOT been validated by a real push.
+        # Reset to 0 by _on_fcm_push (delivery confirmed) or a hard-heal. When
+        # it reaches SOFT_HEAL_ESCALATION_THRESHOLD the next heal escalates to a
+        # fresh registration — the programmatic equivalent of the HA reboot that
+        # field reports needed (2026-06-09). See fcm.async_self_heal_fcm_push.
+        self._fcm_soft_heal_streak: int = 0
         # Serialises every FCM start/stop/self-heal so the setup-time start
         # and the watchdog's self-heal can't run concurrently. Live bug
         # 2026-05-21: without the lock the initial async_start_fcm_push from

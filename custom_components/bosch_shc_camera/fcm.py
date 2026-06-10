@@ -57,6 +57,19 @@ _LOGGER = logging.getLogger(__name__)
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
+# A soft-heal restarts the FCM listener while REUSING the persisted GCM
+# credentials (same token). It revives the TCP/SSL session but cannot fix the
+# case where Google has silently stopped DELIVERING to our token — the socket
+# reports is_started()=True yet no push ever arrives. Field report 2026-06-09:
+# the watchdog soft-healed every few hours, each one "succeeding" at the socket
+# level, while no notification was actually delivered until the user rebooted
+# HA. Once this many soft-heals happen WITHOUT a real push arriving between them
+# (coordinator._fcm_soft_heal_streak), the next heal escalates to a hard
+# self-heal (purge creds + fresh registration → new token) — the programmatic
+# equivalent of the reboot. The streak resets to 0 the moment a real push lands
+# (_on_fcm_push) or a hard-heal completes.
+SOFT_HEAL_ESCALATION_THRESHOLD = 3
+
 
 class _FCMNoiseFilter(logging.Filter):
     """Tame the firebase_messaging FCM client log noise during WAN outages.
@@ -834,6 +847,22 @@ async def async_self_heal_fcm_push(coordinator: Any) -> None:
             await _async_hard_heal_locked(coordinator)
             return
 
+        # Repeated soft-heals that restart the socket but never restore real
+        # push DELIVERY (no FCM push received between them) mean Google has
+        # stopped delivering to our token — only a fresh registration recovers
+        # (matches what an HA reboot does). Escalate before wasting another
+        # no-op soft restart. See SOFT_HEAL_ESCALATION_THRESHOLD.
+        soft_streak = getattr(coordinator, "_fcm_soft_heal_streak", 0)
+        if soft_streak >= SOFT_HEAL_ESCALATION_THRESHOLD:
+            _LOGGER.warning(
+                "FCM self-heal (soft → hard): %d soft-heals without a real push "
+                "— socket reconnects but delivery is dead, forcing fresh "
+                "registration",
+                soft_streak,
+            )
+            await _async_hard_heal_locked(coordinator)
+            return
+
         # Soft-heal path: stop + restart, REUSE persisted credentials.
         # Library's checkin_or_register() will hit gcm_check_in() (lightweight
         # refresh) instead of gcm_register() (the PHONE_REGISTRATION_ERROR
@@ -852,10 +881,19 @@ async def async_self_heal_fcm_push(coordinator: Any) -> None:
         await _async_start_fcm_push_locked(coordinator)
 
         if getattr(coordinator, "_fcm_running", False):
+            # Listener restarted at the socket level. Whether DELIVERY actually
+            # resumed is unknown until a real push arrives (_on_fcm_push resets
+            # the streak to 0). Count this soft-heal so a run of socket-only
+            # recoveries eventually escalates to a fresh registration instead of
+            # silently soft-healing forever (live bug 2026-06-09: needed reboot).
+            coordinator._fcm_soft_heal_streak = soft_streak + 1
             _LOGGER.info(
-                "FCM self-heal (soft): succeeded — push restored without re-register"
+                "FCM self-heal (soft): listener restarted (streak %d/%d — "
+                "escalates to fresh registration if no real push arrives)",
+                coordinator._fcm_soft_heal_streak,
+                SOFT_HEAL_ESCALATION_THRESHOLD,
             )
-            # Reset failure counter — soft-heal recovered fast.
+            # Reset the cool-down ladder — socket recovered fast.
             if hasattr(coordinator, "_fcm_self_heal_failures"):
                 coordinator._fcm_self_heal_failures = 0
                 coordinator._fcm_self_heal_paused_logged = False
@@ -882,6 +920,9 @@ async def _async_hard_heal_locked(coordinator: Any) -> None:
     EVERY key beginning with `fcm_` recovered FCM in the field.
     """
     await async_stop_fcm_push(coordinator)
+    # A fresh registration is the strongest recovery we have — clear the
+    # soft-heal escalation streak so a successful re-register starts clean.
+    coordinator._fcm_soft_heal_streak = 0
     new_data = {
         k: v for k, v in coordinator._entry.data.items() if not k.startswith("fcm_")
     }
@@ -928,6 +969,9 @@ def _on_fcm_push(
             return
         coordinator._fcm_last_push = time.monotonic()
         coordinator._fcm_healthy = True
+        # A real push proves DELIVERY works — any pending soft-heal escalation
+        # is moot, so reset the streak (see SOFT_HEAL_ESCALATION_THRESHOLD).
+        coordinator._fcm_soft_heal_streak = 0
     _LOGGER.info(
         "FCM push received (id=%s, from=%s) — fetching events",
         persistent_id,

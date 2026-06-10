@@ -419,3 +419,144 @@ class TestFcmSelfHealSoft:
         fcm.reset_fcm_error_counter()
         assert _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS == []
         assert _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS == []
+
+
+@pytest.mark.asyncio
+class TestFcmSoftHealEscalation:
+    """Soft-heal streak → fresh-registration escalation.
+
+    Live bug 2026-06-09: the watchdog soft-healed every few hours, each one
+    'succeeded' at the socket level (is_started()=True), but Google had
+    silently stopped DELIVERING to the token — pushes only returned after the
+    user rebooted HA. After SOFT_HEAL_ESCALATION_THRESHOLD soft-heals with no
+    real push in between, the next heal must do a fresh registration (new
+    token) — the programmatic equivalent of the reboot."""
+
+    async def test_successful_soft_heal_increments_streak(self):
+        """Each socket-only soft restart bumps the streak by one (it is only
+        cleared by a real push or a hard-heal)."""
+        from custom_components.bosch_shc_camera import fcm
+
+        _clear_staleness()
+        coord = _make_coord(entry_data={"fcm_credentials": {"gcm": "valid"}})
+        coord._fcm_soft_heal_streak = 0
+
+        async def fake_start(c):
+            c._fcm_running = True
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)
+            ),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
+            await fcm.async_self_heal_fcm_push(coord)
+
+        assert coord._fcm_soft_heal_streak == 1
+        # Still a soft-heal — credentials preserved.
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+
+    async def test_soft_heal_one_below_threshold_stays_soft(self):
+        """At streak == threshold-1 a successful soft-heal lands ON the
+        threshold but still does a soft restart this round (escalation is
+        evaluated at the START of the NEXT heal)."""
+        from custom_components.bosch_shc_camera import fcm
+
+        _clear_staleness()
+        coord = _make_coord(
+            entry_data={"fcm_credentials": {"gcm": "valid"}, "bearer_token": "bt"}
+        )
+        coord._fcm_soft_heal_streak = fcm.SOFT_HEAL_ESCALATION_THRESHOLD - 1
+
+        async def fake_start(c):
+            c._fcm_running = True
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", AsyncMock(side_effect=fake_start)
+            ),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
+            await fcm.async_self_heal_fcm_push(coord)
+
+        assert coord._fcm_soft_heal_streak == fcm.SOFT_HEAL_ESCALATION_THRESHOLD
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+        assert coord._entry.data["fcm_credentials"] == {"gcm": "valid"}
+
+    async def test_streak_at_threshold_escalates_to_fresh_registration(self):
+        """The fix itself: streak == threshold → next heal purges creds + fresh
+        register instead of yet another no-op soft restart, and clears the
+        streak so the recovery starts clean."""
+        from custom_components.bosch_shc_camera import fcm
+
+        _clear_staleness()
+        coord = _make_coord(
+            entry_data={
+                "fcm_credentials": {"gcm": "valid"},
+                "fcm_registered_token": "tok",
+                "bearer_token": "bt",
+            }
+        )
+        coord._fcm_soft_heal_streak = fcm.SOFT_HEAL_ESCALATION_THRESHOLD
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", AsyncMock()),
+            patch.object(fcm, "_async_start_fcm_push_locked", AsyncMock()),
+            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+        ):
+            await fcm.async_self_heal_fcm_push(coord)
+
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+        new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
+            "data"
+        )
+        assert "fcm_credentials" not in new_data
+        assert "fcm_registered_token" not in new_data
+        assert new_data["bearer_token"] == "bt"
+        assert coord._fcm_soft_heal_streak == 0
+
+    async def test_real_push_resets_streak(self):
+        """A genuine incoming push proves delivery works → streak back to 0 so
+        the escalation never fires on a healthy connection."""
+        import threading
+
+        from custom_components.bosch_shc_camera import fcm
+
+        coord = SimpleNamespace()
+        coord._fcm_lock = threading.Lock()
+        coord._fcm_running = True
+        coord._fcm_soft_heal_streak = fcm.SOFT_HEAL_ESCALATION_THRESHOLD - 1
+        coord._fcm_last_push = float("-inf")
+        coord._fcm_healthy = False
+        coord.hass = SimpleNamespace(
+            loop=SimpleNamespace(call_soon_threadsafe=MagicMock())
+        )
+
+        fcm._on_fcm_push(coord, {"from": "111111111111"}, "pid-1")
+
+        assert coord._fcm_soft_heal_streak == 0
+        assert coord._fcm_healthy is True
+        assert coord._fcm_last_push != float("-inf")
+        coord.hass.loop.call_soon_threadsafe.assert_called_once()
+
+    async def test_dropped_push_after_stop_does_not_reset_streak(self):
+        """A trailing push after the client stopped (_fcm_running False) is
+        dropped early and must NOT touch the streak."""
+        import threading
+
+        from custom_components.bosch_shc_camera import fcm
+
+        coord = SimpleNamespace()
+        coord._fcm_lock = threading.Lock()
+        coord._fcm_running = False
+        coord._fcm_soft_heal_streak = 2
+        coord.hass = SimpleNamespace(
+            loop=SimpleNamespace(call_soon_threadsafe=MagicMock())
+        )
+
+        fcm._on_fcm_push(coord, {"from": "x"}, "pid-2")
+
+        assert coord._fcm_soft_heal_streak == 2
+        coord.hass.loop.call_soon_threadsafe.assert_not_called()
