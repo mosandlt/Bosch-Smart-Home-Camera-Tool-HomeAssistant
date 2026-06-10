@@ -4827,12 +4827,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 )
                         return result
                     elif resp.status == 401:
+                        # Still 401 after the in-place token refresh for THIS
+                        # candidate. Don't abort the whole call — in AUTO mode
+                        # (candidates=[LOCAL, REMOTE]) a LOCAL 401 (camera
+                        # unreachable / wrong network) must still let REMOTE be
+                        # tried. Fall through to the next candidate; the loop's
+                        # post-amble returns None only when ALL types failed.
                         _LOGGER.warning(
-                            "try_live_connection: still 401 for %s after token "
-                            "refresh — giving up",
+                            "try_live_connection: still 401 for %s (type=%s) "
+                            "after token refresh — skipping this candidate",
                             cam_id,
+                            type_val,
                         )
-                        return None
                     else:
                         _LOGGER.warning(
                             "try_live_connection: HTTP %d for type=%s: %s",

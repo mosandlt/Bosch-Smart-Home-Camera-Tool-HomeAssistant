@@ -921,6 +921,52 @@ class TestErrorPaths:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_persistent_401_falls_through_to_other_candidate(self):
+        """Regression (bug-hunt 2026-06-10): in AUTO mode a 401 that persists
+        after the in-place token refresh on the FIRST candidate must NOT abort
+        the whole call — the OTHER candidate (e.g. REMOTE) must still be tried.
+        Previously `return None` exited the candidate loop, so an expired token
+        + an unreachable first candidate killed the stream even though the
+        other transport would have worked."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A", "refresh_token": "rfr"},
+                options={"stream_connection_type": "auto"},
+            ),
+            _async_local_tcp_ping=AsyncMock(return_value=True),  # keep LOCAL in pool
+            _ensure_valid_token=AsyncMock(return_value="tok-fresh"),
+        )
+
+        # 1st candidate: 401 → token refresh → retry 401 → must CONTINUE;
+        # 2nd candidate: 404 (attempted only if we fell through).
+        session_mock = MagicMock()
+        session_mock.close = AsyncMock()
+        session_mock.put = AsyncMock(
+            side_effect=[
+                _put_resp(401, "Unauthorized"),
+                _put_resp(401, "Unauthorized"),
+                _put_resp(404, "not found"),
+            ]
+        )
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await BoschCameraCoordinator._try_live_connection_inner(
+                coord, CAM_A
+            )
+
+        types = {c.kwargs["json"]["type"] for c in session_mock.put.call_args_list}
+        assert {"LOCAL", "REMOTE"}.issubset(types), (
+            "a persistent 401 on the first candidate must fall through to the "
+            f"other candidate; PUT types attempted were {types}"
+        )
+        assert result is None  # second candidate returned 404
+
+    @pytest.mark.asyncio
     async def test_put_500_returns_none_after_all_candidates(self):
         """PUT 500 (non-200/404/401) → loop continues; all fail → None."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
