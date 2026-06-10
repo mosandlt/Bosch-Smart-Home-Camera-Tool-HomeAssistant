@@ -1079,7 +1079,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # creds before giving up. Digest creds are ephemeral (camera rotates
         # them on reboot) but usually stable for minutes to hours.
         creds = self.coordinator._local_creds_cache.get(self._cam_id)
-        if creds and self.coordinator._auth_outage_count > 0:
+        # Skip while streaming: a LOCAL Digest snap.jpg opens a second HTTP
+        # session against the camera, contending with the Bosch 3-session limit
+        # and risking teardown of the active RTSP stream — same reason section 2
+        # is gated on `not is_streaming`. The live proxy (section 1) already
+        # serves snapshots during a stream; fall through to the cached image.
+        if creds and self.coordinator._auth_outage_count > 0 and not self.is_streaming:
             local_user = creds.get("user", "")
             local_pass = creds.get("password", "")
             host = creds.get("host", "")

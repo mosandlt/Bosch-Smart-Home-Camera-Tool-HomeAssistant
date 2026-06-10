@@ -316,3 +316,91 @@ class TestYuv422EdgeCases:
         cam = _make_camera()
         out = BoschCamera._yuv422_to_jpeg(cam, b"")
         assert out is None
+
+
+# ── Section 2b outage fallback gated by is_streaming (bug-hunt 2026-06-10) ───
+
+
+class TestOutageFallbackStreamingGuard:
+    """Section 2b (LOCAL snap.jpg via cached Digest creds during a cloud
+    outage) must NOT run while the camera is streaming: opening a second HTTP
+    Digest session against the camera contends with the Bosch 3-session limit
+    and can tear down the active RTSP stream. Section 2 already guards on
+    `not is_streaming`; 2b previously did not. Bug found 2026-06-10."""
+
+    def _outage_coord(self, **overrides):
+        base = dict(
+            _auth_outage_count=1,
+            _local_creds_cache={
+                CAM_ID: {
+                    "user": "cbs-1",
+                    "password": "p",
+                    "host": "192.0.2.5",
+                    "port": 443,
+                }
+            },
+            async_fetch_live_snapshot=AsyncMock(return_value=None),
+            async_fetch_live_snapshot_local=AsyncMock(return_value=None),
+        )
+        base.update(overrides)
+        return _make_coord(**base)
+
+    @pytest.mark.asyncio
+    async def test_streaming_skips_outage_digest(self):
+        """is_streaming True (live rtspsUrl, empty proxyUrl) → section 2b must
+        NOT call async_digest_request; returns the cached image instead."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = self._outage_coord(
+            # rtspsUrl present → is_streaming True; no proxyUrl → section 1 skipped
+            _live_connections={CAM_ID: {"rtspsUrl": "rtsps://192.0.2.9/s"}},
+        )
+        cam = _make_camera(coord=coord, _cached_image=b"\xff\xd8cached")
+        digest = AsyncMock()
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest,
+            ),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+
+        digest.assert_not_called()
+        assert out == b"\xff\xd8cached"
+
+    @pytest.mark.asyncio
+    async def test_idle_outage_still_uses_digest(self):
+        """Positive control: idle (not streaming) + cloud outage + cached creds
+        → section 2b DOES attempt the LOCAL Digest snap.jpg fallback."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = self._outage_coord(_live_connections={})  # is_streaming False
+        # No cached image → section 2 first-load branch falls through to 2b
+        # when the cloud fetch fails (instead of returning a stale cache).
+        cam = _make_camera(coord=coord, _cached_image=None)
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.headers = {"Content-Type": "image/jpeg"}
+        resp.read = AsyncMock(return_value=b"\xff\xd8outage-snap")
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ) as digest,
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+
+        digest.assert_called_once()
+        assert out == b"\xff\xd8outage-snap"
