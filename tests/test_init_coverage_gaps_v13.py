@@ -517,6 +517,59 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
             "_LOGGER.debug with 'HA agrees' must fire when empty body + privacy=ON (line 4176)"
         )
 
+    @pytest.mark.asyncio
+    async def test_empty_body_with_privacy_off_forces_refresh(self):
+        """Regression (bug-hunt 2026-06-10): empty body + HA cached
+        privacyMode='OFF' = state drift (toggled in the Bosch app). The
+        warning says 'Forcing refresh' — so a refresh MUST actually be
+        requested, not just logged. Otherwise the switch stays visually
+        wrong for up to a full poll interval and the warning repeats on
+        every snapshot."""
+        coord = self._bind(
+            SimpleNamespace(
+                token="tok",
+                hass=MagicMock(),
+                _entry=SimpleNamespace(entry_id="01ENTRY"),
+                _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
+                _shc_state_cache={},
+                _rcp_session_cache={},
+                _live_connections={},
+                _fresh_snap_cache={},
+                _fresh_snap_locks={},
+                data={CAM_ID: {"privacyMode": "OFF"}},
+            )
+        )
+        coord.get_quality_params = MagicMock(return_value=(True, 0))
+        coord._get_cached_rcp_session = AsyncMock(return_value=None)
+        coord._rcp_read = AsyncMock(return_value=None)
+        coord._rcp_session = AsyncMock(return_value="0xABCDEF01")
+        coord._invalidate_rcp_session = MagicMock()
+        # Sync MagicMock so calling it does NOT create an un-awaited coroutine
+        # (the impl schedules the result via hass.async_create_task).
+        coord.async_request_refresh = MagicMock(return_value=MagicMock())
+
+        snap_resp = self._resp_cm(200, body=b"", headers={"Content-Type": "image/jpeg"})
+
+        connector = MagicMock()
+        connector.close = AsyncMock()
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        session.get = MagicMock(return_value=snap_resp)
+
+        with (
+            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
+            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
+        ):
+            result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
+
+        assert result is None
+        assert coord.async_request_refresh.called, (
+            "state drift (empty body + HA privacy OFF) must actually request a "
+            "coordinator refresh, not only log 'Forcing refresh'"
+        )
+        coord.hass.async_create_task.assert_called()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Line 5376: _fetch_rcp_lan denied (24h cache)

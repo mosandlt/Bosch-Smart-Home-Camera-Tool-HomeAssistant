@@ -90,6 +90,9 @@ def _stub_coord(**kwargs):
     coord._rcp_read = AsyncMock(return_value=None)
     coord._rcp_session = AsyncMock(return_value="0xABCDEF01")
     coord._invalidate_rcp_session = MagicMock()
+    # Sync MagicMock (not AsyncMock): the impl schedules its result via
+    # hass.async_create_task; an AsyncMock would leave an un-awaited coroutine.
+    coord.async_request_refresh = MagicMock(return_value=MagicMock())
     for k, v in kwargs.items():
         setattr(coord, k, v)
     return coord

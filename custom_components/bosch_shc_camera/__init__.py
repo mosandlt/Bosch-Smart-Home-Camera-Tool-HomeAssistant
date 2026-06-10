@@ -5116,6 +5116,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         "via Bosch app, cloud poll lag). Forcing refresh.",
                                         cam_id,
                                     )
+                                    # Actually force the refresh the message
+                                    # promises: pull fresh privacy state from the
+                                    # cloud now instead of waiting up to a full
+                                    # poll interval. Without this the switch stays
+                                    # visually wrong and this WARNING repeats on
+                                    # every snapshot until the next poll. The
+                                    # coordinator debouncer coalesces repeats.
+                                    self.hass.async_create_task(
+                                        self.async_request_refresh()
+                                    )
                                 return None
                             _LOGGER.debug(
                                 "fetch_live_snapshot: %s → %d bytes", cam_id, len(data)
