@@ -174,39 +174,40 @@ class TestLightComponentSwitches:
 
 class TestPrivacyModeSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on_during_warmup_blocked(self, stub_coord, stub_entry):
-        """Cooldown blocks privacy toggle during stream warm-up — the
-        TLS proxy + encoder init isn't a moment to flip the shutter."""
+    async def test_turn_on_during_warmup_defers(self, stub_coord, stub_entry):
+        """During stream warm-up a privacy toggle is DEFERRED (not applied,
+        not raised) — the TLS proxy + encoder init isn't a moment to flip the
+        shutter, but the intent is queued and applied once warm-up clears."""
         stub_coord.is_stream_warming = lambda cid: True
-        from homeassistant.exceptions import ServiceValidationError
-
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        # Blocked toggles now raise (visible) instead of silently returning (#27)
-        with pytest.raises(ServiceValidationError):
-            await sw.async_turn_on()
-        # The cloud setter must NOT be called when blocked
+        await sw.async_turn_on()  # must NOT raise
+        # The cloud setter must NOT be called immediately while blocked.
         stub_coord.async_cloud_set_privacy_mode.assert_not_awaited()
         stub_coord._tear_down_live_stream.assert_not_awaited()
+        assert sw._pending_privacy is True
+        sw.hass.async_create_task.assert_called_once()
+        sw.hass.async_create_task.call_args.args[0].close()
 
     @pytest.mark.asyncio
-    async def test_turn_on_within_cooldown_blocked(self, stub_coord, stub_entry):
-        """A second flip within the cooldown window must block — protects the
-        camera firmware from rapid shutter toggling (red LED / reboot risk).
-        Uses a just-toggled timestamp so the assertion is independent of the
-        exact _PRIVACY_COOLDOWN value (5 s as of v13.5.1, was 10 s)."""
+    async def test_turn_on_within_cooldown_defers(self, stub_coord, stub_entry):
+        """A second flip within the cooldown window is DEFERRED (not applied
+        immediately, not raised) — protects the camera firmware from rapid
+        shutter toggling while keeping automations running. Uses a just-toggled
+        timestamp so the assertion is independent of the exact _PRIVACY_COOLDOWN
+        value (5 s as of v13.5.1)."""
         stub_coord._privacy_set_at[CAM_ID] = time.monotonic()  # just toggled
-        from homeassistant.exceptions import ServiceValidationError
-
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        with pytest.raises(ServiceValidationError):
-            await sw.async_turn_on()
+        await sw.async_turn_on()  # must NOT raise
         stub_coord.async_cloud_set_privacy_mode.assert_not_awaited()
+        assert sw._pending_privacy is True
+        sw.hass.async_create_task.assert_called_once()
+        sw.hass.async_create_task.call_args.args[0].close()
 
     @pytest.mark.asyncio
     async def test_turn_on_tears_down_active_stream(self, stub_coord, stub_entry):

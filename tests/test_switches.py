@@ -269,26 +269,71 @@ class TestPrivacyModeSwitch:
             assert sw._check_cooldown() is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_during_cooldown_raises_not_silent(
+    async def test_turn_off_during_cooldown_defers_not_raises(
         self, stub_coord, stub_entry
     ):
-        """Regression #27: a privacy toggle inside the cooldown window raises
-        ServiceValidationError (visible rejection) instead of returning
-        silently — a silent drop made the card flip to the wrong state for 8s
-        and look like the button had hung."""
+        """A privacy toggle inside the cooldown window must be DEFERRED +
+        coalesced, never raised — a raised ServiceValidationError aborted an
+        automation's remaining steps (live ERROR 2026-06-10). The write is not
+        applied immediately; the intent is recorded, is_on reflects it (so the
+        card's optimistic flip stays correct, #27), and a deferred task is
+        armed to apply it once the cooldown clears."""
         import time as _time
-        from unittest.mock import AsyncMock
-
-        from homeassistant.exceptions import ServiceValidationError
+        from unittest.mock import AsyncMock, MagicMock
 
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         stub_coord._privacy_set_at[CAM_ID] = _time.monotonic()  # just toggled
         stub_coord.async_cloud_set_privacy_mode = AsyncMock()
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
-        with pytest.raises(ServiceValidationError):
-            await sw.async_turn_off()
+        sw.hass = MagicMock()
+        sw.async_write_ha_state = MagicMock()
+
+        # Must NOT raise.
+        await sw.async_turn_off()
+
         stub_coord.async_cloud_set_privacy_mode.assert_not_called()
+        assert sw._pending_privacy is False
+        assert sw.is_on is False  # pending intent, no snap-back
+        sw.hass.async_create_task.assert_called_once()
+        # The deferred loop coroutine was passed to the mocked async_create_task
+        # but never awaited — close it to avoid a "never awaited" warning.
+        sw.hass.async_create_task.call_args.args[0].close()
+
+    @pytest.mark.asyncio
+    async def test_deferred_privacy_coalesces_to_latest(self, stub_coord, stub_entry):
+        """Toggle ON then OFF within the cooldown → coalesced to the LATEST
+        intent (OFF), one deferred task armed, and the flush applies only OFF."""
+        import time as _time
+        from unittest.mock import AsyncMock, MagicMock
+
+        from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
+
+        stub_coord._privacy_set_at[CAM_ID] = _time.monotonic()  # cooldown active
+        stub_coord.async_cloud_set_privacy_mode = AsyncMock()
+        stub_coord._tear_down_live_stream = AsyncMock()
+        sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.hass = MagicMock()
+        # The deferred task stays "not done" so the 2nd toggle reuses it
+        # (coalesce) instead of arming a second one.
+        running_task = MagicMock()
+        running_task.done.return_value = False
+        sw.hass.async_create_task.return_value = running_task
+        sw.async_write_ha_state = MagicMock()
+
+        await sw.async_turn_on()  # pending = True
+        await sw.async_turn_off()  # coalesced → pending = False
+
+        assert sw._pending_privacy is False
+        assert sw.hass.async_create_task.call_count == 1  # single armed task
+        for c in sw.hass.async_create_task.call_args_list:
+            c.args[0].close()
+
+        # Flushing the pending state applies only the latest intent (OFF).
+        await sw._flush_pending_privacy()
+        stub_coord.async_cloud_set_privacy_mode.assert_awaited_once_with(CAM_ID, False)
+        stub_coord._tear_down_live_stream.assert_not_called()  # OFF: no teardown
+        assert sw._pending_privacy is None
 
     @pytest.mark.asyncio
     async def test_cooldown_message_reports_remaining_seconds(

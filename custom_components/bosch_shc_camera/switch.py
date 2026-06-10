@@ -747,14 +747,24 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         self._attr_name = f"Bosch {self._cam_title} Privacy Mode"
         self._attr_unique_id = f"bosch_shc_privacy_{cam_id.lower()}"
         self._attr_translation_key = "privacy_mode"
+        # Debounce/coalesce state: a toggle that arrives during the cooldown /
+        # warm-up window is remembered here (latest wins) and applied once the
+        # window clears — instead of raising into the caller (which aborted an
+        # automation's remaining steps, live ERROR 2026-06-10).
+        self._pending_privacy: bool | None = None
+        self._pending_apply_task: asyncio.Task[None] | None = None
 
     @property
     def is_on(self) -> bool | None:
         """True when privacy mode is ON (camera blocked/shuttered).
 
         Read from cloud API response (privacyMode field in /v11/video_inputs).
-        Available immediately without SHC configured.
+        Available immediately without SHC configured. While a toggle is deferred
+        (cooldown/warm-up), reflect the pending (intended) state so the card's
+        optimistic flip stays correct until the write lands — no snap-back.
         """
+        if self._pending_privacy is not None:
+            return self._pending_privacy
         return self.coordinator._shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
             "privacy_mode"
         )
@@ -840,6 +850,11 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
     # Minimum seconds between privacy mode changes per camera.
     # Rapid toggling can stress the camera firmware (red LED / reboot).
     _PRIVACY_COOLDOWN = 5
+    # When a toggle arrives during the cooldown / warm-up, the desired state is
+    # deferred and re-checked this often, giving up after the cap (warm-up can
+    # take ~30 s; the cap guards against a stuck `is_stream_warming`).
+    _PRIVACY_PENDING_POLL = 1.0
+    _PRIVACY_PENDING_MAX_WAIT = 90.0
 
     def _check_cooldown(self) -> bool:
         """Return True if cooldown period has passed, False if too soon."""
@@ -894,33 +909,116 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
             "rapid switching)."
         )
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable privacy mode — camera turns off / shutter closes.
+    def _privacy_block_remaining(self) -> float:
+        """Seconds to wait before a privacy write is allowed (0.0 = now).
 
-        Also stops any active live stream since the camera can't stream
-        while privacy mode is active (shutter closed). Uses the coordinator's
-        shared stream-teardown so the renewal task is cancelled, HA's
-        camera.stream is stopped, and the stream_worker doesn't enter its
-        auto-restart loop against the now-dead TLS proxy — which was the
-        side-effect noticed by Thomas: flipping Privacy ON while streaming
-        made the stream switch look still-on, renewal task kept firing,
-        and the stream_worker-error listener would uselessly try a REMOTE
-        fallback against a camera that's returning HTTP 443 privacy-gated.
+        Returns the poll interval while the stream is still warming up (its end
+        is not known up front) and the exact remaining cooldown after a recent
+        toggle. Silent counterpart to `_check_cooldown` for the deferred loop.
         """
-        if not self._check_cooldown():
-            raise ServiceValidationError(self._cooldown_message())
-        if self._cam_id in self.coordinator._live_connections:
+        if self.coordinator.is_stream_warming(self._cam_id):
+            return self._PRIVACY_PENDING_POLL
+        # SENTINEL_RULE: "never set" is float("-inf"), never 0.
+        last = self.coordinator._privacy_set_at.get(self._cam_id, float("-inf"))
+        remaining = self._PRIVACY_COOLDOWN - (time.monotonic() - last)
+        return remaining if remaining > 0 else 0.0
+
+    async def _apply_privacy(self, desired: bool) -> None:
+        """Perform the actual privacy write (and stop the stream when enabling).
+
+        Stops any active live stream on enable — the camera can't stream while
+        the shutter is closed; the shared teardown cancels the renewal task and
+        stops HA's camera.stream so the worker doesn't auto-restart against the
+        now-dead TLS proxy (HTTP 443 privacy-gated).
+        """
+        if desired and self._cam_id in self.coordinator._live_connections:
             _LOGGER.info(
                 "Privacy ON for %s — stopping active live stream", self._cam_title
             )
             await self.coordinator._tear_down_live_stream(self._cam_id)
-        await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, True)
+        await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, desired)
+
+    async def _flush_pending_privacy(self) -> None:
+        """Apply whatever the latest pending desired state is, then clear it."""
+        desired = self._pending_privacy
+        self._pending_privacy = None
+        if desired is not None:
+            await self._apply_privacy(desired)
+
+    async def _pending_privacy_loop(self) -> None:
+        """Wait out the cooldown / warm-up, then apply the latest pending state.
+
+        Coalescing: `_pending_privacy` is overwritten by later toggles, so the
+        most recent intent wins. Never raises into a service caller.
+        """
+        waited = 0.0
+        try:
+            while waited < self._PRIVACY_PENDING_MAX_WAIT:
+                remaining = self._privacy_block_remaining()
+                if remaining <= 0:
+                    break
+                delay = min(remaining, self._PRIVACY_PENDING_POLL)
+                await asyncio.sleep(delay)
+                waited += delay
+            else:
+                _LOGGER.warning(
+                    "Privacy toggle for %s still blocked after %.0fs — applying now",
+                    self._cam_title,
+                    waited,
+                )
+            await self._flush_pending_privacy()
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            # Deferred best-effort apply — surface the failure, don't crash the
+            # background loop task.
+            _LOGGER.warning(
+                "Privacy deferred apply for %s failed: %s", self._cam_title, err
+            )
+        finally:
+            self._pending_apply_task = None
+            self.async_write_ha_state()
+
+    async def _request_privacy(self, desired: bool) -> None:
+        """Set privacy to `desired`, debouncing/coalescing during cooldown.
+
+        Apply immediately when allowed; otherwise remember the latest desired
+        state and apply it once the cooldown / warm-up clears. NEVER raises —
+        an automation calling this must keep running its later steps (a raised
+        ServiceValidationError previously aborted the whole action sequence,
+        live ERROR 2026-06-10). The card's optimistic flip stays correct because
+        `is_on` reflects the pending state until the write lands.
+        """
+        self._pending_privacy = desired
+        if self._privacy_block_remaining() <= 0:
+            await self._flush_pending_privacy()
+            return
+        _LOGGER.debug(
+            "Privacy toggle for %s deferred — applying %s once cooldown/warm-up clears",
+            self._cam_title,
+            "ON" if desired else "OFF",
+        )
+        self.async_write_ha_state()  # reflect the intended state immediately
+        if self._pending_apply_task is None or self._pending_apply_task.done():
+            self._pending_apply_task = self.hass.async_create_task(
+                self._pending_privacy_loop(),
+                name=f"bosch_privacy_pending_{self._cam_id[:8]}",
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable privacy mode — camera turns off / shutter closes."""
+        await self._request_privacy(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable privacy mode — camera turns back on."""
-        if not self._check_cooldown():
-            raise ServiceValidationError(self._cooldown_message())
-        await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, False)
+        await self._request_privacy(False)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel a pending deferred-apply task on entity removal/reload."""
+        task = self._pending_apply_task
+        if task is not None and not task.done():
+            task.cancel()
+        await super().async_will_remove_from_hass()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

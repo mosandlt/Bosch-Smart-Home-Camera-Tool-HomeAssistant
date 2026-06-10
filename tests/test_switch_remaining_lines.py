@@ -149,21 +149,20 @@ async def test_wallwasher_turn_off():
 
 
 @pytest.mark.asyncio
-async def test_privacy_turn_off_cooldown_rejects():
-    from homeassistant.exceptions import ServiceValidationError
-
+async def test_privacy_turn_off_cooldown_defers():
     coord = _make_coord()
-    # _check_cooldown returns False within the cooldown window → the toggle is
-    # now rejected with ServiceValidationError so it is never silently swallowed
-    # (RkcCorian, #27 — a silent drop left the card flipped to the wrong state).
+    # Within the cooldown window the toggle is DEFERRED + coalesced (not raised,
+    # not applied immediately) so an automation's later steps keep running and
+    # the card's optimistic flip stays correct (#27). Applied once it clears.
     sw = BoschPrivacyModeSwitch(coord, CAM_ID, _make_entry())
-    with (
-        patch.object(sw, "_check_cooldown", return_value=False),
-        patch.object(sw, "_cooldown_message", return_value="cooldown active"),
-    ):
-        with pytest.raises(ServiceValidationError):
-            await sw.async_turn_off()
+    sw.hass = MagicMock()
+    sw.async_write_ha_state = MagicMock()
+    with patch.object(sw, "_privacy_block_remaining", return_value=3.0):
+        await sw.async_turn_off()  # must NOT raise
     coord.async_cloud_set_privacy_mode.assert_not_called()
+    assert sw._pending_privacy is False
+    sw.hass.async_create_task.assert_called_once()
+    sw.hass.async_create_task.call_args.args[0].close()
 
 
 # ── Line 721: BoschNotificationsSwitch.is_on returns None when status missing ─
