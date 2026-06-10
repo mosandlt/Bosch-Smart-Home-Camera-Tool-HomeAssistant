@@ -1563,7 +1563,15 @@ async def async_send_alert(
             break
 
     if cam_id:
-        clip_path = os.path.join(alert_dir, f"{cam_name}_{ts_safe}_{event_type}.mp4")
+        # Neutralise path traversal: cam_name is the cloud-provided camera title
+        # and must never escape alert_dir (e.g. a title like "../../config").
+        # Mirrors the snapshot path guard above — the .mp4 write below
+        # (_write_file) would otherwise honour a malicious title verbatim.
+        clip_path = os.path.join(
+            alert_dir,
+            f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
+            f"_{_safe_path_segment(event_type)}.mp4",
+        )
         auth_headers = {
             "Authorization": f"Bearer {coordinator.token}",
             "Accept": "application/json",

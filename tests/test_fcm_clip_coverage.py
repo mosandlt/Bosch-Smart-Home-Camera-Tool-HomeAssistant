@@ -318,3 +318,77 @@ class TestDirectClipMp4ContentTypeGuard:
             f"200 with non-video Content-Type must NOT set found_clip_url; "
             f"the poll fallback must run instead, saw URLs: {gets}"
         )
+
+
+# ── Path-traversal guard on the video clip filename (bug hunt 2026-06-10) ─────
+
+
+class TestClipPathTraversalGuard:
+    """Regression: the step-3 video clip path used the cloud-provided camera
+    title (`cam_name`) verbatim in the `.mp4` filename, while the snapshot path
+    one block above already neutralised it with `_safe_path_segment`. A title
+    like "../../config/evil" let the `.mp4` write escape the alert dir.
+    Pins that the clip path stays a direct child of alert_dir for a malicious
+    title.  Bug found 2026-06-10."""
+
+    @pytest.mark.asyncio
+    async def test_malicious_cam_title_clip_path_stays_in_alert_dir(self):
+        import os
+
+        malicious = "../../config/evil"
+        coord = _make_coord(options={"alert_notify_service": "notify.test"})
+        # cam_id is resolved by matching the cloud title to cam_name → make the
+        # malicious title the stored title so step 3 builds the clip path.
+        coord.data = {CAM_ID: {"info": {"title": malicious}, "events": []}}
+
+        clip_hits = [0]
+
+        def _get_side(url, headers=None, **kwargs):
+            if "/clip.mp4" in url:
+                clip_hits[0] += 1
+                # 1st hit = direct probe (empty 200 video) → sets found_clip_url;
+                # 2nd hit = the actual download → >1000 bytes triggers _write_file.
+                if clip_hits[0] == 1:
+                    return _resp_cm(200, body=b"", content_type="video/mp4")
+                return _resp_cm(200, body=b"x" * 2048, content_type="video/mp4")
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                        from custom_components.bosch_shc_camera import fcm
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
+                        await async_send_alert(
+                            coord,
+                            malicious,
+                            "MOVEMENT",
+                            "2026-05-07T10:00:00.000Z",
+                            image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+                            clip_url="",
+                            clip_status="",
+                            event_id="evt-traversal-001",
+                        )
+
+        # Find the _write_file executor call for the .mp4 and grab its path arg.
+        alert_dir = os.path.join(coord.hass.config.config_dir, "www", "bosch_alerts")
+        mp4_paths = [
+            c.args[1]
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if len(c.args) >= 2
+            and c.args[0] is fcm._write_file
+            and str(c.args[1]).endswith(".mp4")
+        ]
+        assert mp4_paths, "step 3 must have written an .mp4 via _write_file"
+        clip_path = mp4_paths[0]
+        # The write must stay a DIRECT child of alert_dir — no traversal escape.
+        assert ".." not in clip_path, f"clip path still contains '..': {clip_path}"
+        assert os.path.dirname(os.path.normpath(clip_path)) == os.path.normpath(
+            alert_dir
+        ), f"clip path escaped alert_dir: {clip_path}"
