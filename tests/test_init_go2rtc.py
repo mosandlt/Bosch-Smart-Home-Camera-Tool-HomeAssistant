@@ -294,6 +294,38 @@ class TestUnregisterGo2rtcStream:
             await BoschCameraCoordinator._unregister_go2rtc_stream(coord, CAM_A)
         assert captured["params"]["name"] == f"bosch_shc_cam_{CAM_A.lower()}"
 
+    @pytest.mark.asyncio
+    async def test_404_on_first_endpoint_falls_through_to_second(self):
+        """Regression (bug-hunt 2026-06-10): a DELETE returning 404 on the
+        first endpoint must NOT end the loop — the stream may be registered on
+        the other port. The previous unconditional `break` stopped after any
+        status and left a stale stream (+ dead proxy port) in go2rtc. Only
+        200/204 ends the loop."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
+        coord = _make_coord(_camera_entities={CAM_A: cam_entity})
+        urls: list[str] = []
+        statuses = iter([404, 200])
+
+        async def _delete(url, **kw):
+            urls.append(url)
+            return SimpleNamespace(
+                status=next(statuses), text=AsyncMock(return_value="")
+            )
+
+        session = MagicMock()
+        session.delete = _delete
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        with patch("aiohttp.ClientSession", return_value=session):
+            await BoschCameraCoordinator._unregister_go2rtc_stream(coord, CAM_A)
+
+        assert len(urls) == 2, (
+            f"404 on first endpoint must fall through to the second; got {urls}"
+        )
+        assert ":11984" in urls[0] and ":1984/" in urls[1]
+
 
 # ── _check_and_recover_webrtc ────────────────────────────────────────────
 

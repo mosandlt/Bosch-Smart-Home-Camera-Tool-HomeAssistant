@@ -5740,11 +5740,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             try:
                 async with asyncio.timeout(3):
                     async with aiohttp.ClientSession() as s:
-                        await s.delete(url, params={"name": stream_name})
+                        resp = await s.delete(url, params={"name": stream_name})
+                        # Only a real removal (200/204) ends the loop. aiohttp
+                        # does not raise on 4xx/5xx, so an unconditional break
+                        # would stop on a 404 (stream registered on the OTHER
+                        # port) or a 500 and never reach the endpoint where the
+                        # stream actually lives — defeating the documented
+                        # multi-endpoint retry and leaking a stale stream (with
+                        # its dead proxy port) in go2rtc.
+                        if resp.status in (200, 204):
+                            _LOGGER.debug(
+                                "go2rtc stream '%s' removed via %s (HTTP %d)",
+                                stream_name,
+                                url,
+                                resp.status,
+                            )
+                            break
                         _LOGGER.debug(
-                            "go2rtc stream '%s' removed via %s", stream_name, url
+                            "go2rtc DELETE '%s' via %s → HTTP %d — trying next endpoint",
+                            stream_name,
+                            url,
+                            resp.status,
                         )
-                        break  # stop after first success
             except (TimeoutError, aiohttp.ClientError):
                 pass  # go2rtc may not be running on this port — try next
 
