@@ -313,6 +313,7 @@ async def rtsp_keepalive(
 
     Returns True if the keepalive succeeded (camera replied 200 OK).
     """
+    writer = None  # track so the exception path can close it if opened
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection("127.0.0.1", proxy_port), timeout=5
@@ -381,6 +382,15 @@ async def rtsp_keepalive(
         return False
     except Exception as exc:
         _LOGGER.debug("Keepalive failed on port %d: %s", proxy_port, exc)
+        # Close a writer opened before the failure — a read-timeout or drain
+        # error after open_connection succeeded would otherwise leak one
+        # fd/socket per keepalive (runs ~every 30s). Mirrors pre_warm_rtsp.
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:  # noqa: S110 # best-effort writer close on keepalive failure, failure non-actionable
+                pass
         return False
 
 

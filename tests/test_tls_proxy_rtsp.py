@@ -138,6 +138,36 @@ class TestRtspKeepalive:
     """
 
     @pytest.mark.asyncio
+    async def test_closes_writer_on_read_timeout(self):
+        """Regression (bug-hunt 2026-06-10): when the RTSP read times out
+        mid-handshake after open_connection succeeded, the outer except must
+        still close the writer. Otherwise every ~30 s keepalive leaks one
+        fd/socket until the proxy exhausts file descriptors. Mirrors the
+        writer-close already present in pre_warm_rtsp."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from custom_components.bosch_shc_camera import tls_proxy
+
+        reader = MagicMock()
+        # Step-1 OPTIONS read raises after the connection + write succeeded.
+        reader.read = AsyncMock(side_effect=TimeoutError())
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+        writer.wait_closed = AsyncMock()
+
+        async def _fake_open(host, port):
+            return reader, writer
+
+        with patch.object(tls_proxy.asyncio, "open_connection", side_effect=_fake_open):
+            ok = await rtsp_keepalive(12345, "u", "p", "CAM-A")
+
+        assert ok is False
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_handles_direct_200_no_auth(self):
         """Some camera firmwares respond 200 OK to OPTIONS without auth.
         Branch covered: lines 281-284 (early-exit in the `if not (nonce_m and realm_m)`
