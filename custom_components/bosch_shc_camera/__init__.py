@@ -4711,12 +4711,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             ):
                                 try:
                                     cam_entity.stream.update_source(rtsps_url)
-                                    # Redact: the RTSPS URL embeds the proxy
-                                    # session hash (an access token) in its path
-                                    # and query — log only scheme://host.
+                                    # Redact: the RTSPS URL can embed Digest
+                                    # credentials (user:password@) in its netloc
+                                    # plus the proxy session hash (an access
+                                    # token) in its path/query. urlsplit().hostname
+                                    # drops the userinfo entirely; we log only
+                                    # scheme://host[:port], never creds/token.
+                                    from urllib.parse import urlsplit as _urlsplit
+
+                                    _u = _urlsplit(rtsps_url)
                                     _redacted_rtsps = (
-                                        "/".join(rtsps_url.split("/")[:3])
-                                        if rtsps_url.count("/") >= 2
+                                        f"{_u.scheme}://{_u.hostname}"
+                                        + (f":{_u.port}" if _u.port else "")
+                                        if _u.scheme and _u.hostname
                                         else "<redacted>"
                                     )
                                     _LOGGER.debug(
