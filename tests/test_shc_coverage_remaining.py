@@ -104,8 +104,8 @@ class TestGen2RcpFallbackFailureDebugLog:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
             patch(
@@ -150,8 +150,8 @@ class TestGen2RcpFallbackFailureDebugLog:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch("custom_components.bosch_shc_camera.shc._is_gen2", return_value=True),
             patch(
@@ -203,8 +203,8 @@ class TestPersistentNotificationException:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
@@ -243,8 +243,8 @@ class TestPersistentNotificationException:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False

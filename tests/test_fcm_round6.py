@@ -217,7 +217,7 @@ class TestAsyncHandleFcmPushNoToken:
 
         coord = _make_coord(token="")
         session = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             session.get.assert_not_called(),
@@ -230,7 +230,7 @@ class TestAsyncHandleFcmPushNoToken:
 
         coord = _make_coord(token=None)
         session = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             session.get.assert_not_called(),
@@ -262,7 +262,7 @@ class TestAsyncHandleFcmPushHttpBranches:
         coord = _make_coord()
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.async_update_listeners.assert_not_called(),
@@ -276,7 +276,7 @@ class TestAsyncHandleFcmPushHttpBranches:
         coord = _make_coord()
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.async_update_listeners.assert_not_called(),
@@ -290,7 +290,7 @@ class TestAsyncHandleFcmPushHttpBranches:
         coord = _make_coord()
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[]))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.async_update_listeners.assert_not_called(),
@@ -304,7 +304,7 @@ class TestAsyncHandleFcmPushHttpBranches:
         coord = _make_coord()
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(401))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.hass.bus.async_fire.assert_not_called(),
@@ -330,7 +330,7 @@ class TestAsyncHandleFcmPushDedup:
         events = _one_event("new-event-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.hass.bus.async_fire.assert_not_called(),
@@ -354,7 +354,7 @@ class TestAsyncHandleFcmPushDedup:
         events = _one_event("new-event-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         (
@@ -378,7 +378,7 @@ class TestAsyncHandleFcmPushDedup:
         events = _one_event("new-event-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         assert "ancient-id" not in coord._alert_sent_ids, (
@@ -409,7 +409,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -425,7 +425,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         (
@@ -441,7 +441,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("new-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         assert coord._last_event_ids[CAM_ID] == "new-id", (
@@ -456,7 +456,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("new-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         (
@@ -473,7 +473,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("first-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.hass.bus.async_fire.assert_not_called(),
@@ -492,7 +492,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("same-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
         (
             coord.hass.bus.async_fire.assert_not_called(),
@@ -507,7 +507,7 @@ class TestAsyncHandleFcmPushNewEvent:
         events = _one_event("new-id", "AUDIO_ALARM")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -534,7 +534,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
         mock_mark = AsyncMock(return_value=True)
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 with patch(f"{MODULE}.async_mark_events_read", mock_mark):
                     await async_handle_fcm_push(coord)
@@ -559,7 +559,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
         mock_mark = AsyncMock(return_value=True)
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 with patch(f"{MODULE}.async_mark_events_read", mock_mark):
                     await async_handle_fcm_push(coord)
@@ -581,7 +581,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
         mock_mark = AsyncMock(return_value=True)
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 with patch(f"{MODULE}.async_mark_events_read", mock_mark):
                     await async_handle_fcm_push(coord)
@@ -605,7 +605,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         events = _one_event("new-id", "MOVEMENT", ["PERSON"])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -624,7 +624,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         events = _one_event("new-id", "MOVEMENT", [])  # no PERSON tag
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -644,7 +644,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         events = _one_event("new-id", "PERSON", [])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -661,7 +661,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         events = _one_event("new-id", "AUDIO_ALARM", ["PERSON"])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -691,7 +691,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.async_send_alert", new_callable=AsyncMock
             ) as mock_alert:
@@ -713,7 +713,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         (
@@ -731,7 +731,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
         (
@@ -761,7 +761,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
         events = _one_event("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.async_send_alert", new_callable=AsyncMock
             ) as mock_alert:
@@ -809,7 +809,7 @@ class TestAsyncMarkEventsRead:
         coord = _make_coord()
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(200))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["event-1"])
         assert result is True, "HTTP 200 PUT response must return True"
 
@@ -820,7 +820,7 @@ class TestAsyncMarkEventsRead:
         coord = _make_coord()
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(201))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["event-1"])
         assert result is True, "HTTP 201 PUT response must return True"
 
@@ -831,7 +831,7 @@ class TestAsyncMarkEventsRead:
         coord = _make_coord()
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(204))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["event-1"])
         assert result is True, "HTTP 204 PUT response must return True"
 
@@ -842,7 +842,7 @@ class TestAsyncMarkEventsRead:
         coord = _make_coord()
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(500))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["event-1"])
         assert result is False, "HTTP 500 response must return False (all failed)"
 
@@ -853,7 +853,7 @@ class TestAsyncMarkEventsRead:
         coord = _make_coord()
         session = MagicMock()
         session.put = MagicMock(side_effect=Exception("network error"))
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["event-1"])
         assert result is False, "exception during PUT must return False"
 
@@ -875,7 +875,7 @@ class TestAsyncMarkEventsRead:
 
         session = MagicMock()
         session.put = _put
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["fail-id", "ok-id"])
         assert result is True, "partial success (at least one 200) must return True"
 
@@ -893,7 +893,7 @@ class TestAsyncMarkEventsRead:
 
         session = MagicMock()
         session.put = _put
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await async_mark_events_read(coord, ["e1", "e2", "e3"])
         assert result is False, "all-fail responses must return False"
 
@@ -914,7 +914,7 @@ class TestAsyncMarkEventsRead:
 
         session = MagicMock()
         session.put = _put
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_mark_events_read(coord, ["event-xyz"])
         assert captured["json"].get("id") == "event-xyz", (
             "PUT payload must include the event id"

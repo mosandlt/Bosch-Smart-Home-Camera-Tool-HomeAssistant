@@ -40,7 +40,7 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new=AsyncMock(return_value="session-ABC"),
         ):
-            result = await get_cached_rcp_session(cache, "proxy-10:42090", "hash123")
+            result = await get_cached_rcp_session(MagicMock(), cache, "proxy-10:42090", "hash123")
 
         assert result == "session-ABC", (
             "Cache miss must return the newly opened session"
@@ -63,7 +63,7 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new=AsyncMock(return_value="session-NEW"),
         ) as mock_session:
-            result = await get_cached_rcp_session(cache, "proxy-10:42090", "hash123")
+            result = await get_cached_rcp_session(MagicMock(), cache, "proxy-10:42090", "hash123")
 
         assert result == "session-CACHED", "Unexpired entry must be returned from cache"
         assert not mock_session.called, "rcp_session must NOT be called on a cache hit"
@@ -80,7 +80,7 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new=AsyncMock(return_value="session-FRESH"),
         ):
-            result = await get_cached_rcp_session(cache, "proxy-10:42090", "hash123")
+            result = await get_cached_rcp_session(MagicMock(), cache, "proxy-10:42090", "hash123")
 
         assert result == "session-FRESH", "Expired session must be replaced"
         sid, _ = cache["hash123"]
@@ -96,7 +96,7 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new=AsyncMock(return_value=None),
         ):
-            result = await get_cached_rcp_session(cache, "proxy-10:42090", "hash123")
+            result = await get_cached_rcp_session(MagicMock(), cache, "proxy-10:42090", "hash123")
 
         assert result is None
         assert "hash123" not in cache, "Failed session must not pollute the cache"
@@ -548,8 +548,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             result = await rcp_read(
                 MagicMock(),
@@ -585,8 +585,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await rcp_read(
                 MagicMock(),
@@ -621,8 +621,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             result = await rcp_read(
                 MagicMock(),
@@ -660,8 +660,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await rcp_read(
                 MagicMock(),
@@ -693,8 +693,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             result = await rcp_read(
                 MagicMock(),
@@ -724,8 +724,8 @@ class TestRcpReadSessionInvalidation:
         mock_session.get = MagicMock(return_value=ctx)
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             result = await rcp_read(
                 MagicMock(),

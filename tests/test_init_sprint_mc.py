@@ -76,7 +76,7 @@ def _put_resp(status: int, body: str):
     return r
 
 
-_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_clientsession"
+_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 # Camera with privacyMode OFF (needed for RCP path) — Gen2 Indoor
 CAM_GEN2_INDOOR_PRIV_OFF = {
@@ -286,7 +286,7 @@ class TestFetchNon200Status:
 
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         # firmware cache must NOT be set (status != 200 → ep_data = None → skipped)
@@ -330,7 +330,7 @@ class TestGatherExceptionContinue:
             return [RuntimeError("injected"), *list(real_results)]
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch("asyncio.gather", side_effect=_gather_with_exception),
         ):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -375,7 +375,7 @@ class TestMotionLightForLoopBody:
         )
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._motion_light_cache.get(CAM_A) == {
@@ -411,7 +411,7 @@ class TestIconLedBrightnessTypeError:
         )
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._icon_led_brightness_cache.get(CAM_A) == 0, (
@@ -433,7 +433,7 @@ class TestIconLedBrightnessTypeError:
         routes[f"{CAM_A}/iconLedBrightness"] = _make_resp(200, {"value": None})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._icon_led_brightness_cache.get(CAM_A) == 0, (
@@ -481,7 +481,7 @@ class TestRcpViaCloudPut200:
         rcp_connector_mock = MagicMock()
 
         with (
-            patch(_PATCH_SESSION, return_value=main_session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=main_session)),
             patch("aiohttp.TCPConnector", return_value=rcp_connector_mock),
             patch("aiohttp.ClientSession", return_value=rcp_session_mock),
         ):
@@ -517,7 +517,7 @@ class TestRcpViaCloudPut200:
         rcp_session_mock.put = MagicMock(return_value=rcp_put_resp)
 
         with (
-            patch(_PATCH_SESSION, return_value=main_session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=main_session)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=rcp_session_mock),
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
@@ -564,7 +564,7 @@ class TestRcpConnectError:
         rcp_session_mock.put = MagicMock(return_value=rcp_put_resp)
 
         with (
-            patch(_PATCH_SESSION, return_value=main_session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=main_session)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=rcp_session_mock),
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
@@ -604,7 +604,7 @@ class TestShcReadyStatesUpdate:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_update_shc_states.assert_awaited_once()
@@ -633,7 +633,7 @@ class TestShcReadyStatesUpdate:
         session = _make_session_fn(routes)
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
         ):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -681,7 +681,7 @@ class TestSmbCleanupBackgroundTask:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert bg_task_mock.called, (

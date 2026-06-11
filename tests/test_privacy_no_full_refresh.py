@@ -63,8 +63,8 @@ async def test_privacy_on_does_not_request_full_refresh():
 
     coord = _coord()
     with patch(
-        "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-        return_value=_put_204_session(),
+        "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=_put_204_session()),
     ):
         result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
     assert result is True
@@ -82,8 +82,8 @@ async def test_privacy_off_does_not_request_full_refresh():
     coord = _coord()
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_204_session()),
         ),
         patch(
             "custom_components.bosch_shc_camera.shc._schedule_privacy_off_snapshot"

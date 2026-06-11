@@ -30,7 +30,6 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
     AbstractOAuth2Implementation,
@@ -46,6 +45,8 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+
+from .cloud_ssl import async_get_bosch_cloud_session
 
 # ── Section layout (single source of truth) ───────────────────────────────────
 # Sectioned options-flow groups the ~50 fields into collapsible blocks so the
@@ -270,7 +271,7 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
         """Exchange authorization code for tokens."""
         code = external_data["code"]
         redirect_uri = external_data["state"]["redirect_uri"]
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         async with session.post(
             f"{KEYCLOAK_BASE}/token",
             data={
@@ -281,7 +282,6 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
                 "redirect_uri": redirect_uri,
                 "code_verifier": self._last_verifier,
             },
-            ssl=False,
         ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
@@ -293,7 +293,7 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
 
     async def _async_refresh_token(self, token: dict[str, Any]) -> dict[str, Any]:
         """Refresh access token via Keycloak."""
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         async with session.post(
             f"{KEYCLOAK_BASE}/token",
             data={
@@ -302,7 +302,6 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
                 "grant_type": "refresh_token",
                 "refresh_token": token["refresh_token"],
             },
-            ssl=False,
         ) as resp:
             if resp.status >= 400:
                 _LOGGER.error("Token refresh failed: HTTP %d", resp.status)
@@ -356,7 +355,6 @@ async def _exchange_code(
                     "redirect_uri": REDIRECT_URI_MANUAL,
                     "code_verifier": verifier,
                 },
-                ssl=False,
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()  # type: ignore[no-any-return]
@@ -426,7 +424,6 @@ async def _do_refresh(session: Any, refresh_token: str) -> dict[str, Any] | None
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                 },
-                ssl=False,
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()  # type: ignore[no-any-return]
@@ -1098,7 +1095,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             if not code:
                 errors["redirect_url"] = "invalid_redirect_url"
             else:
-                session = async_get_clientsession(self.hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(self.hass)
                 tokens = await _exchange_code(session, code, self._verifier)
 
                 if not tokens or not tokens.get("access_token"):

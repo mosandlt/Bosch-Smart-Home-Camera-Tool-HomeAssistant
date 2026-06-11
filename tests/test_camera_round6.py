@@ -133,8 +133,8 @@ class TestRemoteProxy200:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -158,8 +158,8 @@ class TestRemoteProxy200:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -180,8 +180,8 @@ class TestRemoteProxy200:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -220,8 +220,8 @@ class TestRemoteProxy404:
         session.get.side_effect = [first_cm, second_cm]
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -245,8 +245,8 @@ class TestRemoteProxy404:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -275,8 +275,8 @@ class TestRemoteProxy404:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -315,8 +315,8 @@ class TestRemoteProxy401:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -343,8 +343,8 @@ class TestRemoteProxy401:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -372,8 +372,8 @@ class TestRemoteProxy401:
         session.get.side_effect = [first_cm, retry_cm]
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -400,8 +400,8 @@ class TestRemoteProxy401:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -436,8 +436,8 @@ class TestRemoteProxyTimeout:
         session.get.side_effect = TimeoutError()
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -464,8 +464,8 @@ class TestRemoteProxyTimeout:
         session.get.side_effect = TimeoutError()
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -488,8 +488,8 @@ class TestRemoteProxyTimeout:
         session.get.side_effect = aiohttp.ClientError("connection reset")
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -629,8 +629,8 @@ class TestIdleCameraCloudSnapshot:
         # _cached_image=None (default)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -650,8 +650,8 @@ class TestIdleCameraCloudSnapshot:
         cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp-small")
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -672,8 +672,8 @@ class TestIdleCameraCloudSnapshot:
         cam._async_rcp_thumbnail = AsyncMock(return_value=None)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -693,8 +693,8 @@ class TestIdleCameraCloudSnapshot:
         cam = _make_camera(coord=coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -717,8 +717,8 @@ class TestIdleCameraCloudSnapshot:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -742,8 +742,8 @@ class TestIdleCameraCloudSnapshot:
         cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp-fresh")
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -766,8 +766,8 @@ class TestIdleCameraCloudSnapshot:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -793,8 +793,8 @@ class TestIdleCameraCloudSnapshot:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -845,8 +845,8 @@ class TestEventSnapshotLastResort:
         session.get.return_value = img_resp
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -881,8 +881,8 @@ class TestEventSnapshotLastResort:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -913,8 +913,8 @@ class TestEventSnapshotLastResort:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -931,8 +931,8 @@ class TestEventSnapshotLastResort:
         cam = _make_camera(coord=coord)  # _cached_image=None
 
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=MagicMock(),
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 

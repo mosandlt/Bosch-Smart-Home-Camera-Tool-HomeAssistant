@@ -57,10 +57,11 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1, step2)
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result == "0x12345678"
 
     @pytest.mark.asyncio
@@ -73,10 +74,11 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result is None
 
     @pytest.mark.asyncio
@@ -95,10 +97,11 @@ class TestRcpSession:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get.return_value = cm
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result is None
 
     @pytest.mark.asyncio
@@ -117,10 +120,11 @@ class TestRcpSession:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get.return_value = cm
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result is None
 
     @pytest.mark.asyncio
@@ -133,10 +137,11 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result is None
 
     @pytest.mark.asyncio
@@ -149,10 +154,11 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         assert result is None
 
     @pytest.mark.asyncio
@@ -170,10 +176,11 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1, step2_cm)
         with (
+            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
-            result = await rcp_session({}, PROXY_HOST, PROXY_HASH)
+            result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         # step2 timeout is caught — should still return the session_id
         assert result == "0xABCDEF01"
 

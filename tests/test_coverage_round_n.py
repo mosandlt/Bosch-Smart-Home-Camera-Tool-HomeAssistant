@@ -419,8 +419,8 @@ class TestFetchLocalSnapClosure:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -453,8 +453,8 @@ class TestFetchLocalSnapClosure:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -491,8 +491,8 @@ class TestFetchLocalSnapClosure:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -542,8 +542,8 @@ class TestFetchOutageSnapClosure:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -570,8 +570,8 @@ class TestFetchOutageSnapClosure:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",

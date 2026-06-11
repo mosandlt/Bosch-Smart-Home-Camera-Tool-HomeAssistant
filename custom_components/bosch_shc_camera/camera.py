@@ -35,7 +35,6 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -46,6 +45,7 @@ from . import (
     get_options,
 )
 from .auth_utils import async_digest_request
+from .cloud_ssl import async_get_bosch_cloud_session
 from .const import AUTO_PLAY_DEFAULT_VALUES, DOMAIN, LIVE_SESSION_TTL, TIMEOUT_SNAP
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .snapshot_store import load_snapshot, save_snapshot
@@ -798,7 +798,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         prefer the 320×180 RCP thumbnail on mobile/small displays (avoids 150 KB
         snap.jpg when the card only needs a 400 px thumbnail).
         """
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        # Verifying Bosch-cloud session: REMOTE proxy snap.jpg fetches below are
+        # TLS-validated against the pinned Bosch CA. The LOCAL Digest paths pass
+        # ssl=False per request (camera LAN IP, self-signed) which overrides this
+        # session's connector for those calls only.
+        session = await async_get_bosch_cloud_session(self.hass)
         token = self._token
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
         # True when card requests a mobile/thumbnail-sized image

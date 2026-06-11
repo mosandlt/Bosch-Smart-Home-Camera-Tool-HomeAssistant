@@ -519,8 +519,8 @@ class TestAsyncPutCamera:
         coord.token = "valid"
         session = _fake_session([(204, "")])
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,
@@ -538,8 +538,8 @@ class TestAsyncPutCamera:
         coord.token = "valid"
         session = _fake_session([(201, "")])
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,
@@ -558,8 +558,8 @@ class TestAsyncPutCamera:
         coord.token = "valid"
         session = _fake_session([(500, "")])
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,
@@ -577,8 +577,8 @@ class TestAsyncPutCamera:
         coord.token = "expired"
         session = _fake_session([(401, ""), (204, "")])  # 401 then success
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,
@@ -599,8 +599,8 @@ class TestAsyncPutCamera:
         coord._ensure_valid_token = AsyncMock(side_effect=RuntimeError("auth down"))
         session = _fake_session([(401, "")])
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,
@@ -625,8 +625,8 @@ class TestAsyncPutCamera:
 
         session.put = boom
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschCameraCoordinator.async_put_camera(
                 coord,

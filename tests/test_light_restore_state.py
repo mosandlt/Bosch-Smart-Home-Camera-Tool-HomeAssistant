@@ -160,8 +160,8 @@ class TestPutLightingSwitchDefensiveMerge:
         session.put = MagicMock(side_effect=_capture)
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             # `someFutureGroup` is NOT in the 3-LED default → triggers else branch
             updates = {"someFutureGroup": {"brightness": 50, "color": None}}
@@ -192,8 +192,8 @@ class TestPutLightingSwitchJsonParseError:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await light._put_lighting_switch(
                 {"topLedLightSettings": {"brightness": 50}}
@@ -232,8 +232,8 @@ class TestAsyncTurnOnRemembersBrightness:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             # brightness=255 → round(255*100/255)=100 → _last_brightness=max(1,100)=100
             await light.async_turn_on(**{ATTR_BRIGHTNESS: 255})
@@ -254,8 +254,8 @@ class TestAsyncTurnOnRemembersBrightness:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await light.async_turn_on(**{ATTR_BRIGHTNESS: 1})
 
@@ -282,8 +282,8 @@ class TestAsyncTurnOffRemembersColor:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await light.async_turn_off()
 

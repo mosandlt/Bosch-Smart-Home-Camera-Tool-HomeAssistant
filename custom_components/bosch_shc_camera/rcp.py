@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .cloud_ssl import (
+    async_get_bosch_cloud_session,
+    async_get_bosch_cloud_ssl_context,
+)
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
@@ -46,6 +51,7 @@ def _is_xml_envelope(raw: bytes | None) -> bool:
 
 
 async def get_cached_rcp_session(
+    hass: HomeAssistant,
     session_cache: RcpSessionCache,
     proxy_host: str,
     proxy_hash: str,
@@ -64,7 +70,7 @@ async def get_cached_rcp_session(
         del session_cache[proxy_hash]
 
     new_session_id: str | None = await rcp_session(
-        session_cache, proxy_host, proxy_hash
+        hass, session_cache, proxy_host, proxy_hash
     )
     if new_session_id:
         session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
@@ -72,6 +78,7 @@ async def get_cached_rcp_session(
 
 
 async def rcp_session(
+    hass: HomeAssistant,
     session_cache: RcpSessionCache,
     proxy_host: str,
     proxy_hash: str,
@@ -88,7 +95,7 @@ async def rcp_session(
     base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
     init_payload = "0x0102004000000000040000000000000000010000000000000001000000000000"
 
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(ssl=await async_get_bosch_cloud_ssl_context(hass))
     try:
         async with aiohttp.ClientSession(connector=connector) as session:
             # Step 1: open session
@@ -416,7 +423,8 @@ async def rcp_read(
       <rcp ... ><err>0xa0</err></rcp>
 
     This function extracts the hex payload and returns it as bytes.
-    Uses the HA shared session (verify_ssl=False for cloud proxy — non-standard certs).
+    Uses the pinned Bosch-cloud session (verifies TLS against the private Bosch
+    CA via cloud_ssl.async_get_bosch_cloud_session).
 
     If session_cache is provided, the cached session for the URL's proxy_hash
     is invalidated on HTTP 401/403 or RCP <err>0x0c0d</err> (session closed)
@@ -440,7 +448,7 @@ async def rcp_read(
             if session_cache.pop(proxy_hash, None) is not None:
                 _LOGGER.debug("RCP session cache invalidated for %s", proxy_hash[:8])
 
-    session = async_get_clientsession(hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(hass)
     try:
         async with asyncio.timeout(8):
             async with session.get(rcp_base, params=params) as resp:
@@ -521,7 +529,7 @@ async def async_update_rcp_data(
       - hass
     """
     session_id = await get_cached_rcp_session(
-        coordinator._rcp_session_cache, proxy_host, proxy_hash
+        coordinator.hass, coordinator._rcp_session_cache, proxy_host, proxy_hash
     )
     if not session_id:
         _LOGGER.debug(

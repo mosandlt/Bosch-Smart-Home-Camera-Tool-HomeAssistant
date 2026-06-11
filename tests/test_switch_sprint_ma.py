@@ -699,8 +699,8 @@ class TestIntercomSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_on()
         assert sw._is_on is True
@@ -722,8 +722,8 @@ class TestIntercomSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_off()
         assert sw._is_on is False
@@ -742,8 +742,8 @@ class TestIntercomSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=failing_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_on()  # must not raise
         sw.async_write_ha_state.assert_called_once()
@@ -761,8 +761,8 @@ class TestIntercomSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=failing_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_off()
         sw.async_write_ha_state.assert_called_once()
@@ -968,8 +968,8 @@ class TestAmbientLightSwitch:
         mock_session.get = MagicMock(return_value=get_ctx)
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._set_ambient_light(True)
         assert sw._is_on is True
@@ -1070,8 +1070,8 @@ class TestSoftLightFadingSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(True)
         assert stub_coord._global_lighting_cache[CAM_ID]["softLightFading"] is True
@@ -1111,8 +1111,8 @@ class TestSoftLightFadingSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(True)
         # Cache should be updated with the body dict fallback
@@ -1138,8 +1138,8 @@ class TestSoftLightFadingSwitch:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=failing_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(True)
         sw.async_write_ha_state.assert_called_once()

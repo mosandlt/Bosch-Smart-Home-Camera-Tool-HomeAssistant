@@ -191,8 +191,8 @@ def _make_coord(**overrides):
     return SimpleNamespace(**base)
 
 
-# Canonical patch target for async_get_clientsession
-_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_clientsession"
+# Canonical patch target for async_get_bosch_cloud_session (CWE-295 refactor)
+_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 
 # ── 1. No-token guard ─────────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ class TestNoTokenGuard:
 
         with (
             pytest.raises(UpdateFailed, match="Not authenticated"),
-            patch(_PATCH_SESSION) as mock_sess,
+            patch(_PATCH_SESSION, new_callable=AsyncMock) as mock_sess,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -243,7 +243,7 @@ class TestNoTokenGuard:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -279,7 +279,7 @@ class TestFirstTickDetection:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert hasattr(coord, "_first_tick_done"), (
@@ -315,7 +315,7 @@ class TestFirstTickDetection:
 
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         event_urls = [u for u in call_log if "events" in u and "feature" not in u]
@@ -358,7 +358,7 @@ class TestFirstTickDetection:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         event_urls = [
@@ -405,7 +405,7 @@ class TestFcmWatchdog:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._fcm_healthy is False, (
@@ -438,7 +438,7 @@ class TestFcmWatchdog:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._fcm_healthy is True, (
@@ -469,7 +469,7 @@ class TestFcmWatchdog:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._fcm_healthy is True, (
@@ -508,7 +508,7 @@ class TestFcmWatchdog:
         )
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,
@@ -559,7 +559,7 @@ class TestFcmWatchdog:
         )
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,
@@ -600,7 +600,7 @@ class TestCameraList200:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._hw_version.get("CAM-A") == "HOME_Eyes_Outdoor", (
@@ -623,7 +623,7 @@ class TestCameraList200:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert result == {}, "Empty camera list must produce an empty data dict"
@@ -666,7 +666,7 @@ class TestCameraList401Retry:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert "CAM-B" in result, (
@@ -705,7 +705,7 @@ class TestCameraList401DoubleFailure:
 
         with (
             pytest.raises(UpdateFailed, match="Token expired"),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -738,7 +738,7 @@ class TestCameraListHttpError:
 
         with (
             pytest.raises(UpdateFailed, match="HTTP 500"),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -760,7 +760,7 @@ class TestCameraListHttpError:
 
         with (
             pytest.raises(UpdateFailed, match="HTTP 503"),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -791,7 +791,7 @@ class TestFeatureFlags200:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._feature_flags == ff_data, (
@@ -818,7 +818,7 @@ class TestFeatureFlags200:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         ff_calls = [u for u in call_log if "feature_flags" in u]
@@ -861,7 +861,7 @@ class TestFeatureFlagsTimeout:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -899,7 +899,7 @@ class TestProtocolCheckSupported:
             caplog.at_level(
                 logging.WARNING, logger="custom_components.bosch_shc_camera"
             ),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -924,7 +924,7 @@ class TestProtocolCheckSupported:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._protocol_checked is True, (
@@ -948,7 +948,7 @@ class TestProtocolCheckSupported:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         proto_calls = [u for u in call_log if "protocol_support" in u]
@@ -983,7 +983,7 @@ class TestProtocolCheckDeprecated:
             caplog.at_level(
                 logging.WARNING, logger="custom_components.bosch_shc_camera"
             ),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -1017,7 +1017,7 @@ class TestProtocolCheckDeprecated:
             caplog.at_level(
                 logging.WARNING, logger="custom_components.bosch_shc_camera"
             ),
-            patch(_PATCH_SESSION, return_value=session_mock),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -1044,7 +1044,7 @@ class TestProtocolCheckDeprecated:
         session_mock = MagicMock()
         session_mock.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session_mock):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._protocol_checked is True, (

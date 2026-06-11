@@ -118,7 +118,7 @@ async def test_drift_heal_a_fresh_install_posts_and_writes_both_markers() -> Non
     session.post = _capturing_post
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -170,7 +170,7 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
     session.post = MagicMock()
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -228,7 +228,7 @@ async def test_drift_heal_c_token_matches_but_marker_missing_forces_post() -> No
     session.post = _capturing_post
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -280,7 +280,7 @@ async def test_drift_heal_c2_token_matches_but_marker_is_ios_forces_post() -> No
     session.post = _capturing_post
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -326,7 +326,7 @@ async def test_drift_heal_d_token_changed_posts_and_writes_marker() -> None:
     session.post = _capturing_post
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -360,7 +360,7 @@ async def test_drift_heal_e_server_500_internal_error_writes_marker() -> None:
     session = _make_session_post(resp_cm)
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
@@ -401,7 +401,7 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
     session = _make_session_post(resp_cm)
 
     with (
-        patch(f"{MODULE}.async_get_clientsession", return_value=session),
+        patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch

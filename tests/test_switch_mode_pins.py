@@ -420,8 +420,8 @@ class TestIntercomSwitchModePins:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_on()
         _, call_kwargs = mock_session.put.call_args
@@ -443,8 +443,8 @@ class TestIntercomSwitchModePins:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=mock_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw.async_turn_off()
         _, call_kwargs = mock_session.put.call_args
@@ -727,8 +727,8 @@ class TestAmbientLightSwitchModePins:
         mock_session.get = MagicMock(return_value=get_ctx)
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._set_ambient_light(True)
         _, put_kwargs = mock_session.put.call_args
@@ -759,8 +759,8 @@ class TestAmbientLightSwitchModePins:
         mock_session.get = MagicMock(return_value=get_ctx)
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._set_ambient_light(False)
         _, put_kwargs = mock_session.put.call_args
@@ -838,8 +838,8 @@ class TestSoftLightFadingSwitchModePins:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(True)
         _, put_kwargs = mock_session.put.call_args
@@ -865,8 +865,8 @@ class TestSoftLightFadingSwitchModePins:
         mock_session = MagicMock()
         mock_session.put = MagicMock(return_value=put_ctx)
         with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-            return_value=mock_session,
+            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(False)
         _, put_kwargs = mock_session.put.call_args

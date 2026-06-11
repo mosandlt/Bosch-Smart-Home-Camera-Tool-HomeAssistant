@@ -75,7 +75,7 @@ def _put_resp(status: int, body: str):
     return r
 
 
-_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_clientsession"
+_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 # ── Gen2 camera list payload ──────────────────────────────────────────────────
 # Privacy ON (="ON") skips the RCP-via-cloud path (lines 2066-2105) which
@@ -334,7 +334,7 @@ class TestSlowTierSkippedOffline:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         # Slow-tier should not have populated wifiinfo cache (since offline)
@@ -373,7 +373,7 @@ class TestSlowTierFetchException:
 
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         # Other caches must still be populated — exception on firmware is swallowed
@@ -403,7 +403,7 @@ class TestSlowTierAutofollow:
         routes[f"{CAM_A}/autofollow"] = _make_resp(200, {"enabled": True})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert CAM_A in result, "Camera must appear in result"
@@ -430,7 +430,7 @@ class TestSlowTierTimestamp:
         routes[f"{CAM_A}/timestamp"] = _make_resp(200, {"result": True})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._timestamp_cache.get(CAM_A) is True, (
@@ -456,7 +456,7 @@ class TestSlowTierNotifications:
         routes[f"{CAM_A}/notifications"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._notifications_cache.get(CAM_A) == expected, (
@@ -482,7 +482,7 @@ class TestSlowTierRules:
         routes[f"{CAM_A}/rules"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._rules_cache.get(CAM_A) == expected, (
@@ -508,7 +508,7 @@ class TestSlowTierLedlights:
         routes[f"{CAM_A}/ledlights"] = _make_resp(200, {"state": "ON"})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._ledlights_cache.get(CAM_A) is True, (
@@ -533,7 +533,7 @@ class TestSlowTierLensElevation:
         routes[f"{CAM_A}/lens_elevation"] = _make_resp(200, {"elevation": 45})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._lens_elevation_cache.get(CAM_A) == 45, (
@@ -559,7 +559,7 @@ class TestSlowTierAudio:
         routes[f"{CAM_A}/audio"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._audio_cache.get(CAM_A) == expected, (
@@ -585,7 +585,7 @@ class TestSlowTierUnreadEventsNumeric:
         routes[f"{CAM_A}/unread_events_count"] = _make_resp(200, 5)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._unread_events_cache.get(CAM_A) == 5, (
@@ -612,7 +612,7 @@ class TestSlowTierPrivacySoundNoWriteLock:
         routes[f"{CAM_A}/privacy_sound_override"] = _make_resp(200, {"result": True})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._privacy_sound_cache.get(CAM_A) is True, (
@@ -639,7 +639,7 @@ class TestSlowTierMotionSensitiveAreas:
         routes[f"{CAM_A}/motion_sensitive_areas"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._cloud_zones_cache.get(CAM_A) == expected, (
@@ -666,7 +666,7 @@ class TestSlowTierPrivacyMasks:
         routes[f"{CAM_A}/privacy_masks"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._cloud_privacy_masks_cache.get(CAM_A) == expected, (
@@ -693,7 +693,7 @@ class TestSlowTierLightingOptions:
         routes[f"{CAM_A}/lighting_options"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._lighting_options_cache.get(CAM_A) == expected, (
@@ -719,7 +719,7 @@ class TestSlowTierAlarmSettings:
         routes[f"{CAM_A}/alarm_settings"] = _make_resp(200, expected)
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._alarm_settings_cache.get(CAM_A) == expected, (
@@ -747,7 +747,7 @@ class TestSlowTierAlarmStatusArming:
         )
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._arming_cache.get(CAM_A) is True, (
@@ -771,7 +771,7 @@ class TestSlowTierAlarmStatusArming:
         )
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._arming_cache.get(CAM_A) is False, (
@@ -796,7 +796,7 @@ class TestSlowTierIconLedBrightness:
         routes[f"{CAM_A}/iconLedBrightness"] = _make_resp(200, {"value": 2})
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert coord._icon_led_brightness_cache.get(CAM_A) == 2, (
@@ -826,7 +826,7 @@ class TestCleanupStaleDevices:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert CAM_A in result, "Camera must appear in result"
@@ -868,7 +868,7 @@ class TestNvrCleanupTriggeredDaily:
         }
         session = _make_session_fn(routes)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert bg_task_mock.called, (

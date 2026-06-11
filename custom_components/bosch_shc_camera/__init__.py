@@ -69,6 +69,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from . import recorder as nvr_recorder
 from . import shc as shc_mod
 from .auth_utils import async_digest_request
+from .cloud_ssl import (
+    async_get_bosch_cloud_session,
+    async_get_bosch_cloud_ssl_context,
+)
 from .fcm import (
     _write_file as _fcm_write_file,
 )
@@ -1897,7 +1901,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # No refresh token at all — trigger the built-in HA reauth button
             # (shows "Reconfigure" on the integration card, runs our auto-login).
             raise ConfigEntryAuthFailed("No refresh token — re-authentication required")
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         # Retry up to 3 times with 2s delay on TRANSIENT errors only.
         # Hard auth errors (invalid_grant) raise RefreshTokenInvalidError
         # which we convert to ConfigEntryAuthFailed immediately — retrying
@@ -2402,7 +2406,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "Fast first tick — skipping events + slow-tier for quick startup"
             )
 
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
         try:
@@ -3367,7 +3371,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     )
                 if is_online and do_slow and not local_stream_active and not privacy_on:
                     try:
-                        rcp_connector = aiohttp.TCPConnector(ssl=False)
+                        rcp_connector = aiohttp.TCPConnector(
+                            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+                        )
                         rcp_headers = {
                             "Authorization": f"Bearer {token}",
                             "Content-Type": "application/json",
@@ -4195,7 +4201,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # indent level is a readability liability. ClientSession's default
         # connector_owner=True makes session.close() also close the connector,
         # so the finally block below is leak-free.
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(
+            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+        )
         session = aiohttp.ClientSession(connector=connector)
 
         headers = {
@@ -4703,10 +4711,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             ):
                                 try:
                                     cam_entity.stream.update_source(rtsps_url)
+                                    # Redact: the RTSPS URL embeds the proxy
+                                    # session hash (an access token) in its path
+                                    # and query — log only scheme://host.
+                                    _redacted_rtsps = (
+                                        "/".join(rtsps_url.split("/")[:3])
+                                        if rtsps_url.count("/") >= 2
+                                        else "<redacted>"
+                                    )
                                     _LOGGER.debug(
-                                        "Stream.update_source() for %s → %s",
+                                        "Stream.update_source() for %s → %s/…",
                                         cam_id[:8],
-                                        rtsps_url[:60],
+                                        _redacted_rtsps,
                                     )
                                 except Exception as err:
                                     _LOGGER.debug(
@@ -4969,7 +4985,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
             return None
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(
+            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+        )
         async with aiohttp.ClientSession(connector=connector) as session:
             headers = {
                 "Authorization": f"Bearer {token}",
@@ -5179,9 +5197,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 if time.monotonic() < expiry:
                     return data
 
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-            session = async_get_clientsession(self.hass, verify_ssl=False)
+            session = await async_get_bosch_cloud_session(self.hass)
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
             events_url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}"
 
@@ -5258,7 +5274,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
             return None
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(
+            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+        )
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -6022,7 +6040,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     if not token:
                         continue
                     async with aiohttp.ClientSession(
-                        connector=aiohttp.TCPConnector(ssl=False),
+                        connector=aiohttp.TCPConnector(
+                            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+                        ),
                         connector_owner=True,
                     ) as session:
                         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
@@ -6335,7 +6355,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             "0x0102004000000000040000000000000000010000000000000001000000000000"
         )
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(
+            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
+        )
         try:
             async with aiohttp.ClientSession(connector=connector) as session:
                 # Step 1: open session
@@ -6433,7 +6455,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if num:
             params["num"] = str(num)
 
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         try:
             async with asyncio.timeout(8):
                 async with session.get(rcp_base, params=params) as resp:
@@ -6655,7 +6677,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
         try:
             async with asyncio.timeout(10):
@@ -7822,7 +7844,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "endTime": end_time,
                     "weekdays": weekdays,
                 }
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -7866,7 +7888,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):
@@ -7911,7 +7933,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8040,7 +8062,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8103,7 +8125,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):
@@ -8204,7 +8226,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8267,7 +8289,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):
@@ -8365,7 +8387,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8430,7 +8452,7 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 # Fetch current zones, remove the one at index, re-POST
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8514,7 +8536,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     if cached:
                         data = cached
                     else:
-                        session = async_get_clientsession(hass, verify_ssl=False)
+                        session = await async_get_bosch_cloud_session(hass)
                         headers = {"Authorization": f"Bearer {coord.token}"}
                         async with asyncio.timeout(10):
                             async with session.get(
@@ -8585,7 +8607,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8640,7 +8662,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
@@ -8696,7 +8718,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):
@@ -8766,7 +8788,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                session = async_get_clientsession(hass, verify_ssl=False)
+                session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
                 try:
                     async with asyncio.timeout(10):

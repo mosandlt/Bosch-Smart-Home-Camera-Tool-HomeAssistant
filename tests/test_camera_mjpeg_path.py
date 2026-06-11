@@ -113,10 +113,10 @@ def _make_camera(
 
 
 def _patch_session() -> object:
-    """Patch async_get_clientsession so camera.py can call it without a real hass."""
+    """Patch async_get_bosch_cloud_session so camera.py can call it without a real hass."""
     return patch(
-        "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-        return_value=MagicMock(),
+        "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=MagicMock()),
     )
 
 

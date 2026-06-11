@@ -30,7 +30,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .cloud_ssl import async_get_bosch_cloud_session
 
 if TYPE_CHECKING:
     from . import BoschCameraCoordinator
@@ -409,7 +410,7 @@ async def async_cloud_set_privacy_mode(
     # -- Cloud API (primary -- fast) -------------------------------------------
     token = coordinator.token
     if token and not cam_offline:
-        session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(coordinator.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -595,7 +596,7 @@ async def async_cloud_set_camera_light(
     # -- Cloud API (primary -- fast) -------------------------------------------
     token = coordinator.token
     if token:
-        session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(coordinator.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -697,9 +698,7 @@ async def async_cloud_set_light_component(
     # LAN-RCP fallback at the end of this function works without a cloud
     # session, so we skip the (sometimes expensive) session+resolver setup
     # entirely when token is missing. Type guard before each .put() call.
-    session = (
-        async_get_clientsession(coordinator.hass, verify_ssl=False) if token else None
-    )
+    session = await async_get_bosch_cloud_session(coordinator.hass) if token else None
     headers = {
         "Authorization": f"Bearer {token}" if token else "",
         "Content-Type": "application/json",
@@ -980,7 +979,7 @@ async def async_cloud_set_notifications(
         _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
         return False
 
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -1033,7 +1032,7 @@ async def async_cloud_set_pan(
         _LOGGER.warning("cloud_set_pan: no token for %s", cam_id)
         return False
 
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",

@@ -140,8 +140,8 @@ class TestCloudSetCameraLightNoRefresh:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -166,8 +166,8 @@ class TestCloudSetCameraLightNoRefresh:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=_put_204_session(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=_put_204_session()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -198,8 +198,8 @@ class TestCloudSetLightComponentNoRefresh:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=_put_204_session(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=_put_204_session()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -226,8 +226,8 @@ class TestCloudSetLightComponentNoRefresh:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=_put_204_session(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=_put_204_session()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -257,8 +257,8 @@ class TestCloudSetNotificationsNoRefresh:
         coord = _base_coord()
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_204_session()),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
@@ -280,8 +280,8 @@ class TestCloudSetNotificationsNoRefresh:
         coord = _base_coord()
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_204_session()),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, False)
 
@@ -305,8 +305,8 @@ class TestCloudSetPanNoRefresh:
         coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_204_session()),
         ):
             result = await async_cloud_set_pan(coord, CAM_ID, 90)
 
@@ -325,8 +325,8 @@ class TestCloudSetPanNoRefresh:
         coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_204_session(),
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_204_session()),
         ):
             result = await async_cloud_set_pan(coord, CAM_ID, -45)
 
@@ -345,10 +345,10 @@ class TestCloudSetPanNoRefresh:
         coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=_put_200_json_session(
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_put_200_json_session(
                 {"currentAbsolutePosition": 42, "estimatedTimeToCompletion": 500}
-            ),
+            )),
         ):
             result = await async_cloud_set_pan(coord, CAM_ID, 45)
 

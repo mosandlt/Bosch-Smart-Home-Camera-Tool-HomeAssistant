@@ -27,12 +27,12 @@ from homeassistant.components.light import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
+from .cloud_ssl import async_get_bosch_cloud_session
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -288,7 +288,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
                 body[key] = {**body[key], **val}  # merge, not replace
             else:
                 body[key] = val
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -336,7 +336,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         token = self.coordinator.token
         if not token:
             return False
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

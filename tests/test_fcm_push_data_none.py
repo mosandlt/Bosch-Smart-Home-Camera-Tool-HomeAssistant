@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -47,7 +47,7 @@ class TestPushDataNoneGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=AssertionError("must not call cloud API"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
 
         session.get.assert_not_called()
@@ -60,7 +60,7 @@ class TestPushDataNoneGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=AssertionError("must not call cloud API"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
 
         session.get.assert_not_called()
@@ -74,7 +74,7 @@ class TestPushDataNoneGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=AssertionError("must not call cloud API"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await async_handle_fcm_push(coord)
 
         session.get.assert_not_called()

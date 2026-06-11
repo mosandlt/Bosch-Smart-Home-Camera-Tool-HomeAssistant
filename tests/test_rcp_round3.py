@@ -109,7 +109,7 @@ class TestRcpReadNumParam:
 
         hass = MagicMock()
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=mock_session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
             result = await rcp_read(
                 hass,
                 "https://proxy/hash/rcp.xml",
@@ -144,7 +144,7 @@ class TestRcpReadNumParam:
         mock_session.get = fake_get
         hass = MagicMock()
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=mock_session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
             await rcp_read(hass, "https://proxy/hash/rcp.xml", "0x0d00", "sess123")
 
         assert "num" not in captured_params
@@ -172,7 +172,7 @@ class TestRcpReadDropSessionNone:
         mock_session.get = MagicMock(return_value=cm)
         hass = MagicMock()
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=mock_session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
             result = await rcp_read(
                 hass,
                 "https://proxy/hash/rcp.xml",

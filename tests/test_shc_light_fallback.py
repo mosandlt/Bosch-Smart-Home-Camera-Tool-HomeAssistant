@@ -61,8 +61,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -91,8 +91,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -115,8 +115,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -139,8 +139,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -164,8 +164,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             await shc.async_cloud_set_light_component(stub_coord, CAM_ID, "front", True)
@@ -181,8 +181,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -207,8 +207,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -232,8 +232,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -257,8 +257,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             ok = await shc.async_cloud_set_light_component(
@@ -281,8 +281,8 @@ class TestGen2LocalRcpLightFallback:
                 mock_write,
             ),
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             await shc.async_cloud_set_light_component(stub_coord, CAM_ID, "front", True)

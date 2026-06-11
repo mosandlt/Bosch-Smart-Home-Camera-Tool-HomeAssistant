@@ -243,8 +243,8 @@ class TestAsyncCameraImageImplLocalDigest:
         cm = self._digest_resp_cm(200, img, "image/jpeg")
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -269,8 +269,8 @@ class TestAsyncCameraImageImplLocalDigest:
         cam = _make_camera(coord=self._local_coord(), _cached_image=b"\xff\xd8cached")
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -292,8 +292,8 @@ class TestAsyncCameraImageImplLocalDigest:
         cam = _make_camera(coord=self._local_coord(), _cached_image=b"\xff\xd8cached")
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -359,8 +359,8 @@ class TestOutageFallbackStreamingGuard:
         digest = AsyncMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -392,8 +392,8 @@ class TestOutageFallbackStreamingGuard:
         cm.__aexit__ = AsyncMock(return_value=None)
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",

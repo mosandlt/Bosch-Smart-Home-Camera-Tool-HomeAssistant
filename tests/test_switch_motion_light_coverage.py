@@ -97,7 +97,7 @@ class TestMotionLightNoTokenEarlyReturn:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await sw.async_turn_on()
 
         coord.async_put_camera.assert_not_awaited()
@@ -118,7 +118,7 @@ class TestMotionLightGetHttpError:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await sw.async_turn_on()
 
         (
@@ -139,7 +139,7 @@ class TestMotionLightGetHttpError:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(401))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await sw.async_turn_off()
 
         coord.async_put_camera.assert_not_awaited()
@@ -162,7 +162,7 @@ class TestMotionLightGetRaises:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(0, raise_exc=TimeoutError()))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             # Must not raise even though session.get raises
             await sw.async_turn_on()
 
@@ -186,7 +186,7 @@ class TestMotionLightGetRaises:
             return_value=_resp_cm(0, raise_exc=RuntimeError("boom"))
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await sw.async_turn_off()
 
         coord.async_put_camera.assert_not_awaited()

@@ -425,8 +425,8 @@ class TestPutLightingSwitch:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -452,8 +452,8 @@ class TestPutLightingSwitch:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -470,8 +470,8 @@ class TestPutLightingSwitch:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -501,8 +501,8 @@ class TestPutLightingSwitch:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -535,8 +535,8 @@ class TestPutSwitchEndpoint:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
         assert ok is True
@@ -559,8 +559,8 @@ class TestPutSwitchEndpoint:
         coord = _stub_coord()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
         assert ok is False
@@ -716,8 +716,8 @@ class TestPutLightingSwitch204NoCacheUpdate:
         )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -775,8 +775,8 @@ class TestPutLightingSwitch204NoCacheUpdate:
         light = _make_light(coord, led_key="frontLightSettings")
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,
@@ -848,8 +848,8 @@ class TestPutLightingSwitch204NoCacheUpdate:
         )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
                 light,

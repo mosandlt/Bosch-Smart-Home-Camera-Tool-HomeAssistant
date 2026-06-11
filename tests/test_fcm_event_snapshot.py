@@ -148,7 +148,7 @@ async def _run_alert(
     from custom_components.bosch_shc_camera.fcm import async_send_alert
 
     session = session_override or MagicMock(get=MagicMock(return_value=_resp_cm(404)))
-    with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+    with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
         with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
             with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -191,7 +191,7 @@ class TestPathAMovement:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -229,7 +229,7 @@ class TestPathAPersonEvent:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -268,7 +268,7 @@ class TestPathAGen1Delay:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -301,7 +301,7 @@ class TestPathAStatusOnlyEvent:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -330,7 +330,7 @@ class TestPathAStatusOnlyEvent:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -616,7 +616,7 @@ class TestPathAandBOrdering:
             )
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),

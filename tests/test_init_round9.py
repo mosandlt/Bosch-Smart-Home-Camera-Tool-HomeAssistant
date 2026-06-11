@@ -68,7 +68,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {"enabled": True})
 
         assert result is True, "HTTP 200 must return True"
@@ -80,7 +80,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {"enabled": False})
 
         assert result is True, "HTTP 204 must return True"
@@ -92,7 +92,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(403))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert result is False, "HTTP 403 must return False"
@@ -123,7 +123,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(side_effect=_put_cm)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert result is True, "After 401+refresh, successful retry must return True"
@@ -145,7 +145,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=cm)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert result is False, "Failed token refresh after 401 must return False"
@@ -176,7 +176,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put = MagicMock(side_effect=_put_cm)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert result is False, "Non-200/204 retry after 401 must return False"
@@ -188,7 +188,7 @@ class TestAsyncPutCamera:
         session = MagicMock()
         session.put.side_effect = OSError("connection refused")
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             result = await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert result is False, "Network exception must return False"
@@ -206,7 +206,7 @@ class TestAsyncPutCamera:
 
         session.put = MagicMock(side_effect=_put_cm)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             await coord.async_put_camera(CAM_ID, "privacy", {})
 
         assert captured_headers[0].get("Authorization") == "Bearer my-secret-token", (

@@ -95,7 +95,7 @@ class TestPathAExceptionSwallow:
         )
 
         with (
-            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.models.get_model_config",
                 side_effect=RuntimeError("simulated unknown hw"),
@@ -186,7 +186,7 @@ class TestPathBExceptionSwallow:
             return None
 
         with (
-            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
             patch(
                 f"{MODULE}.save_snapshot",
                 new=AsyncMock(side_effect=RuntimeError("disk full")),

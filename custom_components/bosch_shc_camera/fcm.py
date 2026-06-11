@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse
 
 import aiohttp
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .cloud_ssl import async_get_bosch_cloud_session
 from .snapshot_store import save_snapshot
 
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
@@ -681,7 +681,7 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
             stored_device_type,
         )
 
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {
         "Authorization": f"Bearer {coordinator.token}",
         "Content-Type": "application/json",
@@ -999,7 +999,7 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
         # `AttributeError: 'NoneType' object has no attribute 'keys'`.
         return
 
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     for cam_id in list(coordinator.data.keys()):
@@ -1365,7 +1365,7 @@ async def async_send_alert(
     alert_dir = os.path.join(coordinator.hass.config.config_dir, "www", "bosch_alerts")
     await coordinator.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
     ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {coordinator.token}", "Accept": "*/*"}
     files_to_cleanup: list[str] = []
 
@@ -1777,7 +1777,7 @@ async def async_mark_events_read(coordinator: Any, event_ids: list[str]) -> bool
     if not token:
         return False
 
-    session = async_get_clientsession(coordinator.hass, verify_ssl=False)
+    session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",

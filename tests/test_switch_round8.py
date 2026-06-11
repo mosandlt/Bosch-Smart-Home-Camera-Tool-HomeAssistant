@@ -391,8 +391,8 @@ def _mock_session_ctx(status=200):
 async def test_intercom_turn_on_success():
     sw = _make_intercom_switch()
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=_mock_session_ctx(200),
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=_mock_session_ctx(200)),
     ):
         await sw.async_turn_on()
     assert sw._is_on is True
@@ -403,8 +403,8 @@ async def test_intercom_turn_on_success():
 async def test_intercom_turn_on_non_200():
     sw = _make_intercom_switch()
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=_mock_session_ctx(500),
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=_mock_session_ctx(500)),
     ):
         await sw.async_turn_on()
     assert sw._is_on is False  # not set to True on failure
@@ -425,8 +425,8 @@ async def test_intercom_turn_on_exception():
     session.put = _bad_put
     sw = _make_intercom_switch()
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         await sw.async_turn_on()
     assert sw._is_on is False
@@ -438,8 +438,8 @@ async def test_intercom_turn_off_success():
     sw = _make_intercom_switch()
     sw._is_on = True
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=_mock_session_ctx(204),
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=_mock_session_ctx(204)),
     ):
         await sw.async_turn_off()
     assert sw._is_on is False
@@ -450,8 +450,8 @@ async def test_intercom_turn_off_non_200():
     sw = _make_intercom_switch()
     sw._is_on = True
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=_mock_session_ctx(500),
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=_mock_session_ctx(500)),
     ):
         await sw.async_turn_off()
     # _is_on unchanged when HTTP non-200
@@ -648,8 +648,8 @@ async def test_motion_light_set_without_cache_fetches_api():
     session.get = _session_get
 
     with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         await sw._set_motion_light(True)
 

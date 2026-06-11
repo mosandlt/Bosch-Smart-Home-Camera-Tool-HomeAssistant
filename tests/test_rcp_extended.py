@@ -60,8 +60,8 @@ class TestRcpReadHttpErrors:
         cache = {}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, xml)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, xml))),
         ):
             result = await rcp_read(
                 hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
@@ -81,8 +81,8 @@ class TestRcpReadHttpErrors:
         hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, xml)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, xml))),
         ):
             result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1")
 
@@ -99,8 +99,8 @@ class TestRcpReadHttpErrors:
         hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, raw)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, raw))),
         ):
             result = await rcp_read(hass, RCP_BASE, "0x0901", "sid1")
 
@@ -115,8 +115,8 @@ class TestRcpReadHttpErrors:
         hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, xml)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, xml))),
         ):
             result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1")
 
@@ -131,8 +131,8 @@ class TestRcpReadHttpErrors:
         cache = {PROXY_HASH: ("old-session-id", time.monotonic() + 300)}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(401, b"")),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(401, b""))),
         ):
             result = await rcp_read(
                 hass,
@@ -156,8 +156,8 @@ class TestRcpReadHttpErrors:
         cache = {PROXY_HASH: ("old-session-id", time.monotonic() + 300)}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(403, b"")),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(403, b""))),
         ):
             await rcp_read(hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache)
 
@@ -172,8 +172,8 @@ class TestRcpReadHttpErrors:
         cache = {PROXY_HASH: ("my-session-id", time.monotonic() + 300)}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(500, b"")),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(500, b""))),
         ):
             result = await rcp_read(
                 hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
@@ -192,8 +192,8 @@ class TestRcpReadHttpErrors:
         cache = {PROXY_HASH: ("live-session", time.monotonic() + 300)}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, xml)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, xml))),
         ):
             result = await rcp_read(
                 hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
@@ -215,8 +215,8 @@ class TestRcpReadHttpErrors:
         cache = {PROXY_HASH: ("live-session", time.monotonic() + 300)}
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=_make_session(_make_ha_resp(200, xml)),
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=_make_session(_make_ha_resp(200, xml))),
         ):
             result = await rcp_read(
                 hass, RCP_BASE, "0x0c22", "sid1", session_cache=cache
@@ -237,8 +237,8 @@ class TestRcpReadHttpErrors:
         session.get = MagicMock(side_effect=TimeoutError())
 
         with patch(
-            "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.rcp.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await rcp_read(hass, RCP_BASE, "0x0c22", "sid1")
 
@@ -262,7 +262,7 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new_callable=AsyncMock,
         ) as mock_open:
-            result = await get_cached_rcp_session(cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
 
         assert result == "cached-sid"
         mock_open.assert_not_called()
@@ -279,7 +279,7 @@ class TestGetCachedRcpSession:
             new_callable=AsyncMock,
             return_value="fresh-sid",
         ):
-            result = await get_cached_rcp_session(cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
 
         assert result == "fresh-sid"
         assert PROXY_HASH in cache
@@ -298,7 +298,7 @@ class TestGetCachedRcpSession:
             new_callable=AsyncMock,
             return_value="new-sid",
         ):
-            await get_cached_rcp_session(cache, PROXY_HOST, PROXY_HASH)
+            await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
 
         after = time.monotonic()
         _, expires_at = cache[PROXY_HASH]
@@ -320,7 +320,7 @@ class TestGetCachedRcpSession:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = await get_cached_rcp_session(cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
 
         assert result is None
         assert PROXY_HASH not in cache, (

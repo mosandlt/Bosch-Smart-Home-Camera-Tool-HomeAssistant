@@ -43,7 +43,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -51,6 +50,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator, get_options
+from .cloud_ssl import async_get_bosch_cloud_session
 from .const import CLOUD_API, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -1252,7 +1252,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable intercom (two-way audio) with speaker level 50."""
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {self.coordinator.token}",
             "Content-Type": "application/json",
@@ -1280,7 +1280,7 @@ class BoschIntercomSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable intercom (two-way audio)."""
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {self.coordinator.token}",
             "Content-Type": "application/json",
@@ -1506,7 +1506,7 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
             token = self.coordinator.token
             if not token:
                 return
-            session = async_get_clientsession(self.hass, verify_ssl=False)
+            session = await async_get_bosch_cloud_session(self.hass)
             try:
                 async with asyncio.timeout(10):
                     async with session.get(
@@ -1588,7 +1588,7 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
         token = self.coordinator.token
         if not token:
             return
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -1657,7 +1657,7 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         # Preserve existing darknessThreshold
         threshold = cache.get("darknessThreshold", 0.5)
         body = {"darknessThreshold": threshold, "softLightFading": enabled}
-        session = async_get_clientsession(self.hass, verify_ssl=False)
+        session = await async_get_bosch_cloud_session(self.hass)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

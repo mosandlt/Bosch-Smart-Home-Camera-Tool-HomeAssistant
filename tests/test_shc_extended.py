@@ -175,8 +175,8 @@ class TestAsyncCloudSetNotifications:
         session.put = MagicMock(return_value=_mock_cloud_resp(200))
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
@@ -195,8 +195,8 @@ class TestAsyncCloudSetNotifications:
         session.put = MagicMock(return_value=_mock_cloud_resp(204))
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, False)
 
@@ -213,8 +213,8 @@ class TestAsyncCloudSetNotifications:
         before = time.monotonic()
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await async_cloud_set_notifications(coord, CAM_ID, True)
 
@@ -233,8 +233,8 @@ class TestAsyncCloudSetNotifications:
         session.put = MagicMock(return_value=_mock_cloud_resp(500))
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
@@ -250,8 +250,8 @@ class TestAsyncCloudSetNotifications:
         session.put = MagicMock(side_effect=TimeoutError())
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 

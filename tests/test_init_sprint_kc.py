@@ -286,8 +286,8 @@ class TestEventProcessing:
         session = _session_for_cam(cam_entry, events=events)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -341,8 +341,8 @@ class TestEventProcessing:
         )
         session = _session_for_cam(cam_entry, events=events)
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -389,8 +389,8 @@ class TestEventProcessing:
         session = _session_for_cam(cam_entry, events=events)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -432,8 +432,8 @@ class TestEventProcessing:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -465,8 +465,8 @@ class TestEventProcessing:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -521,8 +521,8 @@ class TestPrivacyModeFromCloud:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -573,8 +573,8 @@ class TestPrivacyModeFromCloud:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -627,8 +627,8 @@ class TestOuterExceptionHandlers:
         session.get = MagicMock(return_value=cm)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             with pytest.raises(UpdateFailed) as exc_info:
                 await BoschCameraCoordinator._async_update_data(coord)
@@ -663,8 +663,8 @@ class TestOuterExceptionHandlers:
         session.get = MagicMock(return_value=cm)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             with pytest.raises(UpdateFailed) as exc_info:
                 await BoschCameraCoordinator._async_update_data(coord)
@@ -748,8 +748,8 @@ class TestSlowTier:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch("aiohttp.TCPConnector"),
         ):
@@ -808,8 +808,8 @@ class TestSlowTier:
         session.put = AsyncMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -853,8 +853,8 @@ class TestShcStatesUpdate:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -885,8 +885,8 @@ class TestShcStatesUpdate:
         session = _session_for_cam(cam_entry)
 
         with patch(
-            "custom_components.bosch_shc_camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 

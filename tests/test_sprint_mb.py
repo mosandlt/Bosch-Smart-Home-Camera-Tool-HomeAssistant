@@ -187,8 +187,8 @@ async def test_handle_fcm_push_mark_events_read_exception_swallowed():
         raise RuntimeError("simulated mark failure")
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_mark_events_read",
@@ -228,8 +228,8 @@ async def test_send_alert_step1_exception_causes_early_return():
 
     session = MagicMock()
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         # Should not raise — exception in step 1 is caught, logged, and returns
         await async_send_alert(
@@ -287,8 +287,8 @@ async def test_send_alert_step2_exception_is_swallowed():
 
     image_url = "https://media.boschsecurity.com/snap.jpg"
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -372,8 +372,8 @@ async def test_send_alert_direct_clip_mp4_detected():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -430,8 +430,8 @@ async def test_send_alert_step3_exception_is_swallowed():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -491,8 +491,8 @@ async def test_send_alert_mark_events_read_exception_swallowed():
         raise RuntimeError("mark failed")
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -558,8 +558,8 @@ async def test_send_alert_smb_exception_swallowed():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -618,8 +618,8 @@ async def test_send_alert_local_save_exception_swallowed():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.sleep", new=AsyncMock()
@@ -839,8 +839,8 @@ async def test_async_put_camera_cancelled_error_on_token_refresh():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         with pytest.raises(asyncio.CancelledError):
             await BoschCameraCoordinator.async_put_camera(
@@ -865,8 +865,8 @@ async def test_async_put_camera_200_success():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         result = await BoschCameraCoordinator.async_put_camera(
             coord, CAM, "endpoint", {}
@@ -892,8 +892,8 @@ async def test_async_put_camera_401_then_token_refresh_fails():
     )
 
     with patch(
-        "custom_components.bosch_shc_camera.async_get_clientsession",
-        return_value=session,
+        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
     ):
         result = await BoschCameraCoordinator.async_put_camera(
             coord, CAM, "endpoint", {}

@@ -33,6 +33,8 @@ from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
     _make_session,
 )
 
+_PATCH_CLOUD_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
+
 
 class TestFcmWatchdogRetryAfterFailedSelfHeal:
     """v12.8.3: third self-heal trigger — retry after a failed previous heal."""
@@ -65,6 +67,7 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,
@@ -108,6 +111,7 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,
@@ -149,6 +153,7 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,
@@ -192,6 +197,7 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
                 "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
             ) as mock_heal,

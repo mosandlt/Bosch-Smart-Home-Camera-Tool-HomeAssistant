@@ -262,8 +262,8 @@ class TestAsyncCameraImageImplCachedImageFallback:
                 return_value={"use_mjpeg_snapshot": False},
             ),
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
         ):
             result = await BoschCamera._async_camera_image_impl(cam)

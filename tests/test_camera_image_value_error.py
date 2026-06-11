@@ -111,8 +111,8 @@ class TestCameraImageImplValueError:
         cam = _make_camera(_cached_image=b"\xff\xd8cached")
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -131,8 +131,8 @@ class TestCameraImageImplValueError:
         cam = _make_camera()  # _cached_image=None
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -153,8 +153,8 @@ class TestCameraImageImplValueError:
         cam = _make_camera()
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.camera.async_digest_request",
@@ -213,14 +213,19 @@ class TestFetchLiveSnapshotLocalValueError:
         session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
+        lan_session = MagicMock()
         with (
             patch(
                 "custom_components.bosch_shc_camera.aiohttp.ClientSession",
                 return_value=session_cm,
             ),
             patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
-                return_value=MagicMock(),
+                return_value=lan_session,
             ),
             patch(
                 "custom_components.bosch_shc_camera.async_digest_request",
@@ -285,8 +290,8 @@ class TestRemoteSnapshotRenewOutsideTimeout:
         )
         cam = _make_camera(coord=coord)
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         coord.try_live_connection.assert_awaited_once()

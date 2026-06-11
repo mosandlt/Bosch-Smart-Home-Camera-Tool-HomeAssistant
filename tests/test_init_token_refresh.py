@@ -129,8 +129,8 @@ class TestHardErrors:
         coord = _make_coord()
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -153,8 +153,8 @@ class TestHardErrors:
         coord = _make_coord()
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -179,8 +179,8 @@ class TestHardErrors:
         coord = _make_coord(_auth_outage_count=3)  # next backoff = 60 * 2^3 = 480
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -208,8 +208,8 @@ class TestHardErrors:
         coord = _make_coord(_auth_outage_count=10)  # 60 * 2^10 = 61440 > 600
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -236,8 +236,8 @@ class TestHardErrors:
         coord = _make_coord(_auth_outage_count=2)  # next is #3
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -267,8 +267,8 @@ class TestHardErrors:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -295,8 +295,8 @@ class TestSuccessfulRefresh:
         new_tokens = {"access_token": "tok-NEW", "refresh_token": "rfr-NEW"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -325,8 +325,8 @@ class TestSuccessfulRefresh:
         }
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -352,8 +352,8 @@ class TestSuccessfulRefresh:
         new_tokens = {"access_token": "tok-NEW", "refresh_token": "rfr-NEW"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -382,8 +382,8 @@ class TestSuccessfulRefresh:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -412,8 +412,8 @@ class TestTransientRetry:
         do_refresh = AsyncMock(side_effect=responses)
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -440,8 +440,8 @@ class TestTransientRetry:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
@@ -466,8 +466,8 @@ class TestTransientRetry:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=MagicMock(),
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",

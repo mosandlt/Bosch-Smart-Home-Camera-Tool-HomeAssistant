@@ -17,13 +17,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
 from .test_init_sprint_ka import _PATCH_SESSION, _make_coord, _make_resp
+
+_PATCH_CLOUD_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -82,6 +84,7 @@ class TestMarkEventsReadCancellation:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             pytest.raises(asyncio.CancelledError),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -123,6 +126,7 @@ class TestMarkEventsReadCancellation:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             pytest.raises(asyncio.CancelledError),
         ):
             await BoschCameraCoordinator._async_update_data(coord)

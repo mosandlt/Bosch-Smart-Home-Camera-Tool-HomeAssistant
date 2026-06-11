@@ -396,8 +396,8 @@ class TestLanDiagnosticSensorsException:
         # Should not raise even though _async_update_lan_diagnostic_sensors raises
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch("aiohttp.TCPConnector"),
         ):
@@ -744,7 +744,7 @@ class TestFeedbackHintNonZhLocale:
                 "homeassistant.helpers.entity_registry.async_get",
                 return_value=_make_ent_reg(),
             ),
-            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=MagicMock())),
         ):
             # Should not raise — line 5915 is just a string split
             await async_setup_entry(hass, entry)
@@ -804,7 +804,7 @@ class TestFeedbackHintExceptionSuppressed:
                 "homeassistant.helpers.entity_registry.async_get",
                 return_value=_make_ent_reg(),
             ),
-            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=MagicMock())),
         ):
             # Should NOT raise even though async_update_entry raises (lines 5932-5933 catch it)
             await async_setup_entry(hass, entry)
@@ -869,7 +869,7 @@ class TestSendEventWebhookNoLoadedEntries:
                 "homeassistant.helpers.entity_registry.async_get",
                 return_value=_make_ent_reg(),
             ),
-            patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
+            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=MagicMock())),
         ):
             await async_setup_entry(hass, entry)
 

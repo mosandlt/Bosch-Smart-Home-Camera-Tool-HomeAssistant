@@ -264,8 +264,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True
@@ -286,8 +286,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is False
@@ -314,8 +314,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             with caplog.at_level(
                 logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
@@ -351,8 +351,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(_entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
 
@@ -378,8 +378,8 @@ class TestRegisterFcmWithBosch:
         session.post = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is False
@@ -405,8 +405,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(_fcm_push_mode="android")
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             await register_fcm_with_bosch(coord)
         assert captured["json"]["deviceType"] == "ANDROID"
@@ -446,8 +446,8 @@ class TestRegisterFcmWithBosch:
             ),
         )
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True, "already-registered token must return True"
@@ -473,8 +473,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(_entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True
@@ -495,8 +495,8 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(_entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
         assert ok is True

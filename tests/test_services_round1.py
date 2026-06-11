@@ -96,7 +96,7 @@ class TestHandleUpdateRuleRemaining:
         session.get = MagicMock(return_value=rules_resp)
         session.put = MagicMock(return_value=put_resp)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -126,7 +126,7 @@ class TestHandleUpdateRuleRemaining:
         session = MagicMock()
         session.get = MagicMock(return_value=rules_resp)
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -172,7 +172,7 @@ class TestHandleUpdateRuleRemaining:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -217,7 +217,7 @@ class TestHandleUpdateRuleRemaining:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(422, text="Unprocessable"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -239,7 +239,7 @@ class TestHandleUpdateRuleRemaining:
         session = MagicMock()
         session.get.side_effect = Exception("network error")
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -324,7 +324,7 @@ class TestHandleSetMotionZones:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_motion_zones"]
             call_mock = MagicMock()
@@ -350,7 +350,7 @@ class TestHandleSetMotionZones:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(443))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_motion_zones"]
             call_mock = MagicMock()
@@ -380,7 +380,7 @@ class TestHandleSetMotionZones:
             return_value=_resp_cm(500, text="Internal Server Error")
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_motion_zones"]
             call_mock = MagicMock()
@@ -405,7 +405,7 @@ class TestHandleSetMotionZones:
         session = MagicMock()
         session.post.side_effect = Exception("connection refused")
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_motion_zones"]
             call_mock = MagicMock()
@@ -433,7 +433,7 @@ class TestHandleGetMotionZones:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[]))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_motion_zones"]
             call_mock = MagicMock()
@@ -459,7 +459,7 @@ class TestHandleGetMotionZones:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=zones))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_motion_zones"]
             call_mock = MagicMock()
@@ -485,7 +485,7 @@ class TestHandleGetMotionZones:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(443))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_motion_zones"]
             call_mock = MagicMock()
@@ -509,7 +509,7 @@ class TestHandleGetMotionZones:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500, text="err"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_motion_zones"]
             call_mock = MagicMock()
@@ -534,7 +534,7 @@ class TestHandleShareCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
@@ -557,7 +557,7 @@ class TestHandleShareCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
@@ -584,7 +584,7 @@ class TestHandleShareCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(403, text="Forbidden"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
@@ -610,7 +610,7 @@ class TestHandleShareCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
@@ -643,7 +643,7 @@ class TestHandleGetPrivacyMasks:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[]))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -666,7 +666,7 @@ class TestHandleGetPrivacyMasks:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=masks))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -690,7 +690,7 @@ class TestHandleGetPrivacyMasks:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(443))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -714,7 +714,7 @@ class TestHandleGetPrivacyMasks:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500, text="err"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -758,7 +758,7 @@ class TestHandleSetPrivacyMasks:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_privacy_masks"]
             call_mock = MagicMock()
@@ -784,7 +784,7 @@ class TestHandleSetPrivacyMasks:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(443))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_privacy_masks"]
             call_mock = MagicMock()
@@ -810,7 +810,7 @@ class TestHandleSetPrivacyMasks:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(500, text="Server Error"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["set_privacy_masks"]
             call_mock = MagicMock()
@@ -841,7 +841,7 @@ class TestHandleDeleteMotionZone:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=zones))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_motion_zone"]
             call_mock = MagicMock()
@@ -865,7 +865,7 @@ class TestHandleDeleteMotionZone:
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[zone_a, zone_b]))
         session.post = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_motion_zone"]
             call_mock = MagicMock()
@@ -892,7 +892,7 @@ class TestHandleDeleteMotionZone:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_motion_zone"]
             call_mock = MagicMock()
@@ -927,7 +927,7 @@ class TestHandleGetLightingSchedule:
 
         session = MagicMock()
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_lighting_schedule"]
             call_mock = MagicMock()
@@ -960,7 +960,7 @@ class TestHandleGetLightingSchedule:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=api_data))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_lighting_schedule"]
             call_mock = MagicMock()
@@ -984,7 +984,7 @@ class TestHandleGetLightingSchedule:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(503))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["get_lighting_schedule"]
             call_mock = MagicMock()
@@ -1055,7 +1055,7 @@ class TestHandleRenameCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["rename_camera"]
             call_mock = MagicMock()
@@ -1078,7 +1078,7 @@ class TestHandleRenameCamera:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(422))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["rename_camera"]
             call_mock = MagicMock()
@@ -1105,7 +1105,7 @@ class TestHandleInviteFriend:
             return_value=_resp_cm(201, json_data={"id": "friend-xyz"})
         )
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["invite_friend"]
             call_mock = MagicMock()
@@ -1130,7 +1130,7 @@ class TestHandleInviteFriend:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(409, text="Already invited"))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["invite_friend"]
             call_mock = MagicMock()
@@ -1152,7 +1152,7 @@ class TestHandleInviteFriend:
         session = MagicMock()
         session.post.side_effect = OSError("timeout")
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["invite_friend"]
             call_mock = MagicMock()
@@ -1177,7 +1177,7 @@ class TestHandleListFriends:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[]))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["list_friends"]
             await handler(MagicMock())
@@ -1205,7 +1205,7 @@ class TestHandleListFriends:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=friends))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["list_friends"]
             await handler(MagicMock())
@@ -1229,7 +1229,7 @@ class TestHandleListFriends:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["list_friends"]
             with pytest.raises(HomeAssistantError):
@@ -1252,7 +1252,7 @@ class TestHandleRemoveFriend:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()
@@ -1275,7 +1275,7 @@ class TestHandleRemoveFriend:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()
@@ -1297,7 +1297,7 @@ class TestHandleRemoveFriend:
         session = MagicMock()
         session.delete.side_effect = OSError("network down")
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()
@@ -1317,7 +1317,7 @@ class TestHandleRemoveFriend:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(200))
 
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session):
+        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()

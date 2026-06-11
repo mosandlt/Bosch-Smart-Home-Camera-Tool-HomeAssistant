@@ -5,6 +5,22 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.13] - 2026-06-11
+
+Security patch — TLS certificate validation for Bosch cloud and login (CWE-295, [GHSA-6qh5-x5m5-vj6v](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/security/advisories/GHSA-6qh5-x5m5-vj6v)). Update recommended for everyone.
+
+- **Outbound connections to Bosch's cloud, login (OAuth) and live video proxy now verify the server certificate.** Earlier versions disabled certificate validation on those calls, so an attacker on the same network (e.g. via ARP or DNS spoofing) could have intercepted the connection, captured your Bosch login tokens, or tampered with cloud responses. The integration now validates every Bosch cloud/login/proxy connection against the proper Bosch certificate authority and rejects anything that doesn't chain to it.
+- **Why a simple "turn verification on" wasn't enough.** Bosch's cloud is served by Bosch's own (private) certificate authority, which isn't in the public trust store — so naively enabling validation would have broken the integration for everyone. This release bundles and pins the Bosch CA alongside the system trust store, so the cloud API, the Let's Encrypt-signed login host, and the video proxy all validate correctly while impostor certificates are refused.
+- **Local camera connections are unchanged.** Snapshots and streams pulled directly from a camera's LAN IP keep using the camera's own self-signed certificate over your private network — that path is not exposed to the cloud and is unaffected.
+- Reported by [EQSTLab](https://github.com/EQSTLab). Thank you for the responsible disclosure.
+
+**Also fixed since v13.5.12** (accumulated maintenance):
+
+- **Privacy toggle:** rapid taps during the cooldown window are now debounced/coalesced instead of raising, and the state-drift recovery path now actually forces a coordinator refresh.
+- **Login/session:** a persistent `401` now falls through to the next connection candidate in Auto mode instead of getting stuck on a dead one.
+- **Streaming:** the go2rtc unregister loop only ends on a real removal (HTTP 200/204); the cloud-outage LOCAL snapshot fallback is now skipped while a stream is active; and a file-descriptor leak in the TLS-proxy keepalive failure path is closed.
+- **Hardening:** camera titles coming from the cloud are sanitized before they are used in the video-clip file path (path-traversal guard).
+
 ## [v13.5.12] - 2026-06-05
 
 Patch release — the live stream starts with sound again when the audio switch is on.

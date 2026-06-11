@@ -158,8 +158,8 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
@@ -191,8 +191,8 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-                return_value=session,
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
             ),
             patch(
                 "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
@@ -237,8 +237,8 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
         session.put = MagicMock(side_effect=[failing_ctx, ok_ctx])
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             # Should not raise — warning is logged and execution continues to step 2
             result = await async_cloud_set_light_component(
@@ -268,8 +268,8 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
         session.put = MagicMock(side_effect=[failing_ctx, ok_ctx])
 
         with patch(
-            "custom_components.bosch_shc_camera.shc.async_get_clientsession",
-            return_value=session,
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
         ):
             result = await async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", False

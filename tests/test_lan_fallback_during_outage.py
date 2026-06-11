@@ -274,7 +274,7 @@ class TestCloud444Cooldown:
         # First write: cloud returns 444 → must stamp _cloud_444_at and fall
         # through to the (unconfigured) SHC fallback → overall False.
         with (
-            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "async_get_bosch_cloud_session", new_callable=AsyncMock) as session_factory,
             patch.object(shc, "shc_ready", return_value=False),
         ):
             session = MagicMock()
@@ -290,7 +290,7 @@ class TestCloud444Cooldown:
 
         # Second write within the cooldown: cloud must NOT be called at all.
         with (
-            patch.object(shc, "async_get_clientsession") as session_factory,
+            patch.object(shc, "async_get_bosch_cloud_session", new_callable=AsyncMock) as session_factory,
             patch.object(shc, "shc_ready", return_value=False),
         ):
             session = MagicMock()
@@ -314,7 +314,7 @@ class TestCloud444Cooldown:
         # Stamp a 444 well outside the 120s cooldown.
         coord._cloud_444_at[CAM_ID] = time.monotonic() - 600
 
-        with patch.object(shc, "async_get_clientsession") as session_factory:
+        with patch.object(shc, "async_get_bosch_cloud_session", new_callable=AsyncMock) as session_factory:
             session = MagicMock()
             session.put = MagicMock(return_value=self._resp(204))
             session_factory.return_value = session

@@ -37,7 +37,7 @@ import pytest
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
-_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_clientsession"
+_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -295,7 +295,7 @@ class TestCamListRetryPaths:
 
         with (
             pytest.raises(UpdateFailed, match="Camera list returned HTTP 500"),
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -327,7 +327,7 @@ class TestCamListRetryPaths:
 
         with (
             pytest.raises(asyncio.CancelledError),
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -354,7 +354,7 @@ class TestCamListRetryPaths:
             caplog.at_level(
                 logging.WARNING, logger="custom_components.bosch_shc_camera"
             ),
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
@@ -389,7 +389,7 @@ class TestCamListRetryPaths:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -437,7 +437,7 @@ class TestGatherExceptionHandling:
             return await original_gather(*coros, **kwargs)
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch("asyncio.gather", side_effect=_patched_gather),
         ):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -479,7 +479,7 @@ class TestGatherExceptionHandling:
             return [RuntimeError("events-boom")]
 
         with (
-            patch(_PATCH_SESSION, return_value=session),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch("asyncio.gather", side_effect=_patched_gather),
         ):
             result = await BoschCameraCoordinator._async_update_data(coord)
@@ -539,7 +539,7 @@ class TestStartupEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         (
@@ -592,7 +592,7 @@ class TestStartupEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -635,7 +635,7 @@ class TestStartupEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         (
@@ -689,7 +689,7 @@ class TestNewEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -735,7 +735,7 @@ class TestNewEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         fired = [c.args[0] for c in coord.hass.bus.async_fire.call_args_list]
@@ -799,7 +799,7 @@ class TestNewEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         (
@@ -851,7 +851,7 @@ class TestNewEventProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -912,7 +912,7 @@ class TestLightingSwitchCacheProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         cache = coord._shc_state_cache[CAM_A]
@@ -968,7 +968,7 @@ class TestLightingSwitchCacheProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         cache = coord._shc_state_cache[CAM_A]
@@ -1021,7 +1021,7 @@ class TestLightingSwitchCacheProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         cache = coord._shc_state_cache[CAM_A]
@@ -1068,7 +1068,7 @@ class TestLightingSwitchCacheProcessing:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         notif_val = coord._shc_state_cache[CAM_A].get("notifications_status")
@@ -1135,7 +1135,7 @@ class TestPanFetch:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert pan_urls_called, (
@@ -1192,7 +1192,7 @@ class TestPanFetch:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
@@ -1244,7 +1244,7 @@ class TestPanFetch:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         assert pan_urls_called == [], (
@@ -1299,7 +1299,7 @@ class TestGen2LightingSwitchTickFetch:
             }
         )
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             await BoschCameraCoordinator._async_update_data(coord)
 
         cached = coord._lighting_switch_cache.get(CAM_A)
@@ -1352,7 +1352,7 @@ class TestGen2LightingSwitchTickFetch:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get)
 
-        with patch(_PATCH_SESSION, return_value=session):
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
             result = await BoschCameraCoordinator._async_update_data(coord)
 
         assert isinstance(result, dict), (
