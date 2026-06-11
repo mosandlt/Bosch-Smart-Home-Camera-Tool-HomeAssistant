@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.12";
+const CARD_VERSION = "13.5.14";
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where
@@ -158,6 +158,44 @@ const CARD_VERSION = "13.5.12";
 // a moment after any exit; `_boschFsOwner` enforces a single fullscreen card.
 let _boschFsExitAt = 0;
 let _boschFsOwner = null;
+
+// Multi-instance audio registry (Feature: A/V-sync / echo prevention).
+// Maps camera_entity → Set<BoschCameraCard instance>.
+// When a card registers itself, it becomes the "primary" only if it is the
+// FIRST entry; 2nd+ instances are flagged as secondary and are auto-muted so
+// they don't echo with the primary's audio stream.  Cleaned up in
+// disconnectedCallback so the next remaining instance becomes primary again.
+// Note on A/V-drift (single instance): the ~80-200 ms drift between video
+// and Bosch's AAC audio (or go2rtc's AAC→Opus transcode) is a pipeline
+// artifact — the audio samples arrive slightly late relative to the video
+// frames because of encoder buffering inside the camera / transcode.
+// A card-side nudge (e.g. periodically checking video.currentTime vs
+// audio.currentTime) is NOT safe here: <video> exposes a single timeline for
+// both tracks and `currentTime` cannot be used to independently shift the
+// audio clock.  The correct fix is a go2rtc `audio_delay` config knob or a
+// server-side PTS re-stamp.  We therefore do NOT add a drift-nudge hack in
+// the card — it could cause pauses/stutters that would trigger the pause-guard
+// (v13.5.8) and freeze the stream.  Documented here for future reference.
+const _boschAudioRegistry = new Map(); // entity_id → Set<BoschCameraCard>
+
+function _boschAudioRegister(entityId, card) {
+  if (!entityId) return false; // no entity → treat as primary
+  if (!_boschAudioRegistry.has(entityId)) {
+    _boschAudioRegistry.set(entityId, new Set());
+  }
+  const group = _boschAudioRegistry.get(entityId);
+  group.add(card);
+  // Primary = first registered card for this entity; all others are secondary.
+  return group.size > 1; // true = secondary → must be auto-muted
+}
+
+function _boschAudioUnregister(entityId, card) {
+  if (!entityId) return;
+  const group = _boschAudioRegistry.get(entityId);
+  if (!group) return;
+  group.delete(card);
+  if (group.size === 0) _boschAudioRegistry.delete(entityId);
+}
 
 // Card auto-play modes. Primary source = integration option
 // `auto_play_default` exposed on the camera entity attribute. Per-card
@@ -210,6 +248,9 @@ const CARD_I18N = {
     maint_announced: "announced",
     maint_check_status: "Check status: Bosch Community",
     maint_auto_return: "The cameras come back automatically once the cloud responds.",
+    privacy_stale_label: "Privacy mode — last image",
+    privacy_stale_prefix: "Last event:",
+    multi_audio_muted: "Audio muted (another tab is playing audio for this camera)",
     // ── editor: shared ──
     ed_cam_entity: "Camera entity *",
     ed_cam_entity_hint: "Required — all other entities are derived automatically from the camera name.",
@@ -299,6 +340,9 @@ const CARD_I18N = {
     maint_announced: "angekündigt",
     maint_check_status: "Status prüfen: Bosch Community",
     maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
+    privacy_stale_label: "Privatmodus — letztes Bild",
+    privacy_stale_prefix: "Letztes Ereignis:",
+    multi_audio_muted: "Ton stummgeschaltet (eine andere Karte gibt Ton für diese Kamera aus)",
     // ── editor: shared ──
     ed_cam_entity: "Kamera-Entity *",
     ed_cam_entity_hint: "Pflichtfeld — alle anderen Entities werden automatisch aus dem Camera-Namen abgeleitet.",
@@ -388,6 +432,9 @@ const CARD_I18N = {
     maint_announced: "anunciado",
     maint_check_status: "Comprobar estado: Bosch Community",
     maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
+    privacy_stale_label: "Modo privacidad — última imagen",
+    privacy_stale_prefix: "Último evento:",
+    multi_audio_muted: "Audio silenciado (otra tarjeta reproduce audio de esta cámara)",
     ed_cam_entity: "Entidad de cámara *",
     ed_cam_entity_hint: "Obligatorio — el resto de entidades se derivan automáticamente del nombre de la cámara.",
     ed_no_cams: "No se detectaron cámaras Bosch. Introduce <code>camera.bosch_xxx</code> manualmente o completa primero la configuración de la integración Bosch.",
@@ -474,6 +521,9 @@ const CARD_I18N = {
     maint_announced: "annoncée",
     maint_check_status: "Vérifier le statut : Bosch Community",
     maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
+    privacy_stale_label: "Mode confidentialité — dernière image",
+    privacy_stale_prefix: "Dernier événement :",
+    multi_audio_muted: "Son coupé (une autre carte diffuse le son de cette caméra)",
     ed_cam_entity: "Entité caméra *",
     ed_cam_entity_hint: "Obligatoire — toutes les autres entités sont dérivées automatiquement du nom de la caméra.",
     ed_no_cams: "Aucune caméra Bosch détectée. Saisir <code>camera.bosch_xxx</code> manuellement, ou terminer d'abord la configuration de l'intégration Bosch.",
@@ -560,6 +610,9 @@ const CARD_I18N = {
     maint_announced: "annunciata",
     maint_check_status: "Verifica stato: Bosch Community",
     maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
+    privacy_stale_label: "Modalità privacy — ultima immagine",
+    privacy_stale_prefix: "Ultimo evento:",
+    multi_audio_muted: "Audio disattivato (un'altra scheda riproduce l'audio di questa telecamera)",
     ed_cam_entity: "Entità telecamera *",
     ed_cam_entity_hint: "Obbligatorio — tutte le altre entità vengono derivate automaticamente dal nome della telecamera.",
     ed_no_cams: "Nessuna telecamera Bosch rilevata. Inserisci <code>camera.bosch_xxx</code> manualmente, oppure completa prima la configurazione dell'integrazione Bosch.",
@@ -646,6 +699,9 @@ const CARD_I18N = {
     maint_announced: "aangekondigd",
     maint_check_status: "Status controleren: Bosch Community",
     maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
+    privacy_stale_label: "Privacymodus — laatste afbeelding",
+    privacy_stale_prefix: "Laatste gebeurtenis:",
+    multi_audio_muted: "Geluid gedempt (een andere kaart speelt audio af voor deze camera)",
     ed_cam_entity: "Camera-entiteit *",
     ed_cam_entity_hint: "Verplicht — alle andere entiteiten worden automatisch afgeleid van de cameranaam.",
     ed_no_cams: "Geen Bosch-camera's gevonden. Voer <code>camera.bosch_xxx</code> handmatig in, of voltooi eerst de Bosch-integratieconfiguratie.",
@@ -732,6 +788,9 @@ const CARD_I18N = {
     maint_announced: "ogłoszona",
     maint_check_status: "Sprawdź status: Bosch Community",
     maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
+    privacy_stale_label: "Tryb prywatności — ostatni obraz",
+    privacy_stale_prefix: "Ostatnie zdarzenie:",
+    multi_audio_muted: "Dźwięk wyciszony (inna karta odtwarza dźwięk tej kamery)",
     ed_cam_entity: "Encja kamery *",
     ed_cam_entity_hint: "Wymagane — wszystkie pozostałe encje są automatycznie wyprowadzane z nazwy kamery.",
     ed_no_cams: "Nie wykryto kamer Bosch. Wpisz <code>camera.bosch_xxx</code> ręcznie lub najpierw zakończ konfigurację integracji Bosch.",
@@ -818,6 +877,9 @@ const CARD_I18N = {
     maint_announced: "anunciada",
     maint_check_status: "Verificar estado: Bosch Community",
     maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
+    privacy_stale_label: "Modo privacidade — última imagem",
+    privacy_stale_prefix: "Último evento:",
+    multi_audio_muted: "Áudio desativado (outro cartão está a reproduzir áudio desta câmara)",
     ed_cam_entity: "Entidade de câmara *",
     ed_cam_entity_hint: "Obrigatório — todas as outras entidades são derivadas automaticamente do nome da câmara.",
     ed_no_cams: "Nenhuma câmara Bosch detectada. Introduza <code>camera.bosch_xxx</code> manualmente ou conclua primeiro a configuração da integração Bosch.",
@@ -904,6 +966,9 @@ const CARD_I18N = {
     maint_announced: "объявлено",
     maint_check_status: "Проверить статус: Bosch Community",
     maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
+    privacy_stale_label: "Режим приватности — последнее изображение",
+    privacy_stale_prefix: "Последнее событие:",
+    multi_audio_muted: "Звук отключён (другая карточка воспроизводит звук этой камеры)",
     ed_cam_entity: "Сущность камеры *",
     ed_cam_entity_hint: "Обязательно — все остальные сущности определяются автоматически по имени камеры.",
     ed_no_cams: "Камеры Bosch не обнаружены. Введите <code>camera.bosch_xxx</code> вручную или сначала завершите настройку интеграции Bosch.",
@@ -990,6 +1055,9 @@ const CARD_I18N = {
     maint_announced: "анонсовано",
     maint_check_status: "Перевірити статус: Bosch Community",
     maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
+    privacy_stale_label: "Режим приватності — останнє зображення",
+    privacy_stale_prefix: "Остання подія:",
+    multi_audio_muted: "Звук вимкнено (інша картка відтворює звук цієї камери)",
     ed_cam_entity: "Об'єкт камери *",
     ed_cam_entity_hint: "Обов'язково — всі інші об'єкти визначаються автоматично за назвою камери.",
     ed_no_cams: "Камери Bosch не виявлено. Введіть <code>camera.bosch_xxx</code> вручну або спочатку завершіть налаштування інтеграції Bosch.",
@@ -1076,6 +1144,9 @@ const CARD_I18N = {
     maint_announced: "已公告",
     maint_check_status: "查看状态：Bosch Community",
     maint_auto_return: "云端恢复后摄像头将自动重新连接。",
+    privacy_stale_label: "隐私模式 — 最后一张图像",
+    privacy_stale_prefix: "最近事件：",
+    multi_audio_muted: "已静音（另一个卡片正在播放此摄像头的音频）",
     ed_cam_entity: "摄像头实体 *",
     ed_cam_entity_hint: "必填 — 所有其他实体均根据摄像头名称自动派生。",
     ed_no_cams: "未检测到 Bosch 摄像头。请手动输入 <code>camera.bosch_xxx</code>，或先完成 Bosch 集成配置。",
@@ -1533,6 +1604,15 @@ class BoschCameraCard extends HTMLElement {
     this._startRefreshTimer();
     // Pre-load hls.js in the background so it's cached when the user starts the stream
     this._loadHlsJs().catch(() => {});
+
+    // Multi-instance audio registry: register this card for the camera entity.
+    // If it is the 2nd+ instance for the same entity, flag it as secondary so
+    // it will be auto-muted (prevents echo when two cards show the same camera).
+    // Re-register whenever setConfig re-runs (entity may have changed).
+    const prevEntity = this._audioRegisteredEntity;
+    if (prevEntity) _boschAudioUnregister(prevEntity, this);
+    this._audioRegisteredEntity = config.camera_entity;
+    this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
   }
 
   // ── Theme (iOS / Android) ─────────────────────────────────────────────────
@@ -1828,6 +1908,11 @@ class BoschCameraCard extends HTMLElement {
     try {
       video.volume = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
     } catch (_) { /* volume not settable */ }
+    // Multi-instance: secondary instances (2nd+ card for same camera_entity)
+    // must stay muted to prevent echo.  Force muted=true here so that even if
+    // a later code path attempts to unmute, the guard in _armStartUnmute /
+    // _tryStartUnmute also bails out.
+    if (this._isSecondaryAudioInstance) video.muted = true;
   }
 
   // Called SYNCHRONOUSLY inside the user's stream-START gesture (stream pill /
@@ -1845,6 +1930,7 @@ class BoschCameraCard extends HTMLElement {
   _armStartUnmute() {
     if (this._isIOS() || this._androidAudioMuted) return;  // iOS/Android pre-gesture never auto-unmute
     if (this._audioDecoupled()) return;                    // card-audio prefs own their own seed
+    if (this._isSecondaryAudioInstance) return;            // 2nd+ card for same entity → stay muted (anti-echo)
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
@@ -1863,6 +1949,7 @@ class BoschCameraCard extends HTMLElement {
   _tryStartUnmute(video) {
     if (!video || !video.muted || this._isIOS() || this._androidAudioMuted) return;
     if (this._audioDecoupled()) return;
+    if (this._isSecondaryAudioInstance) return;            // 2nd+ card for same entity → stay muted
     if (this._getEffectiveState(this._entities.audio) !== "on") return;
     video.muted = false;
     if (video.paused) Promise.resolve(video.play()).catch(() => {});
@@ -1885,7 +1972,9 @@ class BoschCameraCard extends HTMLElement {
     btn.setAttribute("aria-disabled", String(!live));
     const label = !live
       ? this._t("audio_available_when_live")
-      : (audible ? this._t("audio_mute") : this._t("audio_unmute"));
+      : this._isSecondaryAudioInstance
+        ? this._t("multi_audio_muted")
+        : (audible ? this._t("audio_mute") : this._t("audio_unmute"));
     btn.setAttribute("aria-label", label);
     btn.setAttribute("title", label);
   }
@@ -2179,6 +2268,12 @@ class BoschCameraCard extends HTMLElement {
       this._errorFeedbackTimers = {};
     }
     this._stopLiveVideo();
+    // Multi-instance audio registry cleanup: remove this card so the remaining
+    // instance (if any) becomes the new primary next time a card registers.
+    if (this._audioRegisteredEntity) {
+      _boschAudioUnregister(this._audioRegisteredEntity, this);
+      this._audioRegisteredEntity = null;
+    }
     window.removeEventListener("bosch-card-theme-change", this._onThemeBroadcast);
     window.removeEventListener("bosch-card-mode-change",  this._onModeBroadcast);
     if (this._onFullscreenChange) {
@@ -2905,12 +3000,36 @@ class BoschCameraCard extends HTMLElement {
         .privacy-placeholder.visible { opacity: 1; }
         .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.5); }
         .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; }
+        /* Stale-image badge: shown below the lock label when privacy is ON and
+           a last-event timestamp is available.  Uses a slightly smaller font +
+           softer opacity so it reads as supplementary info, not an alarm.  The
+           .privacy-stale-badge wrapper is a glass pill (matches ap-glass aesthetic)
+           to visually separate the timestamp from the "Privatmodus" label above. */
+        .privacy-stale-badge {
+          display: none;
+          align-items: center; gap: 5px;
+          padding: 4px 10px;
+          border-radius: 999px;
+          background: rgba(255,255,255,.10);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          border: 1px solid rgba(255,255,255,.13);
+          font-size: 11px; color: rgba(255,255,255,.55); font-weight: 400;
+          max-width: calc(100% - 24px);
+          text-align: center; line-height: 1.3;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .privacy-stale-badge.visible { display: inline-flex; }
         /* Day mode: lighter overlay with darker glyph for legibility */
         :host(.apple-style.mode-day) .privacy-placeholder {
           background: rgba(240,240,242,.6);
         }
         :host(.apple-style.mode-day) .privacy-placeholder svg { color: rgba(28,28,30,.55); }
         :host(.apple-style.mode-day) .privacy-placeholder span { color: rgba(28,28,30,.65); }
+        :host(.apple-style.mode-day) .privacy-stale-badge {
+          background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.10);
+          color: rgba(28,28,30,.55);
+        }
 
         /* Quality select */
         .quality-section { padding: 0 12px 12px; }
@@ -3901,7 +4020,9 @@ class BoschCameraCard extends HTMLElement {
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
               <path d="M7 11V7a5 5 0 0110 0v4"/>
             </svg>
-            <span>Privat-Modus aktiv</span>
+            <span id="privacy-placeholder-label">Privat-Modus aktiv</span>
+            <!-- Stale-image badge: shown when privacy=ON + last event ts available -->
+            <span class="privacy-stale-badge" id="privacy-stale-badge"></span>
           </div>
           <svg class="motion-zones-overlay" id="motion-zones-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
           <svg class="privacy-mask-overlay" id="privacy-mask-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
@@ -6745,7 +6866,8 @@ class BoschCameraCard extends HTMLElement {
             // interaction anywhere on the page (the FB/YouTube muted-autoplay
             // pattern) — any click counts, so the user no longer has to find the
             // audio pill to restore sound after a load/reload/restart. 2026-06-05.
-            this._armAutoUnmute();
+            // Secondary (2nd+ card for same entity) stays muted to prevent echo.
+            if (!this._isSecondaryAudioInstance) this._armAutoUnmute();
           }
           // Live volume sync from the backend number.<cam>_audio_volume entity —
           // a slider drag on another session or an automation reaches us as a
@@ -6774,6 +6896,38 @@ class BoschCameraCard extends HTMLElement {
       : (ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on");
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
+
+    // Privacy stale-image badge: when privacy=ON, show a small glass pill
+    // below the lock label with the last-event timestamp so a days-old snapshot
+    // behind the overlay is clearly identified as stale — not a live frame.
+    // When privacy is OFF (or no timestamp), the badge is hidden.
+    const staleBadge = this.shadowRoot.getElementById("privacy-stale-badge");
+    const privLabel  = this.shadowRoot.getElementById("privacy-placeholder-label");
+    if (privLabel) privLabel.textContent = this._t("privacy_stale_label").replace(/\s*—.*/, "") || "Privat-Modus aktiv";
+    if (staleBadge) {
+      if (privacyOn && lastEventStr !== "—") {
+        // Build a compact "Last event: <ts>" label.  Re-use the already-computed
+        // `lastEventStr` + the locale-aware pretty timestamp from the ap-last-event block.
+        let staleTs = lastEventStr;
+        try {
+          const d = lastEventState?.state ? new Date(lastEventState.state) : null;
+          if (d && !isNaN(d)) {
+            const sameDay = d.toDateString() === new Date().toDateString();
+            // For stale badge show full date+time (not just time like ap-last-event)
+            // so the user can see how old the frozen frame is.
+            staleTs = sameDay
+              ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : d.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+          }
+        } catch { /* fall back to lastEventStr */ }
+        staleBadge.textContent = `${this._t("privacy_stale_prefix")} ${staleTs}`;
+        staleBadge.classList.add("visible");
+      } else {
+        staleBadge.classList.remove("visible");
+        staleBadge.textContent = "";
+      }
+    }
+
     // Privacy just turned ON → tear down THIS session's stream/connect right
     // away. The backend tears the live connection down too, but the card's HLS
     // buffer would otherwise keep playing video AND sound for several seconds

@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.14] - 2026-06-11
+
+Patch release — live-snapshot stale-event fix, privacy badge, and multi-instance audio mute.
+
+- **Fix: the live snapshot no longer flips to an old event image.** With privacy off, a transient cloud hiccup on the periodic refresh could replace the current snapshot with a days-old motion-event picture. The card now keeps the last good live frame in that situation and only falls back to an event image on a true cold start (no live frame has ever been fetched for that camera).
+- **New: a "last image" badge in privacy mode.** When the camera is in privacy mode the card labels the shown frame with the date and time of the last motion event (e.g. *Letztes Ereignis: …*), so a held snapshot from days ago is clearly dated and cannot be mistaken for a live view.
+- **Audio: cards no longer echo when the same camera is shown twice.** If more than one card on a dashboard shows the same camera, only the first one plays audio; every additional instance auto-mutes itself. (The ~80–200 ms A/V drift on indoor cameras is a characteristic of the Bosch/go2rtc AAC transcoding path — it is not something the card can correct.)
+
 ## [v13.5.13] - 2026-06-11
 
 Security patch — TLS certificate validation for Bosch cloud and login (CWE-295, [GHSA-6qh5-x5m5-vj6v](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/security/advisories/GHSA-6qh5-x5m5-vj6v)). Update recommended for everyone.

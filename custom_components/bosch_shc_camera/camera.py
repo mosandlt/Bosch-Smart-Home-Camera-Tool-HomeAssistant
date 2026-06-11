@@ -271,12 +271,21 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         self._cam_id
                     )
 
-            # Last resort: fetch fresh events from Bosch API and use the latest imageUrl.
-            # Bypasses stale/expired coordinator-cached event URLs.
-            # Skip when streaming — fetching events in streaming mode is unnecessary (the live
-            # proxy snap.jpg already provides a current frame via async_camera_image path 1)
-            # and would overwrite _cached_image with a stale event still, corrupting live frames.
-            if not image and not self.is_streaming:
+            # Last resort: seed from the latest event snapshot ONLY on a true cold
+            # start (nothing cached yet). NEVER fall back to it when we already
+            # hold a frame — the "latest event" can be days old (last_event frozen
+            # when no new motion / FCM stale), so replacing a working live frame
+            # with it flipped the card from the current snapshot back to an ancient
+            # event picture after a transient live-fetch failure on the proactive
+            # refresh tick (privacy OFF). Also skip when streaming (path-1 live
+            # proxy snap.jpg already provides a current frame).
+            # The placeholder (1×1 black) does NOT count as a real frame — on a
+            # genuine cold start we still want to seed from the event image.
+            _has_real_frame = (
+                bool(self._cached_image)
+                and self._cached_image != self._PLACEHOLDER_JPEG
+            )
+            if not image and not self.is_streaming and not _has_real_frame:
                 image = await self.coordinator.async_fetch_fresh_event_snapshot(
                     self._cam_id
                 )
@@ -299,6 +308,16 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     img_entity = self.coordinator._image_entities.get(self._cam_id)
                     if img_entity is not None:
                         await img_entity.async_notify_refreshed()
+            elif _has_real_frame:
+                # Live fetch was unavailable (transient 444 quota / network blip)
+                # but we already hold a good frame — keep it instead of flipping to
+                # a stale event image, and back off a full interval rather than
+                # retrying every coordinator tick.
+                self._last_image_fetch = time.monotonic()
+                _LOGGER.debug(
+                    "%s: live refresh unavailable — keeping last good frame",
+                    self._display_name,
+                )
 
         except Exception as err:
             _LOGGER.debug("%s: image refresh failed: %s", self._display_name, err)
