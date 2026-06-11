@@ -129,7 +129,10 @@ class TestFreshInstallAlertSave:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
@@ -163,7 +166,10 @@ class TestFreshInstallAlertSave:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
@@ -195,7 +201,10 @@ class TestFreshInstallAlertSave:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):

@@ -338,7 +338,10 @@ class TestHandleCreateRuleException:
         session = MagicMock()
         session.post = MagicMock(side_effect=OSError("network error"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["create_rule"]
             call_mock = MagicMock()
@@ -365,7 +368,10 @@ class TestHandleCreateRuleException:
         session = MagicMock()
         session.post = MagicMock(side_effect=TimeoutError("timed out"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["create_rule"]
             call_mock = MagicMock()
@@ -392,7 +398,10 @@ class TestHandleDeleteRuleException:
         session = MagicMock()
         session.delete = MagicMock(side_effect=OSError("connection reset"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_rule"]
             call_mock = MagicMock()
@@ -416,7 +425,10 @@ class TestHandleDeleteRuleException:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(500, "server error"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_rule"]
             call_mock = MagicMock()
@@ -453,7 +465,10 @@ class TestHandleUpdateRulePutException:
         session = MagicMock()
         session.put = MagicMock(side_effect=OSError("broken pipe"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()
@@ -482,7 +497,10 @@ class TestHandleGetMotionZonesException:
         session = MagicMock()
         session.get = MagicMock(side_effect=OSError("timeout"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["get_motion_zones"]
             call_mock = MagicMock()
@@ -526,7 +544,10 @@ class TestHandleShareCameraException:
         session = MagicMock()
         session.put = MagicMock(side_effect=OSError("network unreachable"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["share_camera"]
             call_mock = MagicMock()
@@ -570,7 +591,10 @@ class TestHandleGetPrivacyMasksException:
         session = MagicMock()
         session.get = MagicMock(side_effect=OSError("ssl error"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -594,7 +618,10 @@ class TestHandleGetPrivacyMasksException:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500, "internal server error"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["get_privacy_masks"]
             call_mock = MagicMock()
@@ -623,7 +650,10 @@ class TestHandleSetPrivacyMasksException:
         session = MagicMock()
         session.post = MagicMock(side_effect=OSError("connection refused"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["set_privacy_masks"]
             call_mock = MagicMock()
@@ -674,7 +704,10 @@ class TestHandleDeleteMotionZoneException:
         session = MagicMock()
         session.get = MagicMock(side_effect=OSError("network reset"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_motion_zone"]
             call_mock = MagicMock()
@@ -719,7 +752,10 @@ class TestHandleGetLightingScheduleException:
         session = MagicMock()
         session.get = MagicMock(side_effect=OSError("ssl handshake failed"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["get_lighting_schedule"]
             call_mock = MagicMock()
@@ -754,7 +790,10 @@ class TestHandleGetLightingScheduleException:
         session = MagicMock()
         session.get = MagicMock()  # must NOT be called
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["get_lighting_schedule"]
             call_mock = MagicMock()
@@ -783,7 +822,10 @@ class TestHandleRenameCameraException:
         session = MagicMock()
         session.put = MagicMock(side_effect=OSError("connection refused"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["rename_camera"]
             call_mock = MagicMock()
@@ -827,7 +869,10 @@ class TestHandleInviteFriendException:
         session = MagicMock()
         session.post = MagicMock(side_effect=OSError("dns resolution failed"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["invite_friend"]
             call_mock = MagicMock()
@@ -851,7 +896,10 @@ class TestHandleInviteFriendException:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(400, "bad request"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["invite_friend"]
             call_mock = MagicMock()
@@ -880,7 +928,10 @@ class TestHandleListFriendsException:
         session = MagicMock()
         session.get = MagicMock(side_effect=OSError("connection reset by peer"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["list_friends"]
             call_mock = MagicMock()
@@ -904,7 +955,10 @@ class TestHandleListFriendsException:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(503))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["list_friends"]
             call_mock = MagicMock()
@@ -933,7 +987,10 @@ class TestHandleRemoveFriendException:
         session = MagicMock()
         session.delete = MagicMock(side_effect=OSError("broken pipe"))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()
@@ -957,7 +1014,10 @@ class TestHandleRemoveFriendException:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["remove_friend"]
             call_mock = MagicMock()

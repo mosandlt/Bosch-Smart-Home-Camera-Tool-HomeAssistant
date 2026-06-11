@@ -349,6 +349,8 @@ async def test_delete_motion_zone_post_non_2xx_raises(tmp_path):
         pytest.skip("delete_motion_zone service handler not registered in this build")
 
     call = MagicMock(data={"camera_id": CAM_ID, "zone_index": 0})
-    with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+    ):
         with pytest.raises(HomeAssistantError):
             await handler(call)

@@ -33,7 +33,9 @@ from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
     _make_session,
 )
 
-_PATCH_CLOUD_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
+_PATCH_CLOUD_SESSION = (
+    "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
+)
 
 
 class TestFcmWatchdogRetryAfterFailedSelfHeal:

@@ -206,7 +206,10 @@ async def test_ambient_light_get_non_200_early_return():
     sw.hass = MagicMock()
     sw.async_write_ha_state = MagicMock()
 
-    with patch(f"{switch_mod.__name__}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+    with patch(
+        f"{switch_mod.__name__}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
         await sw._set_ambient_light(True)
     # PUT must not have been called (returned early after GET 500)
     assert session.put.call_count == 0 if hasattr(session, "put") else True
@@ -222,7 +225,10 @@ async def test_ambient_light_exception_caught():
     sw.hass = MagicMock()
     sw.async_write_ha_state = MagicMock()
 
-    with patch(f"{switch_mod.__name__}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+    with patch(
+        f"{switch_mod.__name__}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
         # Must not raise — exception is swallowed by `except Exception`
         await sw._set_ambient_light(True)
     sw.async_write_ha_state.assert_called_once()
@@ -247,7 +253,10 @@ async def test_softlight_fading_json_exception_falls_back_to_body():
     sw.hass = MagicMock()
     sw.async_write_ha_state = MagicMock()
 
-    with patch(f"{switch_mod.__name__}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+    with patch(
+        f"{switch_mod.__name__}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
         await sw._put_global_lighting(True)
 
     # When json() raised, body fallback must populate cache

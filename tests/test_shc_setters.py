@@ -77,7 +77,9 @@ class TestCloudSetPrivacyMode:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             from custom_components.bosch_shc_camera.shc import (
                 async_cloud_set_privacy_mode,
             )
@@ -116,7 +118,9 @@ class TestCloudSetPrivacyMode:
                 _mock_response(204),
             ]
         )
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, False)
         assert coord._ensure_valid_token.called
 
@@ -129,7 +133,11 @@ class TestCloudSetPrivacyMode:
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(500))
         with (
-            patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
             patch.object(shc, "shc_ready", return_value=False),
         ):
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
@@ -151,7 +159,11 @@ class TestCloudSetPrivacyMode:
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(444))
         with (
-            patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
             patch.object(shc, "shc_ready", return_value=False),
         ):
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
@@ -172,7 +184,9 @@ class TestCloudSetCameraLight:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, True)
         assert ok is True
         assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
@@ -191,7 +205,9 @@ class TestCloudSetCameraLight:
                 _mock_response(442),  # topdown not supported on this hw
             ]
         )
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, True)
         # `ok = ok1 or ok2` → True
         assert ok is True
@@ -209,7 +225,11 @@ class TestCloudSetCameraLight:
             ]
         )
         with (
-            patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)),
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
             patch.object(shc, "shc_ready", return_value=False),
         ):
             ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, False)
@@ -233,7 +253,9 @@ class TestCloudSetNotifications:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_notifications(coord, CAM_ID, True)
         assert ok is True
         assert captured_body["enabledNotificationsStatus"] == "FOLLOW_CAMERA_SCHEDULE"
@@ -256,7 +278,9 @@ class TestCloudSetNotifications:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_notifications(coord, CAM_ID, False)
         assert ok is True
         assert captured["enabledNotificationsStatus"] == "ALWAYS_OFF"
@@ -276,7 +300,9 @@ class TestCloudSetNotifications:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(500))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_notifications(coord, CAM_ID, True)
         assert ok is False
         # Cache must NOT have been updated
@@ -312,7 +338,9 @@ class TestCloudSetPan:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 30)
         assert ok is True
 

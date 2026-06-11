@@ -686,7 +686,10 @@ class TestHandleCreateRule:
         resp_mock = session.post.return_value.__aenter__.return_value
         resp_mock.json = AsyncMock(return_value={"id": "r1"})
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["create_rule"]
             call_mock = MagicMock()
@@ -716,7 +719,10 @@ class TestHandleCreateRule:
         session = MagicMock()
         session.post = MagicMock(return_value=_resp_cm(500))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["create_rule"]
             call_mock = MagicMock()
@@ -740,7 +746,10 @@ class TestHandleDeleteRule:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(204))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_rule"]
             call_mock = MagicMock()
@@ -763,7 +772,10 @@ class TestHandleDeleteRule:
         session = MagicMock()
         session.delete = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["delete_rule"]
             call_mock = MagicMock()
@@ -811,7 +823,10 @@ class TestHandleUpdateRule:
         session = MagicMock()
         session.put = MagicMock(return_value=_resp_cm(200, text='{"id":"rule-1"}'))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             _register_services(hass)
             handler = _get_handlers(hass)["update_rule"]
             call_mock = MagicMock()

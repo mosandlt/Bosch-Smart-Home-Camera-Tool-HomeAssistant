@@ -230,7 +230,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -243,7 +246,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -265,7 +271,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
@@ -283,7 +292,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -303,7 +315,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -323,7 +338,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.put.assert_not_called()
@@ -343,7 +361,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.get.assert_not_called()
@@ -368,7 +389,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.get.assert_called()
@@ -405,7 +429,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
@@ -418,7 +445,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -431,7 +461,10 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -677,7 +710,10 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -690,7 +726,10 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -708,7 +747,10 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -723,7 +765,10 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -998,7 +1043,10 @@ class TestCoordRcpSession:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0x12345678"
@@ -1010,7 +1058,10 @@ class TestCoordRcpSession:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -1024,7 +1075,10 @@ class TestCoordRcpSession:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -1037,7 +1091,10 @@ class TestCoordRcpSession:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -1052,7 +1109,10 @@ class TestCoordRcpSession:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0xABCDEF01"
@@ -1083,7 +1143,10 @@ class TestRcpRead:
         raw = b"\x01\x02\x03\x04"
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, body=raw))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result == raw
 
@@ -1096,7 +1159,10 @@ class TestRcpRead:
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(401))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
         assert "abc123" not in coord._rcp_session_cache
@@ -1110,7 +1176,10 @@ class TestRcpRead:
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(403))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
         assert "abc123" not in coord._rcp_session_cache
@@ -1124,7 +1193,10 @@ class TestRcpRead:
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, body=b"<err>0x0c0d</err>"))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
         assert "abc123" not in coord._rcp_session_cache
@@ -1138,7 +1210,10 @@ class TestRcpRead:
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
         assert "abc123" in coord._rcp_session_cache  # not invalidated
@@ -1148,7 +1223,10 @@ class TestRcpRead:
         coord = self._bind(_stub_coord())
         session = MagicMock()
         session.get = MagicMock(return_value=_timeout_cm())
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             result = await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678")
         assert result is None
 
@@ -1157,7 +1235,10 @@ class TestRcpRead:
         coord = self._bind(_stub_coord())
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, body=b"\x01"))
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             await coord._rcp_read(RCP_BASE, "0x0c22", "0x12345678", num=5)
         _, call_kwargs = session.get.call_args
         assert call_kwargs.get("params", {}).get("num") == "5"

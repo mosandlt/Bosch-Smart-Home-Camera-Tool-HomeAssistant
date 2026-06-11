@@ -156,7 +156,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
         assert ok is True
@@ -187,7 +189,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "front", False
             )
@@ -218,7 +222,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", True
             )
@@ -243,7 +249,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "intensity", 0.42
             )
@@ -259,7 +267,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(500))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
         assert ok is False
@@ -282,7 +292,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_raise_timeout)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
         assert ok is False
 
@@ -298,7 +310,9 @@ class TestSetLightComponentGen1:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "snake_oil", True
             )
@@ -328,7 +342,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
         assert ok is True
@@ -353,7 +369,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "intensity", 0.42
             )
@@ -379,7 +397,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "intensity", 75
             )
@@ -405,7 +425,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", True
             )
@@ -444,7 +466,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_capture_put)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", False
             )
@@ -467,7 +491,9 @@ class TestSetLightComponentGen2:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_light_component(
                 coord, CAM_ID, "garbage", True
             )
@@ -489,7 +515,9 @@ class TestSetPanExtras:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(500))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is False
         assert CAM_ID not in coord._pan_cache
@@ -507,7 +535,9 @@ class TestSetPanExtras:
 
         session = MagicMock()
         session.put = MagicMock(side_effect=_raise_timeout)
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is False
 
@@ -529,7 +559,9 @@ class TestSetPanExtras:
                 },
             )
         )
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is True
         # Cache must reflect the actual position from the response (87),
@@ -545,7 +577,9 @@ class TestSetPanExtras:
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_response(204))
-        with patch.object(shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is True
         assert coord._pan_cache[CAM_ID] == 90

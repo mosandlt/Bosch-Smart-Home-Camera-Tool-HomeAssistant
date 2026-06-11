@@ -262,7 +262,9 @@ class TestGetCachedRcpSession:
             "custom_components.bosch_shc_camera.rcp.rcp_session",
             new_callable=AsyncMock,
         ) as mock_open:
-            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(
+                MagicMock(), cache, PROXY_HOST, PROXY_HASH
+            )
 
         assert result == "cached-sid"
         mock_open.assert_not_called()
@@ -279,7 +281,9 @@ class TestGetCachedRcpSession:
             new_callable=AsyncMock,
             return_value="fresh-sid",
         ):
-            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(
+                MagicMock(), cache, PROXY_HOST, PROXY_HASH
+            )
 
         assert result == "fresh-sid"
         assert PROXY_HASH in cache
@@ -320,7 +324,9 @@ class TestGetCachedRcpSession:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = await get_cached_rcp_session(MagicMock(), cache, PROXY_HOST, PROXY_HASH)
+            result = await get_cached_rcp_session(
+                MagicMock(), cache, PROXY_HOST, PROXY_HASH
+            )
 
         assert result is None
         assert PROXY_HASH not in cache, (

@@ -111,7 +111,10 @@ class TestAsyncResolveExternalData:
         mock_session.post.return_value = _make_mock_cm(
             200, {"access_token": "at", "refresh_token": "rt"}
         )
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
             result = await impl.async_resolve_external_data(
                 {
                     "code": "authcode",
@@ -137,7 +140,10 @@ class TestAsyncResolveExternalData:
         mock_session.post.return_value = _make_mock_cm(
             400, {}, raise_for_status=aiohttp.ClientResponseError(MagicMock(), ())
         )
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
             with pytest.raises(aiohttp.ClientResponseError):
                 await impl.async_resolve_external_data(
                     {
@@ -161,7 +167,10 @@ class TestAsyncRefreshToken:
         old_token = {"refresh_token": "old_rt", "access_token": "old_at"}
         mock_session = MagicMock()
         mock_session.post.return_value = _make_mock_cm(200, {"access_token": "new_at"})
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
             result = await impl._async_refresh_token(old_token)
         assert result["access_token"] == "new_at"
         assert result["refresh_token"] == "old_rt"
@@ -179,7 +188,10 @@ class TestAsyncRefreshToken:
         mock_session.post.return_value = _make_mock_cm(
             401, {}, raise_for_status=aiohttp.ClientResponseError(MagicMock(), ())
         )
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=mock_session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
             with pytest.raises(aiohttp.ClientResponseError):
                 await impl._async_refresh_token({"refresh_token": "rt"})
 
@@ -431,7 +443,10 @@ class TestOptionsFlowReloginSteps:
         with (
             patch(f"{MODULE}._extract_code", return_value="valid_code"),
             patch(f"{MODULE}._exchange_code", AsyncMock(return_value=None)),
-            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=MagicMock())),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
         ):
             result = await flow.async_step_relogin_paste(
                 user_input={"redirect_url": "https://r.io?code=valid_code"}
@@ -455,7 +470,10 @@ class TestOptionsFlowReloginSteps:
                     }
                 ),
             ),
-            patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=MagicMock())),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
         ):
             result = await flow.async_step_relogin_paste(
                 user_input={"redirect_url": "https://r.io?code=good_code"}

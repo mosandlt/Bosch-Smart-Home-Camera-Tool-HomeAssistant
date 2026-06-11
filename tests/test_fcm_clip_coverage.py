@@ -115,7 +115,10 @@ class TestStep1Failure:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -174,7 +177,10 @@ class TestStep1FailureNonCancelled:
             raise RuntimeError("synthetic services lookup failure")
 
         with patch(f"{MODULE}.get_alert_services", side_effect=_selective_raise):
-            with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+            with patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ):
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -240,7 +246,10 @@ class TestDirectClipMp4ContentTypeGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get_side)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -292,7 +301,10 @@ class TestDirectClipMp4ContentTypeGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get_side)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -356,7 +368,10 @@ class TestClipPathTraversalGuard:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get_side)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):

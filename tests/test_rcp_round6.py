@@ -57,7 +57,10 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1, step2)
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -74,7 +77,10 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -97,7 +103,10 @@ class TestRcpSession:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get.return_value = cm
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -120,7 +129,10 @@ class TestRcpSession:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get.return_value = cm
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -137,7 +149,10 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -154,7 +169,10 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1)
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):
@@ -176,7 +194,10 @@ class TestRcpSession:
         connector_mock.close = AsyncMock()
         session = _make_session(step1, step2_cm)
         with (
-            patch(f"{MODULE}.async_get_bosch_cloud_ssl_context", new=AsyncMock(return_value=False)),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=False),
+            ),
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector_mock),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
         ):

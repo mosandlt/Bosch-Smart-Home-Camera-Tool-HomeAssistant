@@ -110,7 +110,9 @@ async def _run_alert(
     session = session_override or MagicMock()
     if session_override is None:
         session.get = MagicMock(return_value=_resp_cm(404))
-    with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+    ):
         with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
             with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -357,7 +359,10 @@ class TestHandlePushSnapshotTask:
             return_value=_resp_cm(200, json_data=_one_event("new-evt"))
         )
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -386,7 +391,10 @@ class TestHandlePushExceptions:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=cm)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             # Must not raise — exception is caught per-camera
             await async_handle_fcm_push(coord)
 
@@ -402,7 +410,10 @@ class TestHandlePushExceptions:
         cm.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=cm)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             await async_handle_fcm_push(coord)
 
 
@@ -516,7 +527,10 @@ class TestStep2RefetchExceptionContinues:
 
         session.get = MagicMock(side_effect=_get_side)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -682,7 +696,10 @@ class TestStep3ClipDoneAfterPoll:
         session = MagicMock()
         session.get = MagicMock(side_effect=_get_side)
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -851,7 +868,9 @@ class TestSmbUploadTimeout:
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404)))),
+            new=AsyncMock(
+                return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404)))
+            ),
         ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
@@ -899,7 +918,9 @@ class TestLocalSaveTimeout:
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404)))),
+            new=AsyncMock(
+                return_value=MagicMock(get=MagicMock(return_value=_resp_cm(404)))
+            ),
         ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
@@ -954,7 +975,10 @@ class TestCleanupOsError:
 
         coord.hass.async_add_executor_job = _exec_side
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -1019,7 +1043,10 @@ class TestHandlePushNon200Skip:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(500))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -1048,7 +1075,10 @@ class TestHandlePushEmptyPrevId:
             return_value=_resp_cm(200, json_data=_one_event("first-evt"))
         )
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(
                 f"{MODULE}.asyncio.timeout",
                 return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
@@ -1086,7 +1116,10 @@ class TestLocalSaveWithoutNotifyService:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
@@ -1124,7 +1157,10 @@ class TestLocalSaveWithoutNotifyService:
         coord.hass.async_add_executor_job = AsyncMock()
 
         session = MagicMock()
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     from custom_components.bosch_shc_camera.fcm import async_send_alert
@@ -1165,7 +1201,10 @@ class TestLocalSaveEnableToggle:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
@@ -1204,7 +1243,10 @@ class TestLocalSaveEnableToggle:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
@@ -1268,7 +1310,10 @@ class TestEventIdNotOverwrittenByConcurrentPush:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
@@ -1309,7 +1354,10 @@ class TestEventIdNotOverwrittenByConcurrentPush:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        with patch(f"{MODULE}.async_get_bosch_cloud_session", new=AsyncMock(return_value=session)):
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):

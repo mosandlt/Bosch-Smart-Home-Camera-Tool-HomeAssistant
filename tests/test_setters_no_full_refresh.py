@@ -346,9 +346,11 @@ class TestCloudSetPanNoRefresh:
 
         with patch(
             "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=_put_200_json_session(
-                {"currentAbsolutePosition": 42, "estimatedTimeToCompletion": 500}
-            )),
+            new=AsyncMock(
+                return_value=_put_200_json_session(
+                    {"currentAbsolutePosition": 42, "estimatedTimeToCompletion": 500}
+                )
+            ),
         ):
             result = await async_cloud_set_pan(coord, CAM_ID, 45)
 
