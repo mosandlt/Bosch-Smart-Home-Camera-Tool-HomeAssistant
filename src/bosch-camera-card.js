@@ -148,7 +148,16 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.14";
+const CARD_VERSION = "13.5.15";
+
+// Version banner in the browser console at module load — same convention as
+// other custom cards (apexcharts-card, multiple-entity-row, …) so the
+// installed card version is visible at a glance in the HA dev console.
+console.info(
+  `%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `,
+  "color: #fff; background: #ea0016; font-weight: 700;",
+  "color: #ea0016; background: #fff; font-weight: 700;"
+);
 
 // Fullscreen coordination shared across ALL bosch-camera-card instances on the
 // page (module scope = one per bundle). Fixes a multi-card mobile bug where

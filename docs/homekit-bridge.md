@@ -128,7 +128,8 @@ After saving, restart HA. A new QR code and PIN are generated. If the bridge was
 | Two-way audio | ❌ | HA Core HomeKit Bridge does not forward two-way audio for any camera — not specific to Bosch Smart Home cameras |
 | Activity / detection zones | ❌ | Requires polygon editor in the card; currently parked |
 | Pan controls (360° Indoor) | ❌ | HomeKit camera accessory type has no pan API |
-| HomeKit Secure Video (HSV) | ⚠️ | Requires an Apple Home hub (HomePod, Apple TV 4K, iPad) with iCloud+ subscription; HA's bridge streams standard HomeKit video without HSV cloud recording |
+| HomeKit Secure Video (HSV) | ✅ | Supported when a motion sensor is linked (`binary_sensor.bosch_*_motion`, auto-included) **and** you have an Apple Home hub (HomePod / Apple TV 4K / resident iPad) + iCloud+. Motion clips then record to iCloud and appear in the Home timeline. Without a hub/iCloud+ you still get live view. |
+| Video resolution | 1080p | Bosch SHC cameras are native **1920×1080**; no 2K/4K stream exists. Apple's new "up to 4K" HSV cap-lift only benefits 2K/4K-sensor cameras — Bosch already delivers its full 1080p, so there is nothing higher to hand over. |
 
 ---
 

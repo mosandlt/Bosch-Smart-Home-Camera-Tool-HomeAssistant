@@ -210,16 +210,27 @@ def sync_local_save(
 
 
 def sync_smb_upload(
-    coordinator: BoschCameraCoordinator, data: dict[str, Any], token: str
+    coordinator: BoschCameraCoordinator,
+    data: dict[str, Any],
+    token: str,
+    prefetched_image: bytes | None = None,
 ) -> None:
     """Upload new event files to SMB or FTP.
 
     Folder structure: {smb_base_path}/{camera}/{year}/{month}/{day}/{camera_name}_{date}_{time}_{type}.{ext}
     Backend selected via ``upload_protocol`` option ("smb" default, or "ftp").
+
+    ``prefetched_image`` — when provided, use these bytes directly for the
+    snapshot upload instead of downloading from imageUrl.  The caller
+    (async_send_alert in fcm.py) passes the already-downloaded step-2 bytes to
+    avoid an extra Bosch cloud pull during an active RTSP live-stream — both
+    transfers would compete on the camera's single TLS control channel, causing
+    RTSP keepalive latency spikes and 5-10 s stream freezes.
+    Source: knowledge-base/stream-freeze-on-motion-event-contention.md
     """
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
     if protocol == "ftp":
-        return _sync_ftp_upload(coordinator, data, token)
+        return _sync_ftp_upload(coordinator, data, token, prefetched_image)
 
     opts = coordinator.options
     server = opts.get("smb_server", "").strip()
@@ -315,29 +326,45 @@ def sync_smb_upload(
                 continue
 
             # Upload snapshot
+            # Prefer prefetched_image bytes (already downloaded by the alert
+            # pipeline in async_send_alert) to avoid a second Bosch cloud pull
+            # while the RTSP live-stream is active on the camera's TLS channel.
             img_url = ev.get("imageUrl")
-            if img_url and _is_safe_bosch_url(img_url):
+            _have_url = bool(img_url and _is_safe_bosch_url(img_url))
+            if prefetched_image or _have_url:
                 smb_path = f"{smb_folder}\\{file_base}.jpg"
                 try:
                     smb_stat(smb_path)
                     _LOGGER.debug("SMB skip (exists): %s", file_base + ".jpg")
                 except OSError:
                     try:
-                        status, content = _http_get(img_url, token, timeout=30)
-                        if status == 200 and content:
+                        if prefetched_image:
+                            # Use caller-supplied bytes — no extra cloud request.
+                            content = prefetched_image
                             with open_file(smb_path, mode="wb") as f:
                                 f.write(content)
                             _LOGGER.info(
-                                "SMB uploaded: %s (%d bytes)",
+                                "SMB uploaded (prefetched): %s (%d bytes)",
                                 file_base + ".jpg",
                                 len(content),
                             )
-                        else:
-                            _LOGGER.warning(
-                                "SMB snapshot download failed: HTTP %d, %d bytes",
-                                status,
-                                len(content),
-                            )
+                        elif _have_url:
+                            assert img_url is not None  # narrowed above
+                            status, content = _http_get(img_url, token, timeout=30)
+                            if status == 200 and content:
+                                with open_file(smb_path, mode="wb") as f:
+                                    f.write(content)
+                                _LOGGER.info(
+                                    "SMB uploaded: %s (%d bytes)",
+                                    file_base + ".jpg",
+                                    len(content),
+                                )
+                            else:
+                                _LOGGER.warning(
+                                    "SMB snapshot download failed: HTTP %d, %d bytes",
+                                    status,
+                                    len(content),
+                                )
                     except Exception as err:
                         _LOGGER.warning("SMB upload error for %s: %s", file_base, err)
             else:
@@ -569,9 +596,15 @@ def _ftp_makedirs(ftp: Any, path: str) -> None:
 
 
 def _sync_ftp_upload(
-    coordinator: BoschCameraCoordinator, data: dict[str, Any], token: str
+    coordinator: BoschCameraCoordinator,
+    data: dict[str, Any],
+    token: str,
+    prefetched_image: bytes | None = None,
 ) -> None:
-    """Upload event files to an FTP server (e.g. FRITZ.NAS via plain FTP)."""
+    """Upload event files to an FTP server (e.g. FRITZ.NAS via plain FTP).
+
+    ``prefetched_image`` — see ``sync_smb_upload`` docstring.
+    """
     from io import BytesIO
 
     opts = coordinator.options
@@ -634,24 +667,38 @@ def _sync_ftp_upload(
                 _ftp_makedirs(ftp, ftp_dir)
 
                 # Snapshot
+                # Prefer prefetched_image bytes — see sync_smb_upload docstring.
                 img_url = ev.get("imageUrl")
-                if img_url and _is_safe_bosch_url(img_url):
+                _have_url = bool(img_url and _is_safe_bosch_url(img_url))
+                if prefetched_image or _have_url:
                     fname = f"{file_base}.jpg"
                     fpath = f"{ftp_dir}/{fname}"
                     if _ftp_exists(ftp, fpath):
                         _LOGGER.debug("FTP skip (exists): %s", fname)
                     else:
                         try:
-                            status, content = _http_get(img_url, token, timeout=30)
-                            if status == 200 and content:
+                            if prefetched_image:
+                                content = prefetched_image
                                 ftp.storbinary(f"STOR {fpath}", BytesIO(content))
                                 _LOGGER.info(
-                                    "FTP uploaded: %s (%d bytes)", fname, len(content)
+                                    "FTP uploaded (prefetched): %s (%d bytes)",
+                                    fname,
+                                    len(content),
                                 )
-                            else:
-                                _LOGGER.warning(
-                                    "FTP snapshot download failed: HTTP %d", status
-                                )
+                            elif _have_url:
+                                assert img_url is not None  # narrowed above
+                                status, content = _http_get(img_url, token, timeout=30)
+                                if status == 200 and content:
+                                    ftp.storbinary(f"STOR {fpath}", BytesIO(content))
+                                    _LOGGER.info(
+                                        "FTP uploaded: %s (%d bytes)",
+                                        fname,
+                                        len(content),
+                                    )
+                                else:
+                                    _LOGGER.warning(
+                                        "FTP snapshot download failed: HTTP %d", status
+                                    )
                         except Exception as err:
                             _LOGGER.warning("FTP upload error for %s: %s", fname, err)
 

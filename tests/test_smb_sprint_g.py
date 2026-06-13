@@ -278,7 +278,7 @@ class TestSyncSmbUpload:
         with patch(f"{MODULE}._sync_ftp_upload") as mock_ftp:
             sync_smb_upload(coord, {"x": 1}, "tok")
 
-        mock_ftp.assert_called_once_with(coord, {"x": 1}, "tok")
+        mock_ftp.assert_called_once_with(coord, {"x": 1}, "tok", None)
 
 
 # ── TestSmbMakedirs ──────────────────────────────────────────────────────────

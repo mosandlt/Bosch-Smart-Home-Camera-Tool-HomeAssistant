@@ -567,6 +567,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._last_status: float = -86400.0  # force status check on first tick
         self._last_events: float = -86400.0  # force event check on first tick
         self._last_slow: float = -86400.0  # force slow check on first tick
+        # Per-camera set of cam_ids whose slow-tier diagnostic fetch was deferred
+        # because a live stream was active on that tick.  When the stream goes idle
+        # the next coordinator tick picks these up (do_slow_cam becomes True even
+        # if the global do_slow interval has not elapsed yet).
+        # Invariant: an entry is removed as soon as the deferred fetch actually runs.
+        # SENTINEL_RULE: never use 0.0 / float('inf') here — set membership is the flag.
+        self._slow_tier_deferred: set[str] = set()
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         # Per-cam time (monotonic) the cloud last returned HTTP 444 (session
@@ -3060,11 +3067,56 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # These values change rarely — fetching every tick wastes bandwidth.
                 # Skipped when camera is offline or session-quota hit (444) — endpoints
                 # would return 444 too, and the camera isn't truly unreachable.
-                if do_slow and not is_online:
+                #
+                # Stream-contention gate (Root-Cause: stream-freeze-on-motion-event-
+                # contention.md, 2026-06-12): the Gen2 camera exposes ONE TLS control
+                # channel shared by the RTSP keepalive AND every RCP / cloud slow-tier
+                # read.  When both compete, OPTIONS RTT grows from ~1 s to ~21 s against
+                # a 30-s RTSP session timeout → go2rtc EOF → 5-10 s video freeze.
+                # Fix: defer (NOT drop) the slow-tier fetch for a camera while its live
+                # stream is active.  The next coordinator tick where the stream is idle
+                # will pick it up via _slow_tier_deferred — no permanent staleness.
+                # Partial coordinator stubs in unit tests bypass __init__ and may
+                # lack this attribute; the real coordinator always sets it in
+                # __init__.  Lazy-init keeps the gate robust without forcing every
+                # stub to mirror the field.
+                if not hasattr(self, "_slow_tier_deferred"):
+                    self._slow_tier_deferred = set()
+                stream_active = cam_id_key in self._live_connections
+                # Option: defer slow-tier when stream is active (default ON).
+                # When OFF, slow-tier runs regardless — diagnostic sensors stay
+                # current during streaming at the cost of potential TLS contention.
+                _defer_diag = bool(
+                    opts.get(
+                        "defer_diag_during_stream",
+                        True,
+                    )
+                )
+                # per-camera slow flag: True on the normal interval, OR when a deferred
+                # fetch is now safe to run (stream gone idle since last deferral).
+                do_slow_cam = do_slow or (
+                    cam_id_key in self._slow_tier_deferred and not stream_active
+                )
+                if _defer_diag and do_slow_cam and stream_active:
+                    # Defer: stream is live — adding to deferred set instead of running.
+                    self._slow_tier_deferred.add(cam_id_key)
+                    _LOGGER.debug(
+                        "Slow-tier deferred for %s (live stream active)",
+                        cam_id_key,
+                    )
+                    do_slow_cam = False  # skip the fetch blocks below for this camera
+                elif do_slow_cam and cam_id_key in self._slow_tier_deferred:
+                    # Deferred fetch now safe: stream gone idle (or defer disabled).
+                    self._slow_tier_deferred.discard(cam_id_key)
+                    _LOGGER.debug(
+                        "Slow-tier running deferred fetch for %s (stream now idle)",
+                        cam_id_key,
+                    )
+                if do_slow_cam and not is_online:
                     _LOGGER.debug(
                         "Slow-tier skipped for %s (%s)", cam_id_key, cam_status.lower()
                     )
-                if do_slow and is_online:
+                if do_slow_cam and is_online:
                     # ── Parallel slow-tier fetch ──────────────────────────────
                     # All endpoints are independent — fetch in parallel with
                     # asyncio.gather() instead of sequentially.
@@ -3365,11 +3417,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     == "LOCAL"
                 )
                 privacy_on = cam_raw.get("privacyMode", "").upper() == "ON"
-                if is_online and do_slow and privacy_on:
+                if is_online and do_slow_cam and privacy_on:
                     _LOGGER.debug(
                         "RCP slow-tier skipped for %s (privacy ON)", cam_id_key
                     )
-                if is_online and do_slow and not local_stream_active and not privacy_on:
+                if (
+                    is_online
+                    and do_slow_cam
+                    and not local_stream_active
+                    and not privacy_on
+                ):
                     try:
                         rcp_connector = aiohttp.TCPConnector(
                             ssl=await async_get_bosch_cloud_ssl_context(self.hass)
@@ -3436,7 +3493,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # non-blocking (errors are swallowed, sensor stays unavailable).
                 if (
                     is_online
-                    and do_slow
+                    and do_slow_cam
                     and self._get_cam_lan_ip(cam_id_key)
                     and self._local_creds_cache.get(cam_id_key)
                 ):
@@ -4711,25 +4768,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             ):
                                 try:
                                     cam_entity.stream.update_source(rtsps_url)
-                                    # Redact: the RTSPS URL can embed Digest
-                                    # credentials (user:password@) in its netloc
-                                    # plus the proxy session hash (an access
-                                    # token) in its path/query. urlsplit().hostname
-                                    # drops the userinfo entirely; we log only
-                                    # scheme://host[:port], never creds/token.
-                                    from urllib.parse import urlsplit as _urlsplit
-
-                                    _u = _urlsplit(rtsps_url)
-                                    _redacted_rtsps = (
-                                        f"{_u.scheme}://{_u.hostname}"
-                                        + (f":{_u.port}" if _u.port else "")
-                                        if _u.scheme and _u.hostname
-                                        else "<redacted>"
-                                    )
+                                    # Never log the RTSPS URL or anything derived
+                                    # from it — it embeds Digest credentials
+                                    # (user:password@) and the proxy session-hash
+                                    # token. The cam id alone identifies the event.
                                     _LOGGER.debug(
-                                        "Stream.update_source() for %s → %s/…",
+                                        "Stream.update_source() applied for %s",
                                         cam_id[:8],
-                                        _redacted_rtsps,
                                     )
                                 except Exception as err:
                                     _LOGGER.debug(

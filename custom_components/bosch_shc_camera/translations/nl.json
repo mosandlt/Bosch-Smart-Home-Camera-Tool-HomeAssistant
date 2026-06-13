@@ -94,12 +94,14 @@
               "stream_connection_type": "Stream-verbindingstype",
               "live_buffer_mode": "Afspeelbufferprofiel (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (lage-latentie streaming ~2 s)",
-              "enable_green_it": "Green IT — inactieve live-streams automatisch beëindigen (experimenteel, in ontwikkeling)"
+              "enable_green_it": "Green IT — inactieve live-streams automatisch beëindigen (experimenteel, in ontwikkeling)",
+              "defer_diag_during_stream": "Diagnostische lezingen pauzeren tijdens live stream"
             },
             "data_description": {
               "stream_connection_type": "Standaard verbindingstype voor live streams.\n• **auto** (aanbevolen): Probeert eerst het lokale LAN, schakelt automatisch over naar de Bosch Cloud-proxy bij een storing.\n• **local**: Alleen direct LAN — geen internet vereist. Snellere RTSP, maar langzamere snapshots (~6–10 s). Verbinding wordt elke 50 s automatisch vernieuwd.\n• **remote**: Altijd via de Bosch Cloud-proxy. Snellere snapshots (~0,4–1,9 s). Beste keuze wanneer HA niet op hetzelfde LAN staat.\nDe selectie-entiteit 'Stream-modus' overschrijft deze instelling tijdens gebruik zonder herstart.",
               "live_buffer_mode": "Hoeveel seconden video de speler buffert voor weergave. Meer buffer = minder onderbrekingen, maar meer vertraging ten opzichte van realtijd.\n• **Latentie**: kleine buffer (~4-6 s vertraging). Kan haperen op instabiel Wi-Fi.\n• **Evenwichtig** (aanbevolen): gemiddelde buffer (~8-10 s). Robuust bij typische Wi-Fi-onderbrekingen.\n• **Stabiel**: grote buffer (~12-15 s). Vloeiend zelfs bij zwakke verbindingen, maar merkbaar vertraagd.\nBeïnvloedt alleen de kaartweergave — geen effect op de camera, opname of snapshots.",
-              "enable_go2rtc": "Registreert live streams automatisch bij de meegeleverde go2rtc van HA voor WebRTC-weergave (~2 s latentie vs. ~10 s HLS). Aanbevolen. Schakel alleen uit als u een aangepaste go2rtc-configuratie gebruikt."
+              "enable_go2rtc": "Registreert live streams automatisch bij de meegeleverde go2rtc van HA voor WebRTC-weergave (~2 s latentie vs. ~10 s HLS). Aanbevolen. Schakel alleen uit als u een aangepaste go2rtc-configuratie gebruikt.",
+              "defer_diag_during_stream": "Wanneer INGESCHAKELD (aanbevolen): trage diagnostische cloud-lezingen worden uitgesteld terwijl de live stream van een camera actief is, wat TLS-kanaalconflicten voorkomt die korte stream-freezes kunnen veroorzaken tijdens bewegingsbursts. De uitgestelde lezingen worden uitgevoerd bij de volgende polling-cyclus zodra de stream inactief is. Uitschakelen alleen als diagnostische sensoren ook tijdens het streamen actueel moeten blijven."
             }
           },
           "fcm": {

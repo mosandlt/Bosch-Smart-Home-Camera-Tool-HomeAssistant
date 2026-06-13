@@ -94,12 +94,14 @@
               "stream_connection_type": "Tipo de conexión del stream",
               "live_buffer_mode": "Perfil de búfer del reproductor (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (streaming de baja latencia ~2 s)",
-              "enable_green_it": "Green IT — finalizar automáticamente los streams en vivo inactivos (experimental, en desarrollo)"
+              "enable_green_it": "Green IT — finalizar automáticamente los streams en vivo inactivos (experimental, en desarrollo)",
+              "defer_diag_during_stream": "Pausar lecturas de diagnóstico durante transmisión en vivo"
             },
             "data_description": {
               "stream_connection_type": "Tipo de conexión predeterminado para streams en directo.\n• **auto** (recomendado): Intentar primero la LAN local y, en caso de fallo, cambiar automáticamente al proxy de Bosch Cloud.\n• **local**: Solo LAN directa — no requiere internet. RTSP más rápido, pero snapshots más lentos (~6–10 s). La sesión se renueva automáticamente cada 50 s.\n• **remote**: Siempre a través del proxy de Bosch Cloud. Snapshots más rápidos (~0,4–1,9 s). Mejor opción predeterminada cuando HA no está en la misma LAN.\nLa entidad de selección 'Modo Stream' anula este ajuste en tiempo de ejecución sin reinicio.",
               "live_buffer_mode": "Cuántos segundos de vídeo almacena en búfer el reproductor antes de mostrarlo. Más búfer = menos interrupciones pero mayor desfase respecto al tiempo real.\n• **Latencia**: búfer pequeño (~4-6 s de desfase). Puede interrumpirse en Wi-Fi inestable.\n• **Equilibrado** (recomendado): búfer medio (~8-10 s). Robusto frente a las típicas caídas de Wi-Fi.\n• **Estable**: búfer grande (~12-15 s). Sin interrupciones incluso en conexiones débiles, pero con desfase apreciable.\nAfecta únicamente a la visualización de la tarjeta — no tiene efecto sobre la cámara, la grabación ni los snapshots.",
-              "enable_go2rtc": "Registrar automáticamente los streams en directo en el go2rtc integrado de HA para reproducción WebRTC (~2 s de latencia frente a ~10 s en HLS). Recomendado. Desactivar solo si se usa una configuración go2rtc personalizada."
+              "enable_go2rtc": "Registrar automáticamente los streams en directo en el go2rtc integrado de HA para reproducción WebRTC (~2 s de latencia frente a ~10 s en HLS). Recomendado. Desactivar solo si se usa una configuración go2rtc personalizada.",
+              "defer_diag_during_stream": "Cuando está ACTIVADO (recomendado): las lecturas de diagnóstico lentas se posponen mientras el flujo en vivo de una cámara está activo, evitando contención en el canal TLS que puede causar breves interrupciones durante ráfagas de movimiento. Las lecturas diferidas se ejecutan en el siguiente ciclo de sondeo cuando el flujo esté inactivo. Desactivar solo si los sensores de diagnóstico deben mantenerse actualizados incluso durante la transmisión."
             }
           },
           "fcm": {

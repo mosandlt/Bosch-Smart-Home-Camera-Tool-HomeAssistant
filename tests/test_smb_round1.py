@@ -165,7 +165,7 @@ class TestSyncSmbUploadEarlyExits:
         with patch(f"{MODULE}._sync_ftp_upload") as mock_ftp:
             sync_smb_upload(coord, {"data": 1}, "tok")
 
-        mock_ftp.assert_called_once_with(coord, {"data": 1}, "tok")
+        mock_ftp.assert_called_once_with(coord, {"data": 1}, "tok", None)
 
     def test_smb_session_failure_returns_gracefully(self):
         """register_session raising → log warning and return."""

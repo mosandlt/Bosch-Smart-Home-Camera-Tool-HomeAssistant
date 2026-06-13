@@ -38,7 +38,6 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 
 ## Table of Contents
 
-- [Integration Comparison](#integration-comparison) — pick the right project for your platform
 - [Supported Cameras](#supported-cameras)
 - [Disclaimer](#disclaimer)
 - [Prerequisites — Setting Up a New Camera](#prerequisites--setting-up-a-new-camera)
@@ -65,58 +64,9 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Known Limitations](#known-limitations) — Cloudflare Tunnel tips
 - [Roadmap](#roadmap) — parked features and what's under consideration
 - [Releases](#releases) · [Full changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases)
+- [Integration Comparison](#integration-comparison) — pick the right project for your platform
 - [Related Projects](#related-projects)
 - [License](#license)
-
----
-
-## Integration Comparison
-
-The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling projects. Pick the one that fits your platform.
-
-| Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) |
-|---|---|---|---|---|
-| **Maturity** | v13.3+ — HA Quality Scale **Platinum** | v10.10+ stable (Mini-NVR BETA) | v1.2+ stable · npm | v1.5+ stable · PyPI |
-| **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) |
-| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) |
-| **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) |
-| **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP | ✅ `bosch_camera_stream_url` (LAN-only, no cloud relay) |
-| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ✅ *(v10.6.0)* `live --webrtc` | ❌ | ❌ |
-| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ✅ `info` shows both · `live --sub` *(v10.5.0)* | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* | ✅ via `bosch_camera_info` (verbose URLs) |
-| **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option | ✅ URL returned, hand off to ffmpeg / go2rtc downstream |
-| **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP | ✅ `bosch_camera_privacy_set` (LAN-fallback via `prefer_local`) |
-| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) |
-| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ✅ command | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* |
-| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen1 360° only)* | ✅ DP | ❌ *(intentionally not exposed)* |
-| **Image rotation 180°** | ✅ switch | ✅ flag | ✅ DP | ❌ |
-| **Motion / person / audio events** | ✅ FCM push + polling fallback | ✅ event-watch command | ✅ FCM push + polling fallback | ✅ `bosch_camera_events` (on-demand pull) |
-| **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* | n/a *(request-response, no subscription)* |
-| **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* | n/a *(no background loop)* |
-| **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP | ❌ |
-| **Motion zones / privacy masks (read)** | ✅ | ✅ | ✅ read-only *(v1.2.0)* | ❌ |
-| **Automation rules / schedules (read)** | ✅ | ✅ | ◑ read-only count + JSON *(v1.2.0)* | ❌ |
-| **Lighting schedule (read)** | ✅ | ✅ | ✅ read *(Gen1 + Gen2, v1.2.0)* | ❌ |
-| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
-| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
-| **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
-| **Camera sharing (friends)** | ❌ | ✅ command | ◑ read-only list *(v1.2.0)* | ❌ *(intentionally not exposed — needs user-driven flow)* |
-| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` |
-| **Named pan presets (home / left / right / back-left / back-right)** | ✅ opt-in select entity | ✅ `pan --preset` flag | ✅ `pan_preset` DP | ✅ `bosch_camera_pan preset=` |
-| **Two-way audio / intercom** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — timing-sensitive)* |
-| **Webhook delivery on events** | ✅ service + opt-in options | ✅ `watch --webhook URL` | ✅ via MQTT bridge | ❌ *(request-response model)* |
-| **MQTT event bridge (motion / audio / person)** | n/a *(HA event bus native)* | n/a *(single-run)* | ✅ admin-config | n/a |
-| **Apple HomeKit (via HA Core bridge)** | ✅ documented | n/a | n/a | n/a |
-| **Snapshot scheduler / time-lapse** | ✅ examples/ YAML | ✅ cron + ffmpeg examples | ✅ Blockly example | n/a |
-| **Custom Lovelace card** | ✅ 2 cards (single + grid) | n/a | n/a | n/a |
-| **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` + VIS-2 widget (alpha) | n/a |
-| **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* | ❌ *(media LAN-only; status/events via cloud)* |
-| **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs | n/a (LLM-mediated; config via CLI / MCP client) |
-| **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v10.3.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN | n/a *(no UI — LLM is the front-end)* |
-
-**Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
-
-> All four projects share the same reverse-engineered Cloud API + RCP protocol research, but evolve independently. The Home Assistant integration is the most feature-complete reference implementation; the Python CLI is the lowest-level / scriptable surface; the ioBroker adapter targets VIS dashboards and Blockly automations; the MCP server exposes a curated, LAN-first tool surface to MCP clients (Claude Desktop, Claude Code, custom) for natural-language camera control.
-
 
 ---
 
@@ -180,7 +130,7 @@ For more help with camera setup, see:
 3. Restart Home Assistant.
 4. Continue with [Setup](#setup) below.
 
-> **HACS Default listing.** A PR adding this integration to the HACS Default index is pending ([`hacs/default#7247`](https://github.com/hacs/default/pull/7247)). Once merged, the "Custom repositories" step disappears — the integration appears directly under HACS → Integrations → + Explore.
+> **HACS Default listing.** A PR adding this integration to the HACS Default index is pending ([`hacs/default#8181`](https://github.com/hacs/default/pull/8181)). Once merged, the "Custom repositories" step disappears — the integration appears directly under HACS → Integrations → + Explore.
 
 ### Manual Installation
 
@@ -279,6 +229,8 @@ Both cards are auto-registered since **v10.3.19** — no manual Lovelace resourc
 
 1. Edit dashboard → **+ Add card → Custom: Bosch Camera Card**
 2. Pick the camera entity in the visual editor, or paste:
+
+> **Since HA 2026.6** — when you tap **+ Add card** and pick a Bosch `camera.*` entity, both Bosch cards are offered automatically in the Community section, so you no longer need to type `custom:` by hand.
 
 ```yaml
 type: custom:bosch-camera-card
@@ -889,8 +841,11 @@ stateDiagram-v2
     Active --> EventReceived : push from Bosch CBS
     EventReceived --> Active : event fetched + alert pipeline
     Active --> Polling : is_started=False<br/>(listener silently terminated)
-    Polling --> SelfHeal : watchdog trigger<br/>(a) is_started=False<br/>(b) >=3 failures in 5 min<br/>(c) not _fcm_running
-    SelfHeal --> Cooldown : purge ALL fcm_* keys<br/>increment failure counter
+    Polling --> SoftHeal : watchdog trigger<br/>(a) is_started=False<br/>(b) >=3 failures in 5 min<br/>(c) not _fcm_running
+    SoftHeal --> Active : socket restart succeeds<br/>real push received → streak reset
+    SoftHeal --> SoftHeal : consecutive soft-heals<br/>with no real push (streak++)
+    SoftHeal --> HardHeal : streak >= 3<br/>(escalate)
+    HardHeal --> Cooldown : purge ALL fcm_* keys<br/>fresh FCM registration<br/>new token · streak = 0
     Cooldown --> Registering : ladder elapsed<br/>30 min / 1 h / 3 h / 6 h / 24 h<br/>+- 20% jitter
     Cooldown --> Paused : 5 consecutive failures
     Paused --> Polling : polling fallback continues
@@ -902,9 +857,9 @@ stateDiagram-v2
     CounterReset --> Active : failures = 0
 ```
 
-**Recovery behaviour (since v12.8.4):**
+**Recovery behaviour (since v13.5.12):**
 
-- **Self-heal purges every `fcm_*` key** from the config entry (credentials, registered token, Firebase config, device-type marker) on each cycle — leaving any of them behind kept fresh registrations failing with `PHONE_REGISTRATION_ERROR`.
+- **Two-stage self-heal:** a **soft-heal** first restarts the FCM socket (preserving credentials). After **3 consecutive soft-heals with no real push received**, the watchdog escalates to a **hard-heal**: all `fcm_*` keys are purged, a fresh FCM registration is performed, and a new device token is obtained. The soft-heal streak counter resets whenever a real incoming push is received or a hard-heal completes.
 - **Exponential cool-down ladder** with ±20 % jitter: 30 min → 1 h → 3 h → 6 h → 24 h. After 5 consecutive failures self-heal pauses until the next HA restart; polling fallback keeps event detection alive.
 - **Storm trigger watches registration failures, not just connectivity** — `PHONE_REGISTRATION_ERROR`, "Unable to complete gcm auth request", and "Unable to establish subscription" all count toward the `≥ 3 in 5 min` threshold.
 - **`asyncio.Lock` serialises start + self-heal** so the setup-time registration cannot race the first watchdog tick (the race used to register two device tokens with Bosch CBS in 2 s and orphan the first listener).
@@ -1485,6 +1440,8 @@ show_last_event: false
 | `auto_play` | *(integration default)* | `lan` / `always` / `never` — per-card override of the integration's auto-play behaviour. |
 | `show_motion_zones` | `false` | Overlay the configured motion-zone SVG on the video. |
 | `snapshot_during_warmup` | `true` | Show the last snapshot under the loading overlay while the stream warms up. |
+| `hide_redundant_privacy` | `true` | Hides the standalone privacy switch row when the apple-style pill bar already shows a privacy button — avoids showing the same control twice. Since v13.5.5. |
+| `pan_overlay` | `auto` | On-video edge pan chevrons for pan/tilt cameras: `auto` (visible on hover, touch, and fullscreen), `always`, or `never` (use the menu row instead). Shown only for cameras that expose `number.<cam>_pan_position`. Since v13.5.5. |
 
 > **Fullscreen toggle** — the ⛶ fullscreen button now toggles: tap it once to enter fullscreen, tap it again (or the camera name button when shown) to exit. `Esc` and a tap outside the video also exit, as before.
 
@@ -1954,7 +1911,17 @@ Open the **Home** app on iOS, tap **+** → **Add Accessory**, and scan the QR c
 
 Each camera's `switch.bosch_*_privacy_mode` entity maps automatically to Apple Home's **Camera Streaming** toggle. When privacy mode is ON in HA, the camera appears as streaming-disabled in Apple Home, and vice versa. No additional configuration is required.
 
-### Known Limitations
+### HomeKit Secure Video (HSV)
+
+To record motion clips to iCloud (viewable in the Home app's timeline) you need an Apple **Home hub** (HomePod, Apple TV 4K, or a resident iPad) and an **iCloud+** plan. HSV is enabled per camera in the Home app once a **motion sensor is linked** — HomeKit Bridge does this automatically when you also expose the camera's `binary_sensor.bosch_*_motion` (already included by the `binary_sensor` filter / globs above). Live view works without any of this.
+
+### Video resolution & the Apple 4K update
+
+Bosch Smart Home cameras stream at **1080p Full HD (1920×1080)** — the whole SHC line (Eyes Outdoor / Indoor I + II, 360° Indoor) uses a 1080p sensor; there is no 2K/4K mode.
+
+Apple is lifting HomeKit Secure Video's long-standing **1080p cap to up to 4K** (for both live streaming and HSV recording). That change only benefits cameras with a 2K/4K sensor — **for Bosch cameras it makes no difference**: they already deliver their full native 1080p to Apple Home, and 1080p was never the bottleneck. Nothing needs to change in this integration to "support" it; there simply is no higher-resolution Bosch stream to hand over.
+
+### HomeKit Known Limitations
 
 | Feature | Status |
 |---|---|
@@ -2037,18 +2004,18 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ### Parked
 
-- **Motion-zone editor (read-only)** — local read access via RCP+ (`0x0c0a` + `0x0c00`) is technically possible using the per-session `cbs-…` user from `PUT /connection LOCAL`. A read-only viewer is feasible today; write support is not currently exposed in any documented API.
-- **Rules editor** (`/v11/video_inputs/{id}/rules`) — adjust event rules from the HA UI
-- **Camera sharing** (`/v11/friends`) — manage shared access from HA
+- **Visual motion-zone editor** — cloud read + write via `set_motion_zones` / `get_motion_zones` services is already available; a visual in-card zone editor (draggable polygon overlay) is parked pending at least one user request.
+- **Gen2 subscription sensor** — the `/v11/purchases` endpoint could expose active cloud subscription state as a sensor; parked pending community interest.
 - **Live thumbnail via local RCP+** — opcode `0x099e` is reachable, but the local XML endpoint returns `<err>0x60</err>` for the `F_DATA` reads we tried (the cloud proxy uses binary TLV on the same path). Use case is narrow anyway: the card already shows live HLS as soon as the LOCAL session is up.
 
 ## Releases
 
-Latest: **v13.5.14** — see the GitHub release page for full notes:
-[**v13.5.14 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.5.14)
+Latest: **v13.5.15** — see the GitHub release page for full notes:
+[**v13.5.15 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v13.5.15)
 
 | Version | Highlights |
 |---|---|
+| **v13.5.15** | **No more brief live-stream freeze during a motion-event burst (Gen2 outdoor cameras).** Gen2 cameras share a single secure control channel between the live-stream keepalive and every cloud/diagnostic read. During a flurry of motion events that channel could saturate, the stream timed out and reconnected, and the video froze for 5–10 seconds. Diagnostic cloud reads are now deferred while a stream is running (picked up again the moment the stream is idle, so sensors never go permanently stale), and motion-event snapshots are reused instead of fetched twice. A new *Defer diagnostic reads while streaming* toggle (Options → Stream, on by default) lets you restore the old behaviour. Also: the card now prints its version to the browser console on load, and an internal log line that CodeQL flagged was removed. |
 | **v13.5.14** | **Live snapshot, privacy badge, and audio for multi-card setups.** A transient cloud hiccup during the periodic refresh could silently replace the current snapshot with a days-old motion-event image; the camera now keeps the last known live frame and only falls back to an event image on a true cold start. In privacy mode, the card now labels the shown frame with the exact date and time of the last event (*Letztes Ereignis: …*), so a held snapshot is clearly dated. And if you place the same camera on a dashboard more than once, only the first card plays audio — the others auto-mute — so the same microphone no longer echoes in every instance. Card-only change. |
 | **v13.5.13** | **Security patch — TLS certificate validation for Bosch cloud and login ([CWE-295](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/security/advisories/GHSA-6qh5-x5m5-vj6v)).** Outbound connections to Bosch's cloud API, login (OAuth) and live video proxy now verify the server certificate instead of accepting any certificate — closing a vulnerability where an attacker on your local network could intercept the connection and capture your Bosch login tokens. Because Bosch's cloud uses its own private certificate authority (not in the public trust store), the integration bundles and pins that CA alongside the system trust store, so everything keeps working while impostor certificates are refused. Local camera connections over your LAN are unchanged. **Update recommended for all users.** Reported by [EQSTLab](https://github.com/EQSTLab). |
 | **v13.5.12** | **The live stream starts with sound again when the audio switch is on.** Browsers force every video to begin muted, so the card now treats your *start-stream* tap as the unlock: when you start the stream and the audio switch is on, sound comes on by itself as the first frame appears — no second tap on the audio button needed. After a reload the stream still starts muted (no page may play sound before you interact with it), but your **first click anywhere** now reliably restores it. For sound *immediately* after a reload, install the dashboard as an app (Chrome ⋮ → *Install app*) or use the Companion App — installed apps are allowed to play sound on load. The card still never unmutes without a real user gesture, so the stream cannot freeze. Card-only change. |
@@ -2098,19 +2065,67 @@ Latest: **v13.5.14** — see the GitHub release page for full notes:
 | **Card version** | tracked in `src/bosch-camera-card.js` (`CARD_VERSION`) and mirrored in `custom_components/bosch_shc_camera/const.py` (`CARD_VERSION`) |
 | **Integration version** | `custom_components/bosch_shc_camera/manifest.json` (`version`) |
 
+## Integration Comparison
+
+The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling projects. Pick the one that fits your platform.
+
+| Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) |
+|---|---|---|---|---|
+| **Maturity** | v13.5+ — HA Quality Scale **Platinum** | v10.10+ stable (Mini-NVR BETA) | v1.5+ stable · npm | v1.5+ stable · PyPI |
+| **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) |
+| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) |
+| **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) |
+| **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP | ✅ `bosch_camera_stream_url` (LAN-only, no cloud relay) |
+| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ✅ *(v10.6.0)* `live --webrtc` | ❌ | ❌ |
+| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ✅ `info` shows both · `live --sub` *(v10.5.0)* | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* | ◑ `bosch_camera_stream_url` — main stream only |
+| **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option | ✅ URL returned, hand off to ffmpeg / go2rtc downstream |
+| **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP | ✅ `bosch_camera_privacy_set` (LAN-fallback via `prefer_local`) |
+| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) |
+| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ◑ on/off only — no RGB | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* |
+| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen2 Indoor II only)* | ✅ DP | ✅ `bosch_camera_siren_trigger` *(Gen2 Indoor II only)* |
+| **Image rotation 180°** | ✅ switch | ❌ | ✅ DP | ❌ |
+| **Motion / person / audio events** | ✅ FCM push + polling fallback | ◑ `watch` command only (events cmd removed) | ✅ FCM push + polling fallback | ✅ `bosch_camera_events` (on-demand pull) |
+| **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* | n/a *(request-response, no subscription)* |
+| **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* | n/a *(no background loop)* |
+| **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP | ❌ |
+| **Motion zones / privacy masks (read)** | ✅ | ✅ | ✅ read-only *(v1.2.0)* | ❌ |
+| **Automation rules / schedules (read)** | ✅ | ✅ | ◑ read-only count + JSON *(v1.2.0)* | ❌ |
+| **Lighting schedule (read)** | ✅ | ✅ | ✅ read *(Gen1-only, v1.2.0)* | ❌ |
+| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
+| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
+| **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
+| **Camera sharing (friends)** | ✅ services (share / invite / list) | ✅ command | ◑ read-only list *(v1.2.0)* | ❌ *(intentionally not exposed — needs user-driven flow)* |
+| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` |
+| **Named pan presets (home / left / right / back-left / back-right)** | ✅ opt-in select entity | ✅ `pan --preset` flag | ✅ `pan_preset` DP | ✅ `bosch_camera_pan preset=` |
+| **Two-way audio / intercom** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — timing-sensitive)* |
+| **Webhook delivery on events** | ✅ service + opt-in options | ✅ `watch --webhook URL` | ✅ via MQTT bridge | ❌ *(request-response model)* |
+| **MQTT event bridge (motion / audio / person)** | n/a *(HA event bus native)* | n/a *(single-run)* | ✅ admin-config | n/a |
+| **Apple HomeKit (via HA Core bridge)** | ✅ documented | n/a | n/a | n/a |
+| **Snapshot scheduler / time-lapse** | ✅ examples/ YAML | ✅ cron + ffmpeg examples | ✅ Blockly example | n/a |
+| **Native dashboard card / widget** | ✅ 2 Lovelace cards (single + grid) | n/a | ✅ 2 vis-2 widgets — BoschCamera + BoschOverview multi-cam | n/a |
+| **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* | ❌ *(media LAN-only; status/events via cloud)* |
+| **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs | n/a (LLM-mediated; config via CLI / MCP client) |
+| **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v10.3.0)* | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN | n/a *(no UI — LLM is the front-end)* |
+
+**Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
+
+> All four projects share the same reverse-engineered Cloud API + RCP protocol research, but evolve independently. The Home Assistant integration is the most feature-complete reference implementation; the Python CLI is the lowest-level / scriptable surface; the ioBroker adapter targets VIS dashboards and Blockly automations; the MCP server exposes a curated, LAN-first tool surface to MCP clients (Claude Desktop, Claude Code, custom) for natural-language camera control.
+
+---
+
 ## Related Projects
 
 Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha frontend):
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.4.5** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.1** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.0.3** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widget |
-| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.0** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.1.0-alpha · skeleton — 4 nodes (event / snapshot / privacy / config) |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.5.15** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.2** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.5.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.3** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.2-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.0-alpha Phase-1 skeleton (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.1-alpha** (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land here first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 

@@ -179,6 +179,7 @@ class TestPathAMovement:
 
         cam_entity = MagicMock()
         cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
             _last_event_ids={CAM_ID: "old-evt"},
@@ -218,6 +219,7 @@ class TestPathAPersonEvent:
 
         cam_entity = MagicMock()
         cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
             _last_event_ids={CAM_ID: "old-evt"},
@@ -261,6 +263,7 @@ class TestPathAGen1Delay:
 
         cam_entity = MagicMock()
         cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
             _last_event_ids={CAM_ID: "old-evt"},
@@ -596,6 +599,7 @@ class TestPathAandBOrdering:
         # Set up a cam entity for Path A
         cam_entity = MagicMock()
         cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.is_streaming = False  # not streaming → Path A must fire
         # Set it up so Path B can also update it (no existing cache → update will fire)
         cam_entity._cached_image = None
         cam_entity._last_image_fetch = float("-inf")

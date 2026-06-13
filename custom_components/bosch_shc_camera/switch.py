@@ -37,6 +37,7 @@ import asyncio
 import logging
 import time
 from typing import Any, ClassVar
+from urllib.parse import urlsplit, urlunsplit
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -56,6 +57,33 @@ from .const import CLOUD_API, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
+
+
+def _redact_rtsp_creds(url: str) -> str:
+    """Strip userinfo credentials from an RTSP(S) URL before it reaches a log.
+
+    The LOCAL proxy / Digest credentials are embedded in the netloc userinfo
+    (``user:password@host``); the rest of the URL (host, port, path, stream
+    params) carries no secret. We replace the userinfo with ``***:***`` so the
+    line stays useful for debugging without writing credentials to the log —
+    HA logs are routinely pasted into forum bug reports. Mirrors the
+    never-log-creds principle of the __init__ RTSPS sanitiser (CWE-312).
+    """
+    if not url:
+        return ""
+    parsed = urlsplit(url)
+    if "@" not in parsed.netloc:
+        return url
+    host_part = parsed.netloc.rsplit("@", 1)[1]
+    return urlunsplit(
+        (
+            parsed.scheme,
+            f"***:***@{host_part}",
+            parsed.path,
+            parsed.query,
+            parsed.fragment,
+        )
+    )
 
 
 _GEN2_INDOOR_HW = {"HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
@@ -386,7 +414,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 "Live stream active for %s (%s) — %s",
                 self._cam_title,
                 conn_type,
-                result.get("rtspsUrl", ""),
+                _redact_rtsp_creds(result.get("rtspsUrl", "")),
             )
             # Schedule health check — if the LOCAL stream isn't actually
             # producing HLS segments after ~60s and still not after ~120s,

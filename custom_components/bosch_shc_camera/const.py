@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.5.14"
+CARD_VERSION = "13.5.15"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -171,6 +171,10 @@ DEFAULT_OPTIONS = {
     # implemented, opt-in only — keeps the code path available for testing
     # and skips it for normal users so warn-spam stays out of the logs.
     "use_mjpeg_snapshot": False,
+    # Defer slow-tier diagnostic cloud reads while a live stream is active.
+    # Default ON: prevents TLS-channel contention → stream freeze on motion burst.
+    # See stream-freeze-on-motion-event-contention.md.
+    "defer_diag_during_stream": True,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
@@ -184,3 +188,11 @@ CONF_WEBHOOK_URL = "webhook_url"
 
 # ── PTZ controls (pan presets) ────────────────────────────────────────────────
 CONF_ENABLE_PTZ_CONTROLS = "enable_ptz_controls"
+
+# ── Slow-tier defer during live stream ────────────────────────────────────────
+# When True (default), slow-tier diagnostic cloud reads are deferred while a
+# camera's live stream is active, preventing TLS-channel contention that could
+# cause go2rtc EOF → 5-10 s stream freeze on motion bursts.  Set to False only
+# if diagnostic sensors must stay current even while a stream is running.
+CONF_DEFER_DIAG_DURING_STREAM = "defer_diag_during_stream"
+DEFAULT_DEFER_DIAG_DURING_STREAM = True

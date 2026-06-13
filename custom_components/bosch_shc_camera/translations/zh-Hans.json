@@ -93,12 +93,14 @@
             "data": {
               "stream_connection_type": "流媒体连接类型",
               "live_buffer_mode": "播放器缓冲配置（HLS）",
-              "enable_go2rtc": "go2rtc WebRTC（低延迟约 2 秒）"
+              "enable_go2rtc": "go2rtc WebRTC（低延迟约 2 秒）",
+              "defer_diag_during_stream": "直播期间暂停诊断读取"
             },
             "data_description": {
               "stream_connection_type": "实时直播的默认连接类型。\n• **auto**（推荐）：优先尝试本地 LAN，失败时自动切换至 Bosch 云端代理。\n• **local**：仅直连 LAN — 无需互联网。RTSP 更快，但快照较慢（约 6–10 秒）。会话每 50 秒自动续期。\n• **remote**：始终通过 Bosch 云端代理。快照更快（约 0.4–1.9 秒）。HA 不在同一 LAN 时的最佳默认选项。\n\"Stream Mode\" 选择实体可在运行时覆盖此设置，无需重启。",
               "live_buffer_mode": "播放器在显示前预缓冲的视频秒数。缓冲越多 = 卡顿越少，但与实时的延迟越大。\n• **Latency**：小缓冲（约 4-6 秒延迟）。Wi-Fi 不稳定时可能卡顿。\n• **Balanced**（推荐）：中等缓冲（约 8-10 秒）。对典型 Wi-Fi 波动有较强鲁棒性。\n• **Stable**：大缓冲（约 12-15 秒）。即使在弱网络下也流畅，但延迟明显。\n仅影响卡片显示 — 对摄像头、录制或快照无影响。",
-              "enable_go2rtc": "自动将实时直播注册到 HA 内置 go2rtc 以启用 WebRTC 播放（约 2 秒延迟 vs. HLS 约 10 秒）。推荐。仅在使用自定义 go2rtc 配置时禁用。"
+              "enable_go2rtc": "自动将实时直播注册到 HA 内置 go2rtc 以启用 WebRTC 播放（约 2 秒延迟 vs. HLS 约 10 秒）。推荐。仅在使用自定义 go2rtc 配置时禁用。",
+              "defer_diag_during_stream": "启用时（推荐）：当摄像头直播流处于活跃状态时，慢速诊断云读取将被延迟，以防止TLS通道争用导致运动突发时出现短暂的流卡顿。延迟的读取将在流空闲后的下一个轮询周期执行，不会永久丢失数据。仅在需要诊断传感器在直播期间保持实时更新时关闭。"
             }
           },
           "fcm": {

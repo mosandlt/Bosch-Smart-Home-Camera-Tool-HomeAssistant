@@ -1191,33 +1191,56 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                 )
                 cam_entity = coordinator._camera_entities.get(cam_id)
                 if cam_entity and event_type in _SNAP_EVENT_TYPES:
-                    try:
-                        # Per-model settle delay — Gen2 captures immediately (0 s),
-                        # Gen1 needs ~1.5 s so the snap reflects the post-trigger frame.
-                        from .models import get_model_config
-
-                        hw_cache = getattr(coordinator, "_hw_version", {})
-                        hw = (
-                            hw_cache.get(cam_id, "") if hasattr(hw_cache, "get") else ""
-                        )
-                        refresh_delay = get_model_config(hw).event_refresh_delay
-                        task = coordinator.hass.async_create_task(
-                            cam_entity._async_trigger_image_refresh(delay=refresh_delay)
-                        )
-                        coordinator._bg_tasks.add(task)
-                        task.add_done_callback(coordinator._bg_tasks.discard)
+                    # Stream-contention guard: while the RTSP live-stream is active,
+                    # Path A's live-snap refresh (PUT /connection + snap.jpg) competes
+                    # with the RTSP OPTIONS keepalive on the camera's single TLS
+                    # control channel.  On Gen2 the 30-s RTSP session timeout means
+                    # a delayed OPTIONS response (>30 s) tears down the producer →
+                    # 5–10 s stream freeze.  Path B (alert step-2 in async_send_alert)
+                    # already pushes the Bosch event image (with AI overlay) into
+                    # _cached_image via the same cloud session that fetches the
+                    # notification snapshot — no extra camera-side TLS request needed.
+                    # Skip Path A entirely when is_streaming=True; Path B is sufficient.
+                    # Source: knowledge-base/stream-freeze-on-motion-event-contention.md
+                    if getattr(cam_entity, "is_streaming", False):
                         _LOGGER.debug(
-                            "FCM Path A: live-snap refresh scheduled for %s (%s, delay=%.1fs)",
+                            "FCM Path A: skipped for %s (%s) — camera is streaming, "
+                            "Path B will update cache",
                             cam_name,
                             event_type,
-                            refresh_delay,
                         )
-                    except Exception as _snap_err:
-                        _LOGGER.warning(
-                            "FCM Path A: failed to schedule live-snap refresh for %s: %s",
-                            cam_name,
-                            _snap_err,
-                        )
+                    else:
+                        try:
+                            # Per-model settle delay — Gen2 captures immediately (0 s),
+                            # Gen1 needs ~1.5 s so the snap reflects the post-trigger frame.
+                            from .models import get_model_config
+
+                            hw_cache = getattr(coordinator, "_hw_version", {})
+                            hw = (
+                                hw_cache.get(cam_id, "")
+                                if hasattr(hw_cache, "get")
+                                else ""
+                            )
+                            refresh_delay = get_model_config(hw).event_refresh_delay
+                            task = coordinator.hass.async_create_task(
+                                cam_entity._async_trigger_image_refresh(
+                                    delay=refresh_delay
+                                )
+                            )
+                            coordinator._bg_tasks.add(task)
+                            task.add_done_callback(coordinator._bg_tasks.discard)
+                            _LOGGER.debug(
+                                "FCM Path A: live-snap refresh scheduled for %s (%s, delay=%.1fs)",
+                                cam_name,
+                                event_type,
+                                refresh_delay,
+                            )
+                        except Exception as _snap_err:
+                            _LOGGER.warning(
+                                "FCM Path A: failed to schedule live-snap refresh for %s: %s",
+                                cam_name,
+                                _snap_err,
+                            )
 
                 # Notify all entity listeners
                 coordinator.async_update_listeners()
@@ -1368,6 +1391,11 @@ async def async_send_alert(
     session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {coordinator.token}", "Accept": "*/*"}
     files_to_cleanup: list[str] = []
+    # Snapshot bytes captured in step 2 — passed to SMB/FTP upload so the
+    # upload can use the already-in-memory bytes instead of re-downloading
+    # from Bosch cloud (which would contend with the RTSP live-stream's TLS
+    # control channel).  None until step 2 successfully downloads the image.
+    _prefetched_snapshot: bytes | None = None
 
     async def _notify_type(
         type_key: str, message: str, file_path: str | None = None
@@ -1472,6 +1500,8 @@ async def async_send_alert(
                     ):
                         data = await resp.read()
                         if data:
+                            # Capture bytes for SMB/FTP upload (avoid re-download).
+                            _prefetched_snapshot = data
                             await coordinator.hass.async_add_executor_job(
                                 _write_file, snap_path, data
                             )
@@ -1709,16 +1739,28 @@ async def async_send_alert(
                     "events": [ev_data],
                 }
             }
+            # Pass pre-downloaded snapshot bytes so sync_smb_upload skips the
+            # cloud re-download.  When the camera is streaming, re-downloading
+            # via urllib in the executor would compete on the camera's single TLS
+            # control channel → RTSP keepalive delay → stream freeze.  When
+            # _prefetched_snapshot is None (step 2 skipped / image unavailable),
+            # sync_smb_upload falls back to downloading via imageUrl as before.
+            _smb_prefetch = _prefetched_snapshot
             _LOGGER.info(
-                "Alert: SMB upload starting for %s (event=%s, img=%s, clip=%s)",
+                "Alert: SMB upload starting for %s (event=%s, img=%s, clip=%s, prefetch=%s)",
                 cam_name,
                 ev_id[:8] if ev_id else "?",
                 bool(image_url),
                 bool(found_clip_url),
+                bool(_smb_prefetch),
             )
             await asyncio.wait_for(
                 coordinator.hass.async_add_executor_job(
-                    sync_smb_upload, coordinator, smb_data, coordinator.token
+                    sync_smb_upload,
+                    coordinator,
+                    smb_data,
+                    coordinator.token,
+                    _smb_prefetch,
                 ),
                 timeout=30.0,
             )

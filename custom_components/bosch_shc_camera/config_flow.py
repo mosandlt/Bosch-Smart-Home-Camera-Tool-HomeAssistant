@@ -78,6 +78,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_go2rtc",
         "enable_green_it",
         "use_mjpeg_snapshot",
+        "defer_diag_during_stream",
     ],
     "fcm": [
         "enable_fcm_push",
@@ -189,9 +190,11 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
 
 from . import DEFAULT_OPTIONS, DOMAIN  # type: ignore[attr-defined]
 from .const import (
+    CONF_DEFER_DIAG_DURING_STREAM,
     CONF_ENABLE_PTZ_CONTROLS,
     CONF_ENABLE_WEBHOOK_DELIVERY,
     CONF_WEBHOOK_URL,
+    DEFAULT_DEFER_DIAG_DURING_STREAM,
     DEFAULT_MOTION_ACTIVE_WINDOW,
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
@@ -601,6 +604,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 CONF_ENABLE_WEBHOOK_DELIVERY,
                 CONF_ENABLE_PTZ_CONTROLS,
                 "use_mjpeg_snapshot",
+                CONF_DEFER_DIAG_DURING_STREAM,
             ]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
@@ -781,6 +785,15 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     vol.Optional(
                         "use_mjpeg_snapshot",
                         default=bool(opts.get("use_mjpeg_snapshot", False)),
+                    ): bool,
+                    vol.Optional(
+                        CONF_DEFER_DIAG_DURING_STREAM,
+                        default=bool(
+                            opts.get(
+                                CONF_DEFER_DIAG_DURING_STREAM,
+                                DEFAULT_DEFER_DIAG_DURING_STREAM,
+                            )
+                        ),
                     ): bool,
                 }
             ),
