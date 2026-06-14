@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.15";
+const CARD_VERSION = "13.5.16";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -204,6 +204,17 @@ function _boschAudioUnregister(entityId, card) {
   if (!group) return;
   group.delete(card);
   if (group.size === 0) _boschAudioRegistry.delete(entityId);
+}
+
+// Picture-in-Picture is a browser-wide singleton — only ONE <video> can float
+// at a time (a single document.pictureInPictureElement). So while one camera is
+// in PiP, every other card greys its PiP button out; the active card lights up.
+// This registry lets any card broadcast the active-PiP owner to all the others.
+const _boschPipCards = new Set(); // all live BoschCameraCard instances
+let _boschPipActive = null;       // the card currently in PiP, or null
+function _boschPipSetActive(card) {
+  _boschPipActive = card;
+  for (const c of _boschPipCards) { try { c._reflectPipState(); } catch (_) { /* detached */ } }
 }
 
 // Card auto-play modes. Primary source = integration option
@@ -1310,6 +1321,7 @@ class BoschCameraCard extends HTMLElement {
     this._lastAudioState     = null;  // last backend audio-switch state (live-sync edge detect)
     this._lastVolumeState    = null;  // last backend volume-entity state (live-sync edge detect)
     this._stoppingLiveVideo  = false; // true only during _stopLiveVideo() so the pause-guard doesn't fight our own teardown
+    this._reconnectingLiveVideo = false; // true when _stopLiveVideo() is called as part of an auto-reconnect; suppresses PiP exit so the floating window survives the reconnect cycle
     this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
@@ -1357,6 +1369,7 @@ class BoschCameraCard extends HTMLElement {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   connectedCallback() {
+    _boschPipCards.add(this); // join the cross-card single-PiP greying group
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     // Mobile reload fix: iOS Safari + HA Companion App (WKWebView) do NOT
@@ -2250,6 +2263,10 @@ class BoschCameraCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    // Leave the PiP greying group; if we were the floating owner, release the
+    // hold so the remaining cards re-enable their PiP buttons.
+    _boschPipCards.delete(this);
+    if (_boschPipActive === this) _boschPipSetActive(null);
     this._stopRefreshTimer();
     if (this._visibilityHandler) {
       document.removeEventListener("visibilitychange", this._visibilityHandler);
@@ -3313,6 +3330,10 @@ class BoschCameraCard extends HTMLElement {
           gap: 6px; padding: 6px;
           border-radius: 999px; z-index: 6;
           max-width: calc(100% - 24px);
+          /* With the PiP button the bar holds up to 8 controls; in a narrow
+             minimal overview tile that exceeds max-width. Scroll horizontally
+             instead of clipping the row, and hide the scrollbar chrome. */
+          overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
         }
         .ap-pill-btn {
           width: 42px; height: 42px; border-radius: 50%;
@@ -4084,6 +4105,9 @@ class BoschCameraCard extends HTMLElement {
             <button class="ap-pill-btn" id="ap-btn-fullscreen" title="Vollbild" aria-label="Vollbild">
               <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
             </button>
+            <button class="ap-pill-btn" id="ap-btn-pip" title="Bild-im-Bild" aria-label="Bild-im-Bild (schwebendes Fenster)">
+              <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
+            </button>
             <button class="ap-pill-btn" id="ap-btn-more" title="Mehr Optionen" aria-label="Mehr Optionen" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg>
             </button>
@@ -4547,6 +4571,14 @@ class BoschCameraCard extends HTMLElement {
     img.addEventListener("click", () => this._requestFullscreen());
     const vid = this.shadowRoot.getElementById("cam-video");
     vid.addEventListener("click", () => this._requestFullscreen());
+    // Picture-in-Picture is a browser-wide singleton (one floating window at a
+    // time). Broadcast enter/leave to ALL cards so the active one lights up and
+    // every other card greys its PiP button out. Listeners die with the <video>
+    // on the next render; the wiring re-applies state via _reflectPipState().
+    vid.addEventListener("enterpictureinpicture", () => _boschPipSetActive(this));
+    vid.addEventListener("leavepictureinpicture", () => {
+      if (_boschPipActive === this) _boschPipSetActive(null);
+    });
 
     // Buttons
     this.shadowRoot.getElementById("btn-snapshot").addEventListener("click", () =>
@@ -4591,6 +4623,15 @@ class BoschCameraCard extends HTMLElement {
     apBindClick("ap-btn-privacy",    () => this._togglePrivacy());
     apBindClick("ap-btn-light",      () => this._toggleSwitchWithRollback(this._entities.light));
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
+    apBindClick("ap-btn-pip",        () => this._togglePiP());
+    // Hide the button where the standard PiP API is unavailable
+    // (document.pictureInPictureEnabled === false): older browsers and most
+    // iOS/Android WebViews. Firefox 153+ and Chrome/Safari desktop return true.
+    const pipBtn = this.shadowRoot.getElementById("ap-btn-pip");
+    if (pipBtn && !document.pictureInPictureEnabled) pipBtn.hidden = true;
+    // Re-apply the cross-card single-PiP state so a freshly rendered button is
+    // lit/greyed correctly if some camera is already floating in PiP.
+    this._reflectPipState();
     this._wireAudioPill();
     apBindClick("ap-btn-audio",      () => { this._toggleAudio(); this._refreshAudioPill(); });
     apBindClick("ap-btn-more",       () => {
@@ -5374,10 +5415,13 @@ class BoschCameraCard extends HTMLElement {
             if (this._hls && this._hls.liveSyncPosition) {
               video.currentTime = this._hls.liveSyncPosition;
             } else {
-              // Full restart
+              // Full restart — flag as reconnect so PiP survives the cycle
+              this._reconnectingLiveVideo = true;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => this._startLiveVideo(), 2000);
+                setTimeout(() => { this._reconnectingLiveVideo = false; this._startLiveVideo(); }, 2000);
+              } else {
+                this._reconnectingLiveVideo = false;
               }
             }
           }
@@ -5567,9 +5611,13 @@ class BoschCameraCard extends HTMLElement {
             if (this._stallCount >= 3) {
               console.warn("bosch-camera-card: 3 buffer stalls, reconnecting HLS");
               this._stallCount = 0;
+              // Flag as reconnect so PiP survives the cycle
+              this._reconnectingLiveVideo = true;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => this._reconnectAfterStreamDrop(), 1000);
+                setTimeout(() => { this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 1000);
+              } else {
+                this._reconnectingLiveVideo = false;
               }
             }
             return;
@@ -5581,9 +5629,13 @@ class BoschCameraCard extends HTMLElement {
             hls.recoverMediaError();
           } else {
             console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
+            // Flag as reconnect so PiP survives the cycle
+            this._reconnectingLiveVideo = true;
             this._stopLiveVideo();
             if (this._isStreaming()) {
-              setTimeout(() => this._reconnectAfterStreamDrop(), 2000);
+              setTimeout(() => { this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 2000);
+            } else {
+              this._reconnectingLiveVideo = false;
             }
           }
         });
@@ -5843,6 +5895,8 @@ class BoschCameraCard extends HTMLElement {
     if (!sw || !this._hass?.states?.[sw]) return false;
     this._lastRewarmAt = now;
     console.warn("bosch-camera-card: go2rtc source stale — forcing backend stream rebuild via", sw);
+    // Flag as reconnect so PiP survives the backend rebuild cycle
+    this._reconnectingLiveVideo = true;
     this._stopLiveVideo();
     this._waitingForStream = true;
     this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
@@ -5882,6 +5936,16 @@ class BoschCameraCard extends HTMLElement {
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
+      // If this video is floating in Picture-in-Picture, close it on teardown.
+      // Exception: auto-reconnect paths set _reconnectingLiveVideo=true before
+      // calling _stopLiveVideo() — in that case the video srcObject is about to
+      // be replaced by _startLiveVideo(), so the PiP window will seamlessly
+      // continue with the new stream without any user interaction needed.
+      // Closing PiP on reconnect would be disruptive (e.g. 15s stall recovery,
+      // 60-min Bosch session rotation). 2026-06-14.
+      if (document.pictureInPictureElement === video && !this._reconnectingLiveVideo) {
+        document.exitPictureInPicture().catch(() => {});
+      }
       video.pause();
       video.srcObject = null;
       video.removeAttribute("src");
@@ -5914,6 +5978,10 @@ class BoschCameraCard extends HTMLElement {
     if (tapOverlay) tapOverlay.classList.remove("visible");
     // Teardown done — re-arm the pause-guard for the next stream.
     this._stoppingLiveVideo = false;
+    // Reconnect flag is cleared by the caller after _startLiveVideo() is queued.
+    // Clearing here as well ensures it never stays stuck if _startLiveVideo()
+    // is not called (e.g. _isStreaming() returned false mid-reconnect).
+    this._reconnectingLiveVideo = false;
     // Clear the transport so a stale value can't flash the HLS banner before the
     // next stream picks its transport.
     this._streamTransport = null;
@@ -7848,6 +7916,12 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _requestFullscreen() {
+    // Can't be in PiP and fullscreen at once — the <video> is pulled out of the
+    // page into the floating window, so a fullscreen request would show an empty
+    // box. Leave PiP first (fire-and-forget keeps the gesture for fullscreen).
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    }
     // If CSS fullscreen is already active, exit it
     if (this.classList.contains("fs-active")) {
       this._exitCssFullscreen();
@@ -7895,6 +7969,70 @@ class BoschCameraCard extends HTMLElement {
     } catch (_) {
       this._enterCssFullscreen();
     }
+  }
+
+  // Picture-in-Picture: pop the live <video> into the browser's floating,
+  // always-on-top window. On macOS Safari it floats over ALL apps; on Chrome
+  // it stays above Chrome windows only (browser/OS behaviour, not card-side).
+  // Must run inside the click gesture — requestPictureInPicture() needs user
+  // activation. The WebRTC stream uses srcObject, so the element can still be
+  // HAVE_NOTHING right after start → guard on readyState and let any reject
+  // fall through silently (the user can retry once the stream is playing).
+  async _togglePiP() {
+    // Already floating → the same button closes PiP (toggle, like fullscreen).
+    if (document.pictureInPictureElement) {
+      try { await document.exitPictureInPicture(); } catch (_) { /* ignore */ }
+      return;
+    }
+    const video = this.shadowRoot.getElementById("cam-video");
+    if (!video || !document.pictureInPictureEnabled || video.disablePictureInPicture) {
+      return; // browser/element can't do PiP (iOS Safari, Firefox, blocked)
+    }
+    // Needs at least metadata; a just-started WebRTC stream may not be there yet.
+    if (video.readyState < 1 /* HAVE_METADATA */) {
+      return; // start the live stream first, then tap PiP
+    }
+    // Drop any digital zoom so the floating window shows the full frame.
+    if (this._zoom?.scale > 1) this._resetZoom();
+    // Label the PiP window with the camera name — Chrome otherwise shows the
+    // page origin (e.g. "192.168.x:8123"). Synchronous: keeps the click gesture.
+    this._setPipMetadata();
+    try {
+      await video.requestPictureInPicture();
+    } catch (_) {
+      // gesture lost / NotAllowedError — silent, user can tap again
+    }
+  }
+
+  // Reflect the browser-wide single-PiP rule on this card's PiP button: lit when
+  // WE are the floating window, greyed (disabled) while ANOTHER card floats,
+  // normal when nothing floats. Driven by _boschPipSetActive() across all cards
+  // and re-applied after each render so a freshly drawn button is consistent.
+  _reflectPipState() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-pip");
+    if (!btn) return;
+    const mine    = _boschPipActive === this;
+    const blocked = _boschPipActive !== null && !mine;
+    btn.classList.toggle("on", mine);
+    btn.setAttribute("aria-pressed", String(mine));
+    btn.disabled = blocked; // greys out via .ap-pill-btn:disabled (opacity .4)
+    btn.title = blocked ? "Bild-im-Bild läuft für eine andere Kamera" : "Bild-im-Bild";
+  }
+
+  // Set the Media Session title shown in the PiP window's header (Chrome falls
+  // back to the page origin like "192.168.x:8123" otherwise). Best-effort.
+  _setPipMetadata() {
+    if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+    try {
+      const ents = this._entities || {};
+      const name = this._config?.title
+        || this._hass?.states?.[ents.camera]?.attributes?.friendly_name
+        || "Bosch Kamera";
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: name,
+        artist: "Bosch Smart Home",
+      });
+    } catch (_) { /* MediaMetadata constructor unavailable */ }
   }
 
   _enterCssFullscreen() {

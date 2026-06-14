@@ -139,6 +139,17 @@ SELF_HEAL_JITTER_FRACTION = 0.2
 # next heal, and long enough to weed out flaky 1-2 min connections.
 SELF_HEAL_SUCCESS_WINDOW_SEC = 600.0
 
+# Bounded slow-tier defer (stream-contention gate, see the slow-tier block in
+# _async_update_data): while a live stream is active the slow-tier diagnostic
+# read is deferred to avoid TLS-channel contention.  On a *continuously* active
+# stream (e.g. a dashboard left on live view) that deferral would otherwise
+# never end, freezing the diagnostic sensors indefinitely.  After this many
+# seconds of unbroken deferral we force one read even while streaming —
+# accepting a rare brief contention over permanently stale diagnostics — then
+# the defer cycle restarts.  Bounds worst-case staleness to ~this + one slow
+# interval.
+SLOW_TIER_MAX_DEFER_SEC = 1800.0
+
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
 try:
@@ -574,6 +585,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Invariant: an entry is removed as soon as the deferred fetch actually runs.
         # SENTINEL_RULE: never use 0.0 / float('inf') here — set membership is the flag.
         self._slow_tier_deferred: set[str] = set()
+        # Per-cam monotonic timestamp of when the *current* unbroken deferral
+        # started, so a continuously-active stream cannot starve diagnostics
+        # forever: once now - start >= SLOW_TIER_MAX_DEFER_SEC we force one read
+        # despite the stream. Entry cleared whenever the deferred fetch runs.
+        self._slow_tier_defer_since: dict[str, float] = {}
         # Cached data for types that are not re-fetched this tick
         self._cached_status: dict[str, str] = {}
         # Per-cam time (monotonic) the cloud last returned HTTP 444 (session
@@ -3075,13 +3091,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # a 30-s RTSP session timeout → go2rtc EOF → 5-10 s video freeze.
                 # Fix: defer (NOT drop) the slow-tier fetch for a camera while its live
                 # stream is active.  The next coordinator tick where the stream is idle
-                # will pick it up via _slow_tier_deferred — no permanent staleness.
+                # picks it up via _slow_tier_deferred.  A *continuously* active stream
+                # (dashboard left on live view) never goes idle, so the deferral is
+                # bounded by SLOW_TIER_MAX_DEFER_SEC: once exceeded we force one read
+                # despite the stream, then restart the cycle — no permanent staleness.
                 # Partial coordinator stubs in unit tests bypass __init__ and may
-                # lack this attribute; the real coordinator always sets it in
+                # lack these attributes; the real coordinator always sets them in
                 # __init__.  Lazy-init keeps the gate robust without forcing every
-                # stub to mirror the field.
+                # stub to mirror the fields.
                 if not hasattr(self, "_slow_tier_deferred"):
                     self._slow_tier_deferred = set()
+                if not hasattr(self, "_slow_tier_defer_since"):
+                    self._slow_tier_defer_since = {}
                 stream_active = cam_id_key in self._live_connections
                 # Option: defer slow-tier when stream is active (default ON).
                 # When OFF, slow-tier runs regardless — diagnostic sensors stay
@@ -3092,25 +3113,43 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         True,
                     )
                 )
+                # Bounded defer: a deferral that has lasted ≥ the cap must yield one
+                # read even while the stream is live, else diagnostics freeze forever.
+                _defer_started = self._slow_tier_defer_since.get(cam_id_key)
+                defer_bound_reached = (
+                    _defer_started is not None
+                    and time.monotonic() - _defer_started >= SLOW_TIER_MAX_DEFER_SEC
+                )
                 # per-camera slow flag: True on the normal interval, OR when a deferred
                 # fetch is now safe to run (stream gone idle since last deferral).
                 do_slow_cam = do_slow or (
                     cam_id_key in self._slow_tier_deferred and not stream_active
                 )
-                if _defer_diag and do_slow_cam and stream_active:
+                if (
+                    _defer_diag
+                    and do_slow_cam
+                    and stream_active
+                    and not defer_bound_reached
+                ):
                     # Defer: stream is live — adding to deferred set instead of running.
                     self._slow_tier_deferred.add(cam_id_key)
+                    self._slow_tier_defer_since.setdefault(cam_id_key, time.monotonic())
                     _LOGGER.debug(
                         "Slow-tier deferred for %s (live stream active)",
                         cam_id_key,
                     )
                     do_slow_cam = False  # skip the fetch blocks below for this camera
                 elif do_slow_cam and cam_id_key in self._slow_tier_deferred:
-                    # Deferred fetch now safe: stream gone idle (or defer disabled).
+                    # Deferred fetch now safe: stream gone idle, defer disabled, or the
+                    # defer bound was reached (forced read despite an active stream).
                     self._slow_tier_deferred.discard(cam_id_key)
+                    self._slow_tier_defer_since.pop(cam_id_key, None)
                     _LOGGER.debug(
-                        "Slow-tier running deferred fetch for %s (stream now idle)",
+                        "Slow-tier running deferred fetch for %s (%s)",
                         cam_id_key,
+                        "defer bound reached, stream still active"
+                        if defer_bound_reached and stream_active
+                        else "stream now idle",
                     )
                 if do_slow_cam and not is_online:
                     _LOGGER.debug(

@@ -29,6 +29,9 @@ PIN_EVERY_MODE (no test collapse):
   * do_slow=False, deferred entry, stream=False  → do_slow_cam=True (catch-up)
   * DEFAULT_DEFER_DIAG_DURING_STREAM == True
   * "defer_diag_during_stream" key present in DEFAULT_OPTIONS with value True
+  * bounded defer: deferral < SLOW_TIER_MAX_DEFER_SEC keeps deferring
+  * bounded defer: deferral ≥ SLOW_TIER_MAX_DEFER_SEC forces one read while streaming
+  * bounded defer: defer cycle restarts (fresh start time) after a forced read
 
 Only _slow_tier_deferred and the gate logic are tested — the actual HTTP
 fetches are already covered in test_diagnostic_sensors* and test_stream_lifecycle.
@@ -42,6 +45,8 @@ from typing import Any
 
 import pytest
 
+from custom_components.bosch_shc_camera import SLOW_TIER_MAX_DEFER_SEC
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
@@ -54,6 +59,7 @@ def _make_coord(
     *,
     live_connections: dict[str, Any] | None = None,
     slow_tier_deferred: set[str] | None = None,
+    slow_tier_defer_since: dict[str, float] | None = None,
 ) -> Any:
     """Minimal coordinator stub exposing only the fields the gate reads/writes."""
     return SimpleNamespace(
@@ -61,6 +67,9 @@ def _make_coord(
         _slow_tier_deferred=slow_tier_deferred
         if slow_tier_deferred is not None
         else set(),
+        _slow_tier_defer_since=slow_tier_defer_since
+        if slow_tier_defer_since is not None
+        else {},
     )
 
 
@@ -70,6 +79,7 @@ def _compute_gate(
     do_slow: bool,
     *,
     defer_diag: bool = True,
+    now: float = 0.0,
 ) -> tuple[bool, set[str]]:
     """
     Replicate the gate logic from __init__.py in pure Python so tests
@@ -77,24 +87,26 @@ def _compute_gate(
 
     Returns (do_slow_cam_final, updated _slow_tier_deferred).
 
-    This mirrors the exact if/elif structure shipped in __init__.py:
-        stream_active = cam_id in self._live_connections
-        do_slow_cam = do_slow or (cam_id in self._slow_tier_deferred and not stream_active)
-        if _defer_diag and do_slow_cam and stream_active:
-            self._slow_tier_deferred.add(cam_id)
-            do_slow_cam = False
-        elif do_slow_cam and cam_id in self._slow_tier_deferred:
-            self._slow_tier_deferred.discard(cam_id)
+    `now` stands in for ``time.monotonic()`` so the bounded-defer branch can be
+    exercised deterministically. This mirrors the exact structure shipped in
+    __init__.py, including the SLOW_TIER_MAX_DEFER_SEC bound that forces one read
+    when a continuously-active stream has deferred the slow tier for too long.
     """
     stream_active: bool = cam_id in coord._live_connections
+    defer_started = coord._slow_tier_defer_since.get(cam_id)
+    defer_bound_reached: bool = (
+        defer_started is not None and now - defer_started >= SLOW_TIER_MAX_DEFER_SEC
+    )
     do_slow_cam: bool = do_slow or (
         cam_id in coord._slow_tier_deferred and not stream_active
     )
-    if defer_diag and do_slow_cam and stream_active:
+    if defer_diag and do_slow_cam and stream_active and not defer_bound_reached:
         coord._slow_tier_deferred.add(cam_id)
+        coord._slow_tier_defer_since.setdefault(cam_id, now)
         do_slow_cam = False
     elif do_slow_cam and cam_id in coord._slow_tier_deferred:
         coord._slow_tier_deferred.discard(cam_id)
+        coord._slow_tier_defer_since.pop(cam_id, None)
     return do_slow_cam, coord._slow_tier_deferred
 
 
@@ -231,7 +243,7 @@ class TestSlowTierStreamGate:
         import inspect
 
         from custom_components.bosch_shc_camera import (
-            BoschCameraCoordinator,  # type: ignore[import]
+            BoschCameraCoordinator,
         )
 
         # Verify the real coordinator class initialises the attribute as a set.
@@ -239,6 +251,115 @@ class TestSlowTierStreamGate:
         # so we inspect the __init__ source instead of using SimpleNamespace.
         src = inspect.getsource(BoschCameraCoordinator.__init__)
         assert "_slow_tier_deferred: set[str] = set()" in src
+
+    def test_slow_tier_defer_since_is_dict_type(self) -> None:
+        """_slow_tier_defer_since must be a dict (cam_id → monotonic start)."""
+        import inspect
+
+        from custom_components.bosch_shc_camera import (
+            BoschCameraCoordinator,
+        )
+
+        src = inspect.getsource(BoschCameraCoordinator.__init__)
+        assert "_slow_tier_defer_since: dict[str, float] = {}" in src
+
+
+# ── Bounded-defer tests (continuously-active stream cannot starve diag) ──────────
+
+
+class TestBoundedSlowTierDefer:
+    """The defer is time-bounded so a 24/7 stream cannot freeze diagnostics forever.
+
+    Source: SLOW_TIER_MAX_DEFER_SEC in __init__.py. Once a deferral has lasted
+    that long, one slow-tier read runs despite the active stream, then the cycle
+    restarts. PIN_EVERY_MODE: below-bound defers, at-bound forces, post-force
+    re-defers, the bound constant value, and the recorded start timestamp.
+    """
+
+    def test_defer_records_start_timestamp(self) -> None:
+        """First defer stamps _slow_tier_defer_since with the current time."""
+        coord = _make_coord(live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}})
+        do_slow_cam, _ = _compute_gate(coord, CAM_A, do_slow=True, now=100.0)
+        assert do_slow_cam is False
+        assert coord._slow_tier_defer_since[CAM_A] == 100.0
+
+    def test_defer_start_not_overwritten_on_subsequent_ticks(self) -> None:
+        """A later defer tick keeps the ORIGINAL start (setdefault, not reset)."""
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: 100.0},
+        )
+        # do_slow this tick, still streaming, only 60 s elapsed → stay deferred.
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=True, now=160.0)
+        assert do_slow_cam is False
+        assert CAM_A in deferred
+        assert coord._slow_tier_defer_since[CAM_A] == 100.0  # unchanged
+
+    def test_below_bound_keeps_deferring_while_streaming(self) -> None:
+        """Elapsed < SLOW_TIER_MAX_DEFER_SEC → still deferred even if do_slow."""
+        start = 50.0
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: start},
+        )
+        now = start + SLOW_TIER_MAX_DEFER_SEC - 1.0  # just under the bound
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=True, now=now)
+        assert do_slow_cam is False
+        assert CAM_A in deferred
+
+    def test_bound_reached_forces_read_despite_active_stream(self) -> None:
+        """Elapsed ≥ bound + do_slow + stream active → forced read, entry cleared."""
+        start = 50.0
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: start},
+        )
+        now = start + SLOW_TIER_MAX_DEFER_SEC  # exactly at the bound
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=True, now=now)
+        assert do_slow_cam is True  # read runs despite the live stream
+        assert CAM_A not in deferred  # deferred entry cleared
+        assert CAM_A not in coord._slow_tier_defer_since  # timer reset
+
+    def test_bound_reached_but_no_slow_interval_waits_for_next_slow_tick(self) -> None:
+        """Bound reached but do_slow=False this tick → no read yet (waits a slow tick)."""
+        start = 50.0
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: start},
+        )
+        now = start + SLOW_TIER_MAX_DEFER_SEC + 100.0
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=False, now=now)
+        assert do_slow_cam is False
+        assert CAM_A in deferred  # still pending until a do_slow tick
+        assert coord._slow_tier_defer_since[CAM_A] == start
+
+    def test_cycle_restarts_after_forced_read(self) -> None:
+        """After a forced read, a continuing stream re-defers with a fresh start."""
+        start = 50.0
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: start},
+        )
+        forced_at = start + SLOW_TIER_MAX_DEFER_SEC
+        do_slow_cam, _ = _compute_gate(coord, CAM_A, do_slow=True, now=forced_at)
+        assert do_slow_cam is True  # forced read
+
+        # Next slow tick, stream still live → defers again from the new time.
+        next_tick = forced_at + 300.0
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=True, now=next_tick)
+        assert do_slow_cam is False
+        assert CAM_A in deferred
+        assert coord._slow_tier_defer_since[CAM_A] == next_tick
+
+    def test_bound_constant_is_sane(self) -> None:
+        """SLOW_TIER_MAX_DEFER_SEC must be a positive bound (minutes, not 0/inf)."""
+        assert isinstance(SLOW_TIER_MAX_DEFER_SEC, float)
+        assert 60.0 <= SLOW_TIER_MAX_DEFER_SEC <= 7200.0
 
 
 # ── Tests for defer_diag_during_stream option ──────────────────────────────────

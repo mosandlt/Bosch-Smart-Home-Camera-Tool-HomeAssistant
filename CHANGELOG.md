@@ -5,6 +5,10 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.16] - 2026-06-14
+
+Picture-in-Picture for the live stream. A new ⧉ button pops the live WebRTC stream into the browser's floating, always-on-top window (over all apps on macOS Safari, over the browser on Chrome); the floating window's title shows the camera name (via Media Session). Only one PiP window is allowed by the browser, so the PiP button on every other camera greys out while one is floating, and the window keeps playing across a stream reconnect. Available on the single card and the overview tiles (live WebRTC view); hidden where the browser lacks PiP support (most iOS/Android WebViews). README documents the feature plus the Chrome Live Caption / Live Translate subtitle tip. Also bundles two accumulated fixes: a bounded slow-tier diagnostic deferral so a 24/7 stream can't freeze diagnostics, and a de-flaked stream-cooldown e2e test.
+
 ## [v13.5.14] - 2026-06-11
 
 Patch release — live-snapshot stale-event fix, privacy badge, and multi-instance audio mute.

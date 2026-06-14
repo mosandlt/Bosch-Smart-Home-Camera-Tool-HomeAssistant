@@ -468,9 +468,13 @@ test("stream cooldown blocks rapid restart and shows a countdown", async ({ page
     } };
     document.body.appendChild(card);
     await new Promise((res) => setTimeout(res, 300));
-    // Shorten the cooldown so the test leaves no long-lived interval running
+    // Keep the cooldown comfortably longer than the two 50 ms gaps below so the
+    // "second tap is blocked" assertion can't flake when a loaded CI runner
+    // (seen on macOS 2026-06-13) stretches a 50 ms setTimeout past a short
+    // window via event-loop starvation. The interval is explicitly cleared at
+    // the end of this evaluate(), so a longer value leaves nothing running
     // (same Windows-worker-teardown guard as the privacy cooldown test).
-    card._STREAM_COOLDOWN_MS = 400;
+    card._STREAM_COOLDOWN_MS = 5000;
     const pill = () => card.shadowRoot.getElementById("ap-btn-stream");
     if (!pill()) return { error: "no ap-btn-stream element" };
     await card._toggleStream(); // first tap = STOP → fires turn_off + starts the cooldown
@@ -537,6 +541,51 @@ test("fullscreen is single-owner across cards (mock hass)", async ({ page }) => 
   });
   expect(r.bActive, "second card is fullscreen").toBe(true);
   expect(r.aActive, "first card was closed when the second opened").toBe(false);
+});
+
+// Single-PiP greying: the browser allows only ONE picture-in-picture window
+// globally, so while one camera floats every OTHER card greys out (disables)
+// its PiP button and the active one lights up; releasing PiP re-enables all.
+// Driven by the enterpictureinpicture/leavepictureinpicture broadcast — we
+// dispatch those events directly (real PiP can't be entered headless). Asserts
+// `disabled`, which _reflectPipState() sets regardless of capability-hide, so
+// the test is browser-independent.
+test("PiP is single-owner across cards — others grey out (mock hass)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const mk = (id) => {
+      const c = document.createElement("bosch-camera-card");
+      c.setConfig({ camera_entity: "camera." + id, apple_style: true });
+      c.hass = { ...base, states: { ["camera." + id]: { state: "idle", attributes: { friendly_name: id }, last_updated: "2026-01-01T00:00:00Z" } } };
+      document.body.appendChild(c);
+      return c;
+    };
+    const A = mk("a"), B = mk("b");
+    await new Promise((res) => setTimeout(res, 300));
+    const btn = (c) => c.shadowRoot.getElementById("ap-btn-pip");
+    const vid = (c) => c.shadowRoot.getElementById("cam-video");
+    const snap = () => ({
+      aOn: btn(A).classList.contains("on"), aDisabled: btn(A).disabled,
+      bOn: btn(B).classList.contains("on"), bDisabled: btn(B).disabled,
+    });
+    const idle = snap();
+    vid(A).dispatchEvent(new Event("enterpictureinpicture"));
+    const aFloating = snap();
+    vid(A).dispatchEvent(new Event("leavepictureinpicture"));
+    const released = snap();
+    return { idle, aFloating, released };
+  });
+  // Nothing floating → no card disabled, none lit.
+  expect(r.idle.aDisabled || r.idle.bDisabled, "idle: no card greyed").toBe(false);
+  // A floating → A lit + enabled, B greyed out.
+  expect(r.aFloating.aOn, "A lights up while floating").toBe(true);
+  expect(r.aFloating.aDisabled, "A stays enabled while floating").toBe(false);
+  expect(r.aFloating.bDisabled, "B greys out while A floats").toBe(true);
+  // Released → both restored.
+  expect(r.released.aOn, "A no longer lit after release").toBe(false);
+  expect(r.released.bDisabled, "B re-enabled after release").toBe(false);
 });
 
 // #21: the overview tile (.bco-cell) carries the themed box-shadow itself,
@@ -870,4 +919,58 @@ test("rule-list escaping helpers neutralise HTML and attribute injection", async
   expect(r.attr).toContain("&quot;");
   // Null/undefined is coerced safely, never the string "null"/"undefined" markup.
   expect(r.attrNull).toBe("");
+});
+
+// B1 regression: _stopLiveVideo() during auto-reconnect must NOT call
+// exitPictureInPicture() — the PiP window should survive stall-recovery and
+// HLS-reconnect cycles so the user's floating video stays open.
+test("_reconnectingLiveVideo flag suppresses PiP exit during auto-reconnect", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const r = await page.evaluate(() => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+
+    // Track exitPictureInPicture calls via a mock
+    let pipExitCalled = 0;
+    const origDescriptor = Object.getOwnPropertyDescriptor(document, "pictureInPictureElement");
+
+    // Simulate a PiP-active video element
+    const fakeVideo = document.createElement("video");
+    Object.defineProperty(document, "pictureInPictureElement", {
+      configurable: true,
+      get: () => fakeVideo,
+    });
+    const origExit = document.exitPictureInPicture;
+    document.exitPictureInPicture = () => { pipExitCalled++; return Promise.resolve(); };
+
+    // Stub internal video lookup to return our fakeVideo
+    const sr = card.shadowRoot;
+    const origGetById = sr.getElementById.bind(sr);
+    sr.getElementById = (id) => id === "cam-video" ? fakeVideo : origGetById(id);
+
+    // Case 1: normal teardown — PiP MUST be closed
+    card._reconnectingLiveVideo = false;
+    card._stopLiveVideo();
+    const exitOnNormalStop = pipExitCalled; // expect 1
+
+    pipExitCalled = 0;
+
+    // Case 2: reconnect teardown — PiP must NOT be closed
+    card._reconnectingLiveVideo = true;
+    card._stopLiveVideo();
+    const exitOnReconnect = pipExitCalled; // expect 0
+
+    // Restore
+    document.exitPictureInPicture = origExit;
+    if (origDescriptor) Object.defineProperty(document, "pictureInPictureElement", origDescriptor);
+    else delete document.pictureInPictureElement;
+
+    return { exitOnNormalStop, exitOnReconnect };
+  });
+
+  expect(r.exitOnNormalStop, "normal teardown closes PiP (session expiry/privacy/unload)").toBe(1);
+  expect(r.exitOnReconnect, "auto-reconnect does NOT close PiP — floating window survives").toBe(0);
 });
