@@ -771,7 +771,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # no reauth trigger, no escalation, just back off and retry.
         self._auth_outage_count: int = 0  # consecutive 5xx responses
         self._auth_outage_alert_sent: bool = False
-        self._auth_outage_next_retry_ts: float = 0.0  # monotonic time gate
+        self._auth_outage_next_retry_ts: float = float("-inf")  # monotonic time gate
         # Cached LOCAL Digest credentials per camera — survives live-connection
         # teardown. Populated on every successful PUT /connection LOCAL and used
         # as a fallback path (snap.jpg, Gen2 RCP privacy writes) when the Bosch
@@ -1529,8 +1529,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # min later when Bosch rotates again — skips straight to REMOTE.
             _LOCAL_RESCUE_TTL_SEC = 300
             now_mono = time.monotonic()
-            last_rescue = self._local_rescue_at.get(cam_id, 0)
-            if last_rescue and (now_mono - last_rescue) > _LOCAL_RESCUE_TTL_SEC:
+            last_rescue = self._local_rescue_at.get(cam_id, float("-inf"))
+            if (
+                last_rescue > float("-inf")
+                and (now_mono - last_rescue) > _LOCAL_RESCUE_TTL_SEC
+            ):
                 self._local_rescue_attempts.pop(cam_id, None)
                 self._local_rescue_at.pop(cam_id, None)
             if (
@@ -2021,7 +2024,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     self._auth_outage_count,
                 )
                 self._auth_outage_count = 0
-                self._auth_outage_next_retry_ts = 0.0
+                self._auth_outage_next_retry_ts = float("-inf")
                 if self._auth_outage_alert_sent:
                     self._auth_outage_alert_sent = False
                     ir.async_delete_issue(self.hass, DOMAIN, "auth_server_outage")
@@ -3122,8 +3125,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 )
                 # per-camera slow flag: True on the normal interval, OR when a deferred
                 # fetch is now safe to run (stream gone idle since last deferral).
-                do_slow_cam = do_slow or (
-                    cam_id_key in self._slow_tier_deferred and not stream_active
+                do_slow_cam = (
+                    do_slow
+                    or (cam_id_key in self._slow_tier_deferred and not stream_active)
+                    or defer_bound_reached
                 )
                 if (
                     _defer_diag

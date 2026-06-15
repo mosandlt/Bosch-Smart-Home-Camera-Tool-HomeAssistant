@@ -156,6 +156,10 @@ async def fetch_mjpeg_snapshot(
                 proc.kill()
             except ProcessLookupError:
                 pass  # pragma: no cover — race: process already exited
+            try:
+                await proc.wait()
+            except Exception:  # noqa: S110 — best-effort reap; already killed, no useful msg to log
+                pass
         return None
     except FileNotFoundError:
         # ffmpeg binary not found — should never happen in HA but be safe

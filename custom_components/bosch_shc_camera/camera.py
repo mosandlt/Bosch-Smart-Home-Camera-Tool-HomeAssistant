@@ -846,7 +846,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # fail "Invalid data found when processing input" otherwise.
                 # Threshold 45 s keeps a safety margin.
                 creds_age = (
-                    time.monotonic() - creds.get("ts", 0.0) if creds else float("inf")
+                    time.monotonic() - creds.get("ts", float("-inf"))
+                    if creds
+                    else float("inf")
                 )
                 if creds and creds_age < 45.0:
                     _local_user_m = creds.get("user", "")
@@ -944,7 +946,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             renew_after_status = 404
                         elif resp.status in (401, 403):
                             opened_at = self.coordinator._live_opened_at.get(
-                                self._cam_id, 0
+                                self._cam_id, float("-inf")
                             )
                             age = time.monotonic() - opened_at
                             if age >= LIVE_SESSION_TTL:
@@ -961,7 +963,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # be cancelled mid-flight by the snapshot budget — which previously
                 # aborted every renewal on a slow camera (bug-hunt 2026-06-02).
                 if renew_after_status is not None:
-                    opened_at = self.coordinator._live_opened_at.get(self._cam_id, 0)
+                    opened_at = self.coordinator._live_opened_at.get(
+                        self._cam_id, float("-inf")
+                    )
                     age = time.monotonic() - opened_at
                     _LOGGER.debug(
                         "%s: proxy snapshot %d (age %.0fs) — renewing live connection",

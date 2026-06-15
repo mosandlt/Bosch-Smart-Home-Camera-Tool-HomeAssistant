@@ -5,6 +5,19 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.6.0] - 2026-06-15
+
+Cross-platform reliability round driven by a structured bug-hunt across the card and the Python backend (Chrome, Safari, Firefox, Edge on macOS, Windows, iOS, Android, Linux).
+
+- **iOS Picture-in-Picture**: the PiP button now works on iPhone and iPad (Safari), falling back to the WebKit presentation-mode API where the standard one is unavailable.
+- **iOS audio & playback**: sound now unmutes on the very first tap when you start a stream; a page restored from the browser's back/forward cache reliably offers tap-to-play instead of silently failing; iPad is now recognised when choosing the remote-stream transport.
+- **Android**: returning to the app no longer opens a second, duplicate stream, and the autoplay latch is cleared correctly.
+- **Security**: the live-stream RTSP URL — which embeds local camera credentials — is no longer exposed through the camera entity's attributes (recorder history, REST API, logbook). Credentials were already redacted in the logs; this closes the matching attribute path. Update recommended.
+- **Diagnostics**: sensors no longer freeze on a camera left on a 24/7 live view (a deferred diagnostic read is now force-completed past its time bound).
+- **Robustness**: a lingering snapshot helper process is now reaped on timeout, reconnect/teardown guards were hardened, and several internal "never-run" time sentinels were aligned.
+
+No configuration changes.
+
 ## [v13.5.17] - 2026-06-15
 
 Reliability-focused card release, hardened by a cross-browser / cross-OS pass (Chrome, Safari, Firefox, Edge on macOS, Windows, iOS, Android, Linux).

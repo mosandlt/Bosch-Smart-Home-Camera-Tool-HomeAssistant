@@ -72,7 +72,7 @@ def start_tls_proxy(
     _MAX_BURST = 5
     _BURST_WINDOW = 30.0
     fail_count = [0]
-    first_fail_at = [0.0]
+    first_fail_at = [float("-inf")]
 
     def _proxy_thread() -> None:
         while True:
@@ -108,7 +108,7 @@ def start_tls_proxy(
                 # Reset failure burst — a successful connect proves the
                 # camera is reachable again.
                 fail_count[0] = 0
-                first_fail_at[0] = 0.0
+                first_fail_at[0] = float("-inf")
             except Exception as exc:
                 now = time.monotonic()
                 if fail_count[0] == 0:
@@ -229,7 +229,7 @@ def start_tls_proxy(
                     # expected during session teardown (e.g. after credential
                     # rotation) — not a real error, so don't log it.
                     is_ebadf = isinstance(exc, OSError) and exc.errno == errno.EBADF
-                    if str(exc) and not is_ebadf:
+                    if not is_ebadf:
                         _LOGGER.debug(
                             "TLS proxy %s [%s] pipe error: %s",
                             cam_id[:8],

@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.17";
+const CARD_VERSION = "13.6.0";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1316,10 +1316,10 @@ class BoschCameraCard extends HTMLElement {
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
       const isCompanion = /Home\s?Assistant/i.test(ua);
-      // iPhone/iPod always identify; iPadOS 13+ Safari masquerades as Mac
-      // but exposes touch via maxTouchPoints>1. Android phones/tablets
-      // carry "Android" in the UA reliably.
-      const isIOS = /iPhone|iPod/i.test(ua) ||
+      // iPhone/iPod/iPad always identify (older iPadOS); iPadOS 13+ Safari
+      // masquerades as Mac but exposes touch via maxTouchPoints>1. Android
+      // phones/tablets carry "Android" in the UA reliably.
+      const isIOS = /iPhone|iPod|iPad/i.test(ua) ||
                     (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
       const isAndroid = /Android/i.test(ua);
       const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
@@ -2029,6 +2029,10 @@ class BoschCameraCard extends HTMLElement {
     // unless we were called straight from a tap (inGesture=true, e.g. the
     // first-interaction auto-unmute handler). 2026-06-15 (iOS first-tap sound).
     if (this._isIOS() && !inGesture) return;
+    // HA-1 fix: clear _unmuteOnStart only AFTER the iOS early-return guard above so
+    // that an iOS bail doesn't consume the flag — the flag stays armed and will be
+    // consumed by the next inGesture=true call (first-interaction auto-unmute).
+    this._unmuteOnStart = false;
     if (this._audioDecoupled()) return;
     if (this._isSecondaryAudio()) return;                  // 2nd+ card for same entity → stay muted
     if (this._getEffectiveState(this._entities.audio) !== "on") return;
@@ -2441,9 +2445,13 @@ class BoschCameraCard extends HTMLElement {
     if (!this.isConnected || !this._hass) return;
     if (!this._isStreaming()) return;          // backend stream switch is off → leave it
     if (!this._liveVideoActive) {
-      if (this._startingLiveVideo || this._waitingForStream) return;
+      if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       // Defer so the Companion App's WebSocket finishes reconnecting first, then
       // re-check every guard (state can change during the defer).
+      // BUG-A1 fix: guard also checks _reconnectingLiveVideo — on Android both
+      // visibilitychange and Page-Lifecycle `resume` fire at app-foreground, so
+      // the second call would slip through the 500ms window and spawn a second
+      // peer connection / double Bosch session. 2026-06-15.
       this._reconnectingLiveVideo = true;
       setTimeout(() => {
         this._reconnectingLiveVideo = false;
@@ -2458,7 +2466,29 @@ class BoschCameraCard extends HTMLElement {
     // nudge it; if it can't resume, force a clean reconnect (PiP-safe via flag).
     const video = this.shadowRoot?.getElementById("cam-video");
     if (video && video.paused) {
-      Promise.resolve(video.play()).catch(() => {
+      Promise.resolve(video.play()).catch((err) => {
+        // iOS (bfcache restore via pageshow/visibilitychange) has no user
+        // activation, so play() rejects with NotAllowedError. A full reconnect
+        // would also fail the same way — show the tap-to-play gate instead so
+        // the user can restart with a single tap. 2026-06-15 (HA-S2).
+        if (err && err.name === "NotAllowedError" && this._isIOS()) {
+          const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+          if (overlay && !overlay.classList.contains("visible")) {
+            overlay.classList.add("visible");
+            if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
+            const resume = () => {
+              overlay.classList.remove("visible");
+              overlay.removeEventListener("pointerup", resume);
+              this._tapToPlayResume = null;
+              video.muted = true;
+              video.play().catch(() => {});
+            };
+            this._tapToPlayResume = resume;
+            overlay.addEventListener("pointerup", resume);
+          }
+          return;
+        }
+        // Non-iOS NotAllowedError or other errors: force a clean reconnect.
         this._reconnectingLiveVideo = true;
         this._stopLiveVideo();
         setTimeout(() => {
@@ -4736,6 +4766,23 @@ class BoschCameraCard extends HTMLElement {
       this._refreshAudioToggle();
       this._refreshAudioPill();
     });
+    // HA-X1 iOS PiP: Safari on iOS uses webkitSetPresentationMode("picture-in-picture")
+    // instead of requestPictureInPicture() — document.pictureInPictureEnabled is
+    // always false on iOS so the W3C path never runs. Wire the webkit event so the
+    // cross-card single-PiP state and button are updated on iOS too. 2026-06-15.
+    vid.addEventListener("webkitpresentationmodechanged", () => {
+      const mode = vid.webkitPresentationMode;
+      if (mode === "picture-in-picture") {
+        _boschPipSetActive(this);
+        this._setPipMetadata();
+      } else if (_boschPipActive === this) {
+        _boschPipSetActive(null);
+        this._clearPipMetadata();
+        this._refreshAudioToggle();
+        this._refreshAudioPill();
+      }
+      this._reflectPipState();
+    });
 
     // Buttons
     this.shadowRoot.getElementById("btn-snapshot").addEventListener("click", () =>
@@ -4781,11 +4828,14 @@ class BoschCameraCard extends HTMLElement {
     apBindClick("ap-btn-light",      () => this._toggleSwitchWithRollback(this._entities.light));
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
     apBindClick("ap-btn-pip",        () => this._togglePiP());
-    // Hide the button where the standard PiP API is unavailable
-    // (document.pictureInPictureEnabled === false): older browsers and most
-    // iOS/Android WebViews. Firefox 153+ and Chrome/Safari desktop return true.
+    // Hide the button where PiP is entirely unavailable. Note: iOS Safari has
+    // document.pictureInPictureEnabled===false but supports webkitSetPresentationMode
+    // → the button is kept visible there (HA-X1). _reflectPipState() enforces the
+    // live-stream gate (button re-hides when no stream). 2026-06-15.
     const pipBtn = this.shadowRoot.getElementById("ap-btn-pip");
-    if (pipBtn && !document.pictureInPictureEnabled) pipBtn.hidden = true;
+    const pipVid = this.shadowRoot.getElementById("cam-video");
+    const hasPipApi = document.pictureInPictureEnabled || !!(pipVid && typeof pipVid.webkitSetPresentationMode === "function");
+    if (pipBtn && !hasPipApi) pipBtn.hidden = true;
     // Re-apply the cross-card single-PiP state so a freshly rendered button is
     // lit/greyed correctly if some camera is already floating in PiP.
     this._reflectPipState();
@@ -5497,7 +5547,6 @@ class BoschCameraCard extends HTMLElement {
         // AudioContext bridge in _armStartUnmute), restore sound now that the
         // first frame is playing — "audio on at start" without a second tap.
         if (this._unmuteOnStart) {
-          this._unmuteOnStart = false;
           this._tryStartUnmute(video);
         }
         // Live frame is on screen — the backend source is healthy again. Clear
@@ -5812,7 +5861,9 @@ class BoschCameraCard extends HTMLElement {
               this._reconnectingLiveVideo = true;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => { this._reconnectingLiveVideo = false; if (this.isConnected) this._reconnectAfterStreamDrop(); }, 1000);
+                // HA-3 fix: guard entire callback — without isConnected the reconnect
+                // flag stays mutated on a detached card. 2026-06-15.
+                setTimeout(() => { if (!this.isConnected) return; this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 1000);
               } else {
                 this._reconnectingLiveVideo = false;
               }
@@ -5830,7 +5881,8 @@ class BoschCameraCard extends HTMLElement {
             this._reconnectingLiveVideo = true;
             this._stopLiveVideo();
             if (this._isStreaming()) {
-              setTimeout(() => { this._reconnectingLiveVideo = false; if (this.isConnected) this._reconnectAfterStreamDrop(); }, 2000);
+              // HA-3 fix (same as stall path): guard entire callback. 2026-06-15.
+              setTimeout(() => { if (!this.isConnected) return; this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 2000);
             } else {
               this._reconnectingLiveVideo = false;
             }
@@ -5873,6 +5925,10 @@ class BoschCameraCard extends HTMLElement {
         // stream service" errors. Use _waitForStreamReady() instead so we wait
         // until the backend re-establishes the connection.
         setTimeout(() => {
+          // HA-2 fix: card may be removed from DOM within the 1.5s retry window
+          // (dashboard navigation) — running _startLiveVideo on a detached element
+          // pollutes stale shadow DOM and leaves flags stuck. 2026-06-15.
+          if (!this.isConnected) return;
           const cam = this._hass?.states[this._entities.camera];
           if (cam?.state === "streaming") {
             this._startLiveVideo(attempt + 1);
@@ -7993,12 +8049,14 @@ class BoschCameraCard extends HTMLElement {
       const onAudioCtrl = !!(e.composedPath && e.composedPath().some(
         (el) => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
       this._disarmAutoUnmute();
+      // HA-5 fix: release Android latch BEFORE the onAudioCtrl bail so that
+      // tapping the audio pill as the very first interaction also clears the flag.
+      // Without this, _toggleAudio ran with _androidAudioMuted=true still set,
+      // blocking _tryStartUnmute on every subsequent reconnect. 2026-06-15.
+      this._androidAudioMuted = false;
       if (onAudioCtrl) return;
       // This first interaction IS the synchronous user gesture iOS and Android
-      // require, so release the Android pre-gesture mute latch — otherwise
-      // _armStartUnmute/_tryStartUnmute keep bailing and the stream stays muted
-      // for the whole session on Android. 2026-06-15.
-      this._androidAudioMuted = false;
+      // require; the latch was cleared above — the path below handles non-pill taps.
       // Route through the SAME proven bridge as the start gesture: unlock the
       // AudioContext inside this real gesture so the unmute sticks (a raw
       // muted=false here was getting punished + re-muted within seconds on
@@ -8236,14 +8294,24 @@ class BoschCameraCard extends HTMLElement {
   // HAVE_NOTHING right after start → guard on readyState and let any reject
   // fall through silently (the user can retry once the stream is playing).
   async _togglePiP() {
+    const video = this.shadowRoot.getElementById("cam-video");
+    // HA-X1: iOS Safari uses webkitSetPresentationMode — document.pictureInPictureEnabled
+    // is always false on iOS so the W3C path below never runs there. 2026-06-15.
+    if (video && typeof video.webkitSetPresentationMode === "function" && !document.pictureInPictureEnabled) {
+      const entering = video.webkitPresentationMode !== "picture-in-picture";
+      if (video.muted) { this._armStartUnmute(); this._tryStartUnmute(video, true); }
+      if (this._zoom?.scale > 1) this._resetZoom();
+      this._setPipMetadata();
+      try { video.webkitSetPresentationMode(entering ? "picture-in-picture" : "inline"); } catch (_) { /* unsupported */ }
+      return;
+    }
     // Already floating → the same button closes PiP (toggle, like fullscreen).
     if (document.pictureInPictureElement) {
       try { await document.exitPictureInPicture(); } catch (_) { /* ignore */ }
       return;
     }
-    const video = this.shadowRoot.getElementById("cam-video");
     if (!video || !document.pictureInPictureEnabled || video.disablePictureInPicture) {
-      return; // browser/element can't do PiP (iOS Safari, old browsers, blocked)
+      return; // browser/element can't do PiP (old browsers, blocked)
     }
     // Needs at least metadata; a just-started WebRTC stream may not be there yet.
     if (video.readyState < 1 /* HAVE_METADATA */) {
@@ -8280,10 +8348,12 @@ class BoschCameraCard extends HTMLElement {
     const mine    = _boschPipActive === this;
     const hasLive = !!this._liveVideoActive || mine;
     // PiP can only float a PLAYING <video>. It is stream-contextual, so HIDE the
-    // button entirely when PiP is unsupported (iOS / old browsers / WebViews) or
-    // there is no live stream to float — it reappears together with the stop
-    // button when the stream starts. 2026-06-15 (Thomas: hide-until-needed).
-    if (!document.pictureInPictureEnabled || !hasLive) {
+    // button entirely when PiP is unsupported or there is no live stream to float.
+    // HA-X1: on iOS Safari document.pictureInPictureEnabled is false but
+    // webkitSetPresentationMode is available → show the button on iOS too. 2026-06-15.
+    const video = this.shadowRoot?.getElementById("cam-video");
+    const hasPip = document.pictureInPictureEnabled || !!(video && typeof video.webkitSetPresentationMode === "function");
+    if (!hasPip || !hasLive) {
       btn.hidden = true;
       return;
     }

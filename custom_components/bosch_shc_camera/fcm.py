@@ -1020,9 +1020,7 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
             # Per-event-ID dedup: concurrent FCM handlers (Bosch sometimes
             # sends two pushes ~10 s apart for the same event) otherwise both
             # pass the prev_id check and fire two alert chains.
-            import time as _time
-
-            _now = _time.monotonic()
+            _now = time.monotonic()
             _sent = coordinator._alert_sent_ids
             if newest_id and _sent.get(newest_id, float("-inf")) > _now - 60.0:
                 _LOGGER.debug(

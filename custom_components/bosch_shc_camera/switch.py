@@ -371,7 +371,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         conn_type = live.get("_connection_type", "REMOTE") if live else ""
         return {
             "connection_type": conn_type,
-            "rtsps_url": live.get("rtspsUrl", ""),
+            "rtsps_url": _redact_rtsp_creds(live.get("rtspsUrl", "")),
             "proxy_snap_url": live.get("proxyUrl", ""),
         }
 

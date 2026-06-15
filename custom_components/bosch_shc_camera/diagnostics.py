@@ -48,6 +48,7 @@ TO_REDACT = {
     "security_token",
     "token",
     # SMB / NAS credentials
+    "password",
     "smb_password",
     "smb_username",
     "smb_server",

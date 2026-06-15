@@ -99,6 +99,30 @@ class TestFetchMjpegSnapshot:
         proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_timeout_reaps_zombie_via_proc_wait(self):
+        """Timeout → kill() then await proc.wait() to reap the zombie subprocess.
+
+        MED-3 regression: before the fix, proc.wait() was never called → zombie
+        ffmpeg accumulation under repeated snapshot timeouts.
+        """
+        proc = _mock_proc()
+        proc.wait = AsyncMock(return_value=None)
+        with (
+            patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
+        ):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            result = await fetch_mjpeg_snapshot(
+                CAM_HOST, CAM_PORT, USER, PASS, timeout=0.001
+            )
+        assert result is None
+        proc.kill.assert_called_once()
+        proc.wait.assert_called_once()  # zombie must be reaped
+
+    @pytest.mark.asyncio
     async def test_nonzero_returncode_returns_none(self):
         """FFmpeg exits with code != 0 → None + warning logged."""
         proc = _mock_proc(returncode=1, stdout=b"", stderr=b"some error")

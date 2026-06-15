@@ -47,7 +47,7 @@ def _make_coord(**overrides):
         _refreshed_token=None,
         _refreshed_refresh=None,
         _auth_outage_count=0,
-        _auth_outage_next_retry_ts=0.0,
+        _auth_outage_next_retry_ts=float("-inf"),  # SENTINEL_RULE
         _auth_outage_alert_sent=False,
         _token_fail_count=0,
         _token_alert_sent=False,
@@ -365,7 +365,9 @@ class TestSuccessfulRefresh:
         ):
             await BoschCameraCoordinator._refresh_token_locked(coord)
         assert coord._auth_outage_count == 0
-        assert coord._auth_outage_next_retry_ts == 0.0
+        assert coord._auth_outage_next_retry_ts == float(
+            "-inf"
+        )  # SENTINEL_RULE: reset to -inf, not 0.0
         assert coord._auth_outage_alert_sent is False
         # async_delete_issue called for both token_expired (no-op) and auth_server_outage
         assert del_issue.called

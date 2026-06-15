@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.5.17";
+const CARD_VERSION = "13.6.0";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -1124,7 +1124,7 @@ class BoschCameraCard extends HTMLElement {
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
       const isCompanion = /Home\s?Assistant/i.test(ua);
-      const isIOS = /iPhone|iPod/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+      const isIOS = /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
       const isAndroid = /Android/i.test(ua);
       const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
       if (!isCompanion && !isMobileBrowser) return false;
@@ -1553,6 +1553,7 @@ class BoschCameraCard extends HTMLElement {
   _tryStartUnmute(video, inGesture = false) {
     if (!video || !video.muted || this._androidAudioMuted) return;
     if (this._isIOS() && !inGesture) return;
+    this._unmuteOnStart = false;
     if (this._audioDecoupled()) return;
     if (this._isSecondaryAudio()) return;
     if (this._getEffectiveState(this._entities.audio) !== "on") return;
@@ -1834,7 +1835,7 @@ class BoschCameraCard extends HTMLElement {
     if (!this.isConnected || !this._hass) return;
     if (!this._isStreaming()) return;
     if (!this._liveVideoActive) {
-      if (this._startingLiveVideo || this._waitingForStream) return;
+      if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       this._reconnectingLiveVideo = true;
       setTimeout(() => {
         this._reconnectingLiveVideo = false;
@@ -1846,7 +1847,24 @@ class BoschCameraCard extends HTMLElement {
     }
     const video = this.shadowRoot?.getElementById("cam-video");
     if (video && video.paused) {
-      Promise.resolve(video.play()).catch(() => {
+      Promise.resolve(video.play()).catch(err => {
+        if (err && err.name === "NotAllowedError" && this._isIOS()) {
+          const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+          if (overlay && !overlay.classList.contains("visible")) {
+            overlay.classList.add("visible");
+            if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
+            const resume = () => {
+              overlay.classList.remove("visible");
+              overlay.removeEventListener("pointerup", resume);
+              this._tapToPlayResume = null;
+              video.muted = true;
+              video.play().catch(() => {});
+            };
+            this._tapToPlayResume = resume;
+            overlay.addEventListener("pointerup", resume);
+          }
+          return;
+        }
         this._reconnectingLiveVideo = true;
         this._stopLiveVideo();
         setTimeout(() => {
@@ -1913,6 +1931,19 @@ class BoschCameraCard extends HTMLElement {
       this._refreshAudioToggle();
       this._refreshAudioPill();
     });
+    vid.addEventListener("webkitpresentationmodechanged", () => {
+      const mode = vid.webkitPresentationMode;
+      if (mode === "picture-in-picture") {
+        _boschPipSetActive(this);
+        this._setPipMetadata();
+      } else if (_boschPipActive === this) {
+        _boschPipSetActive(null);
+        this._clearPipMetadata();
+        this._refreshAudioToggle();
+        this._refreshAudioPill();
+      }
+      this._reflectPipState();
+    });
     this.shadowRoot.getElementById("btn-snapshot").addEventListener("click", () => this._onSnapshotClick());
     this.shadowRoot.getElementById("btn-stream").addEventListener("click", () => this._toggleStream());
     const apg = this.shadowRoot.getElementById("auto-play-gate");
@@ -1934,7 +1965,9 @@ class BoschCameraCard extends HTMLElement {
     apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
     apBindClick("ap-btn-pip", () => this._togglePiP());
     const pipBtn = this.shadowRoot.getElementById("ap-btn-pip");
-    if (pipBtn && !document.pictureInPictureEnabled) pipBtn.hidden = true;
+    const pipVid = this.shadowRoot.getElementById("cam-video");
+    const hasPipApi = document.pictureInPictureEnabled || !!(pipVid && typeof pipVid.webkitSetPresentationMode === "function");
+    if (pipBtn && !hasPipApi) pipBtn.hidden = true;
     this._reflectPipState();
     this._wireAudioPill();
     apBindClick("ap-btn-audio", () => {
@@ -2480,7 +2513,6 @@ class BoschCameraCard extends HTMLElement {
         this._setLoadingOverlay(false);
         this._applyAudioPreference(video);
         if (this._unmuteOnStart) {
-          this._unmuteOnStart = false;
           this._tryStartUnmute(video);
         }
         this._staleSourceSeen = false;
@@ -2677,8 +2709,9 @@ class BoschCameraCard extends HTMLElement {
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
                 setTimeout(() => {
+                  if (!this.isConnected) return;
                   this._reconnectingLiveVideo = false;
-                  if (this.isConnected) this._reconnectAfterStreamDrop();
+                  this._reconnectAfterStreamDrop();
                 }, 1e3);
               } else {
                 this._reconnectingLiveVideo = false;
@@ -2697,8 +2730,9 @@ class BoschCameraCard extends HTMLElement {
             this._stopLiveVideo();
             if (this._isStreaming()) {
               setTimeout(() => {
+                if (!this.isConnected) return;
                 this._reconnectingLiveVideo = false;
-                if (this.isConnected) this._reconnectAfterStreamDrop();
+                this._reconnectAfterStreamDrop();
               }, 2e3);
             } else {
               this._reconnectingLiveVideo = false;
@@ -2727,6 +2761,7 @@ class BoschCameraCard extends HTMLElement {
       }
       if (attempt < 5) {
         setTimeout(() => {
+          if (!this.isConnected) return;
           const cam = this._hass?.states[this._entities.camera];
           if (cam?.state === "streaming") {
             this._startLiveVideo(attempt + 1);
@@ -4287,8 +4322,8 @@ class BoschCameraCard extends HTMLElement {
       if (e.type === "keydown" && e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
       const onAudioCtrl = !!(e.composedPath && e.composedPath().some(el => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
       this._disarmAutoUnmute();
-      if (onAudioCtrl) return;
       this._androidAudioMuted = false;
+      if (onAudioCtrl) return;
       this._armStartUnmute();
       const video = this._liveVideoActive ? this.shadowRoot && this.shadowRoot.getElementById("cam-video") : null;
       if (video && !video.paused) {
@@ -4467,13 +4502,26 @@ class BoschCameraCard extends HTMLElement {
     }
   }
   async _togglePiP() {
+    const video = this.shadowRoot.getElementById("cam-video");
+    if (video && typeof video.webkitSetPresentationMode === "function" && !document.pictureInPictureEnabled) {
+      const entering = video.webkitPresentationMode !== "picture-in-picture";
+      if (video.muted) {
+        this._armStartUnmute();
+        this._tryStartUnmute(video, true);
+      }
+      if (this._zoom?.scale > 1) this._resetZoom();
+      this._setPipMetadata();
+      try {
+        video.webkitSetPresentationMode(entering ? "picture-in-picture" : "inline");
+      } catch (_) {}
+      return;
+    }
     if (document.pictureInPictureElement) {
       try {
         await document.exitPictureInPicture();
       } catch (_) {}
       return;
     }
-    const video = this.shadowRoot.getElementById("cam-video");
     if (!video || !document.pictureInPictureEnabled || video.disablePictureInPicture) {
       return;
     }
@@ -4495,7 +4543,9 @@ class BoschCameraCard extends HTMLElement {
     if (!btn) return;
     const mine = _boschPipActive === this;
     const hasLive = !!this._liveVideoActive || mine;
-    if (!document.pictureInPictureEnabled || !hasLive) {
+    const video = this.shadowRoot?.getElementById("cam-video");
+    const hasPip = document.pictureInPictureEnabled || !!(video && typeof video.webkitSetPresentationMode === "function");
+    if (!hasPip || !hasLive) {
       btn.hidden = true;
       return;
     }

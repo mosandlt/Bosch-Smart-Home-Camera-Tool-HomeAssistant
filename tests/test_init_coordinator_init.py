@@ -250,7 +250,9 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._token_fail_count == 0
     assert coord._auth_outage_count == 0
     assert coord._auth_outage_alert_sent is False
-    assert coord._auth_outage_next_retry_ts == 0.0
+    assert coord._auth_outage_next_retry_ts == float(
+        "-inf"
+    )  # SENTINEL_RULE: never 0.0 for monotonic
     assert coord._local_creds_cache == {}
     # Refresh lock must be an asyncio.Lock so concurrent refreshes serialize.
     import asyncio as _asyncio

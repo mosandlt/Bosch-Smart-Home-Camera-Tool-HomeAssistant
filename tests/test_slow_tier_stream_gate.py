@@ -97,8 +97,10 @@ def _compute_gate(
     defer_bound_reached: bool = (
         defer_started is not None and now - defer_started >= SLOW_TIER_MAX_DEFER_SEC
     )
-    do_slow_cam: bool = do_slow or (
-        cam_id in coord._slow_tier_deferred and not stream_active
+    do_slow_cam: bool = (
+        do_slow
+        or (cam_id in coord._slow_tier_deferred and not stream_active)
+        or defer_bound_reached
     )
     if defer_diag and do_slow_cam and stream_active and not defer_bound_reached:
         coord._slow_tier_deferred.add(cam_id)
@@ -323,8 +325,13 @@ class TestBoundedSlowTierDefer:
         assert CAM_A not in deferred  # deferred entry cleared
         assert CAM_A not in coord._slow_tier_defer_since  # timer reset
 
-    def test_bound_reached_but_no_slow_interval_waits_for_next_slow_tick(self) -> None:
-        """Bound reached but do_slow=False this tick → no read yet (waits a slow tick)."""
+    def test_bound_reached_but_no_slow_interval_forces_read_via_defer_bound(
+        self,
+    ) -> None:
+        """Bound exceeded + do_slow=False (between slow ticks) + stream active →
+        defer_bound_reached=True makes do_slow_cam=True, so the forced read fires
+        even without a do_slow tick (HIGH-1 bug fix).
+        """
         start = 50.0
         coord = _make_coord(
             live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
@@ -333,9 +340,28 @@ class TestBoundedSlowTierDefer:
         )
         now = start + SLOW_TIER_MAX_DEFER_SEC + 100.0
         do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=False, now=now)
-        assert do_slow_cam is False
-        assert CAM_A in deferred  # still pending until a do_slow tick
-        assert coord._slow_tier_defer_since[CAM_A] == start
+        assert do_slow_cam is True  # fires between slow ticks once bound exceeded
+        assert CAM_A not in deferred  # cleared
+        assert CAM_A not in coord._slow_tier_defer_since  # timer reset
+
+    def test_bound_reached_between_slow_ticks_forces_read(self) -> None:
+        """Bound exceeded but do_slow=False this tick (between slow intervals)
+        and stream still active → do_slow_cam=True so the forced read fires
+        even WITHOUT a do_slow tick.
+
+        This is the HIGH-1 bug: before the fix, do_slow_cam stayed False
+        between slow intervals even after the bound was exceeded.
+        """
+        start = 50.0
+        coord = _make_coord(
+            live_connections={CAM_A: {"rtspsUrl": "rtsps://x"}},
+            slow_tier_deferred={CAM_A},
+            slow_tier_defer_since={CAM_A: start},
+        )
+        now = start + SLOW_TIER_MAX_DEFER_SEC + 60.0  # well past bound, NOT a slow tick
+        do_slow_cam, deferred = _compute_gate(coord, CAM_A, do_slow=False, now=now)
+        assert do_slow_cam is True  # must fire even between slow ticks
+        assert CAM_A not in deferred  # cleared
 
     def test_cycle_restarts_after_forced_read(self) -> None:
         """After a forced read, a continuing stream re-defers with a fresh start."""
