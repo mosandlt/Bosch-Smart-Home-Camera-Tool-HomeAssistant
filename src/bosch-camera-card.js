@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.5.16";
+const CARD_VERSION = "13.5.17";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -267,6 +267,8 @@ const CARD_I18N = {
     maint_active: "in progress",
     maint_announced: "announced",
     maint_check_status: "Check status: Bosch Community",
+    maint_dismiss: "Dismiss",
+    privacy_stale_prefix_snapshot: "Last snapshot:",
     maint_auto_return: "The cameras come back automatically once the cloud responds.",
     privacy_stale_label: "Privacy mode — last image",
     privacy_stale_prefix: "Last event:",
@@ -359,6 +361,8 @@ const CARD_I18N = {
     maint_active: "läuft",
     maint_announced: "angekündigt",
     maint_check_status: "Status prüfen: Bosch Community",
+    maint_dismiss: "Schließen",
+    privacy_stale_prefix_snapshot: "Letzter Snapshot:",
     maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
     privacy_stale_label: "Privatmodus — letztes Bild",
     privacy_stale_prefix: "Letztes Ereignis:",
@@ -451,6 +455,8 @@ const CARD_I18N = {
     maint_active: "en curso",
     maint_announced: "anunciado",
     maint_check_status: "Comprobar estado: Bosch Community",
+    maint_dismiss: "Descartar",
+    privacy_stale_prefix_snapshot: "Última instantánea:",
     maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
     privacy_stale_label: "Modo privacidad — última imagen",
     privacy_stale_prefix: "Último evento:",
@@ -540,6 +546,8 @@ const CARD_I18N = {
     maint_active: "en cours",
     maint_announced: "annoncée",
     maint_check_status: "Vérifier le statut : Bosch Community",
+    maint_dismiss: "Fermer",
+    privacy_stale_prefix_snapshot: "Dernier instantané :",
     maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
     privacy_stale_label: "Mode confidentialité — dernière image",
     privacy_stale_prefix: "Dernier événement :",
@@ -629,6 +637,8 @@ const CARD_I18N = {
     maint_active: "in corso",
     maint_announced: "annunciata",
     maint_check_status: "Verifica stato: Bosch Community",
+    maint_dismiss: "Chiudi",
+    privacy_stale_prefix_snapshot: "Ultima istantanea:",
     maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
     privacy_stale_label: "Modalità privacy — ultima immagine",
     privacy_stale_prefix: "Ultimo evento:",
@@ -718,6 +728,8 @@ const CARD_I18N = {
     maint_active: "actief",
     maint_announced: "aangekondigd",
     maint_check_status: "Status controleren: Bosch Community",
+    maint_dismiss: "Sluiten",
+    privacy_stale_prefix_snapshot: "Laatste momentopname:",
     maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
     privacy_stale_label: "Privacymodus — laatste afbeelding",
     privacy_stale_prefix: "Laatste gebeurtenis:",
@@ -807,6 +819,8 @@ const CARD_I18N = {
     maint_active: "w toku",
     maint_announced: "ogłoszona",
     maint_check_status: "Sprawdź status: Bosch Community",
+    maint_dismiss: "Zamknij",
+    privacy_stale_prefix_snapshot: "Ostatni zrzut:",
     maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
     privacy_stale_label: "Tryb prywatności — ostatni obraz",
     privacy_stale_prefix: "Ostatnie zdarzenie:",
@@ -896,6 +910,8 @@ const CARD_I18N = {
     maint_active: "em curso",
     maint_announced: "anunciada",
     maint_check_status: "Verificar estado: Bosch Community",
+    maint_dismiss: "Dispensar",
+    privacy_stale_prefix_snapshot: "Último instantâneo:",
     maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
     privacy_stale_label: "Modo privacidade — última imagem",
     privacy_stale_prefix: "Último evento:",
@@ -985,6 +1001,8 @@ const CARD_I18N = {
     maint_active: "выполняется",
     maint_announced: "объявлено",
     maint_check_status: "Проверить статус: Bosch Community",
+    maint_dismiss: "Закрыть",
+    privacy_stale_prefix_snapshot: "Последний снимок:",
     maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
     privacy_stale_label: "Режим приватности — последнее изображение",
     privacy_stale_prefix: "Последнее событие:",
@@ -1074,6 +1092,8 @@ const CARD_I18N = {
     maint_active: "виконується",
     maint_announced: "анонсовано",
     maint_check_status: "Перевірити статус: Bosch Community",
+    maint_dismiss: "Закрити",
+    privacy_stale_prefix_snapshot: "Останній знімок:",
     maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
     privacy_stale_label: "Режим приватності — останнє зображення",
     privacy_stale_prefix: "Остання подія:",
@@ -1163,6 +1183,8 @@ const CARD_I18N = {
     maint_active: "进行中",
     maint_announced: "已公告",
     maint_check_status: "查看状态：Bosch Community",
+    maint_dismiss: "关闭",
+    privacy_stale_prefix_snapshot: "最新快照：",
     maint_auto_return: "云端恢复后摄像头将自动重新连接。",
     privacy_stale_label: "隐私模式 — 最后一张图像",
     privacy_stale_prefix: "最近事件：",
@@ -1330,6 +1352,7 @@ class BoschCameraCard extends HTMLElement {
     this._entityToBtnId     = {};    // map entityId → DOM id of its sw-row/btn (populated in _render)
     this._visibilityHandler = null;  // bound visibilitychange listener
     this._lastEventState    = null;  // last known last_event sensor value — for event detection
+    this._lastSnapshotAt    = null;  // ms timestamp of the last real snapshot frame — privacy badge
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
     this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
@@ -1383,6 +1406,15 @@ class BoschCameraCard extends HTMLElement {
     // WS-unsubscribe so go2rtc frees the consumer immediately.
     this._pagehideHandler = () => this._stopLiveVideo();
     window.addEventListener("pagehide", this._pagehideHandler);
+    // bfcache / Page-Lifecycle recovery: `pagehide` tears the stream down, but
+    // when the page is restored from bfcache (`pageshow` persisted=true — Safari
+    // and iOS WKWebView do this aggressively, Chrome/FF too) or a frozen tab is
+    // unfrozen (`resume`), NOTHING restarted the stream — the user came back to a
+    // frozen frame. Re-evaluate and restart on restore. 2026-06-15 (tab-switch fix).
+    this._pageshowHandler = (e) => { if (e.persisted) this._resumeLiveStreamIfNeeded(); };
+    window.addEventListener("pageshow", this._pageshowHandler);
+    this._resumeHandler = () => this._resumeLiveStreamIfNeeded();
+    document.addEventListener("resume", this._resumeHandler);
     // Listen to theme + mode broadcast so all bosch-camera-cards on the page
     // sync when the user toggles either switcher on any one of them.
     window.addEventListener("bosch-card-theme-change", this._onThemeBroadcast);
@@ -1461,6 +1493,10 @@ class BoschCameraCard extends HTMLElement {
       // drops the pill-bar + status badge).
       show_title:                 config.show_title !== false,
       show_last_event:            config.show_last_event !== false,
+      // Privacy placeholder timestamp source: "snapshot" (default) shows when the
+      // last live frame was captured — usually far more recent and relevant than
+      // "event" (last motion/audio event, which can be days old). 2026-06-15.
+      privacy_stale_source:       config.privacy_stale_source === "event" ? "event" : "snapshot",
       // Audio pill in the control bar (tap = mute/unmute, hover = volume on
       // desktop/Android). Default on; set show_audio:false to hide it.
       show_audio:                 config.show_audio !== false,
@@ -1852,7 +1888,9 @@ class BoschCameraCard extends HTMLElement {
     if (this._isIOS()) return; // iOS: volume read-only
     const video = this.shadowRoot.getElementById("cam-video");
     if (video) {
-      video.volume = v;
+      // video.volume can throw / be read-only on macOS Safari private mode and
+      // some Android WebViews — never let a slider drag bubble an exception.
+      try { video.volume = v; } catch (_) { /* volume not settable */ }
       video.muted = v === 0;
       if (!video.muted && video.paused) video.play().catch(() => {});
     }
@@ -1912,6 +1950,21 @@ class BoschCameraCard extends HTMLElement {
       value: pct,
     });
   }
+  // Live re-evaluation of "am I a secondary (echo-muted) instance?". The cached
+  // _isSecondaryAudioInstance is captured ONCE at register time and goes STALE if
+  // the PRIMARY card for this camera is removed at runtime — the surviving card
+  // would keep its `true` flag and stay permanently muted with no way back. Always
+  // ask the registry instead: the primary is the first card still registered for
+  // this entity (Set keeps insertion order); everyone after it is echo-muted.
+  // 2026-06-15 (multi-instance stale-flag fix).
+  _isSecondaryAudio() {
+    const id = this._audioRegisteredEntity || (this._config && this._config.camera_entity);
+    if (!id) return false;
+    const group = _boschAudioRegistry.get(id);
+    if (!group || group.size <= 1) return false;
+    return group.values().next().value !== this; // not the primary → secondary
+  }
+
   // Seed a freshly-started stream's audio from the BACKEND entities — the single
   // source of truth (automatable, shared across sessions). switch.<cam>_audio ON
   // → start unmuted (best-effort: the autoplay policy may force muted, the pill's
@@ -1934,7 +1987,7 @@ class BoschCameraCard extends HTMLElement {
     // must stay muted to prevent echo.  Force muted=true here so that even if
     // a later code path attempts to unmute, the guard in _armStartUnmute /
     // _tryStartUnmute also bails out.
-    if (this._isSecondaryAudioInstance) video.muted = true;
+    if (this._isSecondaryAudio()) video.muted = true;
   }
 
   // Called SYNCHRONOUSLY inside the user's stream-START gesture (stream pill /
@@ -1952,7 +2005,7 @@ class BoschCameraCard extends HTMLElement {
   _armStartUnmute() {
     if (this._isIOS() || this._androidAudioMuted) return;  // iOS/Android pre-gesture never auto-unmute
     if (this._audioDecoupled()) return;                    // card-audio prefs own their own seed
-    if (this._isSecondaryAudioInstance) return;            // 2nd+ card for same entity → stay muted (anti-echo)
+    if (this._isSecondaryAudio()) return;                  // 2nd+ card for same entity → stay muted (anti-echo)
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
@@ -1968,10 +2021,16 @@ class BoschCameraCard extends HTMLElement {
   // gesture armed _unmuteOnStart and the backend Ton switch is ON. Safe by
   // construction: a refused unmute pauses the element → the pause-guard resumes
   // it muted (no freeze). 2026-06-05.
-  _tryStartUnmute(video) {
-    if (!video || !video.muted || this._isIOS() || this._androidAudioMuted) return;
+  _tryStartUnmute(video, inGesture = false) {
+    if (!video || !video.muted || this._androidAudioMuted) return;
+    // iOS allows a programmatic unmute ONLY inside the synchronous call-stack of a
+    // real user gesture — never from the async `playing` event (the tap's
+    // activation is long gone by then and iOS silently re-mutes). So skip iOS
+    // unless we were called straight from a tap (inGesture=true, e.g. the
+    // first-interaction auto-unmute handler). 2026-06-15 (iOS first-tap sound).
+    if (this._isIOS() && !inGesture) return;
     if (this._audioDecoupled()) return;
-    if (this._isSecondaryAudioInstance) return;            // 2nd+ card for same entity → stay muted
+    if (this._isSecondaryAudio()) return;                  // 2nd+ card for same entity → stay muted
     if (this._getEffectiveState(this._entities.audio) !== "on") return;
     video.muted = false;
     if (video.paused) Promise.resolve(video.play()).catch(() => {});
@@ -1982,10 +2041,13 @@ class BoschCameraCard extends HTMLElement {
   _refreshAudioPill() {
     const btn = this.shadowRoot?.getElementById("ap-btn-audio");
     if (!btn) return;
-    // Audio only exists while a live stream is playing — gray the pill out
-    // otherwise (no reflow, clear "available once streaming" signal; the first
-    // tap after the stream starts enables sound anyway).
-    const live = !!this._liveVideoActive;
+    // The audio control only exists while a live stream is playing — hide the
+    // whole control otherwise (see .audio-inactive CSS). Also hide while privacy
+    // is on: privacy stops the live video, so there is no audio to control. The
+    // privacy check covers the brief window before _stopLiveVideo clears
+    // _liveVideoActive. 2026-06-15.
+    const privacyOn = this._getEffectiveState(this._entities.privacy) === "on";
+    const live = !!this._liveVideoActive && !privacyOn;
     this.classList.toggle("audio-inactive", !live);
     const video = live ? this.shadowRoot.getElementById("cam-video") : null;
     const audible = video ? (!video.muted && video.volume > 0) : false;
@@ -1994,7 +2056,7 @@ class BoschCameraCard extends HTMLElement {
     btn.setAttribute("aria-disabled", String(!live));
     const label = !live
       ? this._t("audio_available_when_live")
-      : this._isSecondaryAudioInstance
+      : this._isSecondaryAudio()
         ? this._t("multi_audio_muted")
         : (audible ? this._t("audio_mute") : this._t("audio_unmute"));
     btn.setAttribute("aria-label", label);
@@ -2276,6 +2338,14 @@ class BoschCameraCard extends HTMLElement {
       window.removeEventListener("pagehide", this._pagehideHandler);
       this._pagehideHandler = null;
     }
+    if (this._pageshowHandler) {
+      window.removeEventListener("pageshow", this._pageshowHandler);
+      this._pageshowHandler = null;
+    }
+    if (this._resumeHandler) {
+      document.removeEventListener("resume", this._resumeHandler);
+      this._resumeHandler = null;
+    }
     // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
     // these document-level listeners would leak via `this`-closure.
     if (this._fsWireTimer) { clearTimeout(this._fsWireTimer); this._fsWireTimer = null; }
@@ -2330,29 +2400,73 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _onVisibilityChange() {
-    if (document.visibilityState === "visible" && !this._liveVideoActive) {
-      // Page just came to foreground — trigger fresh snapshot like on page load,
-      // but defer ~500ms so the Companion App's WebSocket has a chance to finish
-      // reconnecting. Calling trigger_snapshot before WS is ready makes Android
-      // show a native error popup (the `hass.connected` flag can lag the actual
-      // disconnect by a few hundred ms after resume from background).
-      setTimeout(() => {
-        if (document.visibilityState === "visible" && !this._liveVideoActive) {
-          this._triggerFreshSnapshot();
-        }
-      }, 500);
-      // Also pull authoritative state for the toggleable switches via REST.
-      // The HA-Companion-App suspends its WebSocket on backgrounding, and
-      // when it resumes the local `hass.states` cache may briefly disagree
-      // with the server until the next WS push arrives. A user tap during
-      // that window can fire a wrong-direction toggle (observed 2026-04-28:
-      // stream silently turned off because the card was seeing a stale state).
-      // Best-effort, fire-and-forget; the next WS push would correct it
-      // anyway, this just makes it instant.
-      this._pullFreshSwitchStates();
+    if (document.visibilityState === "visible") {
+      if (!this._liveVideoActive) {
+        // Page just came to foreground — trigger fresh snapshot like on page load,
+        // but defer ~500ms so the Companion App's WebSocket has a chance to finish
+        // reconnecting. Calling trigger_snapshot before WS is ready makes Android
+        // show a native error popup (the `hass.connected` flag can lag the actual
+        // disconnect by a few hundred ms after resume from background).
+        setTimeout(() => {
+          if (document.visibilityState === "visible" && !this._liveVideoActive) {
+            this._triggerFreshSnapshot();
+          }
+        }, 500);
+        // Also pull authoritative state for the toggleable switches via REST.
+        // The HA-Companion-App suspends its WebSocket on backgrounding, and
+        // when it resumes the local `hass.states` cache may briefly disagree
+        // with the server until the next WS push arrives. A user tap during
+        // that window can fire a wrong-direction toggle (observed 2026-04-28:
+        // stream silently turned off because the card was seeing a stale state).
+        // Best-effort, fire-and-forget; the next WS push would correct it
+        // anyway, this just makes it instant.
+        this._pullFreshSwitchStates();
+      }
+      // Restart / un-pause a live stream the browser tore down or froze while the
+      // tab was hidden (the visible branch used to only refresh the snapshot and
+      // never brought the stream back). 2026-06-15 (tab-switch fix).
+      this._resumeLiveStreamIfNeeded();
     }
     // Restart timer with the correct interval (60 s or 1800 s)
     this._startRefreshTimer();
+  }
+
+  // Bring a live stream back after the browser tore it down (bfcache / pagehide)
+  // or paused it (background-tab throttle, Chrome 145+ muted-bg-pause, OS doze)
+  // while the page was hidden/frozen. Shared by visibilitychange→visible, the
+  // bfcache `pageshow` handler and the Page-Lifecycle `resume` event. Guards
+  // mirror _update()'s start gate so it only ever restarts a stream the backend
+  // says is on, never auto-starts one the user stopped. 2026-06-15.
+  _resumeLiveStreamIfNeeded() {
+    if (!this.isConnected || !this._hass) return;
+    if (!this._isStreaming()) return;          // backend stream switch is off → leave it
+    if (!this._liveVideoActive) {
+      if (this._startingLiveVideo || this._waitingForStream) return;
+      // Defer so the Companion App's WebSocket finishes reconnecting first, then
+      // re-check every guard (state can change during the defer).
+      this._reconnectingLiveVideo = true;
+      setTimeout(() => {
+        this._reconnectingLiveVideo = false;
+        if (this.isConnected && this._isStreaming()
+            && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+          this._startLiveVideo();
+        }
+      }, 500);
+      return;
+    }
+    // Nominally live, but the element may have been paused/frozen while hidden —
+    // nudge it; if it can't resume, force a clean reconnect (PiP-safe via flag).
+    const video = this.shadowRoot?.getElementById("cam-video");
+    if (video && video.paused) {
+      Promise.resolve(video.play()).catch(() => {
+        this._reconnectingLiveVideo = true;
+        this._stopLiveVideo();
+        setTimeout(() => {
+          this._reconnectingLiveVideo = false;
+          if (this.isConnected && this._isStreaming()) this._startLiveVideo();
+        }, 500);
+      });
+    }
   }
 
   async _pullFreshSwitchStates() {
@@ -2437,6 +2551,14 @@ class BoschCameraCard extends HTMLElement {
         :host { display: block; font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif); }
         ha-card {
           overflow: hidden;
+          /* Flatten the card into one compositing layer so the rounded-corner clip
+             is rasterised ONCE. Without this, fading an overlay (loading spinner,
+             privacy) in over the hardware-composited <video> made all four corners
+             flicker on macOS — the border-radius clip was re-evaluated per frame
+             against the video plane. isolation:isolate fixes it cross-browser and,
+             unlike transform/will-change, does NOT create a containing block for
+             the position:fixed fullscreen overlay. 2026-06-15. */
+          isolation: isolate;
           /* Own --bosch-card-* vars (issue #21), not the global --ha-card-*
              radius/shadow tokens — a dashboard theme that zeroes those must not
              strip our card geometry. Background DOES follow the theme (intended). */
@@ -2594,6 +2716,23 @@ class BoschCameraCard extends HTMLElement {
 
         /* Camera image area */
         .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; aspect-ratio: 16/9; }
+        /* Round the media + every full-bleed overlay to the card radius. Their
+           SQUARE corners otherwise flicker against ha-card's rounded overflow clip
+           whenever the card re-composites — e.g. on hover-out (the lift/shadow +
+           auto-hiding pill bar) or a snapshot-refresh "camera wakeup" repaint over
+           the GPU-composited video. Each child clipping its own corners removes the
+           per-frame ancestor-clip fight. Reset in fullscreen (no card radius there).
+           2026-06-15 (corner-flicker — Thomas: overlays had no corner radius). */
+        .cam-img, .cam-video, .loading-overlay, .privacy-placeholder,
+        .offline-overlay, .auth-overlay, .tap-to-play-overlay, .auto-play-gate {
+          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 12px));
+        }
+        :host(.fs-active) .cam-img, :host(.fs-active) .cam-video,
+        :host(.fs-active) .loading-overlay, :host(.fs-active) .privacy-placeholder,
+        :host(.fs-active) .offline-overlay, :host(.fs-active) .auth-overlay,
+        :host(.fs-active) .tap-to-play-overlay, :host(.fs-active) .auto-play-gate {
+          border-radius: 0;
+        }
         .cam-img {
           width: 100%; height: 100%; display: block; object-fit: cover;
           min-height: 160px; transition: opacity 0.3s;
@@ -3016,6 +3155,9 @@ class BoschCameraCard extends HTMLElement {
            camera is fine" rather than "this view is dead". */
         .privacy-placeholder {
           position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+          /* Above the loading-overlay (z-index 10) so toggling privacy ON while a
+             stream is still connecting shows the lock, not a spinner. 2026-06-15. */
+          z-index: 11;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: rgba(20,20,22,.55);
           backdrop-filter: blur(8px);
@@ -3393,7 +3535,10 @@ class BoschCameraCard extends HTMLElement {
         :host(.audio-hidden) .ap-audio-wrap { display: none; }
         /* Audio is meaningful only while live video plays — dim + disable the
            pill (and hide the volume popup) when there is no stream. */
-        :host(.audio-inactive) #ap-btn-audio { opacity: .4; pointer-events: none; }
+        /* Audio is stream-contextual — hide the whole control while no live
+           stream is playing (it reappears with the stop button on start) instead
+           of greying it out. 2026-06-15 (hide-until-needed). */
+        :host(.audio-inactive) .ap-audio-wrap { display: none; }
         :host(.audio-inactive) .ap-vol-pop { display: none; }
 
         /* Phone-narrow: keep all buttons visible, shrink slightly */
@@ -4575,9 +4720,21 @@ class BoschCameraCard extends HTMLElement {
     // time). Broadcast enter/leave to ALL cards so the active one lights up and
     // every other card greys its PiP button out. Listeners die with the <video>
     // on the next render; the wiring re-applies state via _reflectPipState().
-    vid.addEventListener("enterpictureinpicture", () => _boschPipSetActive(this));
+    vid.addEventListener("enterpictureinpicture", () => {
+      _boschPipSetActive(this);
+      // Re-assert the media session NOW the floating window exists — Chrome reads
+      // the caption from it at this point; setting it only before
+      // requestPictureInPicture() was too early and left the origin showing.
+      this._setPipMetadata();
+    });
     vid.addEventListener("leavepictureinpicture", () => {
       if (_boschPipActive === this) _boschPipSetActive(null);
+      this._clearPipMetadata();
+      // The user may have toggled mute via the PiP window's native media controls
+      // while floating; resync the card's audio toggle + pill so they reflect the
+      // real <video>.muted state on return instead of a stale value. 2026-06-15.
+      this._refreshAudioToggle();
+      this._refreshAudioPill();
     });
 
     // Buttons
@@ -5102,6 +5259,11 @@ class BoschCameraCard extends HTMLElement {
     this._imageLoaded = true;
     this._loadRetries = 0;   // reset retry counter on success
     if (img) img.classList.remove("hidden");
+    // Remember when the last REAL snapshot frame arrived (not the cached/
+    // placeholder data: URI) — the privacy placeholder badge uses this to show
+    // "Last snapshot: <ts>", which is far more recent than the last motion event.
+    // 2026-06-15.
+    if (!isCache) this._lastSnapshotAt = Date.now();
 
     // Clear stream-connecting overlay when first real frame arrives
     if (!isCache && this._streamConnecting) {
@@ -5293,6 +5455,11 @@ class BoschCameraCard extends HTMLElement {
       // black screen gap between image hide and first video frame.
       this._liveVideoActive    = true;
       this._startingLiveVideo  = false;
+      // Stream just went live → the PiP button is now usable, and the audio
+      // control (hidden while not streaming) must re-appear. 2026-06-15.
+      this._reflectPipState();
+      this._refreshAudioPill();
+      this._refreshAudioToggle();
       // Show the HLS-mode banner ONLY when the remote/mobile path actually fell
       // back to HLS — not when the short WebRTC attempt succeeded (e.g. on VPN).
       if (this._remoteSkipWebRTC && this._streamTransport === "hls") {
@@ -5357,7 +5524,7 @@ class BoschCameraCard extends HTMLElement {
       // 2026-06-03 stream-drop fix.
       if (!video._boschPauseGuard) {
         video._boschPauseGuard = true;
-        video.addEventListener("pause", () => {
+        video._boschPauseGuardFn = () => {
           if (this._stoppingLiveVideo || !this._liveVideoActive || !this.isConnected) return;
           if (!video.srcObject && !video.currentSrc && !video.getAttribute("src")) return;
           // If the user has sound ON (unmuted via a valid tap), a transient
@@ -5375,19 +5542,31 @@ class BoschCameraCard extends HTMLElement {
             Promise.resolve(video.play()).catch(() => {});
             this._refreshAudioToggle();
             this._refreshAudioPill();
+            // A transient pause forced us to drop the sound the user asked for.
+            // Re-arm the first-interaction auto-unmute (while the backend Ton
+            // switch is still on) so a single click anywhere restores sound,
+            // instead of leaving the stream silently muted for the rest of the
+            // session. Idempotent (_armAutoUnmute no-ops if already armed) and it
+            // only ARMS — it never unmutes outside a gesture, so no loop. 2026-06-15.
+            if (!this._isSecondaryAudio()
+                && this._getEffectiveState(this._entities.audio) === "on") {
+              this._armAutoUnmute();
+            }
           };
           if (!video.muted) {
             Promise.resolve(video.play()).catch(reMuteAndResume);
             return;
           }
           reMuteAndResume();
-        });
+        };
+        video.addEventListener("pause", video._boschPauseGuardFn);
       }
       // Safety timeout: if video never plays after 120s, hide overlay but
       // keep snapshot visible (don't call clearOverlay which hides the image).
       // Outdoor camera can take 80s+ for first HLS frame.
       if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
       this._activateSafetyTimer = setTimeout(() => {
+        if (!this.isConnected) return;   // card removed during the 120s window
         if (!video.paused && video.currentTime > 0) {
           // Video is actually playing — full cleanup
           clearOverlay();
@@ -5407,19 +5586,31 @@ class BoschCameraCard extends HTMLElement {
           clearInterval(this._stallChecker);
           return;
         }
-        if (video.currentTime === lastTime && !video.paused) {
+        // A live stream is "stalled" if currentTime stopped advancing OR the
+        // browser PAUSED the element while it should be live. The old condition
+        // had `&& !video.paused`, so a stream paused by background-tab throttling,
+        // Chrome 145+ muted-background-pause or Android/iOS doze was NEVER seen as
+        // a stall and never recovered. Treat a paused-while-live element as a stall
+        // too, and try a cheap resume before escalating to a reconnect. 2026-06-15.
+        const frozen        = video.currentTime === lastTime;
+        const pausedWhileLive = video.paused && !this._stoppingLiveVideo;
+        if (frozen || pausedWhileLive) {
+          if (video.paused) Promise.resolve(video.play()).catch(() => {});
           stallCount++;
-          if (stallCount >= 3) { // 15s stall (3 × 5s)
-            console.warn("bosch-camera-card: video stalled for 15s, recovering");
+          if (stallCount >= 3) { // ~15s (3 × 5s)
+            console.warn("bosch-camera-card: live video stalled/paused for ~15s, recovering");
             stallCount = 0;
-            if (this._hls && this._hls.liveSyncPosition) {
+            if (this._hls && this._hls.liveSyncPosition && !video.paused) {
               video.currentTime = this._hls.liveSyncPosition;
             } else {
               // Full restart — flag as reconnect so PiP survives the cycle
               this._reconnectingLiveVideo = true;
               this._stopLiveVideo();
-              if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => { this._reconnectingLiveVideo = false; this._startLiveVideo(); }, 2000);
+              if (this.isConnected && this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  this._reconnectingLiveVideo = false;
+                  if (this.isConnected) this._startLiveVideo();
+                }, 2000);
               } else {
                 this._reconnectingLiveVideo = false;
               }
@@ -5527,12 +5718,18 @@ class BoschCameraCard extends HTMLElement {
               const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
               if (overlay) {
                 overlay.classList.add("visible");
+                // Drop any resume listener left over from a previous start — else
+                // it stacks across reconnects and each copy fires play() against
+                // its own stale `video` closure. 2026-06-15.
+                if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
                 const resume = () => {
                   overlay.classList.remove("visible");
                   overlay.removeEventListener("pointerup", resume);
+                  this._tapToPlayResume = null;
                   video.muted = true;
                   video.play().catch(() => {});
                 };
+                this._tapToPlayResume = resume;
                 // pointerup, not click — reliable on mobile-WebView touch (the
                 // tap-to-play overlay is a <div>; click can be dropped). 2026-05-29.
                 overlay.addEventListener("pointerup", resume);
@@ -5615,7 +5812,7 @@ class BoschCameraCard extends HTMLElement {
               this._reconnectingLiveVideo = true;
               this._stopLiveVideo();
               if (this._isStreaming && this._isStreaming()) {
-                setTimeout(() => { this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 1000);
+                setTimeout(() => { this._reconnectingLiveVideo = false; if (this.isConnected) this._reconnectAfterStreamDrop(); }, 1000);
               } else {
                 this._reconnectingLiveVideo = false;
               }
@@ -5633,7 +5830,7 @@ class BoschCameraCard extends HTMLElement {
             this._reconnectingLiveVideo = true;
             this._stopLiveVideo();
             if (this._isStreaming()) {
-              setTimeout(() => { this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 2000);
+              setTimeout(() => { this._reconnectingLiveVideo = false; if (this.isConnected) this._reconnectAfterStreamDrop(); }, 2000);
             } else {
               this._reconnectingLiveVideo = false;
             }
@@ -5751,6 +5948,17 @@ class BoschCameraCard extends HTMLElement {
     pc.addTransceiver("audio", { direction: "recvonly" });
 
     const remoteStream = new MediaStream();
+    // SINGLE ontrack handler with hoisted settle refs. A second pc.ontrack used to
+    // be assigned inside the await-Promise below, overwriting this one — but a
+    // track arriving during the createOffer/setLocalDescription/subscribe awaits
+    // (before that Promise ran) fired THIS handler, activated WebRTC, yet never
+    // resolved the Promise (the inner handler wasn't installed and never saw the
+    // already-consumed track) → Promise hit its timeout → reject → HLS fallback
+    // spun up a DUPLICATE stream over a live WebRTC one. One handler, hoisted
+    // resolve/reject/timeout, settles whenever the track lands. 2026-06-15.
+    let webrtcResolve = null;
+    let webrtcReject = null;
+    let webrtcTimeout = null;
     pc.ontrack = (ev) => {
       remoteStream.addTrack(ev.track);
       if (video.srcObject !== remoteStream) {
@@ -5760,15 +5968,12 @@ class BoschCameraCard extends HTMLElement {
         video.play().catch(() => {});
         activateVideo();
       }
+      if (webrtcTimeout) { clearTimeout(webrtcTimeout); webrtcTimeout = null; }
+      if (webrtcResolve) { webrtcResolve(); webrtcResolve = null; }
     };
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
-    // Outer-scope reject + timeout so the subscribeMessage error handler
-    // can short-circuit the Promise below. Set by the Promise constructor.
-    let webrtcReject = null;
-    let webrtcTimeout = null;
 
     // Subscribe to answer/candidates via HA WS
     const unsub = await this._hass.connection.subscribeMessage(
@@ -5820,30 +6025,27 @@ class BoschCameraCard extends HTMLElement {
     // we'd otherwise stall the full timeout. Reject early so HLS fallback
     // kicks in fast.
     await new Promise((resolve, reject) => {
+      webrtcResolve = resolve;
       webrtcReject = reject;
       // Short attempt on the remote/mobile path so HLS fallback kicks in fast;
       // normal 5s elsewhere. The ICE attempt doubles as the reachability probe.
       const attemptMs = this._remoteSkipWebRTC ? 2500 : 5000;
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
+      // A track may already have arrived during the awaits above — the single
+      // ontrack handler ran and set srcObject. Settle now so we don't wait out the
+      // timeout and then wrongly fall back to HLS over a live stream. 2026-06-15.
+      if (video.srcObject === remoteStream) { clearTimeout(timeout); webrtcTimeout = null; resolve(); return; }
       pc.addEventListener("iceconnectionstatechange", () => {
-        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+        // Only `failed` is terminal. `disconnected` is transient (a brief LAN blip
+        // or, on Firefox, a normal phase during ICE gathering) and usually
+        // recovers — treating it as fatal forced a premature HLS fallback. The
+        // outer timeout still bounds a genuinely stuck connect. 2026-06-15.
+        if (pc.iceConnectionState === "failed") {
           clearTimeout(timeout);
-          reject(new Error("WebRTC: ICE " + pc.iceConnectionState));
+          reject(new Error("WebRTC: ICE failed"));
         }
       });
-      pc.ontrack = (ev) => {
-        clearTimeout(timeout);
-        remoteStream.addTrack(ev.track);
-        if (video.srcObject !== remoteStream) {
-          this._streamTransport = "webrtc";
-          video.srcObject = remoteStream;
-          video.muted = true;
-          video.play().catch(() => {});
-          activateVideo();
-        }
-        resolve();
-      };
     });
   }
 
@@ -5936,6 +6138,15 @@ class BoschCameraCard extends HTMLElement {
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (video) {
+      // Detach the pause-guard before teardown: video.load() below fires a
+      // synchronous `pause` on Firefox, which would otherwise run the stale guard
+      // closure against a src-cleared element. Re-added by activateVideo() on the
+      // next start (the _boschPauseGuard flag is reset here too). 2026-06-15.
+      if (video._boschPauseGuardFn) {
+        video.removeEventListener("pause", video._boschPauseGuardFn);
+        video._boschPauseGuardFn = null;
+        video._boschPauseGuard = false;
+      }
       // If this video is floating in Picture-in-Picture, close it on teardown.
       // Exception: auto-reconnect paths set _reconnectingLiveVideo=true before
       // calling _stopLiveVideo() — in that case the video srcObject is about to
@@ -5957,7 +6168,17 @@ class BoschCameraCard extends HTMLElement {
     this._startingLiveVideo = false;
     // Clear any pending start-unmute so a stale flag can't auto-unmute a LATER
     // (e.g. auto-play) stream outside a gesture. 2026-06-05.
-    this._unmuteOnStart     = false;
+    // EXCEPTION: an auto-reconnect (stall recovery, HLS fatal, 60-min Bosch
+    // session rotation) sets _reconnectingLiveVideo=true before tearing down and
+    // immediately re-starts the SAME stream — but provides NO new user gesture to
+    // re-arm. Clearing the flag here made the reconnected stream come back MUTED
+    // even though the user had sound on. The sticky user-activation from the
+    // ORIGINAL start tap persists for the whole page session (Chrome/Safari gate
+    // muted=false on STICKY activation, not transient), so preserving the flag
+    // lets _tryStartUnmute restore sound on the new stream's `playing` event,
+    // still gated on switch.<cam>_audio == on; a refused unmute is caught by the
+    // pause-guard (resume muted, never freeze). 2026-06-15 (sound-after-reconnect fix).
+    if (!this._reconnectingLiveVideo) this._unmuteOnStart = false;
     // Clean up stream-connecting state
     this._streamConnecting = false;
     if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
@@ -5975,7 +6196,15 @@ class BoschCameraCard extends HTMLElement {
     this._lastVolumeState = null;
     // Hide tap-to-play overlay if stream stops before user tapped
     const tapOverlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
-    if (tapOverlay) tapOverlay.classList.remove("visible");
+    if (tapOverlay) {
+      tapOverlay.classList.remove("visible");
+      // Remove the stored resume listener so it doesn't survive teardown and
+      // stack on the next start. 2026-06-15.
+      if (this._tapToPlayResume) {
+        tapOverlay.removeEventListener("pointerup", this._tapToPlayResume);
+        this._tapToPlayResume = null;
+      }
+    }
     // Teardown done — re-arm the pause-guard for the next stream.
     this._stoppingLiveVideo = false;
     // Reconnect flag is cleared by the caller after _startLiveVideo() is queued.
@@ -5985,6 +6214,13 @@ class BoschCameraCard extends HTMLElement {
     // Clear the transport so a stale value can't flash the HLS banner before the
     // next stream picks its transport.
     this._streamTransport = null;
+    // Stream is no longer live → hide the PiP button (can't float a snapshot) AND
+    // the audio control. _refreshAudioPill is otherwise only called from _update's
+    // live branch, so without this the Ton pill stayed visible after stream stop.
+    // A reconnect keeps the PiP owner enabled via the `mine` branch. 2026-06-15.
+    this._reflectPipState();
+    this._refreshAudioPill();
+    this._refreshAudioToggle();
   }
 
   // ── Snapshot button ───────────────────────────────────────────────────────
@@ -6944,7 +7180,7 @@ class BoschCameraCard extends HTMLElement {
             // pattern) — any click counts, so the user no longer has to find the
             // audio pill to restore sound after a load/reload/restart. 2026-06-05.
             // Secondary (2nd+ card for same entity) stays muted to prevent echo.
-            if (!this._isSecondaryAudioInstance) this._armAutoUnmute();
+            if (!this._isSecondaryAudio()) this._armAutoUnmute();
           }
           // Live volume sync from the backend number.<cam>_audio_volume entity —
           // a slider drag on another session or an automation reaches us as a
@@ -6982,22 +7218,29 @@ class BoschCameraCard extends HTMLElement {
     const privLabel  = this.shadowRoot.getElementById("privacy-placeholder-label");
     if (privLabel) privLabel.textContent = this._t("privacy_stale_label").replace(/\s*—.*/, "") || "Privat-Modus aktiv";
     if (staleBadge) {
-      if (privacyOn && lastEventStr !== "—") {
-        // Build a compact "Last event: <ts>" label.  Re-use the already-computed
-        // `lastEventStr` + the locale-aware pretty timestamp from the ap-last-event block.
-        let staleTs = lastEventStr;
-        try {
-          const d = lastEventState?.state ? new Date(lastEventState.state) : null;
-          if (d && !isNaN(d)) {
-            const sameDay = d.toDateString() === new Date().toDateString();
-            // For stale badge show full date+time (not just time like ap-last-event)
-            // so the user can see how old the frozen frame is.
-            staleTs = sameDay
-              ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-              : d.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-          }
-        } catch { /* fall back to lastEventStr */ }
-        staleBadge.textContent = `${this._t("privacy_stale_prefix")} ${staleTs}`;
+      // Format a Date as full date+time (or just time if today) so the user sees
+      // how old the frozen frame is.
+      const fmtStale = (d) => {
+        if (!d || isNaN(d)) return null;
+        const sameDay = d.toDateString() === new Date().toDateString();
+        return sameDay
+          ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : d.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      };
+      // Source: "snapshot" (default) shows when the last live frame was captured —
+      // usually far more recent than "event" (last motion/audio). Falls back to the
+      // event timestamp when no snapshot has loaded yet. 2026-06-15.
+      let prefix = null, ts = null;
+      if (privacyOn && this._config.privacy_stale_source === "snapshot" && this._lastSnapshotAt) {
+        ts = fmtStale(new Date(this._lastSnapshotAt));
+        if (ts) prefix = this._t("privacy_stale_prefix_snapshot");
+      }
+      if (privacyOn && !ts && lastEventStr !== "—") {
+        ts = fmtStale(lastEventState?.state ? new Date(lastEventState.state) : null) || lastEventStr;
+        prefix = this._t("privacy_stale_prefix");
+      }
+      if (privacyOn && prefix && ts) {
+        staleBadge.textContent = `${prefix} ${ts}`;
         staleBadge.classList.add("visible");
       } else {
         staleBadge.classList.remove("visible");
@@ -7738,12 +7981,24 @@ class BoschCameraCard extends HTMLElement {
   _armAutoUnmute() {
     if (this._autoUnmuteHandler) return;  // already armed — keep a single listener
     const handler = (e) => {
+      // Only real activation keys (Enter / Space) count as a user gesture. Tab,
+      // arrow keys, Escape, F-keys, media keys etc. are NOT a transient activation,
+      // so unmuting on them would be a gesture-less unmute → Chrome/Safari pause
+      // the element → the pause-guard re-mutes (silent sound loss) AND this
+      // one-shot listener would be consumed, blocking recovery on the next REAL
+      // click. Ignore non-activation keys and stay armed. 2026-06-15.
+      if (e.type === "keydown" && e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
       // The audio pill / Ton toggle own their own gesture via _toggleAudio; if the
       // first interaction lands on them, step aside and let that path do the work.
       const onAudioCtrl = !!(e.composedPath && e.composedPath().some(
         (el) => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
       this._disarmAutoUnmute();
       if (onAudioCtrl) return;
+      // This first interaction IS the synchronous user gesture iOS and Android
+      // require, so release the Android pre-gesture mute latch — otherwise
+      // _armStartUnmute/_tryStartUnmute keep bailing and the stream stays muted
+      // for the whole session on Android. 2026-06-15.
+      this._androidAudioMuted = false;
       // Route through the SAME proven bridge as the start gesture: unlock the
       // AudioContext inside this real gesture so the unmute sticks (a raw
       // muted=false here was getting punished + re-muted within seconds on
@@ -7754,10 +8009,12 @@ class BoschCameraCard extends HTMLElement {
         ? this.shadowRoot && this.shadowRoot.getElementById("cam-video")
         : null;
       if (video && !video.paused) {
-        // Stream already playing → unmute now. If mid-reconnect (paused),
-        // _unmuteOnStart stays armed and the next `playing` event applies it.
+        // Stream already playing → unmute now, straight inside this gesture
+        // (inGesture=true so iOS is allowed too — its only valid unmute window).
+        // If mid-reconnect (paused), _unmuteOnStart stays armed and the next
+        // `playing` event applies it.
         this._unmuteOnStart = false;
-        this._tryStartUnmute(video);
+        this._tryStartUnmute(video, true);
       }
     };
     this._autoUnmuteHandler = handler;
@@ -7986,12 +8243,21 @@ class BoschCameraCard extends HTMLElement {
     }
     const video = this.shadowRoot.getElementById("cam-video");
     if (!video || !document.pictureInPictureEnabled || video.disablePictureInPicture) {
-      return; // browser/element can't do PiP (iOS Safari, Firefox, blocked)
+      return; // browser/element can't do PiP (iOS Safari, old browsers, blocked)
     }
     // Needs at least metadata; a just-started WebRTC stream may not be there yet.
     if (video.readyState < 1 /* HAVE_METADATA */) {
       return; // start the live stream first, then tap PiP
     }
+    // requestPictureInPicture() CONSUMES this gesture's user activation, and once
+    // the <video> floats, taps on the PiP window's chrome do NOT reach our
+    // document-level first-click auto-unmute listener — so a user who enters PiP
+    // while the stream is still muted would be stuck silent with no way to unmute.
+    // If the backend Ton switch is on but the element is muted, unmute NOW,
+    // synchronously inside this PiP-button gesture (a valid activation on every
+    // engine, incl. Safari same-tick). Safe: only ever adds sound; a refused
+    // unmute is caught by the pause-guard (resume muted, never freeze). 2026-06-15.
+    if (video.muted) { this._armStartUnmute(); this._tryStartUnmute(video, true); }
     // Drop any digital zoom so the floating window shows the full frame.
     if (this._zoom?.scale > 1) this._resetZoom();
     // Label the PiP window with the camera name — Chrome otherwise shows the
@@ -8012,6 +8278,19 @@ class BoschCameraCard extends HTMLElement {
     const btn = this.shadowRoot?.getElementById("ap-btn-pip");
     if (!btn) return;
     const mine    = _boschPipActive === this;
+    const hasLive = !!this._liveVideoActive || mine;
+    // PiP can only float a PLAYING <video>. It is stream-contextual, so HIDE the
+    // button entirely when PiP is unsupported (iOS / old browsers / WebViews) or
+    // there is no live stream to float — it reappears together with the stop
+    // button when the stream starts. 2026-06-15 (Thomas: hide-until-needed).
+    if (!document.pictureInPictureEnabled || !hasLive) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    // A live stream exists. Only the cross-card single-PiP block GREYS (not hides)
+    // the button — it belongs to THIS card and is just temporarily taken by
+    // another camera, so it must stay visible (vanishing would read as a bug).
     const blocked = _boschPipActive !== null && !mine;
     btn.classList.toggle("on", mine);
     btn.setAttribute("aria-pressed", String(mine));
@@ -8020,7 +8299,12 @@ class BoschCameraCard extends HTMLElement {
   }
 
   // Set the Media Session title shown in the PiP window's header (Chrome falls
-  // back to the page origin like "192.168.x:8123" otherwise). Best-effort.
+  // back to the page origin like "192.168.x:8123" otherwise). Metadata ALONE is
+  // not enough for a live <video srcObject=MediaStream>: Chrome only uses our
+  // title once the page is the *active* media session, which for a stream means we
+  // must also declare playbackState AND own the transport handlers. Without that
+  // it shows the origin. So set all three. Re-asserted on `enterpictureinpicture`
+  // (the window is created then) and cleared on leave. 2026-06-15.
   _setPipMetadata() {
     if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
     try {
@@ -8032,7 +8316,30 @@ class BoschCameraCard extends HTMLElement {
         title: name,
         artist: "Bosch Smart Home",
       });
+      navigator.mediaSession.playbackState = "playing";
+      // Own the transport so Chrome treats this as the active session (and so the
+      // PiP play/pause button doesn't hard-pause a live stream behind our back —
+      // the pause-guard would only have to fight it). Live view has no real
+      // pause/seek, so keep it playing.
+      const keepLive = () => {
+        const v = this.shadowRoot?.getElementById("cam-video");
+        if (v && v.paused) Promise.resolve(v.play()).catch(() => {});
+      };
+      try { navigator.mediaSession.setActionHandler("play", keepLive); } catch (_) { /* unsupported */ }
+      try { navigator.mediaSession.setActionHandler("pause", () => {}); } catch (_) { /* unsupported */ }
     } catch (_) { /* MediaMetadata constructor unavailable */ }
+  }
+
+  // Release the media session when PiP closes so the camera doesn't linger in the
+  // OS media hub / next PiP. 2026-06-15.
+  _clearPipMetadata() {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = "none";
+      navigator.mediaSession.metadata = null;
+      try { navigator.mediaSession.setActionHandler("play", null); } catch (_) { /* unsupported */ }
+      try { navigator.mediaSession.setActionHandler("pause", null); } catch (_) { /* unsupported */ }
+    } catch (_) { /* best-effort */ }
   }
 
   _enterCssFullscreen() {
@@ -8779,10 +9086,11 @@ class BoschCameraOverviewCard extends HTMLElement {
         }
         .bco-empty-link:hover { text-decoration: underline; }
         .bco-banner {
+          position: relative;
           display: flex;
           flex-direction: column;
           gap: 4px;
-          padding: 10px 12px;
+          padding: 10px 40px 10px 12px;
           margin-bottom: 8px;
           border-radius: 8px;
           background: var(--warning-color, #ffc107);
@@ -8790,6 +9098,18 @@ class BoschCameraOverviewCard extends HTMLElement {
           font-size: 13px;
           line-height: 1.35;
         }
+        .bco-banner-close {
+          position: absolute; top: 6px; inset-inline-end: 8px;
+          /* 26px ≥ WCAG 2.5.8 AA 24px tap-target floor; RTL-safe via logical
+             inset-inline-end; touch-action avoids the iOS synthetic-click delay. */
+          width: 26px; height: 26px; padding: 0;
+          display: flex; align-items: center; justify-content: center;
+          border: none; border-radius: 50%; cursor: pointer;
+          background: rgba(0,0,0,.20); color: inherit;
+          font-size: 18px; line-height: 1; opacity: .85;
+          touch-action: manipulation;
+        }
+        .bco-banner-close:hover { opacity: 1; background: rgba(0,0,0,.32); }
         .bco-banner.bco-banner-info {
           background: var(--info-color, var(--primary-color));
           color: var(--text-primary-color, #fff);
@@ -9007,7 +9327,20 @@ class BoschCameraOverviewCard extends HTMLElement {
     const isActive = mState === "active";
     const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
     // Avoid re-rendering identical banner each tick.
-    const sig = `${mState}|${mAttr.title}|${win}`;
+    const sig = `${mState}|${String(mAttr.title ?? "")}|${win}`;  // render-identity (display)
+    // Dismiss key for the × button: keyed to the RAW ISO window + title, WITHOUT
+    // mState — so (a) locale/format churn of the displayed `win` can't break the
+    // dismissal, and (b) dismissing the "scheduled" banner keeps it dismissed once
+    // maintenance goes "active" (same window). A genuinely new window (different
+    // start/end/title) gets a new key and re-shows. 2026-06-15 (agent findings).
+    const dismissKey = `${String(mAttr.title ?? "")}|${mAttr.scheduled_start ?? ""}|${mAttr.scheduled_end ?? ""}`;
+    let dismissed = "";
+    try { dismissed = localStorage.getItem("bosch-maint-dismissed") || ""; } catch (_) { /* storage blocked */ }
+    if (dismissed === dismissKey) {
+      if (this._bannerSlot.firstChild) this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "dismissed:" + dismissKey;
+      return;
+    }
     if (this._bannerSlot.dataset.sig === sig) return;
     this._bannerSlot.dataset.sig = sig;
     this._bannerSlot.innerHTML = "";
@@ -9022,6 +9355,19 @@ class BoschCameraOverviewCard extends HTMLElement {
       : (mAttr.title || this._t("maint_notice"));
     banner.appendChild(t);
     banner.appendChild(sub);
+    // × close — dismiss this maintenance window for this browser. 2026-06-15.
+    const close = document.createElement("button");
+    close.className = "bco-banner-close";
+    close.type = "button";
+    close.setAttribute("aria-label", this._t("maint_dismiss"));
+    close.title = this._t("maint_dismiss");
+    close.textContent = "×";
+    close.addEventListener("click", () => {
+      try { localStorage.setItem("bosch-maint-dismissed", dismissKey); } catch (_) { /* storage blocked */ }
+      this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "dismissed:" + dismissKey;
+    });
+    banner.appendChild(close);
     if (isActive) {
       const note = document.createElement("div");
       note.textContent = this._t("maint_body");

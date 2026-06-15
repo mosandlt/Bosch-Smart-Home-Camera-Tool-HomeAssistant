@@ -566,6 +566,15 @@ test("PiP is single-owner across cards — others grey out (mock hass)", async (
     await new Promise((res) => setTimeout(res, 300));
     const btn = (c) => c.shadowRoot.getElementById("ap-btn-pip");
     const vid = (c) => c.shadowRoot.getElementById("cam-video");
+    // Force PiP capability so `disabled` is set deterministically across the e2e
+    // browser matrix (WebKit/Firefox headless report pictureInPictureEnabled
+    // false → the button would be hidden, not greyed).
+    Object.defineProperty(document, "pictureInPictureEnabled", { value: true, configurable: true });
+    // Both streams LIVE — this test isolates the cross-card single-owner greying,
+    // which is a separate concern from the "no live stream → hidden" rule (that
+    // has its own test). Without a live stream BOTH buttons are hidden by design.
+    A._liveVideoActive = true; B._liveVideoActive = true;
+    A._reflectPipState(); B._reflectPipState();
     const snap = () => ({
       aOn: btn(A).classList.contains("on"), aDisabled: btn(A).disabled,
       bOn: btn(B).classList.contains("on"), bDisabled: btn(B).disabled,
@@ -973,4 +982,344 @@ test("_reconnectingLiveVideo flag suppresses PiP exit during auto-reconnect", as
 
   expect(r.exitOnNormalStop, "normal teardown closes PiP (session expiry/privacy/unload)").toBe(1);
   expect(r.exitOnReconnect, "auto-reconnect does NOT close PiP — floating window survives").toBe(0);
+});
+
+// 2026-06-15 sound-after-reconnect regression: an auto-reconnect (stall/HLS
+// fatal/Bosch 60-min session rotation) sets _reconnectingLiveVideo=true and
+// re-starts the SAME stream with no new gesture. _stopLiveVideo() used to clear
+// _unmuteOnStart unconditionally → the reconnected stream came back MUTED even
+// with sound on. It must now PRESERVE the flag across a reconnect (and still
+// clear it on a real, user-driven stop).
+test("_unmuteOnStart survives an auto-reconnect teardown but clears on a real stop", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(() => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    // Reconnect teardown — flag must SURVIVE so the new stream's `playing`
+    // re-applies sound.
+    card._unmuteOnStart = true;
+    card._reconnectingLiveVideo = true;
+    card._stopLiveVideo();
+    const afterReconnect = card._unmuteOnStart;
+    // Real user stop — flag must CLEAR so a later auto-play stream can't unmute
+    // itself outside a gesture.
+    card._unmuteOnStart = true;
+    card._reconnectingLiveVideo = false;
+    card._stopLiveVideo();
+    const afterRealStop = card._unmuteOnStart;
+    return { afterReconnect, afterRealStop };
+  });
+  expect(r.afterReconnect, "reconnect preserves the armed start-unmute → sound comes back").toBe(true);
+  expect(r.afterRealStop, "a real stop clears the start-unmute flag").toBe(false);
+});
+
+// 2026-06-15: the PiP button can only float a PLAYING <video> — there is nothing
+// to pop out of a snapshot. So it must be greyed (disabled) until a live stream
+// is running, then enable, then grey again on stop. (Thomas: PiP nur aktiv wenn
+// Livestream läuft.)
+test("PiP button is HIDDEN until a live stream runs (single card)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    // Force PiP capability so the test is deterministic across the e2e browser
+    // matrix (WebKit/Firefox headless report document.pictureInPictureEnabled
+    // false; we are testing the card's hide-until-live logic, not the engine).
+    Object.defineProperty(document, "pictureInPictureEnabled", { value: true, configurable: true });
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const btn = card.shadowRoot.getElementById("ap-btn-pip");
+    const idleHidden = btn.hidden;            // no stream → hidden entirely
+    card._liveVideoActive = true; card._reflectPipState();
+    const liveHidden = btn.hidden;            // streaming → shown
+    const liveDisabled = btn.disabled;        // shown + usable (no other PiP)
+    card._liveVideoActive = false; card._reflectPipState();
+    const stoppedHidden = btn.hidden;         // stopped → hidden again
+    return { idleHidden, liveHidden, liveDisabled, stoppedHidden };
+  });
+  expect(r.idleHidden, "PiP hidden while no stream runs").toBe(true);
+  expect(r.liveHidden, "PiP appears once the live stream is playing").toBe(false);
+  expect(r.liveDisabled, "PiP is usable (not greyed) while live and no other camera floats").toBe(false);
+  expect(r.stoppedHidden, "PiP hidden again after the stream stops").toBe(true);
+});
+
+// 2026-06-15: the first-interaction auto-unmute listener must only treat real
+// activation keys (Enter/Space) as the gesture. A non-activation key (Tab,
+// arrows, Esc, F-keys) is NOT a user activation — acting on it would unmute
+// gesture-lessly (Chrome pauses → pause-guard re-mutes → silent loss) AND consume
+// the one-shot listener, blocking recovery on the next real click. Those keys
+// must be ignored and the listener must STAY armed.
+test("auto-unmute ignores non-activation keys and stays armed; Enter disarms", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_audio": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._armAutoUnmute();
+    const armed = !!card._autoUnmuteHandler;
+    // A navigation key must NOT disarm the one-shot listener.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    const stillArmedAfterTab = !!card._autoUnmuteHandler;
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    const stillArmedAfterArrow = !!card._autoUnmuteHandler;
+    // A real activation key consumes (disarms) the listener.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const armedAfterEnter = !!card._autoUnmuteHandler;
+    return { armed, stillArmedAfterTab, stillArmedAfterArrow, armedAfterEnter };
+  });
+  expect(r.armed, "auto-unmute arms a document listener").toBe(true);
+  expect(r.stillArmedAfterTab, "Tab does not disarm (not an activation key)").toBe(true);
+  expect(r.stillArmedAfterArrow, "Arrow does not disarm (not an activation key)").toBe(true);
+  expect(r.armedAfterEnter, "Enter (a real activation key) disarms the one-shot").toBe(false);
+});
+
+// 2026-06-15 multi-instance stale-flag regression: secondary (echo-muted) status
+// must be re-evaluated LIVE from the registry, not cached once at register time.
+// If the primary card is removed at runtime, the survivor used to keep its stale
+// `secondary` flag and stay permanently muted with no way back.
+test("secondary-audio status re-evaluates after the primary card is removed", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: { "camera.shared": { state: "idle", attributes: { friendly_name: "S" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    const mk = () => {
+      const c = document.createElement("bosch-camera-card");
+      c.setConfig({ camera_entity: "camera.shared", apple_style: true });
+      c.hass = base;
+      document.body.appendChild(c);
+      return c;
+    };
+    const A = mk(); // primary (registered first)
+    const B = mk(); // secondary (same camera_entity)
+    await new Promise((res) => setTimeout(res, 200));
+    const aSecondaryInit = A._isSecondaryAudio();
+    const bSecondaryInit = B._isSecondaryAudio();
+    A.remove(); // primary leaves the dashboard → B should become primary
+    const bSecondaryAfter = B._isSecondaryAudio();
+    return { aSecondaryInit, bSecondaryInit, bSecondaryAfter };
+  });
+  expect(r.aSecondaryInit, "first card is primary (not secondary)").toBe(false);
+  expect(r.bSecondaryInit, "second card for same entity starts secondary (echo-muted)").toBe(true);
+  expect(r.bSecondaryAfter, "after the primary is removed the survivor is no longer secondary").toBe(false);
+});
+
+// 2026-06-15 tab-switch / bfcache recovery: _resumeLiveStreamIfNeeded restarts a
+// stream that was torn down while hidden, but ONLY when the backend stream switch
+// is still on, the card is connected, and nothing is already starting. It never
+// auto-starts a stream the user stopped.
+test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+connected", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    const mk = () => { let n = 0; const f = () => { n++; }; f.count = () => n; return f; };
+
+    // Case 1: streaming + connected + not live → restarts (after the 500ms defer).
+    let start1 = mk(); card._startLiveVideo = start1;
+    card._isStreaming = () => true;
+    card._liveVideoActive = false; card._startingLiveVideo = false; card._waitingForStream = false;
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 650));
+    const restartedWhenStreaming = start1.count();
+
+    // Case 2: backend stream switch OFF → must NOT restart.
+    let start2 = mk(); card._startLiveVideo = start2;
+    card._isStreaming = () => false;
+    card._liveVideoActive = false;
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 650));
+    const restartedWhenNotStreaming = start2.count();
+
+    // Case 3: card disconnected → must NOT restart even if streaming.
+    let start3 = mk(); card._startLiveVideo = start3;
+    card._isStreaming = () => true;
+    card._liveVideoActive = false;
+    card.remove();
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 650));
+    const restartedWhenDetached = start3.count();
+
+    return { restartedWhenStreaming, restartedWhenNotStreaming, restartedWhenDetached };
+  });
+  expect(r.restartedWhenStreaming, "restarts a torn-down stream when backend still streaming").toBe(1);
+  expect(r.restartedWhenNotStreaming, "never restarts when the backend stream switch is off").toBe(0);
+  expect(r.restartedWhenDetached, "never restarts on a disconnected card").toBe(0);
+});
+
+// 2026-06-15: the bfcache `pageshow` handler only acts on a real bfcache restore
+// (event.persisted === true), not a normal load.
+test("pageshow restarts the stream only when restored from bfcache (persisted)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    let calls = 0;
+    card._resumeLiveStreamIfNeeded = () => { calls++; };
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    const afterPlainLoad = calls;
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    const afterBfcache = calls;
+    return { afterPlainLoad, afterBfcache };
+  });
+  expect(r.afterPlainLoad, "a normal (non-bfcache) pageshow does not restart").toBe(0);
+  expect(r.afterBfcache, "a bfcache restore (persisted) triggers a resume").toBe(1);
+});
+
+// 2026-06-15 leak fixes: _stopLiveVideo must detach the tap-to-play resume listener
+// and the pause-guard listener so neither survives teardown / stacks on restart.
+test("_stopLiveVideo detaches the tap-to-play and pause-guard listeners", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    const video = card.shadowRoot.getElementById("cam-video");
+    // Simulate an armed tap-to-play resume + an attached pause-guard.
+    card._tapToPlayResume = () => {};
+    video._boschPauseGuard = true;
+    video._boschPauseGuardFn = () => {};
+    card._stopLiveVideo();
+    return {
+      tapResumeCleared: card._tapToPlayResume === null,
+      pauseGuardCleared: video._boschPauseGuardFn === null && video._boschPauseGuard === false,
+    };
+  });
+  expect(r.tapResumeCleared, "tap-to-play resume listener ref cleared on stop").toBe(true);
+  expect(r.pauseGuardCleared, "pause-guard listener detached + flag reset on stop").toBe(true);
+});
+
+// 2026-06-15: the privacy placeholder must stack above the loading overlay
+// (z-index 10) so toggling privacy while connecting shows the lock, not a spinner.
+test("privacy placeholder sits above the loading overlay (z-index)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    const ph = card.shadowRoot.querySelector(".privacy-placeholder");
+    const lo = card.shadowRoot.querySelector(".loading-overlay");
+    return {
+      privacyZ: ph ? parseInt(getComputedStyle(ph).zIndex, 10) : null,
+      loadingZ: lo ? parseInt(getComputedStyle(lo).zIndex, 10) : null,
+    };
+  });
+  expect(r.privacyZ, "privacy placeholder has an explicit z-index").toBe(11);
+  expect(r.privacyZ > r.loadingZ, "privacy placeholder stacks above the loading overlay").toBe(true);
+});
+
+// 2026-06-15: the maintenance banner gained a × dismiss button. The dismiss key is
+// title + raw ISO window (NOT the formatted display string, NOT mState), so it
+// survives a scheduled→active flap of the same window and locale formatting, and a
+// genuinely new window re-shows.
+test("maintenance banner × dismisses the window, survives state flap, re-shows for a new window", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    try { localStorage.removeItem("bosch-maint-dismissed"); } catch (_) { /* blocked */ }
+    const mkHass = (state, start, end) => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T", brand: "Bosch" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.bosch_maint": { state, attributes: {
+          source: "rss:bosch", camera_relevant: true, title: "Kameras",
+          scheduled_start: start, scheduled_end: end,
+        }, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+    const W1S = "2026-06-16T07:00:00Z", W1E = "2026-06-16T10:00:00Z";
+    const card = document.createElement("bosch-camera-overview-card");
+    card.setConfig({});
+    card.hass = mkHass("scheduled", W1S, W1E);
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const sr = card.shadowRoot;
+    card._renderMaintenanceBanner();
+    const shown = !!sr.querySelector(".bco-banner");
+    const closeBtn = sr.querySelector(".bco-banner-close");
+    const hasClose = !!closeBtn;
+    if (closeBtn) closeBtn.click();
+    const afterClose = !!sr.querySelector(".bco-banner");
+    let stored = null; try { stored = localStorage.getItem("bosch-maint-dismissed"); } catch (_) { /* blocked */ }
+    // Same window, state flaps scheduled → active → must STAY dismissed.
+    card.hass = mkHass("active", W1S, W1E);
+    card._renderMaintenanceBanner();
+    const afterFlap = !!sr.querySelector(".bco-banner");
+    // A genuinely new window (different ISO times) → must re-appear.
+    card.hass = mkHass("scheduled", "2026-07-01T07:00:00Z", "2026-07-01T10:00:00Z");
+    card._renderMaintenanceBanner();
+    const newWindow = !!sr.querySelector(".bco-banner");
+    try { localStorage.removeItem("bosch-maint-dismissed"); } catch (_) { /* blocked */ }
+    return { shown, hasClose, afterClose, stored, afterFlap, newWindow };
+  });
+  expect(r.shown, "banner shows for a scheduled, camera-relevant maintenance").toBe(true);
+  expect(r.hasClose, "banner has a × close button").toBe(true);
+  expect(r.afterClose, "× hides the banner").toBe(false);
+  expect(r.stored, "dismiss key = title|startISO|endISO (no state, no formatted text)")
+    .toBe("Kameras|2026-06-16T07:00:00Z|2026-06-16T10:00:00Z");
+  expect(r.afterFlap, "stays dismissed when state flaps scheduled→active (same window)").toBe(false);
+  expect(r.newWindow, "re-appears for a genuinely new maintenance window").toBe(true);
+});
+
+// 2026-06-15: the privacy placeholder badge shows the last SNAPSHOT time by default
+// (more recent than the last motion event); privacy_stale_source:"event" restores
+// the old last-event behaviour.
+test("privacy badge: last-snapshot by default, last-event when configured", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = () => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_privacy_mode": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_last_event": { state: "2026-06-14T10:12:00Z", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+    const run = async (cfg) => {
+      const card = document.createElement("bosch-camera-card");
+      card.setConfig({ camera_entity: "camera.test", apple_style: true, ...cfg });
+      card._lastSnapshotAt = Date.now();
+      card.hass = mkHass();
+      document.body.appendChild(card);
+      await new Promise((res) => setTimeout(res, 250));
+      card.hass = mkHass();   // re-push so _update runs with privacy ON
+      const badge = card.shadowRoot.getElementById("privacy-stale-badge");
+      const text = badge ? badge.textContent : "";
+      card.remove();
+      return text;
+    };
+    const snapText  = await run({});                              // default = snapshot
+    const eventText = await run({ privacy_stale_source: "event" });
+    return { snapText, eventText };
+  });
+  expect(r.snapText, "default badge uses the last-snapshot prefix").toContain("Last snapshot:");
+  expect(r.eventText, "privacy_stale_source:event uses the last-event prefix").toContain("Last event:");
 });

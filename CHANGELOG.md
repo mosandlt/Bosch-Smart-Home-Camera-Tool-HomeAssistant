@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.5.17] - 2026-06-15
+
+Reliability-focused card release, hardened by a cross-browser / cross-OS pass (Chrome, Safari, Firefox, Edge on macOS, Windows, iOS, Android, Linux).
+
+- **Live-stream sound**: no longer comes back muted after an automatic reconnect (stall / HLS-fallback / session refresh); first-click-unmute only reacts to real activation keys (a stray Tab/arrow can't drop sound); a transient buffering pause re-arms one-click sound recovery; iOS first-tap / Android / multi-card edge cases fixed.
+- **Tab-switch & lifecycle**: stream recovers on return to a backgrounded tab or back/forward-cache restore (was frozen); paused-while-hidden detected and reconnected; leaked teardown timers/listeners cleaned up; a transient ICE blip no longer forces a premature HLS downgrade.
+- **Quieter controls**: the audio and Picture-in-Picture buttons appear on stream start and hide on stop (no greyed controls over a snapshot); card corners no longer flicker on overlay fade / mouse-out.
+- **Bosch cloud maintenance banner**: dismissible with an × (per browser, per maintenance window).
+- **Privacy mode**: the placeholder shows the last live snapshot time by default (`privacy_stale_source: event` restores the old "last event" behaviour).
+
+Card-only release — no configuration changes required.
+
 ## [v13.5.16] - 2026-06-14
 
 Picture-in-Picture for the live stream. A new ⧉ button pops the live WebRTC stream into the browser's floating, always-on-top window (over all apps on macOS Safari, over the browser on Chrome); the floating window's title shows the camera name (via Media Session). Only one PiP window is allowed by the browser, so the PiP button on every other camera greys out while one is floating, and the window keeps playing across a stream reconnect. Available on the single card and the overview tiles (live WebRTC view); hidden where the browser lacks PiP support (most iOS/Android WebViews). README documents the feature plus the Chrome Live Caption / Live Translate subtitle tip. Also bundles two accumulated fixes: a bounded slow-tier diagnostic deferral so a 24/7 stream can't freeze diagnostics, and a de-flaked stream-cooldown e2e test.
