@@ -239,8 +239,8 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and bool(
-            self.coordinator._audio_cache.get(self._cam_id)
+        return self.coordinator.last_update_success and (
+            self.coordinator._audio_cache.get(self._cam_id) is not None
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -524,8 +524,8 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and bool(
-            self.coordinator._audio_cache.get(self._cam_id)
+        return self.coordinator.last_update_success and (
+            self.coordinator._audio_cache.get(self._cam_id) is not None
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -583,8 +583,11 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
         # Gate on the lighting cache being populated — a write during the
         # pre-populate / failed-sub-fetch window would PUT zero-defaults and
         # clobber the camera's real light settings (bug-hunt 2026-06-02).
-        return bool(self.coordinator.last_update_success) and bool(
-            self.coordinator._lighting_switch_cache.get(self._cam_id)
+        return bool(self.coordinator.last_update_success) and (
+            self.coordinator._lighting_switch_cache.get(self._cam_id, {}).get(
+                "frontLightSettings"
+            )
+            is not None
         )
 
     async def async_set_native_value(self, value: float) -> None:
@@ -658,8 +661,11 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
     def available(self) -> bool:
         # Gate on the lighting cache (see white-balance note) — avoids writing
         # zero-defaults that clobber real settings before the cache is populated.
-        return bool(self.coordinator.last_update_success) and bool(
-            self.coordinator._lighting_switch_cache.get(self._cam_id)
+        return bool(self.coordinator.last_update_success) and (
+            self.coordinator._lighting_switch_cache.get(self._cam_id, {}).get(
+                self._led_key
+            )
+            is not None
         )
 
     async def async_set_native_value(self, value: float) -> None:

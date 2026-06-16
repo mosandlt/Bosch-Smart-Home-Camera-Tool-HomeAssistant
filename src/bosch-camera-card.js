@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.6.0";
+const CARD_VERSION = "13.7.0";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -259,6 +259,40 @@ const CARD_I18N = {
     nvr_no_recordings: "No recordings for this day",
     nvr_segments_suffix: "segment(s) — click to play",
     nvr_load_error: "Error loading segments",
+    nvr_loading_stream: "Loading stream…",
+    nvr_playing: "Playing",
+    nvr_segment_error: "Error loading segment",
+    nvr_loading_recordings: "Loading recordings…",
+    stream_warming_up: "Camera is waking up…",
+    stream_connecting: "Establishing connection…",
+    stream_loading_hls: "Loading HLS stream…",
+    stream_starting: "Starting stream…",
+    stream_reconnecting: "Reconnecting…",
+    stream_retrying: "Retrying stream…",
+    loading_image: "Loading image…",
+    loading_refreshing: "Refreshing…",
+    loading_refreshing_image: "Refreshing image…",
+    loading_hint_remote: "Cloud stream — first image in ~30–45 s, then stable",
+    loading_hint_local: "LAN stream — first image in ~25–35 s",
+    loading_hint_connecting: "Establishing camera connection…",
+    pill_snapshot_aria: "Take snapshot",
+    pill_stream_title: "Live stream",
+    pill_stream_aria: "Start or stop live stream",
+    pill_audio_title: "Sound",
+    pill_privacy_title: "Privacy mode",
+    pill_privacy_aria: "Toggle privacy mode",
+    pill_light_title: "Light",
+    pill_light_aria: "Toggle light",
+    pill_fullscreen_title: "Fullscreen",
+    pill_fullscreen_aria: "Fullscreen",
+    pill_pip_title: "Picture in Picture",
+    pill_pip_aria: "Picture in Picture (floating window)",
+    pill_more_title: "More options",
+    pill_more_aria: "More options",
+    pan_left_title: "Pan left",
+    pan_left_aria: "Pan camera left",
+    pan_right_title: "Pan right",
+    pan_right_aria: "Pan camera right",
     maint_title: "Bosch cloud maintenance in progress",
     maint_title_planned: "Bosch cloud maintenance scheduled",
     maint_notice: "Maintenance notice",
@@ -272,6 +306,7 @@ const CARD_I18N = {
     maint_auto_return: "The cameras come back automatically once the cloud responds.",
     privacy_stale_label: "Privacy mode — last image",
     privacy_stale_prefix: "Last event:",
+    ai_caption_prefix: "AI:",
     multi_audio_muted: "Audio muted (another tab is playing audio for this camera)",
     // ── editor: shared ──
     ed_cam_entity: "Camera entity *",
@@ -353,6 +388,40 @@ const CARD_I18N = {
     nvr_no_recordings: "Keine Aufnahmen für diesen Tag",
     nvr_segments_suffix: "Segment(e) — klicken zum Abspielen",
     nvr_load_error: "Fehler beim Laden der Segmente",
+    nvr_loading_stream: "Lade Stream…",
+    nvr_playing: "Wiedergabe",
+    nvr_segment_error: "Fehler beim Laden des Segments",
+    nvr_loading_recordings: "Lade Aufnahmen…",
+    stream_warming_up: "Kamera wird aufgeweckt…",
+    stream_connecting: "Verbindung wird aufgebaut…",
+    stream_loading_hls: "HLS wird geladen…",
+    stream_starting: "Stream wird gestartet…",
+    stream_reconnecting: "Verbindung wird neu aufgebaut…",
+    stream_retrying: "Stream wird erneut versucht…",
+    loading_image: "Bild wird geladen…",
+    loading_refreshing: "Aktualisiere…",
+    loading_refreshing_image: "Aktualisiere Bild…",
+    loading_hint_remote: "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil",
+    loading_hint_local: "LAN-Stream — ca. 25–35 s bis erstes Bild",
+    loading_hint_connecting: "Verbindung zur Kamera wird aufgebaut…",
+    pill_snapshot_aria: "Snapshot aufnehmen",
+    pill_stream_title: "Live-Stream",
+    pill_stream_aria: "Live-Stream starten oder stoppen",
+    pill_audio_title: "Ton",
+    pill_privacy_title: "Privat-Modus",
+    pill_privacy_aria: "Privat-Modus umschalten",
+    pill_light_title: "Licht",
+    pill_light_aria: "Licht umschalten",
+    pill_fullscreen_title: "Vollbild",
+    pill_fullscreen_aria: "Vollbild",
+    pill_pip_title: "Bild-im-Bild",
+    pill_pip_aria: "Bild-im-Bild (schwebendes Fenster)",
+    pill_more_title: "Mehr Optionen",
+    pill_more_aria: "Mehr Optionen",
+    pan_left_title: "Nach links schwenken",
+    pan_left_aria: "Kamera nach links schwenken",
+    pan_right_title: "Nach rechts schwenken",
+    pan_right_aria: "Kamera nach rechts schwenken",
     maint_title: "Bosch-Cloud-Wartung läuft",
     maint_title_planned: "Bosch-Cloud-Wartung geplant",
     maint_notice: "Wartungsmeldung",
@@ -366,6 +435,7 @@ const CARD_I18N = {
     maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
     privacy_stale_label: "Privatmodus — letztes Bild",
     privacy_stale_prefix: "Letztes Ereignis:",
+    ai_caption_prefix: "KI:",
     multi_audio_muted: "Ton stummgeschaltet (eine andere Karte gibt Ton für diese Kamera aus)",
     // ── editor: shared ──
     ed_cam_entity: "Kamera-Entity *",
@@ -460,6 +530,7 @@ const CARD_I18N = {
     maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
     privacy_stale_label: "Modo privacidad — última imagen",
     privacy_stale_prefix: "Último evento:",
+    ai_caption_prefix: "IA:",
     multi_audio_muted: "Audio silenciado (otra tarjeta reproduce audio de esta cámara)",
     ed_cam_entity: "Entidad de cámara *",
     ed_cam_entity_hint: "Obligatorio — el resto de entidades se derivan automáticamente del nombre de la cámara.",
@@ -551,6 +622,7 @@ const CARD_I18N = {
     maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
     privacy_stale_label: "Mode confidentialité — dernière image",
     privacy_stale_prefix: "Dernier événement :",
+    ai_caption_prefix: "IA:",
     multi_audio_muted: "Son coupé (une autre carte diffuse le son de cette caméra)",
     ed_cam_entity: "Entité caméra *",
     ed_cam_entity_hint: "Obligatoire — toutes les autres entités sont dérivées automatiquement du nom de la caméra.",
@@ -642,6 +714,7 @@ const CARD_I18N = {
     maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
     privacy_stale_label: "Modalità privacy — ultima immagine",
     privacy_stale_prefix: "Ultimo evento:",
+    ai_caption_prefix: "IA:",
     multi_audio_muted: "Audio disattivato (un'altra scheda riproduce l'audio di questa telecamera)",
     ed_cam_entity: "Entità telecamera *",
     ed_cam_entity_hint: "Obbligatorio — tutte le altre entità vengono derivate automaticamente dal nome della telecamera.",
@@ -733,6 +806,7 @@ const CARD_I18N = {
     maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
     privacy_stale_label: "Privacymodus — laatste afbeelding",
     privacy_stale_prefix: "Laatste gebeurtenis:",
+    ai_caption_prefix: "AI:",
     multi_audio_muted: "Geluid gedempt (een andere kaart speelt audio af voor deze camera)",
     ed_cam_entity: "Camera-entiteit *",
     ed_cam_entity_hint: "Verplicht — alle andere entiteiten worden automatisch afgeleid van de cameranaam.",
@@ -824,6 +898,7 @@ const CARD_I18N = {
     maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
     privacy_stale_label: "Tryb prywatności — ostatni obraz",
     privacy_stale_prefix: "Ostatnie zdarzenie:",
+    ai_caption_prefix: "AI:",
     multi_audio_muted: "Dźwięk wyciszony (inna karta odtwarza dźwięk tej kamery)",
     ed_cam_entity: "Encja kamery *",
     ed_cam_entity_hint: "Wymagane — wszystkie pozostałe encje są automatycznie wyprowadzane z nazwy kamery.",
@@ -915,6 +990,7 @@ const CARD_I18N = {
     maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
     privacy_stale_label: "Modo privacidade — última imagem",
     privacy_stale_prefix: "Último evento:",
+    ai_caption_prefix: "IA:",
     multi_audio_muted: "Áudio desativado (outro cartão está a reproduzir áudio desta câmara)",
     ed_cam_entity: "Entidade de câmara *",
     ed_cam_entity_hint: "Obrigatório — todas as outras entidades são derivadas automaticamente do nome da câmara.",
@@ -1006,6 +1082,7 @@ const CARD_I18N = {
     maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
     privacy_stale_label: "Режим приватности — последнее изображение",
     privacy_stale_prefix: "Последнее событие:",
+    ai_caption_prefix: "ИИ:",
     multi_audio_muted: "Звук отключён (другая карточка воспроизводит звук этой камеры)",
     ed_cam_entity: "Сущность камеры *",
     ed_cam_entity_hint: "Обязательно — все остальные сущности определяются автоматически по имени камеры.",
@@ -1097,6 +1174,7 @@ const CARD_I18N = {
     maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
     privacy_stale_label: "Режим приватності — останнє зображення",
     privacy_stale_prefix: "Остання подія:",
+    ai_caption_prefix: "ШІ:",
     multi_audio_muted: "Звук вимкнено (інша картка відтворює звук цієї камери)",
     ed_cam_entity: "Об'єкт камери *",
     ed_cam_entity_hint: "Обов'язково — всі інші об'єкти визначаються автоматично за назвою камери.",
@@ -1188,6 +1266,7 @@ const CARD_I18N = {
     maint_auto_return: "云端恢复后摄像头将自动重新连接。",
     privacy_stale_label: "隐私模式 — 最后一张图像",
     privacy_stale_prefix: "最近事件：",
+    ai_caption_prefix: "AI:",
     multi_audio_muted: "已静音（另一个卡片正在播放此摄像头的音频）",
     ed_cam_entity: "摄像头实体 *",
     ed_cam_entity_hint: "必填 — 所有其他实体均根据摄像头名称自动派生。",
@@ -1353,6 +1432,9 @@ class BoschCameraCard extends HTMLElement {
     this._visibilityHandler = null;  // bound visibilitychange listener
     this._lastEventState    = null;  // last known last_event sensor value — for event detection
     this._lastSnapshotAt    = null;  // ms timestamp of the last real snapshot frame — privacy badge
+    this._aiCaptionSig      = null;  // signature of the currently-shown AI caption — re-reveal only on change
+    this._aiCaptionTimer    = null;  // auto-hide timeout handle for the AI caption overlay
+    this._aiCaptionShownAt  = 0;     // ms when the AI caption was last revealed — snapshot-hide grace window
     this._lastFrameTime     = 0;    // monotonic ms of last fresh frame — for Δt debug display
     this._streamStartTime   = 0;    // ms when current stream session started — for uptime counter
     this._awaitingFresh     = false; // true while waiting for a fresh (non-cache) image
@@ -1435,8 +1517,8 @@ class BoschCameraCard extends HTMLElement {
 
   // ── Config ────────────────────────────────────────────────────────────────
   setConfig(config) {
-    if (!config.camera_entity) {
-      throw new Error("bosch-camera-card: camera_entity is required");
+    if (!config.camera_entity || typeof config.camera_entity !== "string") {
+      throw new Error("bosch-camera-card: camera_entity must be a non-empty string");
     }
     this._config = {
       camera_entity:              config.camera_entity,
@@ -1533,6 +1615,24 @@ class BoschCameraCard extends HTMLElement {
       // typically right after the user's first interaction with the page). A
       // user's own last mute/volume choice (saved per browser) takes precedence.
       // idle refresh is handled by Page Visibility API: 60 s visible, 1800 s background
+      // AI snapshot description caption overlay: show the AI-generated image
+      // description (sensor.*_ki_snapshot_beschreibung) as a small caption pill
+      // at the bottom-left of the video. Default true (shown when the sensor
+      // exists and has a non-empty description). Set to false to disable entirely.
+      ai_description_overlay:     config.ai_description_overlay !== false,
+      // Whether to show the AI description while privacy mode is active. Default
+      // true (the description was generated before privacy was enabled and may
+      // still be useful; the user asked for it in privacy mode). Set to false to
+      // hide it during privacy so no analysis artifact is shown.
+      ai_description_in_privacy:  config.ai_description_in_privacy !== false,
+      // Seconds the AI caption stays on screen after a NEW description appears,
+      // then it auto-hides (it also hides as soon as a fresh snapshot frame
+      // replaces the image it described). Default 12 s. Set to 0 to keep it
+      // pinned until the next snapshot frame (no time-based auto-hide).
+      ai_description_overlay_timeout:
+        config.ai_description_overlay_timeout === undefined
+          ? 12
+          : Number(config.ai_description_overlay_timeout),
     };
 
     this._storageKey = `bosch_cam_${config.camera_entity}`;
@@ -1608,6 +1708,10 @@ class BoschCameraCard extends HTMLElement {
       // Image rotation 180° (indoor cameras only — Gen1 360 + Gen2 Indoor II).
       // HA slugifies "180°" to "180deg" — this default matches the actual entity slug.
       imageRotation180: config.image_rotation_180_entity || `switch.${base}_bild_180deg_drehen`,
+      // AI snapshot description — optional, only present when the AI analysis
+      // integration feature is enabled. Entity named by convention; absent from
+      // hass.states when the feature is off → no overlay, no error.
+      aiDescription: config.ai_description_entity || `sensor.${base}_ai_description`,
     };
 
     this._showMotionZones = this._config.show_motion_zones;
@@ -1872,7 +1976,9 @@ class BoschCameraCard extends HTMLElement {
     if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
     const slider = this.shadowRoot.getElementById("ap-vol");
     if (slider && !noSlider) {
-      slider.addEventListener("input", (e) => this._setVideoVolume(parseFloat(e.target.value)));
+      if (this._volSliderHandler) slider.removeEventListener("input", this._volSliderHandler);
+      this._volSliderHandler = (e) => this._setVideoVolume(parseFloat(e.target.value));
+      slider.addEventListener("input", this._volSliderHandler);
       // Sync the thumb to the live video when streaming, else to the backend
       // volume entity (so it shows where sound will resume, not the HTML default).
       // Always reflect the actual VOLUME level — muting must NOT snap the slider
@@ -2159,7 +2265,7 @@ class BoschCameraCard extends HTMLElement {
           ? this._optimistic[this._entities.privacy] === "on"
           : this._hass?.states?.[this._entities?.privacy]?.state === "on";
       if (this._imageLoaded && !_privacyNow) {
-        this._setLoadingOverlay(true, "Aktualisiere…");
+        this._setLoadingOverlay(true, this._t("loading_refreshing"));
       }
       this._triggerFreshSnapshot();
       // CARD_STALE_APP fix: pull authoritative entity states on mount so the
@@ -2334,6 +2440,15 @@ class BoschCameraCard extends HTMLElement {
     _boschPipCards.delete(this);
     if (_boschPipActive === this) _boschPipSetActive(null);
     this._stopRefreshTimer();
+    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    // Volume slider: remove the input listener to avoid a leak when the card is
+    // removed from the DOM. The slider element itself lives in the shadow root
+    // which gets GC'd, but the handler closure keeps `this` alive. 2026-06-16.
+    if (this._volSliderHandler) {
+      const slider = this.shadowRoot && this.shadowRoot.getElementById("ap-vol");
+      if (slider) slider.removeEventListener("input", this._volSliderHandler);
+      this._volSliderHandler = null;
+    }
     if (this._visibilityHandler) {
       document.removeEventListener("visibilitychange", this._visibilityHandler);
       this._visibilityHandler = null;
@@ -2382,6 +2497,16 @@ class BoschCameraCard extends HTMLElement {
       document.removeEventListener("mozfullscreenchange",    this._onFullscreenChange);
       document.removeEventListener("MSFullscreenChange",     this._onFullscreenChange);
       this._onFullscreenChange = null;
+    }
+    // Release zoom listener references so the detached wrap element can be GC'd.
+    if (this._zoomHandlers) {
+      const { el, onDown, onMove, onUp, onWheel } = this._zoomHandlers;
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("wheel", onWheel);
+      this._zoomHandlers = null;
     }
   }
 
@@ -2569,6 +2694,9 @@ class BoschCameraCard extends HTMLElement {
     // → Android shows a native error popup even when JS catches the rejection.
     if (this._hass.connected === false) return;
     if (this._hass.connection && this._hass.connection.connected === false) return;
+    // Guard 3: skip if privacy mode is on — no point fetching a snapshot that will
+    // return the privacy placeholder, and it avoids wasting a Bosch session slot.
+    if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
     this._callService("bosch_shc_camera", "trigger_snapshot", {});
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);
@@ -2859,6 +2987,7 @@ class BoschCameraCard extends HTMLElement {
         .pan-edge {
           position: absolute; top: 50%; transform: translateY(-50%);
           width: 44px; height: 64px; padding: 0; border: none; cursor: pointer;
+          touch-action: manipulation;
           display: flex; align-items: center; justify-content: center;
           pointer-events: auto; color: #fff;
           background: rgba(0,0,0,.34);
@@ -3438,7 +3567,7 @@ class BoschCameraCard extends HTMLElement {
         .ap-top {
           position: absolute; top: 12px; left: 12px; right: 12px;
           display: flex; align-items: center; justify-content: space-between;
-          gap: 8px; z-index: 6; pointer-events: none;
+          gap: 8px; z-index: 13; pointer-events: none;
         }
         .ap-top > * { pointer-events: auto; }
         .ap-title-pill {
@@ -3514,6 +3643,7 @@ class BoschCameraCard extends HTMLElement {
           border: 0.5px solid rgba(255,255,255,.18);
           color: #fff; cursor: pointer;
           padding: 0; flex-shrink: 0;
+          touch-action: manipulation;
           transition: background .15s ease, transform .12s ease;
         }
         .ap-pill-btn:hover { background: rgba(255,255,255,.22); }
@@ -3596,12 +3726,18 @@ class BoschCameraCard extends HTMLElement {
         /* Belt-and-braces: keep overlay z-index low — the wrapper's new
            stacking context confines them anyway, but a low value protects
            against future ancestors that might break isolation. */
-        :host(.apple-style) .ap-top { z-index: 2; }
+        /* BUG FIX (2026-06-15): raise ap-top above the privacy-placeholder
+           (z-index 11) so the camera name title pill stays visible in privacy
+           mode. Default was z-index:2 which the privacy overlay (z:11) covered.
+           13 = above privacy-placeholder(11) + pill-bar(12); ap-top is top-left,
+           pill-bar is bottom-center — they don't overlap so shared z:13 is safe.
+           pointer-events:none on .ap-top itself avoids blocking privacy overlay taps. */
+        :host(.apple-style) .ap-top { z-index: 13; }
         /* The control pill bar must stay TAPPABLE above the full-cover overlays
            (tap-to-play 9, loading 10, pinned-reveal 11) — otherwise those
            overlays swallowed taps on the Stop button and the user could not end
            a stream while it showed "antippen zum Starten" / was warming up
-           (reported 2026-06-03). Only the re-auth overlay (13) sits above it. */
+           (reported 2026-06-03). ap-top (13) sits above it for the title pill. */
         :host(.apple-style) .ap-pill-bar { z-index: 12; }
 
         /* ========================================================
@@ -4030,6 +4166,48 @@ class BoschCameraCard extends HTMLElement {
            value during idle/snapshot mode. */
         :host(.apple-style) .ap-last-event.hide-during-stream { display: none; }
 
+        /* AI snapshot description caption — small glass pill at the bottom-left
+           of the video. Mutually exclusive real-estate with the last-event pill
+           (which sits at bottom-right). Hidden when sensor absent / config off.
+           Max 3 lines of text with ellipsis on the third line so it never
+           obscures the pill-bar above it. Scoped to single card only (compact
+           tiles are too narrow — hidden via :host(.compact)). */
+        .ap-ai-caption {
+          display: none; /* hidden by default; JS adds .visible to show */
+        }
+        .ap-ai-caption.visible {
+          position: absolute;
+          inset-inline-start: 12px; bottom: 72px;  /* above pill-bar (54px) + 12px gap + 6px margin; RTL-safe */
+          z-index: 4;
+          padding: 5px 10px 5px 8px;
+          border-radius: 10px;
+          max-width: calc(60% - 12px);
+          font-size: 11px; font-weight: 400; line-height: 1.4;
+          background: rgba(22,22,24,.78);
+          backdrop-filter: blur(14px) saturate(1.3);
+          -webkit-backdrop-filter: blur(14px) saturate(1.3);
+          color: rgba(255,255,255,.85);
+          border: .5px solid rgba(255,255,255,.14);
+          pointer-events: none;
+          /* Line-clamp: max 3 visible lines then ellipsis */
+          overflow: hidden;
+          display: block;
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+        }
+        /* Only render in apple-style layout (which has position:relative img-wrapper);
+           legacy layout has no positioned overlay ancestor so position:absolute
+           would land unpredictably. */
+        :host(:not(.apple-style)) .ap-ai-caption { display: none !important; }
+        /* Hide on compact tiles — too little horizontal space */
+        :host(.compact) .ap-ai-caption { display: none !important; }
+        /* Day mode legibility */
+        :host(.apple-style.mode-day) .ap-ai-caption {
+          background: rgba(240,240,242,.82); color: rgba(28,28,30,.88);
+          border-color: rgba(0,0,0,.10);
+        }
+
         /* Element-hiding toggles (issue #15): show_title:false / show_last_event:false. */
         :host(.no-title) .ap-top { display: none; }
         :host(.no-last-event) .ap-last-event { display: none !important; }
@@ -4044,7 +4222,8 @@ class BoschCameraCard extends HTMLElement {
            competing piece of chrome. Both hidden to leave only the title
            pill + OFFLINE label visible. */
         :host(.apple-style.cam-offline) .privacy-placeholder,
-        :host(.apple-style.cam-offline) .ap-last-event { display: none !important; }
+        :host(.apple-style.cam-offline) .ap-last-event,
+        :host(.apple-style.cam-offline) .ap-ai-caption { display: none !important; }
         /* The offline-overlay already shows the camera name on its own line
            (.offline-cam-name), so the top-left title pill is redundant when
            offline. On short/compact tiles the centered "Kamera Offline" pill
@@ -4193,7 +4372,7 @@ class BoschCameraCard extends HTMLElement {
                 <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 20 20" to="360 20 20" dur="0.8s" repeatCount="indefinite"/>
               </circle>
             </svg>
-            <span class="loading-text" id="loading-text">Bild wird geladen…</span>
+            <span class="loading-text" id="loading-text">${this._t("loading_image")}</span>
             <span class="loading-hint" id="loading-hint"></span>
           </div>
           <div class="offline-overlay" id="offline-overlay">
@@ -4244,6 +4423,11 @@ class BoschCameraCard extends HTMLElement {
             <span id="ap-last-event-text"></span>
           </span>
 
+          <!-- AI snapshot description caption — glass pill at bottom-left,
+               shown when sensor.*_ki_snapshot_beschreibung has a description.
+               Hidden on compact tiles (insufficient width). -->
+          <div class="ap-ai-caption" id="ap-ai-caption"></div>
+
           <!-- Apple-style overlays (v2.17.0) — rendered always, gated via CSS :host(.apple-style) -->
           <div class="ap-top">
             <div class="ap-title-pill ap-glass">
@@ -4256,14 +4440,14 @@ class BoschCameraCard extends HTMLElement {
           </div>
 
           <div class="ap-pill-bar ap-glass">
-            <button class="ap-pill-btn" id="ap-btn-snapshot" title="Snapshot" aria-label="Snapshot aufnehmen">
+            <button class="ap-pill-btn" id="ap-btn-snapshot" title="Snapshot" aria-label="${this._t("pill_snapshot_aria")}">
               <svg viewBox="0 0 24 24"><path d="M9 2 7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.17L15 2H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
             </button>
-            <button class="ap-pill-btn" id="ap-btn-stream" title="Live-Stream" aria-label="Live-Stream starten oder stoppen" aria-pressed="false">
+            <button class="ap-pill-btn" id="ap-btn-stream" title="${this._t("pill_stream_title")}" aria-label="${this._t("pill_stream_aria")}" aria-pressed="false">
               <svg viewBox="0 0 24 24" id="ap-stream-icon"><path d="M8 5v14l11-7L8 5z"/></svg>
             </button>
             <div class="ap-audio-wrap" id="ap-audio-wrap">
-              <button class="ap-pill-btn" id="ap-btn-audio" title="Ton" aria-label="Ton stummschalten" aria-pressed="false">
+              <button class="ap-pill-btn" id="ap-btn-audio" title="${this._t("pill_audio_title")}" aria-label="${this._t("audio_mute")}" aria-pressed="false">
                 <svg viewBox="0 0 24 24" class="ap-ico-on"><path d="M3 9v6h4l5 5V4L7 9H3zm11 .03v5.94A4.5 4.5 0 0 0 16.5 12 4.5 4.5 0 0 0 14 9.03zM14 4.23v2.06a7 7 0 0 1 0 11.42v2.06a9 9 0 0 0 0-15.54z"/></svg>
                 <svg viewBox="0 0 24 24" class="ap-ico-off"><path d="M3 9v6h4l5 5V4L7 9H3zm13.59 3 2.7-2.7-1.42-1.42L15.17 10.6 12.46 7.88 11.05 9.3 13.76 12l-2.71 2.71 1.41 1.41 2.71-2.7 2.7 2.7 1.42-1.41z"/></svg>
               </button>
@@ -4271,19 +4455,19 @@ class BoschCameraCard extends HTMLElement {
                 <input type="range" id="ap-vol" min="0" max="1" step="0.05" value="1" aria-label="${this._t("volume")}" />
               </div>
             </div>
-            <button class="ap-pill-btn" id="ap-btn-privacy" title="Privat-Modus" aria-label="Privat-Modus umschalten" aria-pressed="false">
+            <button class="ap-pill-btn" id="ap-btn-privacy" title="${this._t("pill_privacy_title")}" aria-label="${this._t("pill_privacy_aria")}" aria-pressed="false">
               <svg viewBox="0 0 24 24"><path d="M12 1 4 5v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V5l-8-4z"/></svg>
             </button>
-            <button class="ap-pill-btn" id="ap-btn-light" title="Licht" aria-label="Licht umschalten" aria-pressed="false">
+            <button class="ap-pill-btn" id="ap-btn-light" title="${this._t("pill_light_title")}" aria-label="${this._t("pill_light_aria")}" aria-pressed="false">
               <svg viewBox="0 0 24 24"><path d="M9 21h6v-1H9v1zm3-19a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
             </button>
-            <button class="ap-pill-btn" id="ap-btn-fullscreen" title="Vollbild" aria-label="Vollbild">
+            <button class="ap-pill-btn" id="ap-btn-fullscreen" title="${this._t("pill_fullscreen_title")}" aria-label="${this._t("pill_fullscreen_aria")}">
               <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
             </button>
-            <button class="ap-pill-btn" id="ap-btn-pip" title="Bild-im-Bild" aria-label="Bild-im-Bild (schwebendes Fenster)">
+            <button class="ap-pill-btn" id="ap-btn-pip" title="${this._t("pill_pip_title")}" aria-label="${this._t("pill_pip_aria")}">
               <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
             </button>
-            <button class="ap-pill-btn" id="ap-btn-more" title="Mehr Optionen" aria-label="Mehr Optionen" aria-haspopup="true" aria-expanded="false">
+            <button class="ap-pill-btn" id="ap-btn-more" title="${this._t("pill_more_title")}" aria-label="${this._t("pill_more_aria")}" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg>
             </button>
           </div>
@@ -4295,11 +4479,11 @@ class BoschCameraCard extends HTMLElement {
                display + disables the end stops at ±120°). Layout-agnostic:
                works in apple + legacy designs and single + overview tiles. -->
           <div class="pan-overlay" id="pan-overlay" style="display:none">
-            <button class="pan-edge pan-edge-left" id="pan-edge-left" title="Nach links schwenken" aria-label="Kamera nach links schwenken">
+            <button class="pan-edge pan-edge-left" id="pan-edge-left" title="${this._t("pan_left_title")}" aria-label="${this._t("pan_left_aria")}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span class="pan-overlay-pos" id="pan-overlay-pos" aria-hidden="true">0°</span>
-            <button class="pan-edge pan-edge-right" id="pan-edge-right" title="Nach rechts schwenken" aria-label="Kamera nach rechts schwenken">
+            <button class="pan-edge pan-edge-right" id="pan-edge-right" title="${this._t("pan_right_title")}" aria-label="${this._t("pan_right_aria")}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
@@ -5282,6 +5466,12 @@ class BoschCameraCard extends HTMLElement {
   _updateImage() {
     const img = this.shadowRoot.getElementById("cam-img");
     if (!img || !this._hass) return;
+    // BUG FIX (2026-06-15): suppress image loads when camera is offline.
+    // Without this gate, img.src is set, the request fails (camera unreachable),
+    // _onImageError() shows the spinner and retries up to 5×, causing the
+    // infinite "Bild wird geladen…" spinner even though _update() correctly
+    // cleared the overlay when it detected the offline state.
+    if (this._isOffline) return;
     const camEntity = this._entities.camera;
     const token = this._hass.states[camEntity]?.attributes?.access_token || "";
     // Request at display width — HA passes this to async_camera_image(width=).
@@ -5313,7 +5503,16 @@ class BoschCameraCard extends HTMLElement {
     // placeholder data: URI) — the privacy placeholder badge uses this to show
     // "Last snapshot: <ts>", which is far more recent than the last motion event.
     // 2026-06-15.
-    if (!isCache) this._lastSnapshotAt = Date.now();
+    if (!isCache) {
+      this._lastSnapshotAt = Date.now();
+      // A fresh snapshot frame replaces the image the AI caption described →
+      // the caption is now stale, hide it. 3 s grace so the describing frame
+      // (and the Path-B event image that arrives right after it) does not nuke
+      // a caption the instant it appears.
+      if (this._aiCaptionShownAt && Date.now() - this._aiCaptionShownAt > 3000) {
+        this._hideAiCaption();
+      }
+    }
 
     // Clear stream-connecting overlay when first real frame arrives
     if (!isCache && this._streamConnecting) {
@@ -5370,7 +5569,8 @@ class BoschCameraCard extends HTMLElement {
     this._setLoadingOverlay(false);
   }
 
-  _setLoadingOverlay(visible, text = "Bild wird geladen…") {
+  _setLoadingOverlay(visible, text) {
+    if (text === undefined) text = this._t("loading_image");
     // Suppress flicker during stream startup: if a connecting/waiting state is
     // active, snapshot-load callbacks must not hide the overlay (the spinner
     // would reappear a moment later when stream-startup advances to its next
@@ -5378,7 +5578,7 @@ class BoschCameraCard extends HTMLElement {
     // text from _toggleStream — let that timeline own the messaging.
     const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
     if (!visible && streamStarting) return;
-    if (visible && streamStarting && this._streamConnecting && text === "Bild wird geladen…") return;
+    if (visible && streamStarting && this._streamConnecting && text === this._t("loading_image")) return;
     const overlay  = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
     const hintEl   = this.shadowRoot.getElementById("loading-hint");
@@ -5395,9 +5595,9 @@ class BoschCameraCard extends HTMLElement {
     if (hintEl) {
       if (visible && (this._streamConnecting || this._startingLiveVideo || this._waitingForStream)) {
         const ct = this._hass?.states?.[this._entities?.switch]?.attributes?.connection_type;
-        if (ct === "REMOTE")       hintEl.textContent = "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil";
-        else if (ct === "LOCAL")   hintEl.textContent = "LAN-Stream — ca. 25–35 s bis erstes Bild";
-        else                        hintEl.textContent = "Verbindung zur Kamera wird aufgebaut…";
+        if (ct === "REMOTE")       hintEl.textContent = this._t("loading_hint_remote");
+        else if (ct === "LOCAL")   hintEl.textContent = this._t("loading_hint_local");
+        else                        hintEl.textContent = this._t("loading_hint_connecting");
       } else {
         hintEl.textContent = "";
       }
@@ -5441,7 +5641,7 @@ class BoschCameraCard extends HTMLElement {
         overlay.classList.add("refreshing");
       }
       const loadText = this.shadowRoot.getElementById("loading-text");
-      if (loadText) loadText.textContent = "Aktualisiere…";
+      if (loadText) loadText.textContent = this._t("loading_refreshing");
     } catch (_) {}
   }
 
@@ -5633,6 +5833,30 @@ class BoschCameraCard extends HTMLElement {
       this._stallChecker = setInterval(() => {
         if (!this._liveVideoActive || !video) {
           clearInterval(this._stallChecker);
+          return;
+        }
+        // While the tab is hidden, do NOT escalate to a _stopLiveVideo()+reconnect:
+        // a reconnect started in a background tab cannot render and would FREEZE a
+        // Picture-in-Picture window the user is actively watching in the foreground
+        // (the symptom: PiP element still there but the picture stops being live).
+        // Instead just keep the element playing — Chrome 145+ pauses a muted
+        // background <video>, so a cheap resume keeps the PiP feed live. Genuine
+        // teardown recovery is left to the visibilitychange→visible path
+        // (_resumeLiveStreamIfNeeded) when the user returns. 2026-06-16
+        // (PiP-stays-live-on-tab-switch fix).
+        if (document.visibilityState === "hidden") {
+          // Only resume when THIS card owns the active PiP element: a PiP video
+          // is foregrounded so play() sticks and keeps the feed live. On a plain
+          // hidden tab (no PiP) a muted <video> is re-paused by Chrome 145+ the
+          // instant we play() it, which would fight the pause-guard in a loop —
+          // so skip it there and let visibilitychange→visible recover. 2026-06-16.
+          const ownsPip = document.pictureInPictureElement === video
+            || _boschPipActive === this;
+          if (ownsPip && video.paused && !this._stoppingLiveVideo) {
+            Promise.resolve(video.play()).catch(() => {});
+          }
+          lastTime = video.currentTime;
+          stallCount = 0;
           return;
         }
         // A live stream is "stalled" if currentTime stopped advancing OR the
@@ -5934,7 +6158,7 @@ class BoschCameraCard extends HTMLElement {
             this._startLiveVideo(attempt + 1);
           } else if (this._isStreaming() && !this._waitingForStream) {
             this._waitingForStream = true;
-            this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+            this._setLoadingOverlay(true, this._t("stream_reconnecting"));
             this._waitForStreamReady();
           } else {
             // Cold-start race (live fix 2026-05-31): the first attempt failed
@@ -5963,7 +6187,7 @@ class BoschCameraCard extends HTMLElement {
         setTimeout(() => {
           if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
             this._waitingForStream = true;
-            this._setLoadingOverlay(true, "Stream wird erneut versucht…");
+            this._setLoadingOverlay(true, this._t("stream_retrying"));
             this._waitForStreamReady();
           }
         }, retryDelay);
@@ -6117,7 +6341,7 @@ class BoschCameraCard extends HTMLElement {
       this._startLiveVideo();
     } else if (!this._waitingForStream) {
       this._waitingForStream = true;
-      this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+      this._setLoadingOverlay(true, this._t("stream_reconnecting"));
       this._waitForStreamReady();
     }
   }
@@ -6157,7 +6381,7 @@ class BoschCameraCard extends HTMLElement {
     this._reconnectingLiveVideo = true;
     this._stopLiveVideo();
     this._waitingForStream = true;
-    this._setLoadingOverlay(true, "Verbindung wird neu aufgebaut…");
+    this._setLoadingOverlay(true, this._t("stream_reconnecting"));
     this._callService("switch", "turn_off", { entity_id: sw });
     // Re-arm after the backend has torn down (camera → idle), then poll until
     // it reports "streaming" again and restart the video on the live port.
@@ -6294,7 +6518,7 @@ class BoschCameraCard extends HTMLElement {
       btn.insertBefore(spinner, btn.firstChild);
     }
     if (label) label.textContent = this._t("loading");
-    this._setLoadingOverlay(true, "Aktualisiere Bild…");
+    this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
 
     // If privacy mode is ON — no live image is available, show placeholder immediately
     const privStates = this._hass?.states;
@@ -6586,6 +6810,10 @@ class BoschCameraCard extends HTMLElement {
         }
       }
     }
+    // Reset image retry counter when the camera comes back online so that a
+    // first-load failure after recovery still triggers retries (edge: card
+    // mounted while offline exhausts all 5 retries during the offline window).
+    if (this._isOffline && !isOffline) this._loadRetries = 0;
     this._isOffline = isOffline;
     // Host class for CSS-side dimming of camera-state buttons (Stream / Light
     // / Privacy) when the hardware is unreachable. Snapshot / Fullscreen /
@@ -6777,7 +7005,7 @@ class BoschCameraCard extends HTMLElement {
     // Stream just stopped → stop video, fetch fresh snapshot for current + next session.
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
-      this._setLoadingOverlay(true, "Aktualisiere Bild…");
+      this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
       if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
         this._callService("bosch_shc_camera", "trigger_snapshot", {});
       this._scheduleImageLoad(3500);
@@ -7345,6 +7573,58 @@ class BoschCameraCard extends HTMLElement {
     // flag.)
     this._lastPrivacy = privacyOn;
 
+    // AI snapshot description caption overlay (ap-ai-caption).
+    // Read from sensor.*_ki_snapshot_beschreibung if it exists in hass.states.
+    // Full description from attributes.description (may exceed 255-char state);
+    // fall back to state when attribute absent. Time from attributes.generated_at.
+    // Hidden when: config option off | sensor absent | state unavailable/unknown/empty |
+    //              privacy is ON and ai_description_in_privacy is false.
+    const aiCaptionEl = this.shadowRoot.getElementById("ap-ai-caption");
+    if (aiCaptionEl && this._config.ai_description_overlay && ents.aiDescription) {
+      const aiState = hass.states[ents.aiDescription];
+      const hideInPrivacy = privacyOn && !this._config.ai_description_in_privacy;
+      const validState = aiState && aiState.state
+        && aiState.state !== "unavailable" && aiState.state !== "unknown"
+        && aiState.state !== "";
+      if (validState && !hideInPrivacy) {
+        const desc = (aiState.attributes?.description && aiState.attributes.description !== "")
+          ? aiState.attributes.description
+          : aiState.state;
+        let timeStr = "";
+        if (aiState.attributes?.generated_at) {
+          try {
+            const d = new Date(aiState.attributes.generated_at);
+            if (!isNaN(d)) {
+              timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            }
+          } catch { /* ignore, omit time */ }
+        }
+        const prefix = this._t("ai_caption_prefix");
+        const captionText = timeStr
+          ? `${prefix} ${timeStr} — ${desc}`
+          : `${prefix} ${desc}`;
+        // Only (re)reveal + (re)arm the auto-hide timer when the description
+        // actually CHANGES — otherwise every hass re-render would keep the
+        // caption pinned on screen forever. A new AI description shows briefly,
+        // then auto-hides (timeout) or vanishes when a fresh snapshot frame
+        // replaces the image it described (see _showAiCaption + snapshot path).
+        const sig = `${ents.aiDescription}|${aiState.attributes?.generated_at || ""}|${captionText}`;
+        if (sig !== this._aiCaptionSig) {
+          this._aiCaptionSig = sig;
+          aiCaptionEl.textContent = captionText;
+          this._showAiCaption();
+        }
+      } else {
+        this._aiCaptionSig = null;
+        this._hideAiCaption();
+        aiCaptionEl.textContent = "";
+      }
+    } else if (aiCaptionEl) {
+      this._aiCaptionSig = null;
+      this._hideAiCaption();
+      aiCaptionEl.textContent = "";
+    }
+
     // Motion zones overlay — SVG polygons from RCP 0x0c00/0x0c0a sensor data
     this._updateMotionZones(hass, ents);
     // Privacy mask overlay — from privacy masks sensor
@@ -7744,10 +8024,10 @@ class BoschCameraCard extends HTMLElement {
     const st = this._hass?.states[this._entities.streamStatus]?.state
             || this._hass?.states[this._entities.camera]?.attributes?.stream_status
             || "";
-    if (st === "warming_up") return "Kamera wird aufgeweckt…";
-    if (st === "connecting")  return "Verbindung wird aufgebaut…";
-    if (st === "streaming" || st === "streaming_remote") return "HLS wird geladen…";
-    return "Stream wird gestartet…";
+    if (st === "warming_up") return this._t("stream_warming_up");
+    if (st === "connecting")  return this._t("stream_connecting");
+    if (st === "streaming" || st === "streaming_remote") return this._t("stream_loading_hls");
+    return this._t("stream_starting");
   }
 
   _waitForStreamReady(attempt = 0) {
@@ -7770,7 +8050,7 @@ class BoschCameraCard extends HTMLElement {
     if (camReady) {
       // Camera entity reports streaming — stream_source is ready, start HLS
       this._waitingForStream = false;
-      this._setLoadingOverlay(true, "HLS wird geladen…");
+      this._setLoadingOverlay(true, this._t("stream_loading_hls"));
       this._startLiveVideo();
       return;
     }
@@ -7783,6 +8063,39 @@ class BoschCameraCard extends HTMLElement {
       return;
     }
     setTimeout(() => this._waitForStreamReady(attempt + 1), 1000);
+  }
+
+  // Reveal the AI caption overlay and arm its auto-hide timer. Called only when
+  // a genuinely new AI description appears (see the render change-detection).
+  _showAiCaption() {
+    const el = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+    if (!el) return;
+    el.classList.add("visible");
+    this._aiCaptionShownAt = Date.now();
+    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    const secs = Number(this._config && this._config.ai_description_overlay_timeout);
+    const timeout = Number.isFinite(secs) ? secs : 12;
+    if (timeout > 0) {
+      this._aiCaptionTimer = setTimeout(() => {
+        const e = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+        if (e) e.classList.remove("visible");
+        this._aiCaptionTimer = null;
+        // Reset so the snapshot-grace guard (Date.now() - _aiCaptionShownAt > 3s)
+        // doesn't stay permanently true once the caption is already hidden.
+        // Also clear the signature so the same caption can re-appear if the AI
+        // refreshes with the same text (e.g. unchanged description on re-analysis).
+        this._aiCaptionShownAt = 0;
+        this._aiCaptionSig = null;
+      }, timeout * 1000);
+    }
+  }
+
+  // Hide the AI caption overlay and cancel any pending auto-hide timer.
+  _hideAiCaption() {
+    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    this._aiCaptionShownAt = 0;
+    const el = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+    if (el) el.classList.remove("visible");
   }
 
   _updateMotionZones(hass, ents) {
@@ -8500,11 +8813,22 @@ class BoschCameraCard extends HTMLElement {
 
   _wireZoom(wrap) {
     if (!wrap) return;
+    // Remove previous handlers before re-wiring (guard against listener accumulation
+    // when _wireZoom is called again after a re-render creates a new DOM element).
+    if (this._zoomHandlers) {
+      const { el, onDown, onMove, onUp, onWheel } = this._zoomHandlers;
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("wheel", onWheel);
+      this._zoomHandlers = null;
+    }
     const rectPt = (e) => {
       const r = wrap.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    wrap.addEventListener("pointerdown", (e) => {
+    const onDown = (e) => {
       if (!this._inFullscreen()) return;
       // Don't hijack taps that land on an overlay CONTROL (pill-bar buttons incl.
       // the fullscreen-exit button, pan edge-arrows, volume slider). These live
@@ -8528,8 +8852,8 @@ class BoschCameraCard extends HTMLElement {
           this._zoom.lastTap = now;
         }
       }
-    });
-    wrap.addEventListener("pointermove", (e) => {
+    };
+    const onMove = (e) => {
       if (!this._inFullscreen() || !this._zoomPointers.has(e.pointerId)) return;
       const prev = this._zoomPointers.get(e.pointerId);
       this._zoomPointers.set(e.pointerId, e);
@@ -8553,22 +8877,26 @@ class BoschCameraCard extends HTMLElement {
         this._applyZoom();
         e.preventDefault();
       }
-    });
-    const up = (e) => {
+    };
+    const onUp = (e) => {
       this._zoomPointers.delete(e.pointerId);
       try { wrap.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
       if (this._zoomPointers.size < 2) this._zoom.prevDist = -1;
     };
-    wrap.addEventListener("pointerup", up);
-    wrap.addEventListener("pointercancel", up);
-    wrap.addEventListener("wheel", (e) => {
+    const onWheel = (e) => {
       if (!this._inFullscreen()) return;
       e.preventDefault();
       const z = this._zoom;
       const p = rectPt(e);
       const newScale = Math.min(this._ZOOM_MAX, Math.max(1, z.scale * (e.deltaY < 0 ? 1.15 : 0.87)));
       this._zoomAnchor(wrap, p.x, p.y, z.scale, newScale);
-    }, { passive: false });
+    };
+    wrap.addEventListener("pointerdown", onDown);
+    wrap.addEventListener("pointermove", onMove);
+    wrap.addEventListener("pointerup", onUp);
+    wrap.addEventListener("pointercancel", onUp);
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    this._zoomHandlers = { el: wrap, onDown, onMove, onUp, onWheel };
     // Re-apply the current zoom after a re-render (the video/img element is new).
     this._applyZoom();
   }
@@ -9936,7 +10264,7 @@ class BoschNvrTimelineCard extends HTMLElement {
       </div>
       <canvas id="timeline" height="48"></canvas>
       <video id="player" controls preload="none" playsinline></video>
-      <div class="status" id="status">Lade Aufnahmen…</div>`;
+      <div class="status" id="status">${this._t("nvr_loading_recordings")}</div>`;
 
     const canvas = this.shadowRoot.getElementById("timeline");
     canvas.addEventListener("click", e => this._onCanvasClick(e));
@@ -9968,15 +10296,16 @@ class BoschNvrTimelineCard extends HTMLElement {
         type: "media_source/browse_media",
         media_content_id: mediaId,
       });
+      if (dateStr !== this._currentDate) return; // stale navigation
       this._segments = (result.children || []).filter(c => c.media_class === "video");
       this._drawTimeline();
-      const status = this.shadowRoot.getElementById("status");
-      status.textContent = this._segments.length
+      const status = this.shadowRoot?.getElementById("status");
+      if (status) status.textContent = this._segments.length
         ? `${this._segments.length} ${this._t("nvr_segments_suffix")}`
         : this._t("nvr_no_recordings");
     } catch (err) {
-      const status = this.shadowRoot.getElementById("status");
-      status.textContent = this._t("nvr_load_error");
+      const status = this.shadowRoot?.getElementById("status");
+      if (status) status.textContent = this._t("nvr_load_error");
     }
   }
 
@@ -10092,20 +10421,18 @@ class BoschNvrTimelineCard extends HTMLElement {
 
   async _playSegment(mediaContentId) {
     if (!this._hass) return;
-    const status = this.shadowRoot.getElementById("status");
-    status.textContent = "Lade Stream…";
+    const status = this.shadowRoot?.getElementById("status");
+    if (status) status.textContent = this._t("nvr_loading_stream");
     try {
       const result = await this._hass.callWS({
         type: "media_source/resolve_media",
         media_content_id: mediaContentId,
       });
-      const video = this.shadowRoot.getElementById("player");
-      video.src = result.url;
-      video.load();
-      video.play().catch(() => {});
-      status.textContent = "Wiedergabe";
+      const video = this.shadowRoot?.getElementById("player");
+      if (video) { video.src = result.url; video.load(); video.play().catch(() => {}); }
+      if (status) status.textContent = this._t("nvr_playing");
     } catch (err) {
-      status.textContent = "Fehler beim Laden des Segments";
+      if (status) status.textContent = this._t("nvr_segment_error");
     }
   }
 

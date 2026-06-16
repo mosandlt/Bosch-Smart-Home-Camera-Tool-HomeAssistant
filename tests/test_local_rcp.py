@@ -78,11 +78,17 @@ class TestParseRcpXml:
         xml = "<rcp><result><str>Bosch_Camera</str></result></rcp>"
         assert self._parse(xml, "P_STRING") == "Bosch_Camera"
 
-    def test_p_string_empty_element_returns_empty_string(self):
-        """Empty <str/> element → empty string, not None."""
+    def test_p_string_empty_element_returns_none(self) -> None:
+        """Empty <str/> element → None (element present but no text content).
+
+        Regression test for local_rcp.py P_STRING semantics fix: previously
+        returned "" via ``s.text or ""``, causing callers to receive an empty
+        string instead of None for absent values.  None is the correct sentinel
+        for "no value" — consistent with the missing-element case below.
+        """
         xml = "<rcp><result><str/></result></rcp>"
         result = self._parse(xml, "P_STRING")
-        assert result == "", "Empty P_STRING must return '' not None"
+        assert result is None, "Empty P_STRING element must return None, not ''"
 
     def test_p_string_missing_str_returns_none(self):
         xml = "<rcp><result></result></rcp>"

@@ -66,6 +66,21 @@ class TestLocalBackendListCameras:
         b = _LocalBackend(str(tmp_path))
         assert b.list_cameras() == ["Real-Cam"]
 
+    def test_skips_underscore_dirs(self, tmp_path):
+        """B13-5 regression: _staging / _failed NVR scratch dirs must not appear
+        as camera tiles in the Media Browser for _LocalBackend."""
+        from custom_components.bosch_shc_camera.media_source import _LocalBackend
+
+        (tmp_path / "Terrasse").mkdir()
+        (tmp_path / "Innenbereich").mkdir()
+        (tmp_path / "_staging").mkdir()
+        (tmp_path / "_failed").mkdir()
+        b = _LocalBackend(str(tmp_path))
+        result = b.list_cameras()
+        assert "_staging" not in result, "_staging must be filtered from camera list"
+        assert "_failed" not in result, "_failed must be filtered from camera list"
+        assert result == ["Innenbereich", "Terrasse"]
+
     def test_skips_files_only_dirs(self, tmp_path):
         from custom_components.bosch_shc_camera.media_source import _LocalBackend
 
@@ -327,6 +342,21 @@ class TestNvrBackend:
         (tmp_path / ".DS_Store").mkdir()
         b = _NvrBackend(str(tmp_path))
         assert b.list_cameras() == ["Garten", "Terrasse"]
+
+    def test_list_cameras_skips_underscore_dirs(self, tmp_path):
+        """B13-5 regression: _staging / _failed NVR internal dirs must not
+        appear as camera tiles in the Media Browser for _NvrBackend."""
+        from custom_components.bosch_shc_camera.media_source import _NvrBackend
+
+        (tmp_path / "Garten").mkdir()
+        (tmp_path / "Terrasse").mkdir()
+        (tmp_path / "_staging").mkdir()
+        (tmp_path / "_failed").mkdir()
+        b = _NvrBackend(str(tmp_path))
+        result = b.list_cameras()
+        assert "_staging" not in result, "_staging must be filtered"
+        assert "_failed" not in result, "_failed must be filtered"
+        assert result == ["Garten", "Terrasse"]
 
     def test_list_dates_only_yyyy_mm_dd_dirs(self, tmp_path):
         """Only `YYYY-MM-DD` named dirs are date entries — random

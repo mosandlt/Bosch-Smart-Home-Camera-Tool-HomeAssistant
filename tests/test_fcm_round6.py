@@ -568,10 +568,17 @@ class TestAsyncHandleFcmPushNewEvent:
 
 
 class TestAsyncHandleFcmPushMarkEventsRead:
-    """Lines 546-550: mark_events_read option gates the call."""
+    """mark_events_read option gates fire-and-forget background task creation.
+
+    BUG-4 fix: mark-read is now fire-and-forget (async_create_task) so it does
+    not block the per-camera loop for cameras 2/3/4.  Tests verify that a task
+    is scheduled (not directly awaited) when the option is True, and that no
+    task is scheduled when it is False/absent.
+    """
 
     @pytest.mark.asyncio
-    async def test_mark_events_read_true_calls_mark(self):
+    async def test_mark_events_read_true_schedules_task(self):
+        """mark_events_read=True → a background task is created (fire-and-forget)."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_coord(
@@ -581,20 +588,41 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         events = _one_event("new-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=events))
-        mock_mark = AsyncMock(return_value=True)
+
+        # Track async_create_task calls so we can inspect what was scheduled.
+        created_coros: list[object] = []
+
+        def _capture_task(coro: object) -> MagicMock:
+            created_coros.append(coro)
+            stub = MagicMock()
+            stub.add_done_callback = MagicMock()
+            return stub
+
+        coord.hass.async_create_task = MagicMock(side_effect=_capture_task)
+
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
-                with patch(f"{MODULE}.async_mark_events_read", mock_mark):
+                with patch(
+                    f"{MODULE}.async_mark_events_read", new_callable=AsyncMock
+                ) as mock_mark:
                     await async_handle_fcm_push(coord)
-        (
-            mock_mark.assert_awaited_once(),
-            "mark_events_read=True must call async_mark_events_read",
+                    # Now actually run any pending mark-read background coroutines
+                    # so we can assert the inner call was made.
+                    for coro in created_coros:
+                        import inspect
+
+                        if inspect.iscoroutine(coro):
+                            await coro
+
+        assert mock_mark.await_count >= 1, (
+            "mark_events_read=True must schedule async_mark_events_read"
         )
-        args = mock_mark.call_args.args
-        assert "new-id" in args[1], (
+        # Verify the call included the new event id
+        all_args = [call.args for call in mock_mark.await_args_list]
+        assert any("new-id" in str(a) for a in all_args), (
             "async_mark_events_read must be called with the new event id"
         )
 

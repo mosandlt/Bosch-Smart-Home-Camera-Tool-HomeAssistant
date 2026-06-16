@@ -49,6 +49,9 @@ def _make_camera(cached: bytes | None):
     cam._force_image_refresh = False
     cam._last_image_fetch = 0.0
     cam._was_streaming = False
+    cam._refresh_inflight = (
+        False  # synchronous in-flight guard (replaces _refresh_lock)
+    )
     cam.async_write_ha_state = MagicMock()
     cam.hass = SimpleNamespace(data={}, async_create_task=MagicMock())
     return cam, coord

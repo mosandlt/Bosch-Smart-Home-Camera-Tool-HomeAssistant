@@ -5,6 +5,21 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.7.0] - 2026-06-16
+
+New optional **AI snapshot descriptions**, plus a round of reliability fixes from a structured bug-hunt across the backend and the card.
+
+- **AI snapshot descriptions (opt-in).** A new option lets Home Assistant's AI Task describe what a camera sees — automatically on motion/person events, or on demand through the new `describe_snapshot` service (which returns the text). You choose the AI Task entity, the prompt, and the reply language. Guardrails keep it economical: a per-camera cooldown, a daily call budget, an optional active-time window, and an optional presence/condition gate (for example, only analyse when nobody is home). The latest description is exposed as a per-camera sensor and can optionally be appended to your event notifications. **Off by default** — no AI calls happen until you enable it, and privacy mode always blocks analysis.
+- **Event-count timezone fix.** The *events today* / *movement events today* / *audio events today* sensors now bucket "today" by the event timestamps' UTC date. Previously a local-date comparison could under-count or mis-bucket events for an hour or two around midnight.
+- **Push reliability.** After an FCM push, the follow-up cloud fetch is retried only when a fetch actually succeeded — a brief cloud outage no longer triggers extra retries and waits against an unreachable endpoint.
+- **Event-poll resilience.** A transient cloud failure during an event poll no longer blanks a camera's recent-events list (and its events-today count) or defers the next poll by a full interval — the poll retries promptly on the next tick and the cached events are preserved until the cloud answers again.
+- **Availability during cloud maintenance.** While a camera is streaming locally during a known Bosch cloud maintenance window, it no longer flips to *unavailable* on every brief cloud dip — the camera and its entities stay available as long as the LAN datapath keeps serving frames. (Requires an active maintenance window, LAN reachability, and an established local live session; the firmware-update guard still takes priority.)
+- **Snapshot refresh.** A second concurrent image refresh is now skipped reliably via a synchronous in-flight guard, avoiding a redundant camera session and an extra `PUT /connection`.
+- **Card.** The on-image AI caption reappears correctly after it auto-hides, and a volume-slider listener is now cleaned up when the card is removed.
+- **Settings.** The AI entity gates can be cleared again to disable them, the daily-budget field no longer has a hidden upper limit (`0` = unlimited), and the active-time fields reject malformed values instead of silently disabling the window.
+
+Existing installations behave exactly as before until you turn the AI option on.
+
 ## [v13.6.0] - 2026-06-15
 
 Cross-platform reliability round driven by a structured bug-hunt across the card and the Python backend (Chrome, Safari, Firefox, Edge on macOS, Windows, iOS, Android, Linux).

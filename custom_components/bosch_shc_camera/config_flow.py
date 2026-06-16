@@ -37,6 +37,8 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
     async_register_implementation,
 )
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -44,6 +46,8 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
 )
 
 from .cloud_ssl import async_get_bosch_cloud_session
@@ -125,6 +129,20 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "ptz": [
         "enable_ptz_controls",
     ],
+    "ai": [
+        "enable_ai_description",
+        "ai_task_entity",
+        "ai_describe_language",
+        "ai_describe_prompt",
+        "ai_describe_on_motion",
+        "ai_notify_include_description",
+        "ai_cooldown_seconds",
+        "ai_max_per_day",
+        "ai_active_time_start",
+        "ai_active_time_end",
+        "ai_active_condition_entity",
+        "ai_active_condition_state",
+    ],
     "auth": [
         "force_relogin",
         "migrate_to_oss_client",
@@ -190,10 +208,24 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
 
 from . import DEFAULT_OPTIONS, DOMAIN  # type: ignore[attr-defined]
 from .const import (
+    CONF_AI_ACTIVE_CONDITION_ENTITY,
+    CONF_AI_ACTIVE_CONDITION_STATE,
+    CONF_AI_ACTIVE_TIME_END,
+    CONF_AI_ACTIVE_TIME_START,
+    CONF_AI_COOLDOWN_SECONDS,
+    CONF_AI_DESCRIBE_LANGUAGE,
+    CONF_AI_DESCRIBE_ON_MOTION,
+    CONF_AI_DESCRIBE_PROMPT,
+    CONF_AI_MAX_PER_DAY,
+    CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
+    CONF_AI_TASK_ENTITY,
     CONF_DEFER_DIAG_DURING_STREAM,
+    CONF_ENABLE_AI_DESCRIPTION,
     CONF_ENABLE_PTZ_CONTROLS,
     CONF_ENABLE_WEBHOOK_DELIVERY,
     CONF_WEBHOOK_URL,
+    DEFAULT_AI_DESCRIBE_LANGUAGE,
+    DEFAULT_AI_DESCRIBE_PROMPT,
     DEFAULT_DEFER_DIAG_DURING_STREAM,
     DEFAULT_MOTION_ACTIVE_WINDOW,
     MOTION_ACTIVE_WINDOW_MAX,
@@ -362,7 +394,9 @@ async def _exchange_code(
                 if resp.status == 200:
                     return await resp.json()  # type: ignore[no-any-return]
                 _LOGGER.warning(
-                    "Token exchange HTTP %d: %s", resp.status, await resp.text()
+                    "Token exchange HTTP %d: %s",
+                    resp.status,
+                    (await resp.text())[:200],
                 )
     except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token exchange error: %s", err)
@@ -533,18 +567,18 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         # so the refreshed credentials are still applied.
         if self.source == config_entries.SOURCE_REAUTH:
             existing = self._get_reauth_entry()
-            self.hass.config_entries.async_schedule_reload(existing.entry_id)
-            return self.async_update_and_abort(
-                existing,
-                data_updates=new_data,
+            self.hass.config_entries.async_update_entry(
+                existing, data={**existing.data, **new_data}
             )
+            self.hass.config_entries.async_schedule_reload(existing.entry_id)
+            return self.async_abort(reason="reauth_successful")
         if self.source == config_entries.SOURCE_RECONFIGURE:
             existing = self._get_reconfigure_entry()
-            self.hass.config_entries.async_schedule_reload(existing.entry_id)
-            return self.async_update_and_abort(
-                existing,
-                data_updates=new_data,
+            self.hass.config_entries.async_update_entry(
+                existing, data={**existing.data, **new_data}
             )
+            self.hass.config_entries.async_schedule_reload(existing.entry_id)
+            return self.async_abort(reason="reconfigure_successful")
         return self.async_create_entry(
             title="Bosch Smart Home Camera",
             data=new_data,
@@ -597,6 +631,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 "alert_delete_after_send",
                 "mark_events_read",
                 "enable_intercom",
+                "enable_local_save",
                 "enable_smb_upload",
                 "enable_nvr",
                 "enable_go2rtc",
@@ -605,15 +640,21 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 CONF_ENABLE_PTZ_CONTROLS,
                 "use_mjpeg_snapshot",
                 CONF_DEFER_DIAG_DURING_STREAM,
+                CONF_ENABLE_AI_DESCRIPTION,
+                CONF_AI_DESCRIBE_ON_MOTION,
+                CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
             ]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
             if migrate_to_oss:
+                # Merge submitted changes on top of existing opts so that
+                # suggested_value fields absent from user_input are preserved.
+                merged = {**opts, **user_input}
                 # Persist any other option changes first so they survive reauth
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
-                    options=user_input,
+                    options=merged,
                 )
                 # Use HA's native reauth trigger — scheduled as a task so the
                 # options dialog closes before the reauth flow registers
@@ -625,13 +666,20 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 )
                 return self.async_abort(reason="migration_started")
 
+            # Merge submitted changes on top of existing opts so that fields
+            # using only suggested_value (no default=) that the user did not
+            # edit are absent from user_input but still preserved in the saved
+            # options dict.  Bug: without this merge, unedited suggested_value
+            # fields revert to DEFAULT_OPTIONS defaults on every save.
+            merged = {**opts, **user_input}
+
             if force_relogin:
-                self._pending_options = user_input
+                self._pending_options = merged
                 self._verifier, challenge = _pkce_pair()
                 self._auth_url = _build_auth_url(challenge, secrets.token_urlsafe(16))
                 return await self.async_step_relogin_show()
 
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(title="", data=merged)
 
         has_refresh = bool(self._config_entry.data.get("refresh_token", ""))
 
@@ -1048,6 +1096,129 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             {"collapsed": True},
         )
 
+        sectioned_schema[vol.Required("ai")] = section(
+            vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_ENABLE_AI_DESCRIPTION,
+                        default=bool(opts.get(CONF_ENABLE_AI_DESCRIPTION, False)),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AI_TASK_ENTITY,
+                        description={
+                            "suggested_value": opts.get(CONF_AI_TASK_ENTITY, "")
+                        },
+                    ): vol.Any(
+                        "",
+                        EntitySelector(EntitySelectorConfig(domain="ai_task")),
+                    ),
+                    vol.Optional(
+                        CONF_AI_DESCRIBE_LANGUAGE,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_DESCRIBE_LANGUAGE, DEFAULT_AI_DESCRIBE_LANGUAGE
+                            )
+                        },
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                "Deutsch",
+                                "English",
+                                "Français",
+                                "Italiano",
+                                "Español",
+                                "Nederlands",
+                                "Polski",
+                            ],
+                            custom_value=True,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_DESCRIBE_PROMPT,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_DESCRIBE_PROMPT, DEFAULT_AI_DESCRIBE_PROMPT
+                            )
+                        },
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_AI_DESCRIBE_ON_MOTION,
+                        default=bool(opts.get(CONF_AI_DESCRIBE_ON_MOTION, False)),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
+                        default=bool(
+                            opts.get(CONF_AI_NOTIFY_INCLUDE_DESCRIPTION, False)
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AI_COOLDOWN_SECONDS,
+                        default=int(opts.get(CONF_AI_COOLDOWN_SECONDS, 60)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                    vol.Optional(
+                        CONF_AI_MAX_PER_DAY,
+                        default=int(opts.get(CONF_AI_MAX_PER_DAY, 100)),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=0),  # 0 = unlimited; no upper cap
+                    ),
+                    vol.Optional(
+                        CONF_AI_ACTIVE_TIME_START,
+                        description={
+                            "suggested_value": opts.get(CONF_AI_ACTIVE_TIME_START, "")
+                        },
+                    ): vol.Any(
+                        "",
+                        vol.All(
+                            str,
+                            vol.Match(
+                                r"^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$",
+                                msg="Use HH:MM or HH:MM:SS format, or leave empty to disable",
+                            ),
+                            TextSelector(TextSelectorConfig()),
+                        ),
+                    ),
+                    vol.Optional(
+                        CONF_AI_ACTIVE_TIME_END,
+                        description={
+                            "suggested_value": opts.get(CONF_AI_ACTIVE_TIME_END, "")
+                        },
+                    ): vol.Any(
+                        "",
+                        vol.All(
+                            str,
+                            vol.Match(
+                                r"^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$",
+                                msg="Use HH:MM or HH:MM:SS format, or leave empty to disable",
+                            ),
+                            TextSelector(TextSelectorConfig()),
+                        ),
+                    ),
+                    vol.Optional(
+                        CONF_AI_ACTIVE_CONDITION_ENTITY,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_ACTIVE_CONDITION_ENTITY, ""
+                            )
+                        },
+                    ): vol.Any(
+                        "",
+                        EntitySelector(EntitySelectorConfig()),
+                    ),
+                    vol.Optional(
+                        CONF_AI_ACTIVE_CONDITION_STATE,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_ACTIVE_CONDITION_STATE, "not_home"
+                            )
+                        },
+                    ): TextSelector(TextSelectorConfig()),
+                }
+            ),
+            {"collapsed": True},
+        )
+
         auth_inner: dict[Any, Any] = {
             vol.Optional("force_relogin", default=False): bool,
         }
@@ -1114,6 +1285,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 if not tokens or not tokens.get("access_token"):
                     errors["redirect_url"] = "token_exchange_failed"
                 else:
+                    # Update only the credential data — options are written once
+                    # by async_create_entry below.  Writing options here AND via
+                    # async_create_entry causes the options-update listener to
+                    # fire twice, triggering a double reload.
                     self.hass.config_entries.async_update_entry(
                         self._config_entry,
                         data={
@@ -1125,10 +1300,8 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     _LOGGER.info(
                         "Token re-authenticated successfully — reloading integration"
                     )
-                    self.hass.async_create_task(
-                        self.hass.config_entries.async_reload(
-                            self._config_entry.entry_id
-                        )
+                    self.hass.config_entries.async_schedule_reload(
+                        self._config_entry.entry_id
                     )
                     return self.async_create_entry(title="", data=self._pending_options)
 

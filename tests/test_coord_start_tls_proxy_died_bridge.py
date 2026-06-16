@@ -22,7 +22,9 @@ def _coord_stub():
     coord._tls_ssl_ctx = ssl.create_default_context()
     coord._tls_proxy_ports = {}
     coord._on_tls_proxy_died = AsyncMock(return_value=None)
+    coord._bg_tasks = set()
     coord.hass = MagicMock()
+    coord.hass.is_stopping = False
     coord.hass.async_add_executor_job = AsyncMock()
     coord.hass.async_create_task = MagicMock()
     coord.hass.loop = MagicMock()

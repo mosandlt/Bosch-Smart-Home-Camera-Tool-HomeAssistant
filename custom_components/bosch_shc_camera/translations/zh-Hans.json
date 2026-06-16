@@ -40,7 +40,8 @@
     },
     "abort": {
       "already_configured": "已配置。",
-      "reauth_successful": "重新认证成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。"
+      "reauth_successful": "重新认证成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。",
+      "reconfigure_successful": "重新配置成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。"
     }
   },
   "options": {
@@ -94,13 +95,17 @@
               "stream_connection_type": "流媒体连接类型",
               "live_buffer_mode": "播放器缓冲配置（HLS）",
               "enable_go2rtc": "go2rtc WebRTC（低延迟约 2 秒）",
-              "defer_diag_during_stream": "直播期间暂停诊断读取"
+              "defer_diag_during_stream": "直播期间暂停诊断读取",
+              "enable_green_it": "绿色IT — 自动结束闲置直播（实验性，开发中）",
+              "use_mjpeg_snapshot": "MJPEG inst=3 快照（Gen2，LAN）"
             },
             "data_description": {
               "stream_connection_type": "实时直播的默认连接类型。\n• **auto**（推荐）：优先尝试本地 LAN，失败时自动切换至 Bosch 云端代理。\n• **local**：仅直连 LAN — 无需互联网。RTSP 更快，但快照较慢（约 6–10 秒）。会话每 50 秒自动续期。\n• **remote**：始终通过 Bosch 云端代理。快照更快（约 0.4–1.9 秒）。HA 不在同一 LAN 时的最佳默认选项。\n\"Stream Mode\" 选择实体可在运行时覆盖此设置，无需重启。",
               "live_buffer_mode": "播放器在显示前预缓冲的视频秒数。缓冲越多 = 卡顿越少，但与实时的延迟越大。\n• **Latency**：小缓冲（约 4-6 秒延迟）。Wi-Fi 不稳定时可能卡顿。\n• **Balanced**（推荐）：中等缓冲（约 8-10 秒）。对典型 Wi-Fi 波动有较强鲁棒性。\n• **Stable**：大缓冲（约 12-15 秒）。即使在弱网络下也流畅，但延迟明显。\n仅影响卡片显示 — 对摄像头、录制或快照无影响。",
               "enable_go2rtc": "自动将实时直播注册到 HA 内置 go2rtc 以启用 WebRTC 播放（约 2 秒延迟 vs. HLS 约 10 秒）。推荐。仅在使用自定义 go2rtc 配置时禁用。",
-              "defer_diag_during_stream": "启用时（推荐）：当摄像头直播流处于活跃状态时，慢速诊断云读取将被延迟，以防止TLS通道争用导致运动突发时出现短暂的流卡顿。延迟的读取将在流空闲后的下一个轮询周期执行，不会永久丢失数据。仅在需要诊断传感器在直播期间保持实时更新时关闭。"
+              "defer_diag_during_stream": "启用时（推荐）：当摄像头直播流处于活跃状态时，慢速诊断云读取将被延迟，以防止TLS通道争用导致运动突发时出现短暂的流卡顿。延迟的读取将在流空闲后的下一个轮询周期执行，不会永久丢失数据。仅在需要诊断传感器在直播期间保持实时更新时关闭。",
+              "use_mjpeg_snapshot": "**仅限 Gen2 摄像头，需要 LAN，实验性功能。** 开启时：快照请求将尝试通过 FFmpeg 直接从摄像头的 RTSP inst=3 MJPEG 流捕获一帧 JPEG。目标延迟 ~150–300 毫秒，优于通过云代理的 ~500 毫秒。**默认关闭** — FFmpeg 内置 TLS 栈目前无法与摄像头的 RTSPS 服务器（端口 443）协商（FFmpeg 错误 183）。FFmpeg 失败时自动回退。",
+              "enable_green_it": "当没有人观看时自动结束摄像头的直播会话 — 当任何应用、仪表板或 Cast 约 3 分钟内未拉取流时。**实验性 — 开发中，默认关闭。** 观众检测目前无法可靠识别 WebRTC 直播观众。"
             }
           },
           "fcm": {
@@ -207,6 +212,38 @@
             },
             "data_description": {
               "enable_ptz_controls": "开启时：支持水平旋转的摄像头将获得预设位置选择实体（home / 向左 / 向右 / 左后 / 右后）。只有室内 360 摄像头支持旋转。**默认关闭**，不使用 360 摄像头的用户不会看到多余实体。"
+            }
+          },
+          "ai": {
+            "name": "AI 快照描述",
+            "description": "让 Home Assistant 的 AI 描述摄像头看到的内容。需要配置好 AI Task 集成（例如 OpenAI、Google、Anthropic 或本地 Ollama）。注意：根据所选 AI 后端，摄像头图像和可能的个人数据会被发送到云服务，并可能根据该提供商的设置用于训练。如需最大程度保护隐私，请使用本地模型（例如 Ollama）。",
+            "data": {
+              "enable_ai_description": "启用 AI 快照描述",
+              "ai_task_entity": "AI Task 实体（可选）",
+              "ai_describe_language": "响应语言",
+              "ai_describe_prompt": "描述提示词",
+              "ai_describe_on_motion": "检测到移动/人员时自动描述",
+              "ai_notify_include_description": "在事件通知中添加 AI 描述",
+              "ai_cooldown_seconds": "自动分析最小间隔秒数（每台摄像头）",
+              "ai_max_per_day": "每日 AI 分析配额（0 = 不限）",
+              "ai_active_time_start": "AI 激活开始时间（HH:MM）",
+              "ai_active_time_end": "AI 激活结束时间（HH:MM）",
+              "ai_active_condition_entity": "条件实体（可选）",
+              "ai_active_condition_state": "所需条件状态"
+            },
+            "data_description": {
+              "enable_ai_description": "启用后，快照描述服务和每台摄像头的 AI 描述传感器将变为可用。需要 Home Assistant 2025.8+ 并配置至少一个 AI Task 实体。",
+              "ai_task_entity": "选择特定的 AI Task 实体。留空以使用 HA 的首选默认值。",
+              "ai_describe_language": "AI 响应的语言。从列表中选择或输入任意语言名称（例如 Português、Русский）。默认：Deutsch。",
+              "ai_describe_prompt": "每次快照发送给 AI 的提示词。自定义以关注摄像头的重点内容。",
+              "ai_describe_on_motion": "在每次移动/人员事件时运行 AI 描述并更新 AI 描述传感器（用于仪表板和自动化）。不向推送通知添加文本。每台摄像头 30 秒防抖。",
+              "ai_notify_include_description": "将 AI 描述直接添加到手机上的事件推送通知中（移动/人员快照提醒）。需要配置事件通知。同时更新传感器。受冷却时间和每日配额限制。",
+              "ai_cooldown_seconds": "每台摄像头自动 AI 分析的最小间隔时间。手动 describe_snapshot 调用忽略此设置。默认 60 秒；0 禁用冷却时间。",
+              "ai_max_per_day": "每天所有摄像头自动 AI 分析的最大次数（午夜重置）。默认 100；0 = 不限。",
+              "ai_active_time_start": "AI 激活时间窗口的开始（24 小时格式，例如 08:00）。两个字段都留空可禁用时间限制。支持跨夜时间窗口（例如 22:00 开始 / 06:00 结束）。",
+              "ai_active_time_end": "AI 激活时间窗口的结束（24 小时格式，例如 22:00）。两个字段都留空可禁用时间限制。",
+              "ai_active_condition_entity": "其状态控制自动 AI 分析的实体。留空可禁用条件限制。示例：zone.home 状态为 0 表示没有人在家（区域统计人数，0 = 空）。也可使用人员组实体，状态为 not_home。",
+              "ai_active_condition_state": "条件实体必须处于的状态以允许 AI 分析。默认：not_home（仅在无人在家时运行 AI）。示例：home、on、off、away。zone.home 请使用 0（无人在家）。"
             }
           },
           "auth": {
@@ -326,9 +363,6 @@
       "pre_alarm": {
         "name": "Pre-Alarm"
       },
-      "audio_alarm": {
-        "name": "声音检测"
-      },
       "panic_alarm": {
         "name": "触发警报器"
       },
@@ -342,9 +376,6 @@
     "number": {
       "pan_position": {
         "name": "水平旋转位置"
-      },
-      "audio_threshold": {
-        "name": "音频阈值"
       },
       "speaker_level": {
         "name": "扬声器音量"
@@ -387,9 +418,6 @@
       },
       "pre_alarm_delay": {
         "name": "Pre-Alarm 持续时间"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "声音检测灵敏度"
       },
       "intrusion_sensitivity": {
         "name": "入侵检测灵敏度"
@@ -494,6 +522,7 @@
           "online": "在线",
           "offline": "离线",
           "session_limit": "会话限制",
+          "updating": "固件更新中",
           "unknown": "未知"
         }
       },
@@ -520,9 +549,6 @@
       },
       "motion_sensitivity": {
         "name": "移动检测灵敏度"
-      },
-      "audio_alarm": {
-        "name": "音频报警"
       },
       "last_event_type": {
         "name": "最新事件类型",
@@ -621,6 +647,29 @@
       },
       "stream_url_sub": {
         "name": "流 URL（副）"
+      },
+      "onvif_scopes": {
+        "name": "ONVIF 范围"
+      },
+      "rcp_version": {
+        "name": "RCP 版本"
+      },
+      "cloud_feature_flags": {
+        "name": "云功能标志"
+      },
+      "ai_description": {
+        "name": "AI 快照描述"
+      },
+      "cloud_maintenance": {
+        "name": "Bosch 云维护",
+        "state": {
+          "active": "维护进行中",
+          "scheduled": "维护已计划",
+          "past": "最近一次维护",
+          "recent": "最近公告",
+          "unknown": "无时间窗口信息",
+          "idle": "无维护信息"
+        }
       }
     }
   },
@@ -712,6 +761,32 @@
           "description": "摄像头的新显示名称"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "描述快照",
+      "description": "请求 HA 的 AI Task 集成描述当前摄像头快照。",
+      "fields": {
+        "camera_id": {
+          "name": "摄像头 ID",
+          "description": "Bosch 云摄像头 ID（UUID）。使用 camera_id 或 entity_id。"
+        },
+        "entity_id": {
+          "name": "摄像头实体",
+          "description": "摄像头实体 ID（例如 camera.bosch_terrasse）。使用 entity_id 或 camera_id。"
+        },
+        "instructions": {
+          "name": "指令",
+          "description": "AI 的自定义提示词。覆盖此次调用的 ai_describe_prompt 选项。"
+        },
+        "language": {
+          "name": "语言",
+          "description": "AI回复的语言。覆盖此次调用的ai_describe_language选项。默认：Deutsch。"
+        },
+        "ai_task_entity": {
+          "name": "AI Task 实体",
+          "description": "要使用的 AI Task 实体。留空以使用 HA 的首选默认值。"
+        }
+      }
     }
   },
   "exceptions": {
@@ -747,6 +822,12 @@
     },
     "unexpected_error": {
       "message": "{action} 失败：{error}"
+    },
+    "privacy_active": {
+      "message": "此摄像头的隐私模式已激活 — AI 分析无可用的实时图像。"
+    },
+    "ai_task_unavailable": {
+      "message": "AI Task 服务不可用或失败：{error}"
     }
   },
   "issues": {

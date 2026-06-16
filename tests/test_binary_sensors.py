@@ -123,7 +123,7 @@ class TestMotionBinarySensor:
         s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "evt-123"
-        assert attrs["image_url"] == "https://..."
+        assert "image_url" not in attrs
 
     def test_attrs_empty_when_no_events(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.binary_sensor import (
@@ -167,7 +167,7 @@ class TestAudioAlarmBinarySensor:
         assert s.is_on is True
 
     def test_attrs_include_audio_event_metadata(self, stub_coord, stub_entry):
-        """extra_state_attributes returns event_id/timestamp/image_url when event present."""
+        """extra_state_attributes returns event_id/timestamp only (image_url omitted — PII)."""
         stub_coord.data[CAM_ID]["events"] = [
             {
                 "eventType": "AUDIO_ALARM",
@@ -183,7 +183,7 @@ class TestAudioAlarmBinarySensor:
         s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "aud-99"
-        assert attrs["image_url"] == "http://img"
+        assert "image_url" not in attrs
 
     def test_attrs_empty_when_no_audio_event(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.binary_sensor import (
@@ -241,7 +241,7 @@ class TestPersonDetectedBinarySensor:
         assert CAM_ID in s._attr_unique_id
 
     def test_attrs_include_person_event_metadata(self, stub_coord, stub_entry):
-        """extra_state_attributes returns event_id/timestamp/image_url when PERSON event present."""
+        """extra_state_attributes returns event_id/timestamp only (image_url omitted — PII)."""
         stub_coord.data[CAM_ID]["events"] = [
             {
                 "eventType": "PERSON",
@@ -259,7 +259,7 @@ class TestPersonDetectedBinarySensor:
         )
         attrs = s.extra_state_attributes
         assert attrs["event_id"] == "per-77"
-        assert attrs["image_url"] == "http://pic"
+        assert "image_url" not in attrs
 
     def test_attrs_empty_when_no_person_event(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.binary_sensor import (
@@ -270,6 +270,83 @@ class TestPersonDetectedBinarySensor:
             BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
         )
         assert s.extra_state_attributes == {}
+
+
+class TestPersonDetectedDeviceClass:
+    """Person sensor must be OCCUPANCY, not MOTION — voice/automation class filter."""
+
+    def test_person_sensor_device_class_is_occupancy(self, stub_coord, stub_entry):
+        from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        s = BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        assert s._attr_device_class == BinarySensorDeviceClass.OCCUPANCY
+
+    def test_motion_sensor_device_class_is_motion(self, stub_coord, stub_entry):
+        from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
+        s = BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry)
+        assert s._attr_device_class == BinarySensorDeviceClass.MOTION
+
+    def test_image_url_not_in_motion_attrs(self, stub_coord, stub_entry):
+        """Signed Bosch URLs must not reach the HA recorder (B20 PII fix)."""
+        stub_coord.data[CAM_ID]["events"] = [
+            {
+                "eventType": "MOVEMENT",
+                "id": "pii-1",
+                "timestamp": _now_iso(),
+                "imageUrl": "https://bosch.example.com/signed?token=abc",
+            }
+        ]
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+        )
+
+        s = _patched_hass(BoschMotionBinarySensor(stub_coord, CAM_ID, stub_entry))
+        assert "image_url" not in s.extra_state_attributes
+
+    def test_image_url_not_in_person_attrs(self, stub_coord, stub_entry):
+        """Signed Bosch URLs must not reach the HA recorder (B20 PII fix)."""
+        stub_coord.data[CAM_ID]["events"] = [
+            {
+                "eventType": "PERSON",
+                "id": "pii-2",
+                "timestamp": _now_iso(),
+                "imageUrl": "https://bosch.example.com/signed?token=xyz",
+            }
+        ]
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschPersonDetectedBinarySensor,
+        )
+
+        s = _patched_hass(
+            BoschPersonDetectedBinarySensor(stub_coord, CAM_ID, stub_entry)
+        )
+        assert "image_url" not in s.extra_state_attributes
+
+    def test_image_url_not_in_audio_alarm_attrs(self, stub_coord, stub_entry):
+        """Signed Bosch URLs must not reach the HA recorder (B20 PII fix)."""
+        stub_coord.data[CAM_ID]["events"] = [
+            {
+                "eventType": "AUDIO_ALARM",
+                "id": "pii-3",
+                "timestamp": _now_iso(),
+                "imageUrl": "https://bosch.example.com/signed?token=def",
+            }
+        ]
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAudioAlarmBinarySensor,
+        )
+
+        s = _patched_hass(BoschAudioAlarmBinarySensor(stub_coord, CAM_ID, stub_entry))
+        assert "image_url" not in s.extra_state_attributes
 
 
 # ── _event_within_window edge cases ─────────────────────────────────────

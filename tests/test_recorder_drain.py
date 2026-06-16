@@ -23,7 +23,7 @@ import shutil
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1227,10 +1227,11 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         # MDTM responses — new.mp4 uses current time so the test never drifts
         # past the retention boundary as calendar days advance.
+        # B13-6: MDTM and DELETE must use absolute paths (position-independent).
         def sendcmd(cmd):
             import datetime
 
-            if cmd == "MDTM old.mp4":
+            if cmd == "MDTM /Bosch/NVR/Terrasse/old.mp4":
                 return "213 20260101010000"
             return datetime.datetime.utcnow().strftime("213 %Y%m%d%H%M%S")
 
@@ -1242,7 +1243,8 @@ class TestSyncNvrCleanupFtpDeepWalk:
             "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
-        ftp.delete.assert_called_once_with("old.mp4")
+        # B13-6 regression pin: delete must use the absolute path, not just the filename.
+        ftp.delete.assert_called_once_with("/Bosch/NVR/Terrasse/old.mp4")
 
     def test_ftp_cwd_failure_returns_cleanly(self, tmp_path):
         """ftp.cwd raising error_perm — entire walk returns early w/o delete."""
@@ -1368,6 +1370,45 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
+    def test_ftp_mdtm_and_delete_use_absolute_paths(self, tmp_path):
+        """B13-6 regression: MDTM and DELETE must use absolute paths so that
+        the commands are position-independent after recursive _walk_and_delete
+        calls leave the FTP cwd pointing at a subdirectory."""
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+        ftp = MagicMock()
+        # Single file in the root NVR dir — old enough to be deleted.
+        listings = {
+            "/Bosch/NVR": [
+                "-rw-r--r--  1 user grp 1024 Apr 01 10:00 clip.mp4",
+            ],
+        }
+
+        def fake_retrlines(cmd, cb):
+            current = ftp.cwd.call_args.args[0]
+            for line in listings.get(current, []):
+                cb(line)
+
+        ftp.retrlines.side_effect = fake_retrlines
+        # Return an old timestamp for any MDTM call.
+        ftp.sendcmd.return_value = "213 20260101010000"
+        ftp.cwd.return_value = None
+        ftp.delete.return_value = None
+
+        with patch(
+            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+        ):
+            recorder._sync_nvr_cleanup_ftp(coord)
+
+        # MDTM must have been called with the absolute path, not just "clip.mp4".
+        mdtm_calls = [str(c) for c in ftp.sendcmd.call_args_list]
+        assert any("/Bosch/NVR/clip.mp4" in c for c in mdtm_calls), (
+            f"MDTM must use absolute path; calls were: {mdtm_calls}"
+        )
+        # DELETE must also use the absolute path.
+        ftp.delete.assert_called_once_with("/Bosch/NVR/clip.mp4")
+
 
 # ── 13. Upload_ftp close-fallback when both quit and close fail ──────────────
 
@@ -1479,3 +1520,165 @@ class TestFtpCleanupShortAndDotDotLines:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
+
+
+# ── D-P2: persistent_notification scheduling — thread vs loop ─────────────────
+
+
+class TestPersistentNotificationScheduling:
+    """D-P2 regression: verify the correct scheduling primitive is used in
+    each caller context.
+
+    * ``_watch_recorder`` (async def, runs on the event loop):
+      must call ``hass.async_create_task`` DIRECTLY — never via
+      ``hass.loop.call_soon_threadsafe``.  Eager-creating a coroutine and
+      passing it through ``call_soon_threadsafe(async_create_task, coro)``
+      from inside an async function is unnecessary and could produce a
+      "coroutine was never awaited" warning if the outer except fires first.
+
+    * ``sync_drain_tick`` (plain def, runs in executor thread):
+      must use ``hass.loop.call_soon_threadsafe`` to cross from the thread
+      back onto the event loop — direct ``async_create_task`` is not
+      thread-safe.
+    """
+
+    # ── _watch_recorder disk-full path ─────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_watch_recorder_diskfull_uses_async_create_task_not_threadsafe(
+        self,
+    ) -> None:
+        """Disk-full branch in _watch_recorder must call async_create_task
+        directly (already on loop), never call_soon_threadsafe."""
+        cam_id = "AABBCCDD-0000-0000-0000-000000000000"
+
+        # Stub coordinator with the minimal fields _watch_recorder reads.
+        create_task = MagicMock()
+        call_soon_threadsafe = MagicMock()
+        # MagicMock (not AsyncMock): the coroutine goes to create_task which
+        # is also a MagicMock — it would never be awaited and would produce a
+        # "coroutine was never awaited" RuntimeWarning.  We only care that
+        # async_create_task was called, not that the coro was actually run.
+        services_async_call = MagicMock()
+
+        coord = SimpleNamespace(
+            _nvr_processes={},
+            _nvr_user_intent={cam_id: True},
+            _nvr_recent_crash={},
+            _nvr_error_state={},
+            data={
+                cam_id: {
+                    "info": {"title": "Terrasse"},
+                    "status": "ONLINE",
+                }
+            },
+            options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
+            is_camera_online=lambda cid: True,
+            _live_connections={
+                cam_id: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://u:p@127.0.0.1:9999/rtsp_tunnel?inst=1",
+                }
+            },
+            hass=SimpleNamespace(
+                async_create_task=create_task,
+                loop=SimpleNamespace(call_soon_threadsafe=call_soon_threadsafe),
+                services=SimpleNamespace(async_call=services_async_call),
+            ),
+        )
+
+        # Proc registered so the guard in _watch_recorder doesn't exit early.
+        proc = MagicMock()
+        proc.returncode = 1
+        proc.stderr = MagicMock()
+        proc.stderr.read = AsyncMock(return_value=b"no space left on device")
+
+        async def _wait() -> int:
+            proc.returncode = 1
+            return 1
+
+        proc.wait = _wait
+        coord._nvr_processes[cam_id] = proc
+
+        await recorder._watch_recorder(coord, cam_id, proc)
+
+        # async_create_task MUST have been called (notification scheduled).
+        create_task.assert_called_once()
+        # call_soon_threadsafe must NOT be used — we're already on the loop.
+        call_soon_threadsafe.assert_not_called()
+        assert coord._nvr_error_state.get(cam_id) == "disk full"
+
+    @pytest.mark.asyncio
+    async def test_watch_recorder_diskfull_swallows_async_create_task_error(
+        self,
+    ) -> None:
+        """If async_create_task raises (e.g. loop shutting down), the disk-full
+        branch must still set error_state and return — no unhandled exception."""
+        cam_id = "AABBCCDD-0000-0000-0000-000000000001"
+
+        coord = SimpleNamespace(
+            _nvr_processes={},
+            _nvr_user_intent={cam_id: True},
+            _nvr_recent_crash={},
+            _nvr_error_state={},
+            data={cam_id: {"info": {"title": "Cam"}, "status": "ONLINE"}},
+            options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
+            is_camera_online=lambda cid: True,
+            _live_connections={
+                cam_id: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://u:p@127.0.0.1:9999/rtsp_tunnel?inst=1",
+                }
+            },
+            hass=SimpleNamespace(
+                async_create_task=MagicMock(side_effect=RuntimeError("loop closed")),
+                loop=SimpleNamespace(call_soon_threadsafe=MagicMock()),
+                # MagicMock (not AsyncMock) so no coroutine object is created;
+                # async_create_task raises before it could consume the return
+                # value anyway — using AsyncMock would produce a "never awaited"
+                # warning here because the coroutine never reaches the task loop.
+                services=SimpleNamespace(async_call=MagicMock()),
+            ),
+        )
+
+        proc = MagicMock()
+        proc.returncode = 1
+        proc.stderr = MagicMock()
+        proc.stderr.read = AsyncMock(return_value=b"enospc")
+
+        async def _wait() -> int:
+            proc.returncode = 1
+            return 1
+
+        proc.wait = _wait
+        coord._nvr_processes[cam_id] = proc
+
+        # Must not raise even though async_create_task blows up.
+        await recorder._watch_recorder(coord, cam_id, proc)
+
+        assert coord._nvr_error_state.get(cam_id) == "disk full"
+
+    # ── sync_drain_tick quarantine path ────────────────────────────────────
+
+    def test_drain_tick_quarantine_uses_call_soon_threadsafe(
+        self, tmp_path: Path
+    ) -> None:
+        """sync_drain_tick runs in an executor thread; its persistent-
+        notification call MUST go through call_soon_threadsafe (not direct
+        async_create_task which is not thread-safe)."""
+        _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
+        coord = _make_coord(tmp_path, target="smb")
+
+        call_soon_threadsafe = MagicMock()
+        create_task = MagicMock()
+        coord.hass.loop.call_soon_threadsafe = call_soon_threadsafe
+        coord.hass.async_create_task = create_task
+
+        with patch.object(recorder, "_upload_smb", return_value=False):
+            for _ in range(recorder._DRAIN_MAX_RETRIES):
+                recorder.sync_drain_tick(coord)
+
+        # Thread path must use call_soon_threadsafe.
+        call_soon_threadsafe.assert_called()
+        # Quarantine happened.
+        assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()

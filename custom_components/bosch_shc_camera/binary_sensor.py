@@ -20,6 +20,7 @@ Device class:
 from __future__ import annotations
 
 import logging
+import time as _time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -209,7 +210,6 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
         return {
             "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
-            "image_url": event.get("imageUrl", ""),
         }
 
 
@@ -246,7 +246,6 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
         return {
             "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
-            "image_url": event.get("imageUrl", ""),
         }
 
 
@@ -254,7 +253,7 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
 class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when a PERSON event occurred within the last 30 seconds."""
 
-    _attr_device_class = BinarySensorDeviceClass.MOTION
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
     _attr_icon = "mdi:account-alert"
 
     def __init__(
@@ -283,7 +282,6 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
         return {
             "event_id": event.get("id", ""),
             "timestamp": event.get("timestamp", ""),
-            "image_url": event.get("imageUrl", ""),
         }
 
 
@@ -329,8 +327,6 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        import time as _time
-
         entry = self.coordinator._lan_tcp_reachable.get(self._cam_id)
         attrs: dict[str, Any] = {"camera_id": self._cam_id}
         if entry is not None:

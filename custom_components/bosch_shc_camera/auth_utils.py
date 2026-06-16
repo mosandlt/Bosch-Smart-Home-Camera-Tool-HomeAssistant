@@ -196,4 +196,23 @@ async def async_digest_request(
     req_kwargs["headers"] = auth_headers
 
     # Second attempt — with Digest Authorization
-    return await session.request(method, url, **req_kwargs)
+    second_resp = await session.request(method, url, **req_kwargs)
+
+    # RFC 7616: if server signals stale=true on the second 401, retry once with
+    # the new nonce (nonce expired between the first and second request).
+    if second_resp.status == 401:
+        www_auth2 = second_resp.headers.get("WWW-Authenticate", "")
+        if www_auth2:
+            challenge2 = _parse_digest_challenge(www_auth2)
+            if challenge2.get("stale", "").lower() == "true":
+                await second_resp.read()  # consume body before reuse
+                auth_header2 = _build_digest_header(
+                    method, url, user, password, challenge2
+                )
+                auth_headers2: dict[str, str] = dict(headers) if headers else {}
+                auth_headers2["Authorization"] = auth_header2
+                req_kwargs2 = dict(req_kwargs)
+                req_kwargs2["headers"] = auth_headers2
+                return await session.request(method, url, **req_kwargs2)
+
+    return second_resp

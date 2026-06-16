@@ -498,7 +498,7 @@ async def rcp_read(
                     raw[:100],
                 )
                 return None
-    except (TimeoutError, aiohttp.ClientError) as err:
+    except (TimeoutError, aiohttp.ClientError, ValueError) as err:
         _LOGGER.debug("rcp_read: command=%s error: %s", command, err)
         return None
 
@@ -601,13 +601,19 @@ async def async_update_rcp_data(
             _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
 
     # Read privacy mask (0x0d00) -- P_OCTET 4B -> byte[1]=1 means ON
-    try:
-        raw = await _read("0x0d00", type_="P_OCTET")
-        if raw and len(raw) >= 2:
-            coordinator._rcp_privacy_cache[cam_id] = int(raw[1])
-            _LOGGER.debug("RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1])
-    except Exception as err:
-        _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
+    if not _skip("0x0d00"):
+        try:
+            raw = await _read("0x0d00", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0d00")
+            elif raw and len(raw) >= 2:
+                coordinator._rcp_privacy_cache[cam_id] = int(raw[1])
+                _LOGGER.debug("RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1])
+                _mark_ok("0x0d00")
+            elif raw is None:
+                _mark_fail("0x0d00")
+        except Exception as err:
+            _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
 
     # Read camera clock (0x0a0f) -- 8 bytes -> compute offset vs server time
     # RCP clock format: year(2B big-endian) month(1B) day(1B) hour(1B) min(1B) sec(1B) weekday(1B)

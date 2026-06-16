@@ -249,6 +249,33 @@ class TestFetchMjpegSnapshot:
         assert USER in rtsp_url
 
     @pytest.mark.asyncio
+    async def test_cancelled_error_reaps_zombie_proc(self):
+        """BUG-1 regression: CancelledError during wait_for must still kill+wait the proc.
+
+        Before the fix the except-block only caught TimeoutError/FileNotFoundError/OSError.
+        A CancelledError (raised by HA coordinator task shutdown) propagated without
+        killing FFmpeg, leaving it running as a zombie until its own internal timeout.
+        The finally-block fix ensures proc.kill() + proc.wait() are always called.
+        """
+        proc = _mock_proc()
+        proc.wait = AsyncMock(return_value=None)
+        # Simulate CancelledError raised inside wait_for (HA task cancellation)
+        with (
+            patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
+            patch("asyncio.wait_for", side_effect=asyncio.CancelledError()),
+        ):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            with pytest.raises(asyncio.CancelledError):
+                await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
+
+        # Despite CancelledError propagating, the zombie must have been reaped
+        proc.kill.assert_called_once()
+        proc.wait.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_custom_timeout_passed_to_wait_for(self):
         """Custom timeout value is forwarded to asyncio.wait_for."""
         proc = _mock_proc(returncode=0, stdout=FAKE_JPEG)

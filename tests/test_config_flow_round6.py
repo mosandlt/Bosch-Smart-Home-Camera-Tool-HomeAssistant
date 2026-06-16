@@ -265,8 +265,10 @@ class TestConfigFlowSteps:
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
         flow.async_update_reload_and_abort = MagicMock(return_value={"type": "abort"})
         flow.async_update_and_abort = MagicMock(return_value={"type": "abort"})
+        flow.async_abort = MagicMock(return_value={"type": "abort"})
         flow._get_reauth_entry = MagicMock(return_value=MagicMock())
         flow._get_reconfigure_entry = MagicMock(return_value=MagicMock())
+        flow.hass.config_entries.async_update_entry = MagicMock()
         return flow
 
     def test_logger_property_returns_module_logger(self):
@@ -333,34 +335,43 @@ class TestConfigFlowSteps:
 
     @pytest.mark.asyncio
     async def test_oauth_create_entry_reauth_updates_existing(self):
-        """SOURCE_REAUTH → async_update_and_abort + explicit schedule_reload
-        (HA 2026.6: async_update_reload_and_abort is deprecated alongside the
-        options update-listener)."""
+        """SOURCE_REAUTH → async_update_entry (writes tokens) + schedule_reload + abort.
+        H1 fix: reload was previously scheduled BEFORE async_update_and_abort wrote
+        new tokens, causing the reload to boot with stale credentials.
+        New pattern: async_update_entry writes tokens synchronously, then reload is
+        scheduled (guaranteed to run after write), then async_abort returns."""
         from homeassistant import config_entries
 
         flow = self._make_flow(source=config_entries.SOURCE_REAUTH)
+        flow.async_abort = MagicMock(return_value={"type": "abort"})
         await flow.async_oauth_create_entry(
             {
                 "token": {"access_token": "new_at", "refresh_token": "new_rt"},
             }
         )
-        flow.async_update_and_abort.assert_called_once()
+        # Must write entry data first (synchronous)
+        flow.hass.config_entries.async_update_entry.assert_called_once()
+        # Then schedule the reload (guaranteed tokens are written)
         flow.hass.config_entries.async_schedule_reload.assert_called_once()
+        # Then abort the flow
+        flow.async_abort.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_oauth_create_entry_reconfigure_updates_existing(self):
-        """SOURCE_RECONFIGURE → async_update_and_abort + explicit schedule_reload
-        (HA 2026.6 deprecation, see reauth test)."""
+        """SOURCE_RECONFIGURE → async_update_entry + schedule_reload + abort.
+        H1 fix: same as reauth — write-before-reload ordering."""
         from homeassistant import config_entries
 
         flow = self._make_flow(source=config_entries.SOURCE_RECONFIGURE)
+        flow.async_abort = MagicMock(return_value={"type": "abort"})
         await flow.async_oauth_create_entry(
             {
                 "token": {"access_token": "new_at", "refresh_token": "new_rt"},
             }
         )
-        flow.async_update_and_abort.assert_called_once()
+        flow.hass.config_entries.async_update_entry.assert_called_once()
         flow.hass.config_entries.async_schedule_reload.assert_called_once()
+        flow.async_abort.assert_called_once()
 
     def test_async_get_options_flow_returns_options_flow_instance(self):
         """async_get_options_flow must return a BoschCameraOptionsFlow (line 480)."""

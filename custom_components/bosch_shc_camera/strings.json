@@ -33,7 +33,9 @@
       }
     },
     "abort": {
-      "already_configured": "Already configured."
+      "already_configured": "Already configured.",
+      "reauth_successful": "Re-authentication successful — your Bosch Smart Home Camera integration has been updated with a fresh token.",
+      "reconfigure_successful": "Reconfiguration successful — your Bosch Smart Home Camera integration has been updated with a fresh token."
     },
     "error": {
       "invalid_redirect_url": "No auth code found in the URL.",
@@ -212,6 +214,38 @@
               "enable_ptz_controls": "When ON: cameras with pan support get a pan-preset select entity (home / left / right / back-left / back-right). Only the indoor 360 camera exposes pan. **Off by default** so users without a 360 camera see no stray entity."
             }
           },
+          "ai": {
+            "name": "AI Snapshot Description",
+            "description": "Let Home Assistant's AI describe what the camera sees. Requires a configured AI Task integration (e.g. OpenAI, Google, Anthropic, or local Ollama). Note: depending on the chosen AI backend, camera images and possibly personal data are sent to a cloud service and may — subject to that provider's settings — be used for training. For maximum privacy, use a local model (e.g. Ollama).",
+            "data": {
+              "enable_ai_description": "Enable AI snapshot descriptions",
+              "ai_task_entity": "AI Task entity (optional)",
+              "ai_describe_language": "Response language",
+              "ai_describe_prompt": "Description prompt (prompt tuning)",
+              "ai_describe_on_motion": "Auto-describe on motion/person events",
+              "ai_notify_include_description": "Add AI description to event notifications",
+              "ai_cooldown_seconds": "Minimum seconds between auto analyses (per camera)",
+              "ai_max_per_day": "Daily AI analysis budget (0 = unlimited)",
+              "ai_active_time_start": "AI active from (HH:MM)",
+              "ai_active_time_end": "AI active until (HH:MM)",
+              "ai_active_condition_entity": "Condition entity (optional)",
+              "ai_active_condition_state": "Required condition state"
+            },
+            "data_description": {
+              "enable_ai_description": "When enabled, a snapshot-description service and a per-camera AI description sensor become available. Requires Home Assistant 2025.8+ with at least one AI Task entity configured.",
+              "ai_task_entity": "Select a specific AI Task entity to use. Leave empty to use HA's preferred default.",
+              "ai_describe_language": "Language the AI responds in. Select from the list or type any language name (e.g. Português, Русский). Default: Deutsch.",
+              "ai_describe_prompt": "The base prompt sent to the AI with each snapshot. A language directive is appended automatically. Customize to focus on what matters for your camera.",
+              "ai_describe_on_motion": "Runs an AI description on every motion/person event and updates the AI description SENSOR (for dashboards & automations). Does NOT add text to push notifications. 30-second debounce per camera.",
+              "ai_notify_include_description": "Adds the AI description directly INTO the event push notification on your phone (the motion/person snapshot alert). Requires event notifications to be configured. Also updates the sensor. Rate-limited by cooldown + daily budget.",
+              "ai_cooldown_seconds": "Per-camera minimum time between automatic AI analyses (notify-include and on-motion). Manual describe_snapshot calls ignore this. Default 60 s; 0 disables the cooldown.",
+              "ai_max_per_day": "Maximum automatic AI analyses across all cameras per day (resets at midnight). Protects against burning AI credits on busy days. Default 100; 0 = unlimited.",
+              "ai_active_time_start": "Start of the AI activation window (24h format, e.g. 08:00). Leave both fields empty to disable time gating. Overnight windows are supported (e.g. 22:00 start / 06:00 end).",
+              "ai_active_time_end": "End of the AI activation window (24h format, e.g. 22:00). Leave both fields empty to disable time gating.",
+              "ai_active_condition_entity": "Entity whose state gates automatic AI analyses. E.g. a presence group or person entity. Leave empty to disable condition gating. If the entity is unavailable or unknown, AI is blocked (conservative).",
+              "ai_active_condition_state": "State the condition entity must be in to allow AI analyses. Default: not_home (AI only runs when nobody is home). Examples: home, on, off, away."
+            }
+          },
           "auth": {
             "name": "Authentication",
             "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
@@ -294,6 +328,9 @@
       },
       "cloud_feature_flags": {
         "name": "Cloud Feature Flags"
+      },
+      "ai_description": {
+        "name": "AI Snapshot Description"
       }
     }
   },
@@ -385,6 +422,32 @@
           "description": "New display name for the camera"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "Describe Snapshot",
+      "description": "Ask HA's AI Task integration to describe the current camera snapshot.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera ID",
+          "description": "Bosch cloud camera ID (UUID). Use either camera_id or entity_id."
+        },
+        "entity_id": {
+          "name": "Camera Entity",
+          "description": "Camera entity ID (e.g. camera.bosch_terrasse). Use either entity_id or camera_id."
+        },
+        "instructions": {
+          "name": "Instructions",
+          "description": "Custom prompt override for the AI (replaces ai_describe_prompt for this call). The language directive is still appended automatically."
+        },
+        "language": {
+          "name": "Language",
+          "description": "Language for the AI response. Overrides ai_describe_language for this call. Default: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "AI Task Entity",
+          "description": "AI Task entity to use. Leave empty for HA's preferred default."
+        }
+      }
     }
   },
   "exceptions": {
@@ -420,6 +483,12 @@
     },
     "unexpected_error": {
       "message": "{action} failed: {error}"
+    },
+    "privacy_active": {
+      "message": "Privacy mode is active for this camera — no live image is available for AI analysis."
+    },
+    "ai_task_unavailable": {
+      "message": "AI Task service unavailable or failed: {error}"
     }
   },
   "issues": {

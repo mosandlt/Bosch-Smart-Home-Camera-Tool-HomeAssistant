@@ -40,7 +40,8 @@
     },
     "abort": {
       "already_configured": "Bereits konfiguriert.",
-      "reauth_successful": "Erneute Anmeldung erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben."
+      "reauth_successful": "Erneute Anmeldung erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben.",
+      "reconfigure_successful": "Neukonfiguration erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben."
     }
   },
   "options": {
@@ -211,6 +212,38 @@
             },
             "data_description": {
               "enable_ptz_controls": "Bei aktivierter Option zeigen Kameras mit Pan-Funktion eine Pan-Preset-Auswahl (Home / Links / Rechts / Hinten-Links / Hinten-Rechts). Nur die 360-Innenkamera unterstützt Pan. **Standardmäßig deaktiviert** — Nutzer ohne 360-Kamera sehen keine überflüssige Entität."
+            }
+          },
+          "ai": {
+            "name": "KI-Snapshot-Beschreibung",
+            "description": "Lässt die KI von Home Assistant beschreiben, was die Kamera sieht. Erfordert eine konfigurierte „AI Task\"-Integration (z. B. OpenAI, Google, Anthropic oder lokal über Ollama). Hinweis: Je nach gewähltem KI-Backend werden Kamerabilder und ggf. personenbezogene Daten an einen Cloud-Dienst übertragen und können dort – abhängig von dessen Einstellungen – zu Trainingszwecken verwendet werden. Für maximalen Datenschutz ein lokales Modell (z. B. Ollama) verwenden.",
+            "data": {
+              "enable_ai_description": "KI-Snapshot-Beschreibungen aktivieren",
+              "ai_task_entity": "KI-Task-Entität (optional)",
+              "ai_describe_language": "Antwortsprache",
+              "ai_describe_prompt": "Beschreibungs-Prompt (Prompt-Tuning)",
+              "ai_describe_on_motion": "Bei Bewegung/Person automatisch beschreiben",
+              "ai_notify_include_description": "KI-Beschreibung an Ereignis-Benachrichtigungen anhängen",
+              "ai_cooldown_seconds": "Mindestabstand zwischen Auto-Analysen (Sekunden, pro Kamera)",
+              "ai_max_per_day": "Tagesbudget für KI-Analysen (0 = unbegrenzt)",
+              "ai_active_time_start": "KI aktiv ab (HH:MM)",
+              "ai_active_time_end": "KI aktiv bis (HH:MM)",
+              "ai_active_condition_entity": "Bedingungs-Entität (optional)",
+              "ai_active_condition_state": "Erforderlicher Zustand"
+            },
+            "data_description": {
+              "enable_ai_description": "Wenn aktiviert, stehen ein Dienst zur Schnappschuss-Beschreibung und ein KI-Beschreibungssensor pro Kamera zur Verfügung. Erfordert Home Assistant 2025.8+ mit mindestens einer konfigurierten „AI Task\"-Entität.",
+              "ai_task_entity": "Wähle eine spezifische KI-Task-Entität aus. Leer lassen für den bevorzugten Standard von HA.",
+              "ai_describe_language": "Sprache, in der die KI antwortet. Aus der Liste wählen oder einen beliebigen Sprachnamen eintippen (z. B. Português, Русский). Standard: Deutsch.",
+              "ai_describe_prompt": "Der Prompt, der mit jedem Snapshot an die KI gesendet wird. Eine Sprach-Anweisung wird automatisch angehängt. Anpassen, um zu beschreiben, worauf bei dieser Kamera geachtet werden soll.",
+              "ai_describe_on_motion": "Führt bei jedem Bewegungs-/Person-Ereignis eine KI-Beschreibung aus und aktualisiert den KI-Beschreibungs-SENSOR (für Dashboards & Automationen). Fügt KEINEN Text zur Push-Benachrichtigung hinzu. 30-Sekunden-Entpreller pro Kamera.",
+              "ai_notify_include_description": "Hängt die KI-Beschreibung direkt in die Ereignis-Push auf deinem Handy (die Bewegungs-/Person-Snapshot-Meldung). Erfordert konfigurierte Ereignis-Benachrichtigungen. Aktualisiert auch den Sensor. Durch Cooldown + Tagesbudget begrenzt.",
+              "ai_cooldown_seconds": "Mindestzeit zwischen automatischen KI-Analysen pro Kamera (Benachrichtigung + bei Bewegung). Manuelle describe_snapshot-Aufrufe ignorieren dies. Standard 60 s; 0 deaktiviert den Cooldown.",
+              "ai_max_per_day": "Maximale automatische KI-Analysen pro Tag über alle Kameras (Reset um Mitternacht). Schützt vor übermäßigem Verbrauch von KI-Credits. Standard 100; 0 = unbegrenzt.",
+              "ai_active_time_start": "Beginn des KI-Aktivierungsfensters (24-h-Format, z. B. 08:00). Beide Felder leer lassen, um kein Zeitfenster zu setzen. Über-Nacht-Fenster werden unterstützt (z. B. Start 22:00 / Ende 06:00).",
+              "ai_active_time_end": "Ende des KI-Aktivierungsfensters (24-h-Format, z. B. 22:00). Beide Felder leer lassen, um kein Zeitfenster zu setzen.",
+              "ai_active_condition_entity": "Entität, deren Zustand automatische KI-Analysen erlaubt oder sperrt. Z. B. eine Anwesenheits-Gruppe oder Person. Leer lassen, um keine Bedingung zu setzen. Wenn die Entität nicht verfügbar oder unbekannt ist, wird die KI gesperrt (konservativ). Beispiel: zone.home mit Zustand 0 bedeutet, dass niemand zu Hause ist (Zonen zählen Personen, 0 = leer). Oder eine Personengruppen-Entität mit Zustand not_home verwenden.",
+              "ai_active_condition_state": "Zustand, in dem sich die Bedingungs-Entität befinden muss, damit KI-Analysen erlaubt sind. Standard: not_home (KI läuft nur, wenn niemand zu Hause ist). Beispiele: home, on, off, away."
             }
           },
           "auth": {
@@ -634,6 +667,9 @@
       },
       "cloud_feature_flags": {
         "name": "Cloud-Feature-Flags"
+      },
+      "ai_description": {
+        "name": "KI-Snapshot-Beschreibung"
       }
     }
   },
@@ -725,6 +761,32 @@
           "description": "Neuer Anzeigename für die Kamera"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "Snapshot beschreiben",
+      "description": "Bittet die KI-Task-Integration von HA, den aktuellen Kamera-Snapshot zu beschreiben.",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Bosch-Cloud-Kamera-ID (UUID). Entweder camera_id oder entity_id angeben."
+        },
+        "entity_id": {
+          "name": "Kamera-Entität",
+          "description": "Kamera-Entitäts-ID (z.B. camera.bosch_terrasse). Entweder entity_id oder camera_id angeben."
+        },
+        "instructions": {
+          "name": "Anweisungen",
+          "description": "Benutzerdefinierter Prompt für die KI. Überschreibt die Option ai_describe_prompt für diesen Aufruf."
+        },
+        "language": {
+          "name": "Sprache",
+          "description": "Sprache für die KI-Antwort. Überschreibt die Option ai_describe_language für diesen Aufruf. Standard: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "KI-Task-Entität",
+          "description": "Zu verwendende KI-Task-Entität. Leer lassen für den bevorzugten Standard von HA."
+        }
+      }
     }
   },
   "exceptions": {
@@ -760,6 +822,12 @@
     },
     "unexpected_error": {
       "message": "{action} fehlgeschlagen: {error}"
+    },
+    "privacy_active": {
+      "message": "Privatsphäre-Modus ist für diese Kamera aktiv — es ist kein Live-Bild für die KI-Analyse verfügbar."
+    },
+    "ai_task_unavailable": {
+      "message": "KI-Task-Dienst nicht verfügbar oder fehlgeschlagen: {error}"
     }
   },
   "issues": {

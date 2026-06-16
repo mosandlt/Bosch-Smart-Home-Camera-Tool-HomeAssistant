@@ -19,7 +19,8 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 # Bosch camera IDs are UUID-formatted: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-# All hex upper-case, 8-4-4-4-12 groups separated by hyphens.
+# Normalized to upper-case before matching (API returns upper-case; callers may
+# pass lower-case e.g. after slug munging — both are accepted, stored upper-case).
 _CAM_ID_RE = re.compile(
     r"^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$"
 )
@@ -30,16 +31,20 @@ _MIN_JPEG_BYTES = 100
 _MAX_JPEG_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap
 
 
-def _validate_cam_id(cam_id: str) -> None:
-    """Raise ValueError when cam_id is not a valid Bosch UUID.
+def _validate_cam_id(cam_id: str) -> str:
+    """Validate *cam_id* and return its upper-case normalised form.
 
-    Enforced to prevent path-traversal attacks via crafted cam_id values
-    (e.g. '../../etc/passwd'). Bosch UUIDs are always UUID-shaped hex+hyphen.
+    Raises ValueError when *cam_id* is not a valid Bosch UUID (prevents
+    path-traversal attacks via crafted cam_id values like '../../etc/passwd').
+    Both upper- and lower-case hex digits are accepted; the return value is
+    always upper-case so storage keys are consistent.
     """
-    if not _CAM_ID_RE.match(cam_id):
+    normalised = cam_id.upper()
+    if not _CAM_ID_RE.match(normalised):
         raise ValueError(
             f"cam_id must match ^[A-F0-9-]{{36}}$ (UUID format), got: {cam_id!r}"
         )
+    return normalised
 
 
 def _storage_dir(hass: HomeAssistant) -> Path:
@@ -54,13 +59,30 @@ def _sync_save(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     """Blocking: atomically write *jpeg* to the snapshot store.
 
     Called via async_add_executor_job — never call directly from async code.
+
+    The write is two-phase (write .tmp → rename to .jpg) so a crash between
+    the two steps leaves the previous .jpg intact.  If the rename fails (e.g.
+    cross-device rename on NFS/Docker bind-mounts) the .tmp is cleaned up in
+    the finally block so it does not accumulate across restarts.
     """
     snap_dir = _storage_dir(hass)
     snap_dir.mkdir(parents=True, exist_ok=True)
     final = snap_dir / f"{cam_id}.jpg"
     tmp = snap_dir / f"{cam_id}.jpg.tmp"
     tmp.write_bytes(jpeg)
-    tmp.replace(final)
+    try:
+        tmp.replace(final)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError as unlink_err:
+            # Secondary failure: log but do not let it mask the original replace() error.
+            _LOGGER.debug(
+                "bosch_shc_camera: could not remove tmp file %s after failed replace: %s",
+                tmp,
+                unlink_err,
+            )
+        raise
 
 
 def _sync_load(hass: HomeAssistant, cam_id: str) -> bytes | None:
@@ -90,7 +112,7 @@ async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     Raises ValueError when *cam_id* is not a valid UUID — callers must ensure
     only real Bosch camera IDs are passed (prevents path traversal).
     """
-    _validate_cam_id(cam_id)
+    cam_id = _validate_cam_id(cam_id)
     n = len(jpeg)
     if n < _MIN_JPEG_BYTES:
         _LOGGER.warning(
@@ -116,5 +138,5 @@ async def load_snapshot(hass: HomeAssistant, cam_id: str) -> bytes | None:
     Raises ValueError when *cam_id* is not a valid UUID.
     Returns None on FileNotFoundError; logs WARNING on other OSError.
     """
-    _validate_cam_id(cam_id)
+    cam_id = _validate_cam_id(cam_id)
     return await hass.async_add_executor_job(_sync_load, hass, cam_id)  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed

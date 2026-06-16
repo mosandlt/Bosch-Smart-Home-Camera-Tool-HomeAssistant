@@ -40,7 +40,8 @@
     },
     "abort": {
       "already_configured": "Ya está configurado.",
-      "reauth_successful": "Reautenticación correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones."
+      "reauth_successful": "Reautenticación correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones.",
+      "reconfigure_successful": "Reconfiguración correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones."
     }
   },
   "options": {
@@ -95,13 +96,16 @@
               "live_buffer_mode": "Perfil de búfer del reproductor (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (streaming de baja latencia ~2 s)",
               "enable_green_it": "Green IT — finalizar automáticamente los streams en vivo inactivos (experimental, en desarrollo)",
-              "defer_diag_during_stream": "Pausar lecturas de diagnóstico durante transmisión en vivo"
+              "defer_diag_during_stream": "Pausar lecturas de diagnóstico durante transmisión en vivo",
+              "use_mjpeg_snapshot": "Snapshot MJPEG inst=3 (Gen2, LAN)"
             },
             "data_description": {
               "stream_connection_type": "Tipo de conexión predeterminado para streams en directo.\n• **auto** (recomendado): Intentar primero la LAN local y, en caso de fallo, cambiar automáticamente al proxy de Bosch Cloud.\n• **local**: Solo LAN directa — no requiere internet. RTSP más rápido, pero snapshots más lentos (~6–10 s). La sesión se renueva automáticamente cada 50 s.\n• **remote**: Siempre a través del proxy de Bosch Cloud. Snapshots más rápidos (~0,4–1,9 s). Mejor opción predeterminada cuando HA no está en la misma LAN.\nLa entidad de selección 'Modo Stream' anula este ajuste en tiempo de ejecución sin reinicio.",
               "live_buffer_mode": "Cuántos segundos de vídeo almacena en búfer el reproductor antes de mostrarlo. Más búfer = menos interrupciones pero mayor desfase respecto al tiempo real.\n• **Latencia**: búfer pequeño (~4-6 s de desfase). Puede interrumpirse en Wi-Fi inestable.\n• **Equilibrado** (recomendado): búfer medio (~8-10 s). Robusto frente a las típicas caídas de Wi-Fi.\n• **Estable**: búfer grande (~12-15 s). Sin interrupciones incluso en conexiones débiles, pero con desfase apreciable.\nAfecta únicamente a la visualización de la tarjeta — no tiene efecto sobre la cámara, la grabación ni los snapshots.",
               "enable_go2rtc": "Registrar automáticamente los streams en directo en el go2rtc integrado de HA para reproducción WebRTC (~2 s de latencia frente a ~10 s en HLS). Recomendado. Desactivar solo si se usa una configuración go2rtc personalizada.",
-              "defer_diag_during_stream": "Cuando está ACTIVADO (recomendado): las lecturas de diagnóstico lentas se posponen mientras el flujo en vivo de una cámara está activo, evitando contención en el canal TLS que puede causar breves interrupciones durante ráfagas de movimiento. Las lecturas diferidas se ejecutan en el siguiente ciclo de sondeo cuando el flujo esté inactivo. Desactivar solo si los sensores de diagnóstico deben mantenerse actualizados incluso durante la transmisión."
+              "defer_diag_during_stream": "Cuando está ACTIVADO (recomendado): las lecturas de diagnóstico lentas se posponen mientras el flujo en vivo de una cámara está activo, evitando contención en el canal TLS que puede causar breves interrupciones durante ráfagas de movimiento. Las lecturas diferidas se ejecutan en el siguiente ciclo de sondeo cuando el flujo esté inactivo. Desactivar solo si los sensores de diagnóstico deben mantenerse actualizados incluso durante la transmisión.",
+              "use_mjpeg_snapshot": "**Solo cámaras Gen2, requiere LAN, experimental.** Cuando está ACTIVADO: las solicitudes de snapshot intentan capturar un fotograma JPEG directamente desde la cámara a través de su stream MJPEG RTSP inst=3 usando FFmpeg. El objetivo es ~150–300 ms frente a ~500 ms mediante el proxy en la nube. **Desactivado por defecto** — la pila TLS integrada de FFmpeg no consigue negociar actualmente con el servidor RTSPS de la cámara en el puerto 443 (error FFmpeg 183), por lo que la mayoría de usuarios verá la ruta habitual del proxy en la nube incluso con esta opción activada. Vuelve automáticamente al proxy cuando FFmpeg falla.",
+              "enable_green_it": "Finalizar automáticamente la sesión en vivo de una cámara cuando nadie la esté viendo — cuando ninguna app, panel o dispositivo Cast haya obtenido el stream durante unos 3 minutos. Esto evita que la cámara codifique y transmita vídeo continuamente sin audiencia: ahorra ancho de banda Wi-Fi y energía/calor de la cámara, apaga el LED de actividad en vivo y libera el slot de sesión en vivo por cámara de Bosch. **Experimental — en desarrollo, desactivado por defecto.** La detección de espectadores aún no puede ver de forma fiable un espectador WebRTC en vivo, por lo que con esta opción activada un stream que estás viendo activamente podría cerrarse prematuramente. Déjala DESACTIVADA por ahora; las sesiones inactivas ya están acotadas por el reciclado de sesión de 60 minutos de Bosch."
             }
           },
           "fcm": {
@@ -208,6 +212,38 @@
             },
             "data_description": {
               "enable_ptz_controls": "Cuando está ACTIVADO: las cámaras con soporte de giro obtienen una entidad de selección de posición predefinida (inicio / izquierda / derecha / atrás-izquierda / atrás-derecha). Solo la cámara interior 360 admite giro. **Desactivado por defecto** para que los usuarios sin cámara 360 no vean ninguna entidad innecesaria."
+            }
+          },
+          "ai": {
+            "name": "Descripción de snapshot por IA",
+            "description": "Permite que la IA de Home Assistant describa lo que ve la cámara. Requiere una integración de tarea de IA configurada (p. ej. OpenAI, Google, Anthropic u Ollama local). Nota: dependiendo del backend de IA elegido, las imágenes de la cámara y posiblemente datos personales se envían a un servicio en la nube y podrían — según la configuración de ese proveedor — usarse para entrenamiento. Para máxima privacidad, usar un modelo local (p. ej. Ollama).",
+            "data": {
+              "enable_ai_description": "Activar descripciones de snapshot por IA",
+              "ai_task_entity": "Entidad de tarea de IA (opcional)",
+              "ai_describe_language": "Idioma de respuesta",
+              "ai_describe_prompt": "Prompt de descripción",
+              "ai_describe_on_motion": "Describir automáticamente en eventos de movimiento/persona",
+              "ai_notify_include_description": "Añadir descripción de IA a las notificaciones de eventos",
+              "ai_cooldown_seconds": "Segundos mínimos entre análisis automáticos (por cámara)",
+              "ai_max_per_day": "Presupuesto diario de análisis de IA (0 = ilimitado)",
+              "ai_active_time_start": "IA activa desde (HH:MM)",
+              "ai_active_time_end": "IA activa hasta (HH:MM)",
+              "ai_active_condition_entity": "Entidad de condición (opcional)",
+              "ai_active_condition_state": "Estado de condición requerido"
+            },
+            "data_description": {
+              "enable_ai_description": "Cuando está activado, se habilita un servicio de descripción de snapshots y un sensor de descripción de IA por cámara. Requiere Home Assistant 2025.8+ con al menos una entidad de tarea de IA configurada.",
+              "ai_task_entity": "Seleccionar una entidad de tarea de IA específica. Dejar vacío para usar la predeterminada de HA.",
+              "ai_describe_language": "Idioma en el que responde la IA. Seleccionar de la lista o escribir cualquier nombre de idioma (p. ej. Português, Русский). Predeterminado: Deutsch.",
+              "ai_describe_prompt": "El prompt enviado a la IA con cada snapshot. Personalizar para centrarse en lo que importa para tu cámara.",
+              "ai_describe_on_motion": "Ejecuta una descripción de IA en cada evento de movimiento/persona y actualiza el SENSOR de descripción de IA (para paneles y automatizaciones). NO añade texto a las notificaciones push. Antirrebote de 30 segundos por cámara.",
+              "ai_notify_include_description": "Añade la descripción de IA directamente EN la notificación push del evento en tu teléfono (la alerta de snapshot por movimiento/persona). Requiere que las notificaciones de eventos estén configuradas. También actualiza el sensor. Limitado por el tiempo de espera y el presupuesto diario.",
+              "ai_cooldown_seconds": "Tiempo mínimo entre análisis de IA automáticos por cámara (notificación incluida y por movimiento). Las llamadas manuales a describe_snapshot ignoran esto. Predeterminado 60 s; 0 desactiva el tiempo de espera.",
+              "ai_max_per_day": "Número máximo de análisis de IA automáticos en todas las cámaras por día (se reinicia a medianoche). Protege contra el consumo excesivo de créditos de IA en días de mucha actividad. Predeterminado 100; 0 = ilimitado.",
+              "ai_active_time_start": "Inicio de la ventana de activación de la IA (formato 24h, p. ej. 08:00). Dejar ambos campos vacíos para desactivar el filtro horario. Se admiten ventanas nocturnas (p. ej. inicio 22:00 / fin 06:00).",
+              "ai_active_time_end": "Fin de la ventana de activación de la IA (formato 24h, p. ej. 22:00). Dejar ambos campos vacíos para desactivar el filtro horario.",
+              "ai_active_condition_entity": "Entidad cuyo estado condiciona los análisis de IA automáticos. P. ej. un grupo de presencia o una entidad de persona. Dejar vacío para desactivar el filtrado por condición. Si la entidad no está disponible o es desconocida, la IA se bloquea (conservador). Ejemplo: zone.home con estado 0 significa que no hay nadie en casa (la zona cuenta personas, 0 = vacía). O usar una entidad de grupo de personas con estado not_home.",
+              "ai_active_condition_state": "Estado en el que debe encontrarse la entidad de condición para permitir los análisis de IA. Predeterminado: not_home (la IA solo se ejecuta cuando no hay nadie en casa). Ejemplos: home, on, off, away. Para zone.home usar 0 (nadie en casa)."
             }
           },
           "auth": {
@@ -327,9 +363,6 @@
       "pre_alarm": {
         "name": "Pre-alarma"
       },
-      "audio_alarm": {
-        "name": "Detección de sonido"
-      },
       "panic_alarm": {
         "name": "Activar sirena"
       },
@@ -343,9 +376,6 @@
     "number": {
       "pan_position": {
         "name": "Posición panorámica"
-      },
-      "audio_threshold": {
-        "name": "Umbral de audio"
       },
       "speaker_level": {
         "name": "Nivel del altavoz"
@@ -388,9 +418,6 @@
       },
       "pre_alarm_delay": {
         "name": "Duración de la pre-alarma"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "Sensibilidad de detección de sonido"
       },
       "intrusion_sensitivity": {
         "name": "Sensibilidad de Detección de Intrusión"
@@ -495,7 +522,31 @@
           "online": "En línea",
           "offline": "Sin conexión",
           "session_limit": "Límite de sesión",
-          "unknown": "Desconocido"
+          "unknown": "Desconocido",
+          "updating": "Actualización de firmware"
+        }
+      },
+      "onvif_scopes": {
+        "name": "Ámbitos ONVIF"
+      },
+      "rcp_version": {
+        "name": "Versión RCP"
+      },
+      "cloud_feature_flags": {
+        "name": "Indicadores de funciones en la nube"
+      },
+      "ai_description": {
+        "name": "Descripción de snapshot por IA"
+      },
+      "cloud_maintenance": {
+        "name": "Mantenimiento Bosch Cloud",
+        "state": {
+          "active": "Mantenimiento en curso",
+          "scheduled": "Mantenimiento programado",
+          "past": "Mantenimiento más reciente",
+          "recent": "Anuncio reciente",
+          "unknown": "Sin información de ventana horaria",
+          "idle": "Sin información de mantenimiento"
         }
       },
       "last_event": {
@@ -521,9 +572,6 @@
       },
       "motion_sensitivity": {
         "name": "Sensibilidad de movimiento"
-      },
-      "audio_alarm": {
-        "name": "Alarma de audio"
       },
       "last_event_type": {
         "name": "Tipo del último evento",
@@ -713,6 +761,32 @@
           "description": "Nuevo nombre de visualización para la cámara"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "Describir Snapshot",
+      "description": "Solicita a la integración de tarea de IA de HA que describa el snapshot actual de la cámara.",
+      "fields": {
+        "camera_id": {
+          "name": "ID de cámara",
+          "description": "ID de cámara en la nube de Bosch (UUID). Usar camera_id o entity_id."
+        },
+        "entity_id": {
+          "name": "Entidad de cámara",
+          "description": "ID de entidad de cámara (p. ej. camera.bosch_terrasse). Usar entity_id o camera_id."
+        },
+        "instructions": {
+          "name": "Instrucciones",
+          "description": "Prompt personalizado para la IA. Reemplaza la opción ai_describe_prompt para esta llamada."
+        },
+        "language": {
+          "name": "Idioma",
+          "description": "Idioma de la respuesta de la IA. Anula la opción ai_describe_language para esta llamada. Predeterminado: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "Entidad de tarea de IA",
+          "description": "Entidad de tarea de IA a usar. Dejar vacío para usar la predeterminada de HA."
+        }
+      }
     }
   },
   "exceptions": {
@@ -748,6 +822,12 @@
     },
     "unexpected_error": {
       "message": "{action} fallido: {error}"
+    },
+    "privacy_active": {
+      "message": "El modo de privacidad está activo para esta cámara — no hay imagen en vivo disponible para el análisis de IA."
+    },
+    "ai_task_unavailable": {
+      "message": "Servicio de tarea de IA no disponible o con error: {error}"
     }
   },
   "issues": {

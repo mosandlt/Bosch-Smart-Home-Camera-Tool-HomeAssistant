@@ -150,16 +150,6 @@ async def fetch_mjpeg_snapshot(
             elapsed_ms,
             cam_host,
         )
-        # Terminate the lingering process so we don't accumulate zombies
-        if proc is not None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass  # pragma: no cover — race: process already exited
-            try:
-                await proc.wait()
-            except Exception:  # noqa: S110 — best-effort reap; already killed, no useful msg to log
-                pass
         return None
     except FileNotFoundError:
         # ffmpeg binary not found — should never happen in HA but be safe
@@ -170,3 +160,20 @@ async def fetch_mjpeg_snapshot(
     except OSError as err:
         _LOGGER.warning("fetch_mjpeg_snapshot: OS error spawning ffmpeg: %s", err)
         return None
+    finally:
+        # BUG-1 fix: always reap the subprocess on any exception path
+        # (TimeoutError, CancelledError, BaseException, etc.) to prevent
+        # zombie FFmpeg processes accumulating under HA task cancellation.
+        # FileNotFoundError / OSError mean proc was never created → guard.
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                # ProcessLookupError (process already exited) is the common case.
+                # Broader OSError (e.g. PermissionError) is caught too so it never
+                # masks the original exception propagating from the try block.
+                pass
+            try:
+                await proc.wait()
+            except Exception:  # noqa: S110 — best-effort reap; proc is already dead
+                pass

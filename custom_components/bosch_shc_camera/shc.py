@@ -82,12 +82,12 @@ def _shc_mark_success(coordinator: BoschCameraCoordinator) -> None:
 def _shc_mark_failure(coordinator: BoschCameraCoordinator) -> None:
     """Track a failed SHC request; mark offline after N consecutive failures."""
     coordinator._shc_fail_count += 1
-    coordinator._shc_last_check = time.monotonic()
     if (
         coordinator._shc_fail_count >= coordinator._SHC_MAX_FAILS
         and coordinator._shc_available
     ):
         coordinator._shc_available = False
+        coordinator._shc_last_check = time.monotonic()
         _LOGGER.warning(
             "SHC local API marked offline after %d consecutive failures -- "
             "will retry in %ds. Falling back to cloud API.",

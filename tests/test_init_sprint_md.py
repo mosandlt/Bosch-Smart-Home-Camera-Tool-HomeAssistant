@@ -111,6 +111,7 @@ def _make_coord_stub(
     coord._stream_log_listener = None
     coord._async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
+    coord.async_load_ai_budget = AsyncMock(return_value=None)
     return coord
 
 
@@ -652,7 +653,7 @@ class TestSetupEntryPersistedStores:
 
         with (
             patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
-            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
             patch(f"{MODULE}.cf_unbuffer.register"),
             patch(
                 "homeassistant.helpers.entity_registry.async_get",
@@ -690,7 +691,7 @@ class TestSetupEntryPersistedStores:
 
         with (
             patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
-            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
             patch(f"{MODULE}.cf_unbuffer.register"),
             patch(
                 "homeassistant.helpers.entity_registry.async_get",
@@ -737,7 +738,7 @@ class TestSetupEntryPersistedStores:
 
         with (
             patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
-            patch("homeassistant.helpers.storage.Store", side_effect=store_factory),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
             patch(f"{MODULE}.cf_unbuffer.register"),
             patch(
                 "homeassistant.helpers.entity_registry.async_get",
@@ -1348,7 +1349,9 @@ class TestSetupEntrySendEventWebhookService:
             hass.states.get = MagicMock(return_value=fake_state)
         captured_handler: list[Any] = []
 
-        def _register_service(domain: str, service: str, handler: Any) -> None:
+        def _register_service(
+            domain: str, service: str, handler: Any, **kwargs: Any
+        ) -> None:
             if service == "send_event_webhook":
                 captured_handler.append(handler)
 

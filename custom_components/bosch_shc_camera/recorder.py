@@ -836,20 +836,65 @@ async def _watch_recorder(
         _LOGGER.info("NVR not respawning for %s — gate now closed", cam_id[:8])
         return
 
-    # Crash-loop guard.
-    if elapsed < _RESPAWN_WINDOW_SECONDS:
-        prev_crash = coordinator._nvr_recent_crash.get(cam_id, float("-inf"))
-        now = time.monotonic()
-        if (now - prev_crash) < _RESPAWN_WINDOW_SECONDS:
-            _LOGGER.error(
-                "NVR ffmpeg crashed twice within %.0fs for %s — giving up. "
-                "Toggle the recording switch off+on to retry.",
-                _RESPAWN_WINDOW_SECONDS,
-                cam_id[:8],
-            )
-            coordinator._nvr_error_state[cam_id] = "ffmpeg crashed twice"
-            return
-        coordinator._nvr_recent_crash[cam_id] = now
+    # B13-4: Detect disk-full — ENOSPC causes ffmpeg rc=1 with a specific
+    # stderr message.  Raise a persistent HA notification and skip respawn
+    # (the drive is still full, retrying immediately loops forever).
+    _ENOSPC_MARKERS = ("no space left", "enospc", "disk quota exceeded")
+    err_lower = err_tail.lower()
+    if any(marker in err_lower for marker in _ENOSPC_MARKERS):
+        _LOGGER.error(
+            "NVR ffmpeg exited due to disk-full for %s — not respawning. "
+            "Free space under %s and toggle the switch off+on to retry.",
+            cam_id[:8],
+            (coordinator.options.get("nvr_base_path") or DEFAULT_BASE_PATH),
+        )
+        coordinator._nvr_error_state[cam_id] = "disk full"
+        try:
+            hass = getattr(coordinator, "hass", None)
+            if hass is not None:
+                # Already in the async event loop (_watch_recorder is an async def),
+                # so schedule the task directly — no call_soon_threadsafe needed.
+                # The coroutine is created INSIDE async_create_task to avoid an
+                # eager-create / never-awaited coroutine object if the outer except
+                # fires before the task is scheduled.
+                hass.async_create_task(
+                    hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "Bosch Mini-NVR — Disk full",
+                            "message": (
+                                f"Recording stopped for camera {cam_id[:8]}: "
+                                "no space left on device. "
+                                f"Free space under "
+                                f"{coordinator.options.get('nvr_base_path') or DEFAULT_BASE_PATH} "
+                                "and toggle the NVR switch off+on to resume."
+                            ),
+                            "notification_id": f"bosch_nvr_diskfull_{cam_id[:8]}",
+                        },
+                    )
+                )
+        except Exception:  # noqa: S110 # best-effort UI notification; error already logged
+            pass
+        return
+
+    # B13-2: Always record the crash timestamp (not only for short-lived
+    # crashes).  This closes the hole where a camera that crashes every 45 s
+    # (i.e. elapsed > _RESPAWN_WINDOW_SECONDS) is never counted and respawns
+    # forever because _nvr_recent_crash is never written.
+    # The *give-up* gate still requires two crashes within the window.
+    now = time.monotonic()
+    prev_crash = coordinator._nvr_recent_crash.get(cam_id, float("-inf"))
+    if (now - prev_crash) < _RESPAWN_WINDOW_SECONDS:
+        _LOGGER.error(
+            "NVR ffmpeg crashed twice within %.0fs for %s — giving up. "
+            "Toggle the recording switch off+on to retry.",
+            _RESPAWN_WINDOW_SECONDS,
+            cam_id[:8],
+        )
+        coordinator._nvr_error_state[cam_id] = "ffmpeg crashed twice"
+        return
+    coordinator._nvr_recent_crash[cam_id] = now
 
     await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
     if not should_record(coordinator, cam_id, switch_on=last):
@@ -1162,6 +1207,17 @@ def sync_drain_tick(
             try:
                 hass = getattr(coordinator, "hass", None)
                 if hass is not None:
+                    # sync_drain_tick runs in an executor thread, so we need
+                    # call_soon_threadsafe to schedule onto the event loop.
+                    # The coroutine is created INSIDE the lambda so it is only
+                    # constructed on the loop thread — never an eager-create /
+                    # never-awaited object sitting on a foreign thread.
+                    _msg = (
+                        f"Failed to drain {os.path.basename(full)} "
+                        f"after {_DRAIN_MAX_RETRIES} attempts. "
+                        f"File moved to {_failed_dir(base_path, cam)}."
+                    )
+                    _nid = f"bosch_nvr_drain_failed_{cam}"
                     hass.loop.call_soon_threadsafe(
                         hass.async_create_task,
                         hass.services.async_call(
@@ -1169,12 +1225,8 @@ def sync_drain_tick(
                             "create",
                             {
                                 "title": "Bosch Mini-NVR — Upload failed",
-                                "message": (
-                                    f"Failed to drain {os.path.basename(full)} "
-                                    f"after {_DRAIN_MAX_RETRIES} attempts. "
-                                    f"File moved to {_failed_dir(base_path, cam)}."
-                                ),
-                                "notification_id": f"bosch_nvr_drain_failed_{cam}",
+                                "message": _msg,
+                                "notification_id": _nid,
                             },
                         ),
                     )
@@ -1409,8 +1461,12 @@ def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
                 files.append(name)
 
         for name in files:
+            # B13-6: use absolute paths for MDTM and DELETE so the commands are
+            # position-independent even if a recursive _walk_and_delete call
+            # left the FTP working-directory pointing at a subdirectory.
+            abs_name = f"{path}/{name}"
             try:
-                resp = ftp.sendcmd(f"MDTM {name}")
+                resp = ftp.sendcmd(f"MDTM {abs_name}")
                 ts_str = resp.split()[-1]
                 mt = (
                     datetime.strptime(ts_str[:14], "%Y%m%d%H%M%S")
@@ -1421,10 +1477,12 @@ def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
                 continue
             if mt < cutoff:
                 try:
-                    ftp.delete(name)
+                    ftp.delete(abs_name)
                     deleted += 1
                 except Exception as err:
-                    _LOGGER.debug("NVR cleanup (ftp): delete %s failed: %s", name, err)
+                    _LOGGER.debug(
+                        "NVR cleanup (ftp): delete %s failed: %s", abs_name, err
+                    )
         for sd in subdirs:
             _walk_and_delete(f"{path}/{sd}")
             try:

@@ -129,7 +129,9 @@ class _LocalBackend:
             (
                 p.name
                 for p in self.base.iterdir()
-                if p.is_dir() and not _is_macos_junk(p.name)
+                if p.is_dir()
+                and not _is_macos_junk(p.name)
+                and not p.name.startswith("_")
             ),
             key=str.casefold,
         )
@@ -399,6 +401,9 @@ class _SmbBackend:
             for e in scandir(path, connection_cache=cache):
                 if _is_macos_junk(e.name):
                     continue
+                # Skip NVR internal dirs (_staging, _failed, etc.)
+                if want_dirs and e.name.startswith("_"):
+                    continue
                 if want_dirs and e.is_dir():
                     yield e.name
                 elif not want_dirs and e.is_file():
@@ -623,7 +628,9 @@ class _NvrBackend:
             (
                 p.name
                 for p in self.base.iterdir()
-                if p.is_dir() and not _is_macos_junk(p.name)
+                if p.is_dir()
+                and not _is_macos_junk(p.name)
+                and not p.name.startswith("_")
             ),
             key=str.casefold,
         )

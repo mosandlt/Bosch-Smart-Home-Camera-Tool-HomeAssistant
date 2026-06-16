@@ -90,12 +90,11 @@ class TestRefreshSnapshotPress:
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
-        tasks_created = []
         fake_hass = MagicMock()
-        fake_hass.async_create_task = lambda coro: tasks_created.append(coro)
+        # MagicMock.async_create_task returns a MagicMock (has .add_done_callback)
         btn.hass = fake_hass
         await btn.async_press()
-        assert len(tasks_created) >= 1
+        assert fake_hass.async_create_task.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_press_also_triggers_image_refresh_when_cam_entity_present(
@@ -111,12 +110,52 @@ class TestRefreshSnapshotPress:
         stub_coord._camera_entities[CAM_ID] = fake_cam
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
-        tasks_created = []
         fake_hass = MagicMock()
-        fake_hass.async_create_task = lambda coro: tasks_created.append(coro)
         btn.hass = fake_hass
         await btn.async_press()
-        assert len(tasks_created) == 2
+        assert fake_hass.async_create_task.call_count == 2
+
+
+class TestRefreshSnapshotErrorHandling:
+    """async_press attaches error-logging callbacks to the created tasks."""
+
+    @pytest.mark.asyncio
+    async def test_done_callback_attached_to_refresh_task(self, stub_coord, stub_entry):
+        """A done callback must be registered on the coordinator refresh task."""
+        from unittest.mock import MagicMock
+
+        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
+        btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
+        fake_hass = MagicMock()
+        btn.hass = fake_hass
+        await btn.async_press()
+        task_mock = fake_hass.async_create_task.return_value
+        task_mock.add_done_callback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_done_callback_attached_to_image_refresh_task(
+        self, stub_coord, stub_entry
+    ):
+        """A done callback must be registered on the image refresh task too."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+
+        fake_cam = MagicMock()
+        fake_cam._async_trigger_image_refresh = AsyncMock(return_value=None)
+        stub_coord._camera_entities[CAM_ID] = fake_cam
+
+        btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
+        fake_hass = MagicMock()
+        btn.hass = fake_hass
+        await btn.async_press()
+        # Two tasks created → each should have add_done_callback called once
+        assert fake_hass.async_create_task.call_count == 2
+        for (
+            call
+        ) in fake_hass.async_create_task.return_value.add_done_callback.call_args_list:
+            assert call is not None
 
 
 # ── async_setup_entry ────────────────────────────────────────────────────

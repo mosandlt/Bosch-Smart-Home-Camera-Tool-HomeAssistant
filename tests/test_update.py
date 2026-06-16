@@ -152,6 +152,19 @@ class TestFirmwareUpdate:
         assert stub_coord._firmware_cache == {}
         assert u.latest_version == "9.40.25"
 
+    def test_latest_version_returns_none_when_up_to_date_absent(
+        self, stub_coord, stub_entry
+    ):
+        """Partial payload with no upToDate key → latest_version None (indeterminate).
+
+        Previously defaulted to True → silently hid a pending update (B08 #1).
+        """
+        stub_coord._firmware_cache[CAM_ID] = {"current": "9.40.25"}
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert u.latest_version is None
+
 
 class TestSetupEntry:
     """async_setup_entry creates one BoschFirmwareUpdate per cam in coordinator.data."""

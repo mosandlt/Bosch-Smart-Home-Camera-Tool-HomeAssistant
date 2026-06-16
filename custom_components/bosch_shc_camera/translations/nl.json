@@ -40,7 +40,8 @@
     },
     "abort": {
       "already_configured": "Al geconfigureerd.",
-      "reauth_successful": "Opnieuw koppelen geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden."
+      "reauth_successful": "Opnieuw koppelen geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
+      "reconfigure_successful": "Herconfiguratie geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden."
     }
   },
   "options": {
@@ -95,13 +96,16 @@
               "live_buffer_mode": "Afspeelbufferprofiel (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (lage-latentie streaming ~2 s)",
               "enable_green_it": "Green IT — inactieve live-streams automatisch beëindigen (experimenteel, in ontwikkeling)",
-              "defer_diag_during_stream": "Diagnostische lezingen pauzeren tijdens live stream"
+              "defer_diag_during_stream": "Diagnostische lezingen pauzeren tijdens live stream",
+              "use_mjpeg_snapshot": "MJPEG inst=3 snapshot (Gen2, LAN)"
             },
             "data_description": {
               "stream_connection_type": "Standaard verbindingstype voor live streams.\n• **auto** (aanbevolen): Probeert eerst het lokale LAN, schakelt automatisch over naar de Bosch Cloud-proxy bij een storing.\n• **local**: Alleen direct LAN — geen internet vereist. Snellere RTSP, maar langzamere snapshots (~6–10 s). Verbinding wordt elke 50 s automatisch vernieuwd.\n• **remote**: Altijd via de Bosch Cloud-proxy. Snellere snapshots (~0,4–1,9 s). Beste keuze wanneer HA niet op hetzelfde LAN staat.\nDe selectie-entiteit 'Stream-modus' overschrijft deze instelling tijdens gebruik zonder herstart.",
               "live_buffer_mode": "Hoeveel seconden video de speler buffert voor weergave. Meer buffer = minder onderbrekingen, maar meer vertraging ten opzichte van realtijd.\n• **Latentie**: kleine buffer (~4-6 s vertraging). Kan haperen op instabiel Wi-Fi.\n• **Evenwichtig** (aanbevolen): gemiddelde buffer (~8-10 s). Robuust bij typische Wi-Fi-onderbrekingen.\n• **Stabiel**: grote buffer (~12-15 s). Vloeiend zelfs bij zwakke verbindingen, maar merkbaar vertraagd.\nBeïnvloedt alleen de kaartweergave — geen effect op de camera, opname of snapshots.",
               "enable_go2rtc": "Registreert live streams automatisch bij de meegeleverde go2rtc van HA voor WebRTC-weergave (~2 s latentie vs. ~10 s HLS). Aanbevolen. Schakel alleen uit als u een aangepaste go2rtc-configuratie gebruikt.",
-              "defer_diag_during_stream": "Wanneer INGESCHAKELD (aanbevolen): trage diagnostische cloud-lezingen worden uitgesteld terwijl de live stream van een camera actief is, wat TLS-kanaalconflicten voorkomt die korte stream-freezes kunnen veroorzaken tijdens bewegingsbursts. De uitgestelde lezingen worden uitgevoerd bij de volgende polling-cyclus zodra de stream inactief is. Uitschakelen alleen als diagnostische sensoren ook tijdens het streamen actueel moeten blijven."
+              "defer_diag_during_stream": "Wanneer INGESCHAKELD (aanbevolen): trage diagnostische cloud-lezingen worden uitgesteld terwijl de live stream van een camera actief is, wat TLS-kanaalconflicten voorkomt die korte stream-freezes kunnen veroorzaken tijdens bewegingsbursts. De uitgestelde lezingen worden uitgevoerd bij de volgende polling-cyclus zodra de stream inactief is. Uitschakelen alleen als diagnostische sensoren ook tijdens het streamen actueel moeten blijven.",
+              "use_mjpeg_snapshot": "**Alleen Gen2-camera's, LAN vereist, experimenteel.** Wanneer AAN: snapshotverzoeken proberen één JPEG-frame rechtstreeks van de camera te halen via de RTSP inst=3 MJPEG-stream met FFmpeg. Doel: ~150–300 ms vs ~500 ms via de cloudproxy. **Standaard UIT** — de ingebouwde TLS-stack van FFmpeg kan momenteel niet onderhandelen met de RTSPS-server van de camera op poort 443 (FFmpeg-fout 183). Valt automatisch terug wanneer FFmpeg mislukt.",
+              "enable_green_it": "Beëindigt automatisch de livesessie van een camera wanneer niemand meer kijkt — wanneer geen app, dashboard of Cast de stream gedurende ongeveer 3 minuten heeft opgehaald. **Experimenteel — in ontwikkeling, standaard UIT.** Kijkersdetectie kan een live WebRTC-kijker nog niet betrouwbaar zien."
             }
           },
           "fcm": {
@@ -208,6 +212,38 @@
             },
             "data_description": {
               "enable_ptz_controls": "Wanneer INGESCHAKELD: camera's met pan-ondersteuning krijgen een pan-voorinstelling selectie-entiteit (home / links / rechts / achter-links / achter-rechts). Alleen de indoor 360-camera ondersteunt pannen. **Standaard uitgeschakeld** zodat gebruikers zonder 360-camera geen overbodige entiteit zien."
+            }
+          },
+          "ai": {
+            "name": "AI-snapshotomschrijving",
+            "description": "Laat de AI van Home Assistant beschrijven wat de camera ziet. Vereist een geconfigureerde AI Task-integratie (bijv. OpenAI, Google, Anthropic of lokale Ollama). Let op: afhankelijk van de gekozen AI-backend worden camerabeelden en mogelijk persoonsgegevens naar een clouddienst gestuurd en kunnen worden gebruikt voor training. Gebruik voor maximale privacy een lokaal model (bijv. Ollama).",
+            "data": {
+              "enable_ai_description": "AI-snapshotomschrijvingen inschakelen",
+              "ai_task_entity": "AI Task-entiteit (optioneel)",
+              "ai_describe_language": "Antwoordtaal",
+              "ai_describe_prompt": "Omschrijvingsprompt",
+              "ai_describe_on_motion": "Automatisch omschrijven bij bewegings-/persoonsevenementen",
+              "ai_notify_include_description": "AI-omschrijving toevoegen aan evenementmeldingen",
+              "ai_cooldown_seconds": "Minimale seconden tussen automatische analyses (per camera)",
+              "ai_max_per_day": "Dagelijks AI-analysebudget (0 = onbeperkt)",
+              "ai_active_time_start": "AI actief vanaf (UU:MM)",
+              "ai_active_time_end": "AI actief tot (UU:MM)",
+              "ai_active_condition_entity": "Conditie-entiteit (optioneel)",
+              "ai_active_condition_state": "Vereiste conditiestatus"
+            },
+            "data_description": {
+              "enable_ai_description": "Indien ingeschakeld worden een snapshot-omschrijvingsdienst en een AI-omschrijvingssensor per camera beschikbaar. Vereist Home Assistant 2025.8+ met minimaal één geconfigureerde AI Task-entiteit.",
+              "ai_task_entity": "Selecteer een specifieke AI Task-entiteit. Leeg laten voor de voorkeurinstelling van HA.",
+              "ai_describe_language": "Taal waarin de AI antwoordt. Selecteer uit de lijst of typ een willekeurige taalnaam (bijv. Português, Русский). Standaard: Deutsch.",
+              "ai_describe_prompt": "De prompt die met elke snapshot naar de AI wordt gestuurd. Aanpassen om te focussen op wat belangrijk is voor uw camera.",
+              "ai_describe_on_motion": "Voert een AI-omschrijving uit bij elk bewegings-/persoonsevenement en werkt de AI-omschrijvingsSENSOR bij. Voegt GEEN tekst toe aan pushmeldingen. 30 seconden debounce per camera.",
+              "ai_notify_include_description": "Voegt de AI-omschrijving direct IN de evenementpushmelding op uw telefoon toe. Vereist geconfigureerde evenementmeldingen. Werkt ook de sensor bij. Beperkt door cooldown + dagelijks budget.",
+              "ai_cooldown_seconds": "Minimale tijd tussen automatische AI-analyses per camera. Handmatige describe_snapshot-aanroepen negeren dit. Standaard 60 s; 0 schakelt de cooldown uit.",
+              "ai_max_per_day": "Maximaal aantal automatische AI-analyses over alle camera's per dag (reset om middernacht). Standaard 100; 0 = onbeperkt.",
+              "ai_active_time_start": "Begin van het AI-activeringsvenster (24u-formaat, bijv. 08:00). Laat beide velden leeg om tijdsbegrenzing uit te schakelen. Nachtelijke vensters worden ondersteund (bijv. 22:00 start / 06:00 einde).",
+              "ai_active_time_end": "Einde van het AI-activeringsvenster (24u-formaat, bijv. 22:00). Laat beide velden leeg om tijdsbegrenzing uit te schakelen.",
+              "ai_active_condition_entity": "Entiteit wiens status automatische AI-analyses bepaalt. Leeg laten om conditiebegrenzing uit te schakelen. Voorbeeld: zone.home met status 0 betekent dat niemand thuis is (zone telt personen, 0 = leeg). Of gebruik een personsgroep-entiteit met status not_home.",
+              "ai_active_condition_state": "Status die de conditie-entiteit moet hebben om AI-analyses toe te staan. Standaard: not_home (AI werkt alleen wanneer niemand thuis is). Voorbeelden: home, on, off, away. Voor zone.home gebruik 0 (niemand thuis)."
             }
           },
           "auth": {
@@ -327,9 +363,6 @@
       "pre_alarm": {
         "name": "Pre-alarm"
       },
-      "audio_alarm": {
-        "name": "Geluidsdetectie"
-      },
       "panic_alarm": {
         "name": "Sirene activeren"
       },
@@ -343,9 +376,6 @@
     "number": {
       "pan_position": {
         "name": "Draaipositie"
-      },
-      "audio_threshold": {
-        "name": "Audiodrempel"
       },
       "speaker_level": {
         "name": "Luidspreker volume"
@@ -388,9 +418,6 @@
       },
       "pre_alarm_delay": {
         "name": "Pre-alarmduur"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "Gevoeligheid geluidsdetectie"
       },
       "intrusion_sensitivity": {
         "name": "Gevoeligheid Indringingsdetectie"
@@ -495,7 +522,8 @@
           "online": "Online",
           "offline": "Offline",
           "session_limit": "Sessielimiet",
-          "unknown": "Onbekend"
+          "unknown": "Onbekend",
+          "updating": "Firmware-update"
         }
       },
       "last_event": {
@@ -521,9 +549,6 @@
       },
       "motion_sensitivity": {
         "name": "Bewegingsgevoeligheid"
-      },
-      "audio_alarm": {
-        "name": "Audioalarm"
       },
       "last_event_type": {
         "name": "Laatste gebeurtenistype",
@@ -622,6 +647,29 @@
       },
       "stream_url_sub": {
         "name": "Stream-URL (sub)"
+      },
+      "onvif_scopes": {
+        "name": "ONVIF-scopes"
+      },
+      "rcp_version": {
+        "name": "RCP-versie"
+      },
+      "cloud_feature_flags": {
+        "name": "Cloud-functiemarkeringen"
+      },
+      "ai_description": {
+        "name": "AI-snaphotomschrijving"
+      },
+      "cloud_maintenance": {
+        "name": "Bosch Cloud-onderhoud",
+        "state": {
+          "active": "Onderhoud in uitvoering",
+          "scheduled": "Onderhoud gepland",
+          "past": "Recentste onderhoud",
+          "recent": "Recente aankondiging",
+          "unknown": "Geen tijdvensterinformatie",
+          "idle": "Geen onderhoudsinformatie"
+        }
       }
     }
   },
@@ -713,6 +761,32 @@
           "description": "Nieuwe weergavenaam voor de camera"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "Snapshot omschrijven",
+      "description": "Vraag de AI Task-integratie van HA om de huidige camerasnap te omschrijven.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Bosch cloud camera-ID (UUID). Gebruik camera_id of entity_id."
+        },
+        "entity_id": {
+          "name": "Camera-entiteit",
+          "description": "Camera-entiteit-ID (bijv. camera.bosch_terrasse). Gebruik entity_id of camera_id."
+        },
+        "instructions": {
+          "name": "Instructies",
+          "description": "Aangepaste prompt voor de AI. Overschrijft de optie ai_describe_prompt voor deze aanroep."
+        },
+        "language": {
+          "name": "Taal",
+          "description": "Taal voor het AI-antwoord. Overschrijft de optie ai_describe_language voor dit aanroep. Standaard: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "AI Task-entiteit",
+          "description": "AI Task-entiteit om te gebruiken. Leeg laten voor de voorkeurinstelling van HA."
+        }
+      }
     }
   },
   "exceptions": {
@@ -748,6 +822,12 @@
     },
     "unexpected_error": {
       "message": "{action} mislukt: {error}"
+    },
+    "privacy_active": {
+      "message": "Privacymodus is actief voor deze camera — geen live afbeelding beschikbaar voor AI-analyse."
+    },
+    "ai_task_unavailable": {
+      "message": "AI Task-dienst niet beschikbaar of mislukt: {error}"
     }
   },
   "issues": {

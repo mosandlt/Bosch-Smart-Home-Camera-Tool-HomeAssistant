@@ -164,11 +164,44 @@ def start_tls_proxy(
                 pass
             _dbg_count = [0]  # shared debug exchange counter
 
+            # Shared close-once guards — each socket must only be closed once
+            # across both pipe threads.  Without this, when C→CAM's finally
+            # closes `tls`, the OS recycles the fd number; CAM→C's finally then
+            # calls tls.close() on the *recycled* fd, silently closing an
+            # unrelated file descriptor.  The guards are a list so the inner
+            # function can mutate them (Python 2 closure compatibility pattern;
+            # nonlocal would work too but lists are clearer about shared state).
+            _client_closed = [False]
+            _tls_closed = [False]
+            _close_lock = threading.Lock()
+
+            def _close_once(
+                sock: socket.socket,
+                flag: list[bool],
+                _lock: threading.Lock = _close_lock,
+            ) -> None:
+                """Close *sock* exactly once, even when called from two threads.
+
+                ``_lock`` is passed as a default argument to bind the *current*
+                iteration's lock object at function-definition time, avoiding
+                the B023 "loop variable not bound" issue.
+                """
+                with _lock:
+                    if flag[0]:
+                        return
+                    flag[0] = True
+                try:
+                    sock.close()
+                except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
+                    pass
+
             def _pipe(
                 src: socket.socket,
                 dst: socket.socket,
                 rewrite_transport: bool = False,
                 direction: str = "???",
+                src_flag: list[bool] = _client_closed,
+                dst_flag: list[bool] = _tls_closed,
             ) -> None:
                 """Forward bytes. If rewrite_transport=True, intercept RTSP
                 SETUP requests and force TCP interleaved transport so FFmpeg
@@ -237,21 +270,21 @@ def start_tls_proxy(
                             exc,
                         )
                 finally:
-                    try:
-                        src.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
-                        pass
-                    try:
-                        dst.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
-                        pass
+                    _close_once(src, src_flag)
+                    _close_once(dst, dst_flag)
 
-            # client→camera: rewrite SETUP Transport to force TCP interleaved
+            # client→camera: rewrite SETUP Transport to force TCP interleaved.
+            # Each thread passes its own src/dst flags so each socket is only
+            # closed once regardless of which thread finishes first.
             t1 = threading.Thread(
-                target=_pipe, args=(client, tls, True, "C→CAM"), daemon=True
+                target=_pipe,
+                args=(client, tls, True, "C→CAM", _client_closed, _tls_closed),
+                daemon=True,
             )
             t2 = threading.Thread(
-                target=_pipe, args=(tls, client, False, "CAM→C"), daemon=True
+                target=_pipe,
+                args=(tls, client, False, "CAM→C", _tls_closed, _client_closed),
+                daemon=True,
             )
             t1.start()
             t2.start()
@@ -296,9 +329,21 @@ def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
 
 
 def stop_all_proxies(port_cache: dict[str, int]) -> None:
-    """Stop all TLS proxies — called during integration unload."""
+    """Stop all TLS proxies — called during integration unload.
+
+    Clears ``_proxy_servers`` completely so that a HA reload (which does NOT
+    reimport the module) starts with a clean slate.  Without the clear a
+    crashed coordinator can leave stale entries in the module-level dict; the
+    next ``start_tls_proxy`` call finds ``cam_id in _proxy_servers``, calls
+    ``stop_tls_proxy`` on an already-closed socket (benign EBADF) but more
+    importantly skips allocating the fresh server socket, leaving the proxy
+    permanently broken until the next full HA restart.
+    """
     for cam_id in list(_proxy_servers.keys()):
         stop_tls_proxy(cam_id, port_cache)
+    # Belt-and-suspenders: if stop_tls_proxy left any entries (shouldn't
+    # happen, but guards against future refactors), wipe them now.
+    _proxy_servers.clear()
 
 
 async def rtsp_keepalive(
@@ -425,6 +470,7 @@ async def pre_warm_rtsp(
     retry_wait: int = 3,
     post_success_wait: int = 3,
     describe_timeout: int = 5,
+    max_session_duration: int = 60,
 ) -> bool:
     """Pre-warm camera's H.264 encoder via authenticated RTSP DESCRIBE.
 
@@ -445,6 +491,13 @@ async def pre_warm_rtsp(
     decide whether to fall back to REMOTE: if the camera's LAN IP isn't
     reachable from HA (firewall, wrong subnet, different VLAN), every retry
     times out and we should not pin the user on a dead LOCAL URL.
+
+    ``max_session_duration`` is substituted into the DESCRIBE URI so the
+    pre-warm and the subsequent FFmpeg stream share the same session-duration
+    value.  If Bosch uses the DESCRIBE URI to configure the server-side timer,
+    a mismatched value here (old hard-coded 60 s) could start a 60-second
+    countdown before FFmpeg connects — silently starving long-session models
+    (e.g. Indoor Gen2 with maxSessionDuration=3600).
     """
     for attempt in range(1, max_attempts + 1):
         writer = (
@@ -454,7 +507,7 @@ async def pre_warm_rtsp(
             reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
             uri = (
                 f"rtsp://127.0.0.1:{proxy_port}"
-                "/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=60"
+                f"/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration={max_session_duration}"
             )
 
             # Step 1: DESCRIBE without auth → 401 + nonce/realm

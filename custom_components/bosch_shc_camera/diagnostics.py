@@ -52,6 +52,8 @@ TO_REDACT = {
     "smb_password",
     "smb_username",
     "smb_server",
+    "smb_share",
+    "smb_base_path",
     # Stream / RTSP URLs (contain proxy session credentials)
     "rtspsUrl",
     "rtsps_url",
@@ -83,25 +85,28 @@ async def async_get_config_entry_diagnostics(
             live = cdata.get("live", {})
             since = offline_since.get(cam_id)
             cameras.append(
-                {
-                    "cam_id_prefix": cam_id[:8],
-                    "title": info.get("title"),
-                    "model": info.get("hardwareVersion"),
-                    "firmware": info.get("firmwareVersion"),
-                    "status": cdata.get("status"),
-                    "online": cdata.get("online"),
-                    "privacy_mode": cdata.get("privacy_mode"),
-                    "events_today_count": len(cdata.get("events", [])),
-                    "live_connection_type": live.get("connectionType"),
-                    "live_age_seconds": live.get("age_seconds"),
-                    # stream health — useful for diagnosing stream-restart loops
-                    "stream_error_count": stream_error_count.get(cam_id, 0),
-                    "stream_fell_back": stream_fell_back.get(cam_id, False),
-                    "session_stale": session_stale.get(cam_id, False),
-                    "offline_since_seconds": int(now - since)
-                    if since is not None
-                    else None,
-                }
+                async_redact_data(
+                    {
+                        "cam_id_prefix": cam_id[:8],
+                        "title": info.get("title"),
+                        "model": info.get("hardwareVersion"),
+                        "firmware": info.get("firmwareVersion"),
+                        "status": cdata.get("status"),
+                        "online": cdata.get("online"),
+                        "privacy_mode": cdata.get("privacy_mode"),
+                        "events_today_count": len(cdata.get("events", [])),
+                        "live_connection_type": live.get("connectionType"),
+                        "live_age_seconds": live.get("age_seconds"),
+                        # stream health — useful for diagnosing stream-restart loops
+                        "stream_error_count": stream_error_count.get(cam_id, 0),
+                        "stream_fell_back": stream_fell_back.get(cam_id, False),
+                        "session_stale": session_stale.get(cam_id, False),
+                        "offline_since_seconds": int(now - since)
+                        if since is not None
+                        else None,
+                    },
+                    TO_REDACT,
+                )
             )
 
     stream_warming: set[str] = getattr(coord, "_stream_warming", set())

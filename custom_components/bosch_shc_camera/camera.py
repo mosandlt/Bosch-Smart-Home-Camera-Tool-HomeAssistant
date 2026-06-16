@@ -49,6 +49,7 @@ from .cloud_ssl import async_get_bosch_cloud_session
 from .const import AUTO_PLAY_DEFAULT_VALUES, DOMAIN, LIVE_SESSION_TTL, TIMEOUT_SNAP
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .snapshot_store import load_snapshot, save_snapshot
+from .switch import _redact_rtsp_creds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,9 +138,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._entry = entry
         self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
-        self._last_image_fetch: float = (
-            -86400.0
-        )  # monotonic timestamp of last fetch (large-negative = never fetched)
+        self._last_image_fetch: float = -86400.0  # monotonic timestamp of last *successful* fetch (large-negative = never fetched)
+        self._last_failed_fetch: float = float(
+            "-inf"
+        )  # monotonic timestamp of last *failed* fetch; separate so successes always update the cache window
+        self._refresh_inflight: bool = False  # synchronous guard: set before first yield, cleared in finally  # prevents concurrent _async_trigger_image_refresh (replaces locked()+async-with race)
         self._was_streaming: bool = False
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
@@ -227,6 +230,19 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         Sets _force_image_refresh=True so that frame_interval returns 0.1 s,
         causing HA's image cache to expire on the very next proxy request.
         After the fetch, frame_interval reverts to its normal value.
+
+        Concurrent calls are short-circuit via _refresh_inflight: the flag is set
+        synchronously before the first ``await``, so a second caller sees it
+        immediately and returns without opening a duplicate PUT /connection.
+        This prevents startup + stream-stop + proactive-tick from each burning
+        the Bosch 3-session budget and racing on _cached_image /
+        _force_image_refresh.
+
+        Note: the previous implementation used ``_refresh_lock.locked()`` +
+        ``async with _refresh_lock``. That left a yield-point gap between the
+        check and the acquire (``__aenter__`` is a coroutine), allowing two
+        delayed callers to both pass the check and proceed in sequence. The
+        synchronous boolean flag closes that window entirely.
         """
         if delay:
             await asyncio.sleep(delay)
@@ -241,15 +257,29 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             )
             return
 
+        # Synchronous in-flight guard: set before any yield so a second caller
+        # (even one that just woke from asyncio.sleep) sees the flag immediately.
+        if self._refresh_inflight:
+            _LOGGER.debug(
+                "%s: refresh already in progress — skipping duplicate",
+                self._display_name,
+            )
+            return
+
+        self._refresh_inflight = True
         self._force_image_refresh = True
         try:
-            # Fast path: populate _cached_image from the latest event snapshot immediately
-            # so the HA camera proxy can serve something while the live snap is fetching.
-            # This ensures the card shows a real image within ~1s of startup/stream-stop,
-            # instead of waiting 5-15s for the PUT /connection + snap.jpg round-trip.
-            if not self._cached_image:
+            # Fast path: populate _cached_image from the latest event snapshot
+            # immediately so the HA camera proxy can serve something while the
+            # live snap is fetching. This ensures the card shows a real image
+            # within ~1s of startup/stream-stop, instead of waiting 5-15s for
+            # the PUT /connection + snap.jpg round-trip.
+            # Guard: only seed when we hold nothing but the 1×1 black placeholder
+            # (not self._cached_image checked `not bytes`, but placeholder is
+            # truthy — use identity check).
+            if self._cached_image is self._PLACEHOLDER_JPEG:
                 quick = await self.async_camera_image()
-                if quick:
+                if quick and quick is not self._PLACEHOLDER_JPEG:
                     self._cached_image = quick
                     self._last_image_fetch = time.monotonic()
                     _LOGGER.debug(
@@ -283,7 +313,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # genuine cold start we still want to seed from the event image.
             _has_real_frame = (
                 bool(self._cached_image)
-                and self._cached_image != self._PLACEHOLDER_JPEG
+                and self._cached_image is not self._PLACEHOLDER_JPEG
             )
             if not image and not self.is_streaming and not _has_real_frame:
                 image = await self.coordinator.async_fetch_fresh_event_snapshot(
@@ -291,6 +321,19 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 )
 
             if image:
+                # Privacy TOCTOU guard: re-read privacy from the live cache
+                # immediately before writing _cached_image. The coordinator may
+                # have updated between the top-of-method check and now (privacy
+                # turned ON during the 2-10 s fetch). Writing a just-fetched
+                # live frame while privacy is transitioning ON would serve a
+                # real-scene image until the next refresh.
+                shc_state = self.coordinator._shc_state_cache.get(self._cam_id, {})
+                if shc_state.get("privacy_mode") is True:
+                    _LOGGER.debug(
+                        "%s: privacy turned ON during fetch — discarding frame",
+                        self._display_name,
+                    )
+                    return
                 self._cached_image = image
                 self._last_image_fetch = time.monotonic()
                 _LOGGER.debug(
@@ -300,9 +343,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 )
                 self.async_write_ha_state()
 
-                # Persist to disk (defence-in-depth: privacy gate at top of
-                # this method already prevents reaching here when privacy is ON)
-                shc_state = self.coordinator._shc_state_cache.get(self._cam_id, {})
+                # Persist to disk (defence-in-depth: privacy gate above
+                # already prevents reaching here when privacy is ON)
                 if not shc_state.get("privacy_mode"):
                     await save_snapshot(self.hass, self._cam_id, image)
                     img_entity = self.coordinator._image_entities.get(self._cam_id)
@@ -322,6 +364,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         except Exception as err:
             _LOGGER.debug("%s: image refresh failed: %s", self._display_name, err)
         finally:
+            self._refresh_inflight = False
             self._force_image_refresh = False
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -440,7 +483,40 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         is_updating = getattr(self.coordinator, "is_updating", None)
         if is_updating is not None and is_updating(self._cam_id):
             return False
-        return bool(self.coordinator.last_update_success)
+        if self.coordinator.last_update_success:
+            return True
+        # Cloud poll failed. Inside a KNOWN active Bosch maintenance window the
+        # cloud flaps for minutes (Connect refused → ~3 min → recover) while the
+        # LOCAL datapath (TLS proxy + RTSP) keeps serving frames. Keep a
+        # locally-streaming camera available so the UI/automations don't churn
+        # through unavailable on every cloud dip — local snapshot + live stream
+        # stay functional. Verified live 2026-06-16 maintenance window.
+        return self._local_available_during_cloud_outage()
+
+    def _local_available_during_cloud_outage(self) -> bool:
+        """True only when the cloud poll failed BUT this camera is still
+        locally serviceable inside a known active maintenance window.
+
+        Three guards, ALL required: an active camera-relevant Bosch maintenance
+        window, a positive LAN-TCP reachability for this cam, and an established
+        local live session (rtsps/rtsp URL ready). Anything unknown/absent →
+        False, so we fall back to the cloud coordinator's availability. Must
+        never raise — `available` is read on every state-machine update.
+        """
+        coord = self.coordinator
+        mw = getattr(coord, "_maintenance_cache", None)
+        if mw is None or not getattr(mw, "camera_relevant", False):
+            return False
+        try:
+            if mw.state() != "active":
+                return False
+        except (TypeError, ValueError):
+            return False
+        is_lan_reachable = getattr(coord, "is_lan_reachable", None)
+        if is_lan_reachable is None or is_lan_reachable(self._cam_id) is not True:
+            return False
+        # Established local live session for THIS cam (mirrors `is_streaming`).
+        return self.is_streaming
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -485,7 +561,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "hardware_version": self._hw_version,
             "firmware": self._fw,
             "mac": self._mac,
-            "live_rtsps": rtsps_url,
+            "live_rtsps": _redact_rtsp_creds(rtsps_url),
             "live_proxy": live.get("proxyUrl", ""),
             "stream_errors": err_count,
             # Bosch-app camera order. Mirrors the float priority returned by
@@ -495,7 +571,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "bosch_priority": bosch_priority,
         }
         if rtsps_url:
-            attrs["stream_url"] = rtsps_url
+            attrs["stream_url"] = _redact_rtsp_creds(rtsps_url)
         # bufferingTime from PUT /connection (LOCAL=500ms, REMOTE=1000ms)
         # — Bosch-server-side hint, NOT the player buffer. Display only.
         live_conn = self.coordinator._live_connections.get(self._cam_id, {})

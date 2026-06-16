@@ -619,6 +619,12 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
                 coordinator._fcm_running = True
                 coordinator._fcm_healthy = True
                 coordinator._fcm_push_mode = "auto"
+                # BUG-3 fix: reset soft-heal streak ONLY on confirmed successful
+                # start.  Resetting before the attempt (old code in
+                # _async_hard_heal_locked) silently zeroed the counter on every
+                # hard-heal even when the new registration subsequently failed,
+                # causing the watchdog to restart the ladder from 0.
+                coordinator._fcm_soft_heal_streak = 0
             _LOGGER.info(
                 "FCM push listener started — near-instant event detection active"
             )
@@ -920,9 +926,12 @@ async def _async_hard_heal_locked(coordinator: Any) -> None:
     EVERY key beginning with `fcm_` recovered FCM in the field.
     """
     await async_stop_fcm_push(coordinator)
-    # A fresh registration is the strongest recovery we have — clear the
-    # soft-heal escalation streak so a successful re-register starts clean.
-    coordinator._fcm_soft_heal_streak = 0
+    # BUG-3 fix: do NOT reset _fcm_soft_heal_streak here.  If the fresh
+    # checkin_or_register() inside _async_start_fcm_push_locked fails, the
+    # streak stays intact so the next watchdog tick doesn't silently restart
+    # the soft-heal ladder from 0.  The streak is reset inside
+    # _async_start_fcm_push_locked on SUCCESSFUL start (line ~619), and by
+    # _on_fcm_push when a real push arrives.
     new_data = {
         k: v for k, v in coordinator._entry.data.items() if not k.startswith("fcm_")
     }
@@ -990,8 +999,16 @@ def _on_fcm_push(
     coordinator.hass.loop.call_soon_threadsafe(_spawn_fcm_handler)
 
 
-async def async_handle_fcm_push(coordinator: Any) -> None:
-    """Handle an FCM push — fetch fresh events for all cameras and fire HA events."""
+async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
+    """Handle an FCM push — fetch fresh events for all cameras and fire HA events.
+
+    Bosch's FCM push can beat its own /v11/events cloud index by a few seconds:
+    the first fetch then returns no new event, and the alert would otherwise only
+    arrive via the ~300 s safety poll ("alles über das normale pull verhalten").
+    When a push finds nothing new, this handler retries a couple of times with a
+    short backoff (`_attempt`) so the event is caught within seconds. Dedup via
+    _alert_sent_ids + _last_event_ids makes a re-scan safe (no double alerts).
+    """
     token = coordinator.token
     if not token or not coordinator.data:
         # Race: FCM push can arrive during setup, before the first coordinator
@@ -1002,6 +1019,8 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
     session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
+    _dispatched_new = False
+    _any_fetch_ok = False  # B1 fix: track if ≥1 camera fetch returned HTTP 200
     for cam_id in list(coordinator.data.keys()):
         try:
             url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=5"
@@ -1010,6 +1029,7 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                     if r.status != 200:
                         continue
                     events = await r.json()
+            _any_fetch_ok = True  # HTTP 200 received — cloud is reachable
 
             if not events:
                 continue
@@ -1042,6 +1062,7 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                     _sent.pop(_k, None)
 
             if prev_id is not None and newest_id and newest_id != prev_id:
+                _dispatched_new = True
                 # Record alert dispatch ASAP so a concurrent handler sees it
                 _sent[newest_id] = _now
                 # Update last event ID FIRST to prevent polling from
@@ -1159,6 +1180,7 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                             newest_event.get("videoClipUrl", ""),
                             newest_event.get("videoClipUploadStatus", ""),
                             event_id=newest_id,
+                            cam_id=cam_id,
                         )
                     )
                     coordinator._bg_tasks.add(_alert_task)
@@ -1243,12 +1265,23 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
                 # Notify all entity listeners
                 coordinator.async_update_listeners()
 
-                # Mark new event as read on the Bosch cloud (gated by user option)
+                # Mark new event as read on the Bosch cloud (gated by user option).
+                # BUG-4 fix: fire-and-forget via async_create_task so cameras
+                # 2/3/4 are not blocked for up to 5s by camera 1's mark-read
+                # HTTP PUT inside the per-cam loop.
                 if coordinator.options.get("mark_events_read", False):
-                    try:
-                        await async_mark_events_read(coordinator, [newest_id])
-                    except Exception:  # noqa: S110 # best-effort cloud housekeeping; failure doesn't affect event delivery
-                        pass
+
+                    async def _mark_read_bg(
+                        _coord: Any = coordinator, _eid: str = newest_id
+                    ) -> None:
+                        try:
+                            await async_mark_events_read(_coord, [_eid])
+                        except Exception:  # noqa: S110 # best-effort cloud housekeeping
+                            pass
+
+                    _mr_task = coordinator.hass.async_create_task(_mark_read_bg())
+                    coordinator._bg_tasks.add(_mr_task)
+                    _mr_task.add_done_callback(coordinator._bg_tasks.discard)
 
             elif newest_id:
                 coordinator._last_event_ids[cam_id] = newest_id
@@ -1259,6 +1292,21 @@ async def async_handle_fcm_push(coordinator: Any) -> None:
             )
         except Exception as err:
             _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
+
+    # Push beat the cloud index → no new event this pass. Retry a couple of
+    # times with a short backoff before falling back to the 300 s safety poll.
+    # B1 fix: only retry when ≥1 fetch succeeded (HTTP 200) — if ALL cameras
+    # failed with TimeoutError/ClientError the cloud endpoint is down and
+    # retrying wastes round-trips + adds 2+4 s of sleep on a dead endpoint.
+    _FCM_FETCH_RETRY_BACKOFFS = (2.0, 4.0)
+    if (
+        not _dispatched_new
+        and _any_fetch_ok
+        and _attempt < len(_FCM_FETCH_RETRY_BACKOFFS)
+    ):
+        await asyncio.sleep(_FCM_FETCH_RETRY_BACKOFFS[_attempt])
+        if getattr(coordinator, "_fcm_running", False):
+            await async_handle_fcm_push(coordinator, _attempt + 1)
 
 
 # ── Alert routing helpers ────────────────────────────────────────────────────
@@ -1330,16 +1378,44 @@ async def async_send_alert(
     clip_url: str = "",
     clip_status: str = "",
     event_id: str = "",
+    cam_id: str = "",
 ) -> None:
     """Send a 3-step alert: instant text, snapshot image, video clip.
 
     Step 1: Immediate text notification (no delay)
     Step 2: Download snapshot from Bosch cloud (after 5s), send with image
     Step 3: Download video clip (after 15s total), send as attachment
+
+    cam_id: stable camera ID (UUID). When provided, all sub-lookups use it
+    directly instead of searching coordinator.data by the mutable title string.
+    Callers that cannot supply cam_id (legacy / __init__ wrapper) leave it as
+    "" and the title-fallback is used instead.
     """
     from .smb import sync_local_save, sync_smb_upload
 
     opts = coordinator.options
+
+    # Resolve the stable cam_id once at push-receipt time (start of coroutine).
+    # Doing this early ensures all sub-lookups (Path B, Step 3, AI title-match)
+    # use the stable ID rather than the mutable display title — fixes B04-BUG-2
+    # and W-imageflip-BUG-2 (stale privacy / wrong cam on rename).
+    _resolved_cam_id: str | None = cam_id if cam_id else None
+    if not _resolved_cam_id:
+        for _cid, _cdata in coordinator.data.items():
+            if _cdata.get("info", {}).get("title", "") == cam_name:
+                _resolved_cam_id = _cid
+                break
+
+    # Capture privacy state NOW (at push-receipt time, start of coroutine).
+    # Path B runs up to ~30 s later; re-reading the live cache at that point
+    # can pick up a post-privacy-off value and write a pre-privacy frame into
+    # the cache — fixing W-imageflip-BUG-2.
+    _shc_cache_early = getattr(coordinator, "_shc_state_cache", {})
+    _push_time_priv: bool = (
+        _shc_cache_early.get(_resolved_cam_id, {}).get("privacy_mode", False)
+        if _resolved_cam_id
+        else False
+    )
 
     # Per-type service routing: information/screenshot/video each fall back to alert_notify_service.
     # TROUBLE events use "system" — check that before bailing on missing information services.
@@ -1430,15 +1506,24 @@ async def async_send_alert(
     # appeared 90s later via the SMB upload path). Retry at +3 / +10 / +25 s
     # cumulative — covers steady-state cloud and warm-up cases without
     # delaying the common path noticeably.
-    if not image_url:
-        # Resolve THIS camera's id by title; if none matches, skip the re-fetch
-        # entirely. Querying with an empty videoInputId returns EVERY camera's
-        # events and event[0] would attach a foreign camera's image to this alert.
-        events_url = None
-        for cid, cdata in coordinator.data.items():
-            if cdata.get("info", {}).get("title", "") == cam_name:
-                events_url = f"{CLOUD_API}/v11/events?videoInputId={cid}&limit=5"
-                break
+    #
+    # BUG-5 fix: track whether image_url was empty at push-arrival time.
+    # The 5s sleep before downloading is only needed when the URL was missing
+    # on push arrival (retry loop already introduces cumulative delays for that
+    # case, so the extra sleep is for the "URL present from the start" path only
+    # — but it's unnecessary there too since Bosch's image is already ready if
+    # the URL was provided). Move the sleep inside the empty-URL branch so the
+    # fast path (URL known upfront) skips the 5s stall entirely.
+    _image_url_was_empty = not image_url
+    if _image_url_was_empty:
+        # Use the stable cam_id resolved at push-receipt time (B04-BUG-2 fix).
+        # Querying with an empty videoInputId returns EVERY camera's events and
+        # event[0] would attach a foreign camera's image to this alert.
+        events_url = (
+            f"{CLOUD_API}/v11/events?videoInputId={_resolved_cam_id}&limit=5"
+            if _resolved_cam_id
+            else None
+        )
         if events_url is None:
             _LOGGER.debug(
                 "Alert: no camera matches title %r — skipping image re-fetch",
@@ -1481,7 +1566,14 @@ async def async_send_alert(
         image_url = ""
 
     if image_url:
-        await asyncio.sleep(5)
+        # Only wait when the URL was missing at push time and had to be
+        # re-fetched — in that case the retry loop already slept up to 25 s,
+        # but a brief extra settle avoids a race where Bosch's image is still
+        # being finalized after the URL first appears.  When the URL was
+        # provided with the original push the image is already ready and the
+        # sleep is a pure 5 s stall with no benefit (BUG-5 fix).
+        if _image_url_was_empty:
+            await asyncio.sleep(2)
         # Neutralise path traversal: cam_name is the cloud-provided camera title
         # and must never escape alert_dir (e.g. a title like "../../config/secrets").
         # ts_safe and event_type are integration-generated, but sanitise defensively.
@@ -1504,6 +1596,26 @@ async def async_send_alert(
                                 _write_file, snap_path, data
                             )
                             caption = f"\U0001f4f8 {cam_name} Snapshot ({ts_short})"
+                            # F2: optionally append an AI description of the
+                            # snapshot to the push. Rate-limited + daily-budgeted
+                            # in async_generate_ai_description; wrapped here so a
+                            # failure can never break the screenshot notification.
+                            if opts.get("ai_notify_include_description"):
+                                try:
+                                    # Use stable cam_id resolved at push-receipt
+                                    # time (B04-BUG-2: title-match fails on rename).
+                                    _ai_cid: str | None = _resolved_cam_id
+                                    if _ai_cid:
+                                        _desc = await coordinator.async_generate_ai_description(
+                                            _ai_cid
+                                        )
+                                        if _desc:
+                                            _desc = _desc[:200].rstrip()
+                                            caption = f"{caption}\n\U0001f916 {_desc}"
+                                except Exception as _ai_err:
+                                    _LOGGER.debug(
+                                        "AI notify-include failed: %s", _ai_err
+                                    )
                             await _notify_type(
                                 "screenshot",
                                 caption,
@@ -1515,40 +1627,39 @@ async def async_send_alert(
                             if not save_snapshots:
                                 files_to_cleanup.append(snap_path)
 
-                            # Path B — push the Bosch event image (with AI overlay / motion
-                            # box) into the camera entity cache so the image entity gets a
-                            # second update ~5-30 s after Path A's live snap.
-                            # Skip when privacy is ON (cache must not hold a stale image that
-                            # was captured before privacy was activated).
-                            # Skip when bytes are identical length to the current cache —
-                            # avoids a pointless disk write + notify on duplicate pushes.
-                            # Wrapped in its own try/except so any error here never affects
+                            # Path B — push the Bosch event image (with AI overlay /
+                            # motion box) into the camera entity cache so the image
+                            # entity gets a second update ~5-30 s after Path A's snap.
+                            #
+                            # Fixes applied here:
+                            #   W-imageflip-BUG-2: use _push_time_priv (captured at
+                            #     coroutine start) instead of re-reading the live cache.
+                            #     Re-reading can see privacy=False if privacy was turned
+                            #     off after the event arrived, writing a pre-privacy
+                            #     frame into cache.
+                            #   B04-BUG-1: use byte-identity (_existing != data) not
+                            #     byte-length (len mismatch) for dedup.  Same-length
+                            #     different-content images (same scene, same quality)
+                            #     would be incorrectly skipped with len comparison.
+                            #   B04-BUG-2: use _resolved_cam_id (stable, push-time)
+                            #     instead of title-lookup that fails on rename.
+                            #
+                            # Wrapped in try/except so any error here never affects
                             # the alert pipeline (cleanup, clip download, etc.).
                             try:
-                                _cam_id_for_b: str | None = None
-                                for _cid, _cdata in coordinator.data.items():
-                                    if (
-                                        _cdata.get("info", {}).get("title", "")
-                                        == cam_name
-                                    ):
-                                        _cam_id_for_b = _cid
-                                        break
+                                _cam_id_for_b: str | None = _resolved_cam_id
                                 if _cam_id_for_b:
                                     _cam_entities = getattr(
                                         coordinator, "_camera_entities", {}
                                     )
                                     _cam_b = _cam_entities.get(_cam_id_for_b)
-                                    _shc_cache = getattr(
-                                        coordinator, "_shc_state_cache", {}
-                                    )
-                                    _priv = _shc_cache.get(_cam_id_for_b, {}).get(
-                                        "privacy_mode", False
-                                    )
-                                    if _cam_b and not _priv:
+                                    # Use privacy state captured at push-receipt time
+                                    # (W-imageflip-BUG-2 fix — not re-read from cache).
+                                    if _cam_b and not _push_time_priv:
                                         _existing = _cam_b._cached_image
-                                        if _existing is None or len(_existing) != len(
-                                            data
-                                        ):
+                                        # Byte-identity dedup (B04-BUG-1 fix):
+                                        # len equality is NOT image equality.
+                                        if _existing is None or _existing != data:
                                             _cam_b._cached_image = data
                                             _cam_b._last_image_fetch = time.monotonic()
                                             await save_snapshot(
@@ -1567,7 +1678,7 @@ async def async_send_alert(
                                             )
                                         else:
                                             _LOGGER.debug(
-                                                "FCM Path B: skipping %s — bytes unchanged (%d B)",
+                                                "FCM Path B: skipping %s — bytes identical (%d B)",
                                                 cam_name,
                                                 len(data),
                                             )
@@ -1584,13 +1695,10 @@ async def async_send_alert(
     # Bosch uploads clips asynchronously. The event initially has
     # clip_status=Pending (or no clipUrl at all). We poll the events API
     # every 10s for up to 90s until videoClipUploadStatus=Done.
-    cam_id = None
-    for cid, cdata in coordinator.data.items():
-        if cdata.get("info", {}).get("title", "") == cam_name:
-            cam_id = cid
-            break
+    # Use stable cam_id resolved at push-receipt time (B04-BUG-2 fix).
+    _clip_cam_id: str | None = _resolved_cam_id
 
-    if cam_id:
+    if _clip_cam_id:
         # Neutralise path traversal: cam_name is the cloud-provided camera title
         # and must never escape alert_dir (e.g. a title like "../../config").
         # Mirrors the snapshot path guard above — the .mp4 write below
@@ -1608,7 +1716,7 @@ async def async_send_alert(
 
         # Try direct clip.mp4 download first (faster than polling)
         if not found_clip_url:
-            event_id = event_id or coordinator._last_event_ids.get(cam_id, "")
+            event_id = event_id or coordinator._last_event_ids.get(_clip_cam_id, "")
             if event_id:
                 try:
                     async with asyncio.timeout(10):
@@ -1644,26 +1752,39 @@ async def async_send_alert(
                 try:
                     async with asyncio.timeout(10):
                         async with session.get(
-                            f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=3",
+                            f"{CLOUD_API}/v11/events?videoInputId={_clip_cam_id}&limit=3",
                             headers=auth_headers,
                         ) as r:
                             if r.status != 200:
                                 continue
                             fresh = await r.json()
                             for ev in fresh:
-                                if ev.get("timestamp", "")[:19] == timestamp[:19]:
-                                    status = ev.get("videoClipUploadStatus", "")
-                                    url = ev.get("videoClipUrl", "")
-                                    if status == "Done" and url:
-                                        found_clip_url = url
-                                    elif status == "Unavailable":
-                                        clip_unavailable = True
-                                        _LOGGER.debug(
-                                            "Alert: clip Unavailable after %ds — stop polling for %s",
-                                            (attempt + 1) * 10,
-                                            cam_name,
-                                        )
-                                    break
+                                # Match by event_id (stable UUID) rather than
+                                # timestamp[:19] — two events within the same
+                                # second share the same prefix and the wrong
+                                # clip could be attached (BUG-6 fix).
+                                _ev_id = ev.get("id", "")
+                                if event_id and _ev_id and _ev_id != event_id:
+                                    continue
+                                if not event_id and (
+                                    ev.get("timestamp", "")[:19] != timestamp[:19]
+                                ):
+                                    # Fallback: no event_id known, use timestamp
+                                    # (legacy path — event_id should always be
+                                    # present for FCM-triggered alerts).
+                                    continue
+                                status = ev.get("videoClipUploadStatus", "")
+                                url = ev.get("videoClipUrl", "")
+                                if status == "Done" and url:
+                                    found_clip_url = url
+                                elif status == "Unavailable":
+                                    clip_unavailable = True
+                                    _LOGGER.debug(
+                                        "Alert: clip Unavailable after %ds — stop polling for %s",
+                                        (attempt + 1) * 10,
+                                        cam_name,
+                                    )
+                                break
                     if found_clip_url:
                         _LOGGER.debug(
                             "Alert: clip ready after %ds for %s",
@@ -1710,8 +1831,8 @@ async def async_send_alert(
             _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
 
     # -- Mark event as read ------------------------------------------------
-    if cam_id and coordinator.options.get("mark_events_read", False):
-        event_id = event_id or coordinator._last_event_ids.get(cam_id, "")
+    if _clip_cam_id and coordinator.options.get("mark_events_read", False):
+        event_id = event_id or coordinator._last_event_ids.get(_clip_cam_id, "")
         if event_id:
             try:
                 await async_mark_events_read(coordinator, [event_id])
@@ -1719,10 +1840,10 @@ async def async_send_alert(
                 pass
 
     # -- SMB upload (immediate, alongside alert) ---------------------------
-    if opts.get("enable_smb_upload") and opts.get("smb_server") and cam_id:
+    if opts.get("enable_smb_upload") and opts.get("smb_server") and _clip_cam_id:
         try:
             # Build a minimal data dict for sync_smb_upload with just this event
-            ev_id = event_id or coordinator._last_event_ids.get(cam_id, "unknown")
+            ev_id = event_id or coordinator._last_event_ids.get(_clip_cam_id, "unknown")
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,
@@ -1732,7 +1853,7 @@ async def async_send_alert(
                 "videoClipUploadStatus": "Done" if found_clip_url else "",
             }
             smb_data = {
-                cam_id: {
+                _clip_cam_id: {
                     "info": {"title": cam_name},
                     "events": [ev_data],
                 }
@@ -1769,9 +1890,9 @@ async def async_send_alert(
             _LOGGER.warning("Alert: SMB upload failed for %s: %s", cam_name, err)
 
     # -- Local save (FCM-triggered, alongside SMB) -------------------------
-    if opts.get("enable_local_save") and opts.get("download_path") and cam_id:
+    if opts.get("enable_local_save") and opts.get("download_path") and _clip_cam_id:
         try:
-            ev_id = event_id or coordinator._last_event_ids.get(cam_id, "unknown")
+            ev_id = event_id or coordinator._last_event_ids.get(_clip_cam_id, "unknown")
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,

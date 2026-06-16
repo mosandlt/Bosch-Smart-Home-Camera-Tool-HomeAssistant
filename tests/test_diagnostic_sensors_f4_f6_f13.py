@@ -118,7 +118,10 @@ class TestBoschOnvifScopesSensor:
             "raw_scopes": [],
         }
         s = self._make(_make_coord(onvif_scopes=scopes))
-        assert s.native_value == "ONVIF supported"
+        # BoschOnvifScopesSensor.native_value returns "supported" (the enum
+        # value used in _attr_options); the HA translation layer maps this to
+        # the localised string "ONVIF supported" at render time.
+        assert s.native_value == "supported"
 
     def test_native_value_none_when_no_scopes(self) -> None:
         s = self._make(_make_coord(onvif_scopes=None))

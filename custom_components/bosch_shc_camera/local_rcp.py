@@ -57,7 +57,7 @@ def _parse_rcp_xml(text: str, type_: str) -> Any:
         return None
     if type_ == "P_STRING":
         s = root.find(".//result/str")
-        return (s.text or "") if s is not None else None
+        return s.text if s is not None else None
     if type_ == "P_OCTET":
         s = root.find(".//result/str")
         if s is None or not s.text:

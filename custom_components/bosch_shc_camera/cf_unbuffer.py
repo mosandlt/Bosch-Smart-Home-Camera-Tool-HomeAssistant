@@ -75,7 +75,19 @@ _FLUSH_PREFIX = "text/event-stream; x-actual="
 # embedded in the HLS URL (/api/hls/<token>/...). See __init__.py
 # _has_active_consumer.
 _HLS_ACCESS: dict[str, float] = {}
-_HLS_ACCESS_MAX = 64  # cap — tokens rotate per session; prune oldest beyond this
+# Cap raised from 64 → 256 (B05-5).  64 was enough for typical deployments,
+# but tokens rotate on every HLS session renewal.  With >64 cameras — or after
+# many rapid session restarts — the oldest token could be evicted while HLS was
+# still actively serving a segment.  hls_access_age() would then return None
+# ("never seen"), and the idle-session reaper would misinterpret the missing
+# entry as "idle" and tear the stream down mid-delivery.  256 makes overflow
+# effectively impossible in any realistic installation (<20 cameras per HA box).
+_HLS_ACCESS_MAX = 256
+# Re-stamp threshold: if the oldest token was accessed within this many seconds
+# it is still active — skip evicting it and evict the second-oldest instead.
+# Prevents a slow-segment delivery from being misclassified as idle when the
+# dict hits capacity.
+_HLS_ACTIVE_WINDOW = 30.0
 
 
 def _note_hls_access(request: web.Request | None) -> None:
@@ -87,10 +99,17 @@ def _note_hls_access(request: web.Request | None) -> None:
         return
     if not token:
         return
-    _HLS_ACCESS[token] = time.monotonic()
+    now = time.monotonic()
+    _HLS_ACCESS[token] = now
     if len(_HLS_ACCESS) > _HLS_ACCESS_MAX:
-        oldest = min(_HLS_ACCESS, key=_HLS_ACCESS.__getitem__)
-        _HLS_ACCESS.pop(oldest, None)
+        # Evict the oldest token, but skip it if it was recently accessed
+        # (i.e. an active stream is still in flight).  In that case promote
+        # to the second-oldest so a slow segment fetch is not silently killed.
+        sorted_tokens = sorted(_HLS_ACCESS, key=_HLS_ACCESS.__getitem__)
+        evict = sorted_tokens[0]
+        if now - _HLS_ACCESS[evict] < _HLS_ACTIVE_WINDOW and len(sorted_tokens) > 1:
+            evict = sorted_tokens[1]
+        _HLS_ACCESS.pop(evict, None)
 
 
 def hls_access_age(token: str) -> float | None:

@@ -253,18 +253,22 @@ class TestMotionSensitivitySelect:
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
         assert sel.current_option is None
 
-    def test_current_option_none_for_unknown_api_value(self, stub_coord, stub_entry):
+    def test_current_option_default_for_unknown_api_value(self, stub_coord, stub_entry):
         """If Bosch ever returns a level we don't list (e.g. the rumored
-        EXTREME mode on Gen3), surface as 'unknown' rather than guessing
-        — the user sees a missing label and we get a bug report instead
-        of a silently wrong sensitivity."""
+        EXTREME mode on Gen3), return the first valid option (with a warning)
+        so the select entity does not appear de-selected/broken.
+        Bug M8 fix: previously returned None (entity appeared de-selected)."""
         stub_coord.motion_settings = lambda cid: {"motionAlarmConfiguration": "EXTREME"}
         from custom_components.bosch_shc_camera.select import (
+            MOTION_SENSITIVITY_OPTIONS,
             BoschMotionSensitivitySelect,
         )
 
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
-        assert sel.current_option is None
+        result = sel.current_option
+        assert result == MOTION_SENSITIVITY_OPTIONS[0], (
+            f"Unknown API value should return first option, got {result!r}"
+        )
 
     def test_unavailable_when_motion_settings_empty(self, stub_coord, stub_entry):
         """Slow tier hasn't run yet → entity unavailable. Avoids the

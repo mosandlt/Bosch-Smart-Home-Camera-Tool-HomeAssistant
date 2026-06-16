@@ -54,7 +54,7 @@ def _is_safe_bosch_url(url: str) -> bool:
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -64,7 +64,9 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from . import recorder as nvr_recorder
 from . import shc as shc_mod
@@ -149,6 +151,13 @@ SELF_HEAL_SUCCESS_WINDOW_SEC = 600.0
 # the defer cycle restarts.  Bounds worst-case staleness to ~this + one slow
 # interval.
 SLOW_TIER_MAX_DEFER_SEC = 1800.0
+
+# Module-level debounce dict for auto-describe-on-motion — keyed by cam_id.
+# Must live at module level (not inside async_setup_entry) so it survives
+# integration reloads: re-entering async_setup_entry would otherwise reset
+# the dict and allow a burst of back-to-back AI calls across the reload gap.
+_AI_MOTION_DEBOUNCE: dict[str, float] = {}
+_AI_MOTION_DEBOUNCE_SEC = 30.0
 
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
@@ -260,10 +269,12 @@ class _StreamWorkerErrorListener(logging.Handler):
 
     def __init__(self, coordinator: "BoschCameraCoordinator") -> None:
         super().__init__(logging.ERROR)
-        self._coordinator = coordinator
+        self._coordinator: BoschCameraCoordinator | None = coordinator
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            if self._coordinator is None:
+                return
             if record.levelno < logging.ERROR:
                 return
             # Only interested in HA's stream worker errors. Other errors on
@@ -691,6 +702,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # TTL=8s covers the burst window while staying well inside the 60s scan cycle.
         self._fresh_snap_cache: dict[str, tuple[bytes, float]] = {}
         self._fresh_snap_locks: dict[str, asyncio.Lock] = {}
+        # AI snapshot-description rate limiter (F3): per-camera cooldown +
+        # global daily budget. monotonic sentinel = -inf (SENTINEL_RULE: CI VMs
+        # boot ~200s monotonic, 0.0 would falsely satisfy the cooldown).
+        self._ai_last_call: dict[str, float] = {}
+        self._ai_day_count: int = 0
+        self._ai_day_stamp: str = ""
+        self._ai_in_flight: int = 0
+        self._ai_budget_logged_day: str = ""
+        # Persistent storage for the daily AI budget counter (survives restart/reload).
+        self._ai_budget_store: Store[dict[str, Any]] = Store(
+            hass, 1, f"{DOMAIN}_ai_budget"
+        )
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self._last_event_ids: dict[str, str] = {}
         # Epoch timestamp of coordinator start — used to reject event downloads for
@@ -1033,6 +1056,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._nvr_preroll_processes: dict[str, asyncio.subprocess.Process] = {}
         self._nvr_preroll_last_crash: dict[str, float] = {}
         self._nvr_preroll_segment_counts: dict[str, int] = {}
+        self._nvr_preroll_tasks: dict[str, asyncio.Task[Any]] = {}
         # Drain watcher state — populated by recorder.sync_drain_tick. Used by
         # BoschNvrStateSensor to render `target` / `pending_uploads` /
         # `failed_uploads` / `last_segment_age_s` attributes without coupling
@@ -2119,15 +2143,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     _LOGGER.debug(
                         "Could not cancel prior token-refresh handle: %s", err
                     )
+
+            def _schedule_proactive_refresh() -> None:
+                if self.hass.is_stopping:
+                    return
+                t = self.hass.async_create_task(self._proactive_refresh())
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._bg_tasks.discard)
+
             self._token_refresh_handle = self.hass.loop.call_later(
                 refresh_in,
-                lambda: self.hass.async_create_task(self._proactive_refresh()),
+                _schedule_proactive_refresh,
             )
         except Exception as err:
             _LOGGER.debug("_schedule_token_refresh: cannot parse token expiry: %s", err)
 
     async def _proactive_refresh(self) -> None:
         """Background task: refresh the token before it expires."""
+        if self.hass.is_stopping:
+            return
         _LOGGER.debug("Proactive token refresh triggered")
         try:
             await self._ensure_valid_token()
@@ -2575,8 +2609,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # waiting for the user to re-toggle. Cooldown 5 min
                     # prevents ping-pong if LAN flaps in/out.
                     if self._stream_fell_back.get(cam_id):
-                        opts = get_options(self._entry)
-                        if opts.get("stream_connection_type", "local") == "auto":
+                        _check_opts = get_options(self._entry)
+                        if _check_opts.get("stream_connection_type", "local") == "auto":
                             err_count_was = self._stream_error_count.get(cam_id, 0)
                             _LOGGER.info(
                                 "AUTO mode: %s LAN reachable again — clearing "
@@ -2701,10 +2735,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 any_status_checked = True
 
             # ── 3. Events — parallel across all cameras ──────────────────────
-            async def _fetch_events(cam_id: str) -> tuple[str, list[Any]]:
-                """Fetch events for single camera. Returns (cam_id, events)."""
+            async def _fetch_events(cam_id: str) -> tuple[str, list[Any], bool]:
+                """Fetch events for single camera.
+
+                Returns ``(cam_id, events, ok)``. ``ok`` is True only when the
+                cloud gave a definitive answer (last_event matched the cached id,
+                or the full events list came back 200). On a transient failure
+                ``ok`` is False so the caller keeps the previously-cached events
+                instead of blanking them, and does not advance ``_last_events``
+                (which would defer the next retry by a full poll interval — up to
+                300 s while FCM is healthy). Mirrors the cross-version ioBroker fix.
+                """
                 events: list[Any] = []
                 skip_full_fetch = False
+                ok = False
                 try:
                     async with asyncio.timeout(5):
                         async with session.get(
@@ -2719,6 +2763,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     and last_ev_id == self._last_event_ids.get(cam_id)
                                 ):
                                     skip_full_fetch = True
+                                    ok = True
                                     events = self._cached_events.get(cam_id, [])
                                     _LOGGER.debug(
                                         "last_event unchanged for %s (id=%s) — skipping full fetch",
@@ -2739,14 +2784,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             async with session.get(url, headers=headers) as r:
                                 if r.status == 200:
                                     events = await r.json()
+                                    ok = True
                     except Exception as err:
                         _LOGGER.debug(
                             "Events fetch error for %s: %s",
                             cam_id,
                             BoschCameraCoordinator._err_str(err),
                         )
-                return (cam_id, events)
+                return (cam_id, events, ok)
 
+            any_events_fetched = False
             if do_events:
                 # Run all event fetches in parallel
                 event_results = await asyncio.gather(
@@ -2756,8 +2803,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 for ev_result in event_results:
                     if isinstance(ev_result, BaseException):
                         continue
-                    cid, ev_list = ev_result
-                    self._cached_events[cid] = ev_list
+                    cid, ev_list, ev_ok = ev_result
+                    # Only overwrite the cache on a definitive fetch — a transient
+                    # failure must not blank a camera's events (and its
+                    # events-today count) until the next successful poll.
+                    if ev_ok:
+                        self._cached_events[cid] = ev_list
+                        any_events_fetched = True
 
             # ── Build data dict + process new events (must be sequential) ─────
             for cam_id in cam_ids:
@@ -2901,7 +2953,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # Update timestamps only after successful fetches
             if any_status_checked:
                 self._last_status = now
-            if do_events:
+            # Advance the events timestamp only when at least one camera returned
+            # a definitive result. If every fetch failed (cloud blip), leave
+            # _last_events so do_events stays True next tick and the poll retries
+            # promptly instead of backing off a full interval (up to 300 s while
+            # FCM is healthy). Cross-version parity with the ioBroker fix.
+            if do_events and any_events_fetched:
                 self._last_events = now
             if do_slow:
                 self._last_slow = now
@@ -4728,6 +4785,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     retry_wait=cfg.pre_warm_retry_wait,
                                     post_success_wait=cfg.post_warm_buffer,
                                     describe_timeout=cfg.describe_timeout,
+                                    max_session_duration=cfg.max_session_duration,
                                 )
                             else:
                                 prewarm_ok = False
@@ -5256,6 +5314,286 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
                 return None
 
+    def _ai_window_allowed(self) -> bool:
+        """Time-window + condition-entity gate for AUTO AI analyses.
+
+        Returns True if the current moment is within the configured activation
+        window AND the condition entity (if any) is in the expected state.
+        When neither gate is configured, always returns True.
+        Manual force=True callers MUST bypass this — callers are responsible.
+        """
+        opts = self.options
+        time_start_raw: str = (opts.get("ai_active_time_start") or "").strip()
+        time_end_raw: str = (opts.get("ai_active_time_end") or "").strip()
+        condition_entity_id: str = (
+            opts.get("ai_active_condition_entity") or ""
+        ).strip()
+        condition_state: str = (
+            opts.get("ai_active_condition_state") or "not_home"
+        ).strip()
+
+        time_gate_active = bool(time_start_raw and time_end_raw)
+        if bool(time_start_raw) != bool(time_end_raw):
+            _LOGGER.warning(
+                "AI activation window: only one of start/end time is configured"
+                " (start=%r end=%r) — time gate disabled. Set both or neither.",
+                time_start_raw,
+                time_end_raw,
+            )
+        condition_gate_active = bool(condition_entity_id)
+
+        if not time_gate_active and not condition_gate_active:
+            return True
+
+        time_allowed = True
+        if time_gate_active:
+            try:
+                from datetime import time as _dt_time
+
+                def _parse_t(s: str) -> _dt_time:
+                    parts = s.split(":")
+                    h, m = int(parts[0]), int(parts[1])
+                    sec = int(parts[2]) if len(parts) > 2 else 0
+                    return _dt_time(h, m, sec)
+
+                t_start = _parse_t(time_start_raw)
+                t_end = _parse_t(time_end_raw)
+                now_t = dt_util.now().time().replace(microsecond=0)
+                if t_end >= t_start:
+                    # Normal window: e.g. 08:00–22:00. start==end is a zero-width
+                    # window (allowed only at that exact second) — matches live.
+                    time_allowed = t_start <= now_t <= t_end
+                else:
+                    # Overnight window: e.g. 22:00–06:00
+                    time_allowed = now_t >= t_start or now_t <= t_end
+            except Exception:
+                _LOGGER.debug(
+                    "AI activation window: malformed time value (start=%r end=%r)"
+                    " — treating as no time gate",
+                    time_start_raw,
+                    time_end_raw,
+                )
+                time_allowed = True  # malformed → allow (fail-open)
+
+        condition_allowed = True
+        if condition_gate_active:
+            state_obj = self.hass.states.get(condition_entity_id)
+            if state_obj is None or state_obj.state in ("unknown", "unavailable"):
+                condition_allowed = False  # conservative: don't burn credits
+                _LOGGER.debug(
+                    "AI activation window: condition entity %s is %s — blocking AI",
+                    condition_entity_id,
+                    state_obj.state if state_obj else "missing",
+                )
+            else:
+                condition_allowed = state_obj.state == condition_state
+
+        return time_allowed and condition_allowed
+
+    def ai_budget_state(self) -> tuple[int, int]:
+        """Return (used_today, max_per_day) for the AI-analysis daily budget.
+
+        Rolls the counter over when the local calendar date changes.
+        max_per_day == 0 means unlimited.
+        """
+        opts = self.options
+        try:
+            max_per_day = int(opts.get("ai_max_per_day", 100) or 0)
+        except (TypeError, ValueError):
+            max_per_day = 100
+        today = dt_util.now().date().isoformat()
+        if self._ai_day_stamp != today:
+            self._ai_day_stamp = today
+            self._ai_day_count = 0
+            self.hass.async_create_task(self._async_save_ai_budget())
+        return self._ai_day_count, max_per_day
+
+    async def async_load_ai_budget(self) -> None:
+        """Load persisted daily AI budget from storage (called on setup)."""
+        try:
+            stored = await self._ai_budget_store.async_load()
+        except Exception as err:
+            _LOGGER.debug("AI budget store load failed: %s", err)
+            stored = None
+        if isinstance(stored, dict):
+            stored_date: str = stored.get("date", "")
+            today = dt_util.now().date().isoformat()
+            if stored_date == today:
+                try:
+                    self._ai_day_count = int(stored.get("count", 0))
+                    self._ai_day_stamp = stored_date
+                except (TypeError, ValueError):
+                    pass
+            # else: stored day != today → counter stays at 0 (already reset for new day)
+
+    async def _async_save_ai_budget(self) -> None:
+        """Persist daily AI budget count to storage."""
+        try:
+            await self._ai_budget_store.async_save(
+                {
+                    "date": self._ai_day_stamp,
+                    "count": self._ai_day_count,
+                }
+            )
+        except Exception as err:
+            _LOGGER.debug("AI budget store save failed: %s", err)
+
+    def _ai_rate_allowed(self, cam_id: str) -> bool:
+        """Cooldown + daily-budget gate for AUTO AI analyses."""
+        opts = self.options
+        try:
+            cooldown = float(opts.get("ai_cooldown_seconds", 60) or 0)
+        except (TypeError, ValueError):
+            cooldown = 60.0
+        used, max_per_day = self.ai_budget_state()
+        if max_per_day and (used + self._ai_in_flight) >= max_per_day:
+            # Use the SAME local-date source as ai_budget_state() above so the
+            # one-shot "budget reached" log re-arms in lockstep with the daily
+            # counter reset (a UTC date here would suppress the log for the
+            # hours between local and UTC midnight). Lesson: events-today UTC bug.
+            today = dt_util.now().date().isoformat()
+            if self._ai_budget_logged_day != today:
+                self._ai_budget_logged_day = today
+                _LOGGER.info(
+                    "AI analysis daily budget of %d reached — skipping until tomorrow",
+                    max_per_day,
+                )
+            return False
+        last = self._ai_last_call.get(cam_id, float("-inf"))
+        return (time.monotonic() - last) >= cooldown
+
+    def _ai_record_call(self, cam_id: str) -> None:
+        """Record an AI analysis for cooldown + daily-budget accounting."""
+        self.ai_budget_state()  # ensure the day-rollover runs first
+        self._ai_last_call[cam_id] = time.monotonic()
+        self._ai_day_count += 1
+        self.hass.async_create_task(self._async_save_ai_budget())
+
+    async def async_generate_ai_description(
+        self, cam_id: str, *, force: bool = False
+    ) -> str | None:
+        """Generate an AI description of a camera's current snapshot via ai_task.
+
+        Shared by the notify-include path (F2) and the on-motion auto path.
+        Returns the description text, or None when skipped (rate-limited,
+        camera unknown, ai_task unavailable, or empty result). Auto callers
+        pass force=False so the cooldown + daily budget apply; manual/service
+        callers pass force=True to bypass the cooldown (still counts toward
+        the daily budget). Never raises — failures return None so the calling
+        notification/event path is never broken.
+        """
+        if not self.options.get("enable_ai_description", False):
+            return None
+        if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
+            return None
+        if not force and not self._ai_window_allowed():
+            return None
+        if not force and not self._ai_rate_allowed(cam_id):
+            # Reuse cached description only if not stale and not from a privacy era
+            cached_entry = self.data.get(cam_id, {}).get("ai_description", {})
+            cached_text: str | None = cached_entry.get("text")
+            if cached_text and not self._shc_state_cache.get(cam_id, {}).get(
+                "privacy_mode"
+            ):
+                # Reject cache if generated_at is older than cooldown window or 300s cap
+                try:
+                    opts_cs = self.options
+                    cooldown_secs = float(opts_cs.get("ai_cooldown_seconds", 60) or 0)
+                    max_age = min(cooldown_secs, 300.0)
+                    gen_at_str: str | None = cached_entry.get("generated_at")
+                    if gen_at_str:
+                        gen_dt = datetime.fromisoformat(gen_at_str)
+                        age_secs = (datetime.now(UTC) - gen_dt).total_seconds()
+                        if max_age > 0 and age_secs <= max_age:
+                            return cached_text
+                except Exception as _cache_err:
+                    _LOGGER.debug("AI cache staleness check failed: %s", _cache_err)
+            return None
+        cam_entity = getattr(self, "_camera_entities", {}).get(cam_id)
+        if cam_entity is None:
+            return None
+        entity_id = cam_entity.entity_id
+        opts = self.options
+        prompt = opts.get("ai_describe_prompt") or (
+            "Du bist eine Überwachungskamera-Assistenz. Melde NUR"
+            " sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise"
+            " sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere,"
+            " Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die"
+            " Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne"
+            " KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und"
+            " Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes"
+            " erkennbar ist, sage das kurz, z. B.: Keine"
+            " sicherheitsrelevanten Beobachtungen."
+        )
+        language = (opts.get("ai_describe_language") or "").strip() or "Deutsch"
+        full_instructions = (
+            f"{prompt}\n\nRespond only in {language}."
+            f" Antworte ausschließlich auf {language}."
+        )
+        ai_task_entity = (opts.get("ai_task_entity") or "").strip()
+        ai_call_data: dict[str, Any] = {
+            "task_name": "Bosch camera snapshot",
+            "instructions": full_instructions,
+            "attachments": [
+                {
+                    "media_content_id": f"media-source://camera/{entity_id}",
+                    "media_content_type": "image/jpeg",
+                }
+            ],
+        }
+        if ai_task_entity:
+            ai_call_data["entity_id"] = ai_task_entity
+        self._ai_in_flight += 1
+        _ai_resp: Any = None
+        _text_result: str | None = None
+        try:
+            async with asyncio.timeout(20):
+                _ai_resp = await self.hass.services.async_call(
+                    "ai_task",
+                    "generate_data",
+                    ai_call_data,
+                    blocking=True,
+                    return_response=True,
+                )
+            if _ai_resp is not None:
+                _text_candidate = (
+                    str(_ai_resp.get("data", ""))
+                    if isinstance(_ai_resp, dict)
+                    else str(_ai_resp or "")
+                ).strip()
+                if _text_candidate:
+                    _text_result = _text_candidate
+                    # Record the call while _ai_in_flight is still 1 so the
+                    # budget counter reflects in-progress work correctly.
+                    self._ai_record_call(cam_id)
+        except TimeoutError:
+            _LOGGER.debug("AI description timed out (20s) for %s", cam_id[:8])
+        except Exception as err:
+            _LOGGER.debug("AI description generate failed for %s: %s", cam_id[:8], err)
+        finally:
+            self._ai_in_flight -= 1
+        if _text_result is None:
+            return None
+        text = _text_result
+        generated_at = datetime.now(UTC).isoformat()
+        if cam_id in self.data:
+            self.data[cam_id]["ai_description"] = {
+                "text": text,
+                "generated_at": generated_at,
+                "ai_task_entity": ai_task_entity or "default",
+            }
+            self.async_set_updated_data(self.data)
+        self.hass.bus.async_fire(
+            "bosch_shc_camera_ai_description",
+            {
+                "camera_id": cam_id,
+                "entity_id": entity_id,
+                "description": text,
+                "generated_at": generated_at,
+            },
+        )
+        return text
+
     async def async_fetch_fresh_event_snapshot(self, cam_id: str) -> bytes | None:
         """Fetch fresh events from Bosch API and return the latest event JPEG.
 
@@ -5768,7 +6106,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         ]
         # Also try Unix socket if available
         config_dir = self.hass.config.config_dir
-        sock_path = os.path.join(config_dir, "go2rtc.sock") if config_dir else None
+        sock_path: str | None = None
+        for _candidate in (
+            os.path.join(config_dir, "go2rtc.sock") if config_dir else None,
+            "/homeassistant/go2rtc.sock",
+        ):
+            if _candidate and os.path.exists(_candidate):
+                sock_path = _candidate
+                break
 
         for url in endpoints:
             try:
@@ -5808,8 +6153,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # not. This catches any silent mis-registration.
                             verified = False
                             try:
-                                check_url = put_url + f"?src={stream_name}"
-                                async with s.get(check_url) as check_resp:
+                                async with s.get(
+                                    put_url, params={"src": stream_name}
+                                ) as check_resp:
                                     if check_resp.status == 200:
                                         verified = True
                             except (TimeoutError, aiohttp.ClientError):
@@ -5911,10 +6257,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # transient WiFi jitter; without this signal the stream stays dead
         # until the next heartbeat (up to 3600s for Indoor Gen2).
         def _died_callback() -> None:
+            def _on_loop() -> None:
+                if self.hass.is_stopping:
+                    return
+                t = self.hass.async_create_task(self._on_tls_proxy_died(cam_id))
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._bg_tasks.discard)
+
             try:
-                self.hass.loop.call_soon_threadsafe(
-                    lambda: self.hass.async_create_task(self._on_tls_proxy_died(cam_id))
-                )
+                self.hass.loop.call_soon_threadsafe(_on_loop)
             except RuntimeError:
                 pass  # event loop closed (HA shutting down)
 
@@ -7234,9 +7585,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # maintenance announcement ~20 times because every HA restart wiped
     # `_maintenance_notified_key` and the next coordinator tick re-fired
     # the active-state notify.
-    from homeassistant.helpers.storage import Store
-
-    _maint_key_store: Store = Store(hass, version=1, key=f"{DOMAIN}_maint_notified")
+    _maint_key_store: Store[dict[str, str]] = Store(
+        hass, version=1, key=f"{DOMAIN}_maint_notified"
+    )
     coordinator._maint_notified_store = _maint_key_store
     _persisted_maint_key = await _maint_key_store.async_load() or None
     if isinstance(_persisted_maint_key, dict):
@@ -7470,6 +7821,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Start proactive background token refresh (5 min before JWT expiry)
     coordinator._schedule_token_refresh()
 
+    # Restore persisted daily AI budget so the cap survives restart/reload.
+    await coordinator.async_load_ai_budget()
+
     # Quality-Scale Bronze (runtime-data): store on entry.runtime_data, not hass.data[DOMAIN].
     # HA clears runtime_data automatically on unload — no manual cleanup needed.
     entry.runtime_data = coordinator
@@ -7670,6 +8024,242 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for _evt_type in _WEBHOOK_EVENT_TYPES:
         entry.async_on_unload(hass.bus.async_listen(_evt_type, _async_deliver_webhook))
 
+    # describe_snapshot service — ask HA ai_task to describe a camera snapshot
+    async def handle_describe_snapshot(call: ServiceCall) -> dict[str, Any]:
+        """Ask HA's ai_task to describe the current camera snapshot."""
+        import datetime as _dt_mod
+
+        camera_id: str = call.data.get("camera_id", "").strip()
+        entity_id_arg: str = call.data.get("entity_id", "").strip()
+        instructions: str = call.data.get("instructions", "").strip()
+        ai_task_entity_arg: str = call.data.get("ai_task_entity", "").strip()
+
+        if not camera_id and not entity_id_arg:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id or entity_id"},
+            )
+
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "describe_snapshot",
+                    "error": "no loaded entries",
+                },
+            )
+        resolved_entity_id: str = ""
+        resolved_cam_id: str = ""
+        coord: Any = None
+        cur_opts: dict[str, Any] = {}
+        for entry_inst in loaded:
+            _coord = entry_inst.runtime_data
+            if not _coord:
+                continue
+            if camera_id:
+                cam_entity = getattr(_coord, "_camera_entities", {}).get(camera_id)
+                if cam_entity:
+                    coord = _coord
+                    cur_opts = get_options(entry_inst)
+                    resolved_entity_id = cam_entity.entity_id
+                    resolved_cam_id = camera_id
+                    break
+            elif entity_id_arg:
+                for cid, cent in getattr(_coord, "_camera_entities", {}).items():
+                    if cent.entity_id == entity_id_arg:
+                        coord = _coord
+                        cur_opts = get_options(entry_inst)
+                        resolved_entity_id = entity_id_arg
+                        resolved_cam_id = cid
+                        break
+                if coord:
+                    break
+        if coord is None:
+            # Fallback to first available coordinator for options
+            for _fb_entry in loaded:
+                if _fb_entry.runtime_data:
+                    coord = _fb_entry.runtime_data
+                    cur_opts = get_options(_fb_entry)
+                    break
+        if coord is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "describe_snapshot",
+                    "error": "no active coordinator",
+                },
+            )
+
+        # Privacy guard: do not analyze a blank/privacy frame via the manual service
+        if resolved_cam_id and coord._shc_state_cache.get(resolved_cam_id, {}).get(
+            "privacy_mode"
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="privacy_active",
+            )
+
+        if not resolved_entity_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+                translation_placeholders={
+                    "kind": "camera entity",
+                    "id": camera_id or entity_id_arg,
+                },
+            )
+
+        prompt = instructions or cur_opts.get(
+            "ai_describe_prompt",
+            "Du bist eine Überwachungskamera-Assistenz. Melde NUR"
+            " sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise"
+            " sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere,"
+            " Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die"
+            " Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne"
+            " KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und"
+            " Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes"
+            " erkennbar ist, sage das kurz, z. B.: Keine"
+            " sicherheitsrelevanten Beobachtungen.",
+        )
+        # Language resolution: per-call override → option → fallback "Deutsch"
+        language: str = (
+            call.data.get("language", "").strip()
+            or (cur_opts.get("ai_describe_language") or "").strip()
+            or "Deutsch"
+        )
+        # Append bilingual language directive so the model replies in the chosen
+        # language regardless of its training defaults.
+        full_instructions: str = f"{prompt}\n\nRespond only in {language}. Antworte ausschließlich auf {language}."
+        ai_task_entity_used: str = (
+            ai_task_entity_arg or (cur_opts.get("ai_task_entity") or "").strip()
+        )
+
+        ai_call_data: dict[str, Any] = {
+            "task_name": "Bosch camera snapshot",
+            "instructions": full_instructions,
+            "attachments": [
+                {
+                    "media_content_id": f"media-source://camera/{resolved_entity_id}",
+                    "media_content_type": "image/jpeg",
+                }
+            ],
+        }
+        if ai_task_entity_used:
+            ai_call_data["entity_id"] = ai_task_entity_used
+
+        # Count this manual call as in-flight so a concurrent AUTO describe
+        # (whose budget gate reads ``used + _ai_in_flight``) sees the work and
+        # does not push the daily total over the cap. Service-path itself has no
+        # budget gate (manual = always allowed), but it must stay visible.
+        _track_in_flight = hasattr(coord, "_ai_in_flight")
+        if _track_in_flight:
+            coord._ai_in_flight += 1
+        try:
+            async with asyncio.timeout(20):
+                resp = await hass.services.async_call(
+                    "ai_task",
+                    "generate_data",
+                    ai_call_data,
+                    blocking=True,
+                    return_response=True,
+                )
+        except TimeoutError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ai_task_unavailable",
+                translation_placeholders={"error": "timed out (20s)"},
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ai_task_unavailable",
+                translation_placeholders={"error": str(err)},
+            ) from err
+        finally:
+            if _track_in_flight:
+                coord._ai_in_flight -= 1
+
+        text: str = (
+            str(resp.get("data", "")) if isinstance(resp, dict) else str(resp or "")
+        ).strip()
+        if not text:
+            return {"description": ""}
+        if resolved_cam_id:
+            coord._ai_record_call(resolved_cam_id)
+        generated_at = _dt_mod.datetime.now(_dt_mod.UTC).isoformat()
+        if resolved_cam_id and resolved_cam_id in coord.data:
+            coord.data[resolved_cam_id]["ai_description"] = {
+                "text": text,
+                "generated_at": generated_at,
+                "ai_task_entity": ai_task_entity_used or "default",
+            }
+            coord.async_set_updated_data(coord.data)
+        hass.bus.async_fire(
+            "bosch_shc_camera_ai_description",
+            {
+                "camera_id": resolved_cam_id,
+                "entity_id": resolved_entity_id,
+                "description": text,
+                "generated_at": generated_at,
+            },
+        )
+        return {"description": text}
+
+    # ── Auto-describe on motion (opt-in) ─────────────────────────────────────
+    # _AI_MOTION_DEBOUNCE / _AI_MOTION_DEBOUNCE_SEC are module-level so the
+    # debounce state survives integration reloads — see definition near the top.
+
+    async def _async_auto_describe(event: Any) -> None:
+        """Auto-call describe_snapshot on motion/person events (debounced)."""
+        cam_id_evt: str = event.data.get("camera_id", "")
+        now_ts = hass.loop.time()
+        last = _AI_MOTION_DEBOUNCE.get(cam_id_evt, float("-inf"))
+        if now_ts - last < _AI_MOTION_DEBOUNCE_SEC:
+            return
+        loaded_entries = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded_entries:
+            return
+        # Resolve the correct coordinator for this camera before reading options.
+        found_coord: Any = None
+        for _entry in loaded_entries:
+            coord_inst = _entry.runtime_data
+            if coord_inst:
+                cam_entity_obj = getattr(coord_inst, "_camera_entities", {}).get(
+                    cam_id_evt
+                )
+                if cam_entity_obj:
+                    found_coord = coord_inst
+                    break
+        if found_coord is None:
+            _LOGGER.debug("auto-describe: no entity found for cam_id %s", cam_id_evt)
+            return
+        ai_opts = get_options(found_coord._entry)
+        if not ai_opts.get("ai_describe_on_motion", False):
+            return
+        # Update debounce timestamp only after confirming the option is enabled —
+        # writing it before the check would suppress the first real describe call
+        # if the user enables the option within the debounce window.
+        _AI_MOTION_DEBOUNCE[cam_id_evt] = now_ts
+        try:
+            await found_coord.async_generate_ai_description(cam_id_evt, force=False)
+        except Exception as err:
+            _LOGGER.debug("auto-describe failed for %s: %s", cam_id_evt, err)
+
+    for _motion_evt in ("bosch_shc_camera_motion", "bosch_shc_camera_person"):
+        entry.async_on_unload(hass.bus.async_listen(_motion_evt, _async_auto_describe))
+
+    if not hass.services.has_service(DOMAIN, "describe_snapshot"):
+        hass.services.async_register(
+            DOMAIN,
+            "describe_snapshot",
+            handle_describe_snapshot,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     # send_event_webhook service — test/manual trigger
     # Uses live-entry iteration so the handler always reads the current options
     # even after an integration reload — no stale closure over a setup-time entry.
@@ -7694,6 +8284,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
         if not url:
             _LOGGER.warning("send_event_webhook: webhook_url is not configured")
+            return
+        if not url.lower().startswith(("http://", "https://")):
+            _LOGGER.warning(
+                "send_event_webhook: webhook_url %r has invalid scheme — only http/https allowed",
+                url[:50],
+            )
             return
         event_type_val: str = call.data.get("event_type", "MOVEMENT")
         entity_id_val: str = call.data.get("entity_id", "")
@@ -7822,6 +8418,9 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     listener = getattr(coord, "_stream_log_listener", None)
     if listener is not None:
         logging.getLogger("homeassistant.components.stream").removeHandler(listener)
+        # Nullify the coordinator reference so any in-flight emit() calls
+        # during the reload gap bail out early instead of accessing a dead object.
+        listener._coordinator = None
         coord._stream_log_listener = None
 
 
@@ -7924,6 +8523,12 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_create_rule(call: ServiceCall) -> None:
         """Create a cloud-side schedule rule for a camera."""
         cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
         name = call.data.get("name", "HA Rule")
         start_time = call.data.get("start_time", "00:00:00")
         end_time = call.data.get("end_time", "23:59:00")
@@ -7981,6 +8586,12 @@ def _register_services(hass: HomeAssistant) -> None:
         """Delete a cloud-side schedule rule."""
         cam_id = call.data.get("camera_id", "")
         rule_id = call.data.get("rule_id", "")
+        if not cam_id or not rule_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id and rule_id"},
+            )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
@@ -8083,7 +8694,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 try:
                     async with asyncio.timeout(10):
                         async with session.put(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}",
                             headers=headers,
                             json=existing,
                         ) as resp:
@@ -8143,7 +8754,19 @@ def _register_services(hass: HomeAssistant) -> None:
                             "field": key,
                         },
                     )
-                val = float(z[key])
+                try:
+                    val = float(z[key])
+                except (TypeError, ValueError) as err:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="value_out_of_range",
+                        translation_placeholders={
+                            "kind": "zone",
+                            "index": str(i),
+                            "field": key,
+                            "value": str(z[key]),
+                        },
+                    ) from err
                 if val < 0.0 or val > 1.0:
                     raise ServiceValidationError(
                         translation_domain=DOMAIN,
@@ -8261,7 +8884,13 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "notification_id": "bosch_motion_zones",
                                     },
                                 )
-                                raise HomeAssistantError(msg)
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="privacy_blocked",
+                                    translation_placeholders={
+                                        "action": "get_motion_zones"
+                                    },
+                                )
                             else:
                                 body = await resp.text()
                                 raise HomeAssistantError(
@@ -8427,7 +9056,13 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "notification_id": "bosch_privacy_masks",
                                     },
                                 )
-                                raise HomeAssistantError(msg)
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="privacy_blocked",
+                                    translation_placeholders={
+                                        "action": "get_privacy_masks"
+                                    },
+                                )
                             else:
                                 body = await resp.text()
                                 raise HomeAssistantError(
@@ -8478,6 +9113,30 @@ def _register_services(hass: HomeAssistant) -> None:
                             "kind": "mask",
                             "index": str(i),
                             "field": key,
+                        },
+                    )
+                try:
+                    val = float(m[key])
+                except (TypeError, ValueError) as err:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="value_out_of_range",
+                        translation_placeholders={
+                            "kind": "mask",
+                            "index": str(i),
+                            "field": key,
+                            "value": str(m[key]),
+                        },
+                    ) from err
+                if val < 0.0 or val > 1.0:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="value_out_of_range",
+                        translation_placeholders={
+                            "kind": "mask",
+                            "index": str(i),
+                            "field": key,
+                            "value": f"{val:.3f}",
                         },
                     )
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
@@ -8716,7 +9375,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             json={
                                 "videoInputId": cam_id,
                                 "title": new_name,
-                                "timeZone": "Europe/Berlin",
+                                "timeZone": hass.config.time_zone,
                             },
                         ) as resp:
                             if resp.status in (200, 201, 204):
@@ -8772,9 +9431,14 @@ def _register_services(hass: HomeAssistant) -> None:
                         ) as resp:
                             if resp.status in (200, 201):
                                 data = await resp.json()
+                                email_domain = (
+                                    email.split("@")[-1]
+                                    if "@" in email
+                                    else "[no-domain]"
+                                )
                                 _LOGGER.info(
-                                    "Friend invited: %s (ID: %s)",
-                                    email,
+                                    "Friend invited: *@%s (ID: %s)",
+                                    email_domain,
                                     data.get("id", "?"),
                                 )
                                 await hass.services.async_call(
@@ -8984,6 +9648,13 @@ def _register_services(hass: HomeAssistant) -> None:
         file_path = (call.data.get("file_path") or "").strip()
         camera = (call.data.get("camera") or "").strip()
         date = (call.data.get("date") or "").strip()
+
+        if not file_path and not camera:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "file_path or camera"},
+            )
 
         deleted = 0
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):

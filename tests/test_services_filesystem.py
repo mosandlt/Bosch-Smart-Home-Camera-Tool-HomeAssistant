@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import ServiceValidationError
 
 MODULE = "custom_components.bosch_shc_camera"
 
@@ -330,7 +331,7 @@ class TestHandleDeleteEvent:
 
     @pytest.mark.asyncio
     async def test_no_camera_no_path_zero_deletions(self, tmp_path):
-        """Neither `file_path` nor `camera` given → 0 deletions, no crash."""
+        """Neither `file_path` nor `camera` given → ServiceValidationError raised."""
         from custom_components.bosch_shc_camera import _register_services
 
         base = tmp_path / "events"
@@ -346,7 +347,7 @@ class TestHandleDeleteEvent:
 
         _register_services(hass)
         handler = _get_handlers(hass)["delete_event"]
-        await handler(MagicMock(data={}))
+        with pytest.raises(ServiceValidationError):
+            await handler(MagicMock(data={}))
 
         assert keep.exists()
-        assert "Deleted 0" in hass.services.async_call.call_args[0][2]["message"]

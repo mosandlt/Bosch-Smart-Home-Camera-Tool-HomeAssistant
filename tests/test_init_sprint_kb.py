@@ -953,6 +953,110 @@ class TestFetchEventsTimeoutSwallowed:
         )
 
 
+class TestFetchEventsTransientFailurePreservesState:
+    """Cross-version parity with the ioBroker ``_lastEventFetchAt`` fix.
+
+    A transient event-fetch failure must NOT (a) blank a camera's cached events
+    or (b) advance ``_last_events`` — otherwise the next retry backs off a full
+    poll interval (up to 300 s while FCM is healthy) and the events-today count
+    drops to 0 in the meantime.
+    """
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_keeps_cached_events(self):
+        """last_event id changed + /events times out → cached events preserved."""
+        old_events = [{"id": "ev-old", "eventType": "MOVEMENT"}]
+        coord = _make_coord(
+            _async_local_tcp_ping=AsyncMock(return_value=True),
+            _last_event_ids={CAM_A: "ev-old"},
+            _cached_events={CAM_A: list(old_events)},
+            _last_events=float("-inf"),
+        )
+        last_ev_resp = _make_resp(200, json_val={"id": "ev-new"})
+        events_timeout = MagicMock()
+        events_timeout.__aenter__ = AsyncMock(side_effect=TimeoutError())
+        events_timeout.__aexit__ = AsyncMock(return_value=None)
+        session = _url_session(
+            _base_url_map(
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_timeout,
+                }
+            )
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._cached_events.get(CAM_A) == old_events, (
+            "Transient /events failure must not blank the cached events"
+        )
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_does_not_advance_last_events(self):
+        """Every fetch fails → _last_events stays so the poll retries next tick."""
+        coord = _make_coord(
+            _async_local_tcp_ping=AsyncMock(return_value=True),
+            _last_event_ids={CAM_A: "ev-old"},
+            _cached_events={CAM_A: [{"id": "ev-old"}]},
+            _last_events=float("-inf"),
+        )
+        last_ev_resp = _make_resp(200, json_val={"id": "ev-new"})
+        events_timeout = MagicMock()
+        events_timeout.__aenter__ = AsyncMock(side_effect=TimeoutError())
+        events_timeout.__aexit__ = AsyncMock(return_value=None)
+        session = _url_session(
+            _base_url_map(
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_timeout,
+                }
+            )
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._last_events == float("-inf"), (
+            "Failed event poll must not advance _last_events"
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_fetch_advances_last_events(self):
+        """A definitive 200 fetch advances _last_events (positive control)."""
+        coord = _make_coord(
+            _async_local_tcp_ping=AsyncMock(return_value=True),
+            _last_event_ids={},
+            _cached_events={},
+            _last_events=float("-inf"),
+        )
+        last_ev_resp = _make_resp(200, json_val={"id": "ev-new"})
+        events_resp = _make_resp(
+            200, json_val=[{"id": "ev-new", "eventType": "MOVEMENT"}]
+        )
+        session = _url_session(
+            _base_url_map(
+                **{
+                    f"/{CAM_A}/last_event": last_ev_resp,
+                    "/events?videoInputId": events_resp,
+                }
+            )
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._last_events != float("-inf"), (
+            "Successful event fetch must advance _last_events"
+        )
+
+
 class TestDoEventsFalse:
     """do_events=False → /events endpoint never called.
 

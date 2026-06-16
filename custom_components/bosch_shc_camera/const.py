@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.6.0"
+CARD_VERSION = "13.7.0"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -34,7 +34,7 @@ TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
 # Subprocess-lifecycle timeouts (recorder.py). Grace = SIGTERM→SIGKILL window;
 # kill_wait = post-SIGKILL wait_for; stderr_drain = drain pipe before close;
 # ffmpeg_init = NVR FFmpeg process init wait.
-TIMEOUT_RECORDER_GRACE = 5.0
+TIMEOUT_RECORDER_GRACE = 20.0
 TIMEOUT_RECORDER_KILL_WAIT = 2.0
 TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
 TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
@@ -175,6 +175,33 @@ DEFAULT_OPTIONS = {
     # Default ON: prevents TLS-channel contention → stream freeze on motion burst.
     # See stream-freeze-on-motion-event-contention.md.
     "defer_diag_during_stream": True,
+    # ── AI Snapshot Description ───────────────────────────────────────────────
+    # Opt-in: when enabled, exposes a describe_snapshot service and a per-camera
+    # sensor holding the last AI-generated description.
+    "enable_ai_description": False,
+    "ai_task_entity": "",  # empty → HA chooses the preferred ai_task entity
+    "ai_describe_prompt": "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen.",
+    "ai_describe_language": "Deutsch",
+    "ai_describe_on_motion": False,
+    # Append the AI snapshot description to the event push notification
+    # ("Stage 2" snapshot alert). Opt-in (default off). Rate-limited by the
+    # two budget knobs below so frequent motion events do not burn AI credits.
+    "ai_notify_include_description": False,
+    # Per-camera minimum seconds between AUTO analyses (notify-include +
+    # on-motion). Manual describe_snapshot bypasses the cooldown.
+    "ai_cooldown_seconds": 60,
+    # Global daily budget across all cameras (resets at local midnight). When
+    # exceeded, auto analyses are skipped until the next day. 0 = unlimited.
+    "ai_max_per_day": 100,
+    # Activation time window for AUTO AI analyses (on-motion + notify-include).
+    # "HH:MM" or "HH:MM:SS". Both empty = no time gate (always active).
+    # If end < start the window spans midnight (e.g. 22:00–06:00).
+    "ai_active_time_start": "",
+    "ai_active_time_end": "",
+    # Condition-entity gate: entity_id whose state must match ai_active_condition_state
+    # before AUTO analyses are allowed. Empty = no condition gate.
+    "ai_active_condition_entity": "",
+    "ai_active_condition_state": "not_home",
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
@@ -196,3 +223,19 @@ CONF_ENABLE_PTZ_CONTROLS = "enable_ptz_controls"
 # if diagnostic sensors must stay current even while a stream is running.
 CONF_DEFER_DIAG_DURING_STREAM = "defer_diag_during_stream"
 DEFAULT_DEFER_DIAG_DURING_STREAM = True
+
+# ── AI Snapshot Description ───────────────────────────────────────────────────
+CONF_ENABLE_AI_DESCRIPTION = "enable_ai_description"
+CONF_AI_TASK_ENTITY = "ai_task_entity"
+CONF_AI_DESCRIBE_PROMPT = "ai_describe_prompt"
+CONF_AI_DESCRIBE_LANGUAGE = "ai_describe_language"
+CONF_AI_DESCRIBE_ON_MOTION = "ai_describe_on_motion"
+CONF_AI_NOTIFY_INCLUDE_DESCRIPTION = "ai_notify_include_description"
+CONF_AI_COOLDOWN_SECONDS = "ai_cooldown_seconds"
+CONF_AI_MAX_PER_DAY = "ai_max_per_day"
+CONF_AI_ACTIVE_TIME_START = "ai_active_time_start"
+CONF_AI_ACTIVE_TIME_END = "ai_active_time_end"
+CONF_AI_ACTIVE_CONDITION_ENTITY = "ai_active_condition_entity"
+CONF_AI_ACTIVE_CONDITION_STATE = "ai_active_condition_state"
+DEFAULT_AI_DESCRIBE_PROMPT = "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen."
+DEFAULT_AI_DESCRIBE_LANGUAGE = "Deutsch"

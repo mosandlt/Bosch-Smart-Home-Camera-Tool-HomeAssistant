@@ -30,7 +30,14 @@ from custom_components.bosch_shc_camera.config_flow import (
     BoschCameraOptionsFlow,
     _flatten_sections,
 )
-from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+from custom_components.bosch_shc_camera.const import (
+    CONF_AI_ACTIVE_CONDITION_ENTITY,
+    CONF_AI_ACTIVE_TIME_END,
+    CONF_AI_ACTIVE_TIME_START,
+    CONF_AI_MAX_PER_DAY,
+    CONF_AI_TASK_ENTITY,
+    DEFAULT_OPTIONS,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -309,6 +316,19 @@ class TestEventsStorageSection:
         assert data["enable_local_save"] is True
 
     @pytest.mark.asyncio
+    async def test_enable_local_save_int_coercion(self):
+        """enable_local_save int 1/0 must be coerced to bool (was missing from coerce list)."""
+        flow = BoschCameraOptionsFlow(_make_entry())
+        data = await _submit(flow, {"events_storage": {"enable_local_save": 1}})
+        assert data["enable_local_save"] is True
+        assert isinstance(data["enable_local_save"], bool)
+
+        flow2 = BoschCameraOptionsFlow(_make_entry())
+        data2 = await _submit(flow2, {"events_storage": {"enable_local_save": 0}})
+        assert data2["enable_local_save"] is False
+        assert isinstance(data2["enable_local_save"], bool)
+
+    @pytest.mark.asyncio
     async def test_download_path_saved(self):
         flow = BoschCameraOptionsFlow(_make_entry())
         data = await _submit(
@@ -411,6 +431,148 @@ class TestNvrSection:
         flow = BoschCameraOptionsFlow(_make_entry())
         data = await _submit(flow, {"nvr": {"nvr_storage_target": "ftp"}})
         assert data["nvr_storage_target"] == "ftp"
+
+
+class TestAiSection:
+    """Tests for AI options schema validation (E-P1 / E-P2 / E-P3)."""
+
+    # ── E-P1: EntitySelector fields accept empty string (gate-disable) ──────────
+
+    def test_ai_task_entity_empty_string_allowed(self) -> None:
+        """Clearing the ai_task entity selector must NOT raise (E-P1)."""
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_TASK_ENTITY: ""})
+        assert result[CONF_AI_TASK_ENTITY] == ""
+
+    def test_ai_task_entity_valid_entity_id_allowed(self) -> None:
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_TASK_ENTITY: "ai_task.my_llm"})
+        assert result[CONF_AI_TASK_ENTITY] == "ai_task.my_llm"
+
+    def test_ai_active_condition_entity_empty_string_allowed(self) -> None:
+        """Clearing the condition entity selector must NOT raise (E-P1)."""
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_CONDITION_ENTITY: ""})
+        assert result[CONF_AI_ACTIVE_CONDITION_ENTITY] == ""
+
+    def test_ai_active_condition_entity_valid_entity_id_allowed(self) -> None:
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_CONDITION_ENTITY: "input_boolean.away"})
+        assert result[CONF_AI_ACTIVE_CONDITION_ENTITY] == "input_boolean.away"
+
+    # ── E-P2: ai_max_per_day has no upper cap (0 = unlimited is honoured) ───────
+
+    def test_ai_max_per_day_zero_allowed(self) -> None:
+        """0 = unlimited must pass (E-P2)."""
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_MAX_PER_DAY: 0})
+        assert result[CONF_AI_MAX_PER_DAY] == 0
+
+    def test_ai_max_per_day_large_value_allowed(self) -> None:
+        """Values beyond old max=100000 cap must now pass (E-P2)."""
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_MAX_PER_DAY: 500000})
+        assert result[CONF_AI_MAX_PER_DAY] == 500000
+
+    def test_ai_max_per_day_negative_rejected(self) -> None:
+        """Negative budgets must be rejected."""
+        import voluptuous as vol
+
+        schema = _get_section_schema("ai")
+        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
+            schema({CONF_AI_MAX_PER_DAY: -1})
+
+    # ── E-P3: time fields accept HH:MM / HH:MM:SS or empty (gate-disable) ───────
+
+    def test_ai_active_time_start_empty_allowed(self) -> None:
+        """Empty string must be allowed to disable the time gate (E-P3)."""
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_TIME_START: ""})
+        assert result[CONF_AI_ACTIVE_TIME_START] == ""
+
+    def test_ai_active_time_end_empty_allowed(self) -> None:
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_TIME_END: ""})
+        assert result[CONF_AI_ACTIVE_TIME_END] == ""
+
+    def test_ai_active_time_start_hhmm_valid(self) -> None:
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_TIME_START: "08:00"})
+        assert result[CONF_AI_ACTIVE_TIME_START] == "08:00"
+
+    def test_ai_active_time_end_hhmmss_valid(self) -> None:
+        schema = _get_section_schema("ai")
+        result = schema({CONF_AI_ACTIVE_TIME_END: "22:30:00"})
+        assert result[CONF_AI_ACTIVE_TIME_END] == "22:30:00"
+
+    def test_ai_active_time_start_garbage_rejected(self) -> None:
+        """'midnight' and other prose values must be rejected (E-P3)."""
+        import voluptuous as vol
+
+        schema = _get_section_schema("ai")
+        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
+            schema({CONF_AI_ACTIVE_TIME_START: "midnight"})
+
+    def test_ai_active_time_end_out_of_range_rejected(self) -> None:
+        """25:00 is not a valid time."""
+        import voluptuous as vol
+
+        schema = _get_section_schema("ai")
+        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
+            schema({CONF_AI_ACTIVE_TIME_END: "25:00"})
+
+    def test_ai_active_time_start_invalid_minutes_rejected(self) -> None:
+        """08:60 has invalid minutes."""
+        import voluptuous as vol
+
+        schema = _get_section_schema("ai")
+        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
+            schema({CONF_AI_ACTIVE_TIME_START: "08:60"})
+
+    # ── E-P1 + round-trip: submit AI section with entity cleared ────────────────
+
+    @pytest.mark.asyncio
+    async def test_ai_entity_fields_cleared_saves_empty_string(self) -> None:
+        """Submitting empty entity fields (gate disabled) must persist '' (E-P1)."""
+        flow = BoschCameraOptionsFlow(
+            _make_entry(
+                options={
+                    CONF_AI_TASK_ENTITY: "ai_task.old_llm",
+                    CONF_AI_ACTIVE_CONDITION_ENTITY: "input_boolean.away",
+                }
+            )
+        )
+        data = await _submit(
+            flow,
+            {
+                "ai": {
+                    CONF_AI_TASK_ENTITY: "",
+                    CONF_AI_ACTIVE_CONDITION_ENTITY: "",
+                    CONF_AI_ACTIVE_TIME_START: "",
+                    CONF_AI_ACTIVE_TIME_END: "",
+                }
+            },
+        )
+        assert data[CONF_AI_TASK_ENTITY] == ""
+        assert data[CONF_AI_ACTIVE_CONDITION_ENTITY] == ""
+
+    @pytest.mark.asyncio
+    async def test_ai_time_gate_with_valid_times_saves(self) -> None:
+        """Valid HH:MM times must be saved correctly."""
+        flow = BoschCameraOptionsFlow(_make_entry())
+        data = await _submit(
+            flow,
+            {
+                "ai": {
+                    CONF_AI_ACTIVE_TIME_START: "07:00",
+                    CONF_AI_ACTIVE_TIME_END: "23:00",
+                    CONF_AI_TASK_ENTITY: "",
+                    CONF_AI_ACTIVE_CONDITION_ENTITY: "",
+                }
+            },
+        )
+        assert data[CONF_AI_ACTIVE_TIME_START] == "07:00"
+        assert data[CONF_AI_ACTIVE_TIME_END] == "23:00"
 
 
 class TestAuthSection:
@@ -583,6 +745,92 @@ class TestFullRoundTrip:
         # The submitted 'polling' section was the only one sent.
         # enable_go2rtc not in the submit → but must be preserved via prior options merge.
         assert data["scan_interval"] == 45
+        assert data["enable_go2rtc"] is False  # non-submitted field preserved
+
+    @pytest.mark.asyncio
+    async def test_suggested_value_field_preserved_when_user_does_not_edit(self):
+        """Regression: smb_server (suggested_value-only, no default=) must NOT revert
+        to '' when the user opens options and saves without touching the SMB section.
+
+        Before the fix, the save path called async_create_entry(data=user_input)
+        directly; fields absent from user_input (because the user did not touch them)
+        were silently dropped, reverting to DEFAULT_OPTIONS values.
+
+        After the fix, async_step_init merges user_input on top of the existing opts:
+            merged = {**opts, **user_input}
+        so the persisted smb_server survives even when the user does not submit it.
+        """
+        prior = {
+            "smb_server": "192.168.2.25",
+            "smb_share": "bosch-events",
+            "smb_username": "nas_user",
+            "smb_password": "s3cret",
+            "alert_notify_service": "notify.mobile_app",
+            "alert_notify_information": "true",
+            "download_path": "/config/my_events",
+        }
+        flow = BoschCameraOptionsFlow(_make_entry(options=prior))
+        # User only touches the polling interval — does NOT submit any events_storage
+        # or fcm section fields → those suggested_value fields must survive.
+        data = await _submit(
+            flow,
+            {
+                "polling": {
+                    "scan_interval": 120,
+                    "interval_status": 300,
+                    "interval_events": 300,
+                    "snapshot_interval": 1800,
+                }
+            },
+        )
+        assert data["scan_interval"] == 120
+        # suggested_value-only fields — must keep saved values, NOT revert to "":
+        assert data["smb_server"] == "192.168.2.25"
+        assert data["smb_share"] == "bosch-events"
+        assert data["smb_username"] == "nas_user"
+        assert data["smb_password"] == "s3cret"
+        assert data["alert_notify_service"] == "notify.mobile_app"
+        assert data["alert_notify_information"] == "true"
+        assert data["download_path"] == "/config/my_events"
+
+    @pytest.mark.asyncio
+    async def test_suggested_value_field_preserved_on_migrate_to_oss_path(self):
+        """Regression: same merge must happen on the migrate_to_oss code path.
+
+        When the user clicks 'migrate to OSS client', async_update_entry is called
+        with the merged options dict.  Without the merge, suggested_value fields
+        absent from user_input were dropped before being persisted.
+        """
+        prior = {
+            "smb_server": "192.168.2.25",
+            "alert_notify_service": "notify.mobile_app",
+        }
+        entry = _make_entry(options=prior, bearer_token=_legacy_token())
+        # async_start_reauth is called as a coroutine on the config entry
+        entry.async_start_reauth = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+        flow = BoschCameraOptionsFlow(entry)
+        flow.hass = MagicMock()
+        flow.hass.config_entries = MagicMock()
+        flow.hass.async_create_task = MagicMock()
+
+        update_calls: list[dict] = []
+
+        def capture_update(e, **kw):  # type: ignore[no-untyped-def]
+            update_calls.append(kw)
+
+        flow.hass.config_entries.async_update_entry = capture_update
+        flow.async_abort = MagicMock(return_value={"type": "abort"})
+
+        # User submits with migrate_to_oss_client=True but no SMB fields
+        await flow.async_step_init(
+            user_input={"auth": {"force_relogin": False, "migrate_to_oss_client": True}}
+        )
+
+        assert update_calls, "async_update_entry was never called"
+        saved_options = update_calls[0].get("options", {})
+        # suggested_value fields absent from user_input must be in the persisted options
+        assert saved_options.get("smb_server") == "192.168.2.25"
+        assert saved_options.get("alert_notify_service") == "notify.mobile_app"
 
 
 # ── Coverage: all DEFAULT_OPTIONS keys are in OPTIONS_SECTIONS ────────────────

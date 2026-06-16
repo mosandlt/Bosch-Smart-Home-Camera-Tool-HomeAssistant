@@ -22,6 +22,7 @@ Coverage targets:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -312,21 +313,23 @@ class TestEventsTodaySensors:
         return coord
 
     def test_movement_today_counts_only_today_movement(self, stub_entry):
-        from homeassistant.util import dt as dt_util
-
         from custom_components.bosch_shc_camera.sensor import (
             BoschMovementEventsTodaySensor,
         )
 
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # Production code uses datetime.now(UTC) for date bucketing — use UTC date here.
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = [
-            {"eventType": "MOVEMENT", "timestamp": f"{today}T10:00:00"},
-            {"eventType": "MOVEMENT", "timestamp": f"{today}T11:00:00"},
+            {"eventType": "MOVEMENT", "timestamp": f"{today}T10:00:00.000Z"},
+            {"eventType": "MOVEMENT", "timestamp": f"{today}T11:00:00.000Z"},
             {
                 "eventType": "AUDIO_ALARM",
-                "timestamp": f"{today}T12:00:00",
+                "timestamp": f"{today}T12:00:00.000Z",
             },  # wrong type
-            {"eventType": "MOVEMENT", "timestamp": "2020-01-01T00:00:00"},  # wrong date
+            {
+                "eventType": "MOVEMENT",
+                "timestamp": "2000-01-01T00:00:00.000Z",
+            },  # wrong date
         ]
         coord = self._coord_with_events(events)
         s = BoschMovementEventsTodaySensor(coord, CAM_ID, stub_entry)
@@ -341,16 +344,18 @@ class TestEventsTodaySensors:
         assert s.native_value == 0
 
     def test_audio_today_counts_only_today_audio(self, stub_entry):
-        from homeassistant.util import dt as dt_util
-
         from custom_components.bosch_shc_camera.sensor import (
             BoschAudioEventsTodaySensor,
         )
 
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # Production code uses datetime.now(UTC) for date bucketing — use UTC date here.
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = [
-            {"eventType": "AUDIO_ALARM", "timestamp": f"{today}T05:00:00"},
-            {"eventType": "MOVEMENT", "timestamp": f"{today}T05:00:00"},  # wrong type
+            {"eventType": "AUDIO_ALARM", "timestamp": f"{today}T05:00:00.000Z"},
+            {
+                "eventType": "MOVEMENT",
+                "timestamp": f"{today}T05:00:00.000Z",
+            },  # wrong type
         ]
         coord = self._coord_with_events(events)
         s = BoschAudioEventsTodaySensor(coord, CAM_ID, stub_entry)
@@ -417,7 +422,7 @@ class TestCommissionedSensor:
             }
         )
         s = BoschCommissionedSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == "Commissioned"
+        assert s.native_value == "commissioned"
 
     def test_not_commissioned_state(self, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
@@ -428,7 +433,7 @@ class TestCommissionedSensor:
             }
         )
         s = BoschCommissionedSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == "Not commissioned"
+        assert s.native_value == "not_commissioned"
 
     def test_not_connected_state(self, stub_entry):
         """`connected=False` overrides commissioning state — camera
@@ -441,7 +446,7 @@ class TestCommissionedSensor:
             }
         )
         s = BoschCommissionedSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == "Not connected"
+        assert s.native_value == "not_connected"
 
     def test_no_cache_returns_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor

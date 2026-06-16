@@ -417,5 +417,5 @@ async def test_options_redaction_strips_smb_credentials(hass: HomeAssistant) -> 
     assert redacted_opts["smb_password"] == "**REDACTED**"
     assert redacted_opts["smb_username"] == "**REDACTED**"
     assert redacted_opts["smb_server"] == "**REDACTED**"
-    # smb_share is not sensitive — it's a public path name
-    assert redacted_opts["smb_share"] == "FRITZ.NAS"
+    # smb_share exposes NAS share name (network topology) — must be redacted (M2 fix)
+    assert redacted_opts["smb_share"] == "**REDACTED**"

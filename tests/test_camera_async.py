@@ -100,6 +100,9 @@ def _make_camera(coord=None, entry=None, **camera_overrides):
     cam._force_image_refresh = False
     cam._last_image_fetch = 0.0
     cam._was_streaming = False
+    cam._refresh_inflight = (
+        False  # synchronous in-flight guard (replaces _refresh_lock)
+    )
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor"
     cam._hw_version = "HOME_Eyes_Outdoor"
@@ -518,17 +521,22 @@ class TestAsyncTriggerImageRefresh:
         coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_quick_event_seed_when_no_cached_image(self):
-        """First-mount path: _cached_image is None (haven't seeded the
-        placeholder yet via __init__). Use async_camera_image to grab
-        a quick event snapshot so the card has something within 1 s."""
+    async def test_quick_event_seed_when_only_placeholder(self):
+        """First-mount path: _cached_image is the 1×1 placeholder (the state
+        set by __init__ before any real frame has arrived). Use async_camera_image
+        to grab a quick event snapshot so the card has something within 1 s.
+
+        Note: the guard uses identity check ``is self._PLACEHOLDER_JPEG``, not
+        a None/falsy check — must pass the actual placeholder instance.
+        """
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=None)
-        cam = _make_camera(coord=coord, _cached_image=None)
+        # Set _cached_image to the real placeholder so the identity check triggers
+        cam = _make_camera(coord=coord, _cached_image=BoschCamera._PLACEHOLDER_JPEG)
         cam.async_camera_image = AsyncMock(return_value=b"\xff\xd8seed")
         await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         cam.async_camera_image.assert_awaited_once()
@@ -871,3 +879,79 @@ class TestAsyncCreateStream:
         coord.try_live_connection.assert_not_awaited()
         coord.async_update_listeners.assert_not_called()
         assert result is fake_stream
+
+
+# ── D-P2 regression: concurrent delayed callers must not both fetch ───────
+
+
+class TestRefreshInflightGuard:
+    """Regression for Finding D-P2: two concurrent delayed callers both
+    sleeping then racing past the old ``_refresh_lock.locked()`` check.
+
+    With the old two-step guard (``locked()`` → ``async with lock``), two
+    coroutines sleeping concurrently (delay>0) could both observe
+    ``locked()==False``, both enter ``async with``, and the second one would
+    block on the yield inside ``__aenter__``, then perform a redundant second
+    fetch after the first completed — burning the Bosch 3-session budget.
+
+    The fix uses a synchronous ``_refresh_inflight`` boolean set BEFORE the
+    first yield: the second caller sees it immediately and returns.
+    """
+
+    @pytest.mark.asyncio
+    async def test_second_caller_skips_when_inflight_true(self) -> None:
+        """When _refresh_inflight is already True (set by a first in-flight caller),
+        a second call to _async_trigger_image_refresh must return immediately
+        without calling async_fetch_live_snapshot.
+
+        This pins the synchronous-flag guard that replaces the old two-step
+        ``_refresh_lock.locked()`` + ``async with lock`` approach. The old
+        approach had a yield-point gap between the check and the acquire
+        (``Lock.__aenter__`` is a coroutine), so two concurrent delayed callers
+        (both sleeping then both waking) could both pass the check and proceed.
+        The boolean flag is set synchronously before any I/O yield, closing
+        the window entirely.
+
+        We simulate the concurrent scenario directly by pre-setting the flag
+        to True (as the first caller would have done) and confirming the second
+        call returns without fetching.
+        """
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8live")
+        cam = _make_camera(coord=coord)
+
+        # Simulate first caller holding the inflight flag
+        cam._refresh_inflight = True
+
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+
+        # Second caller must have returned without fetching
+        coord.async_fetch_live_snapshot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_inflight_flag_cleared_after_completion(self) -> None:
+        """_refresh_inflight must be False after the coroutine completes
+        so subsequent calls (e.g. on the next proactive tick) are not
+        permanently suppressed."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        cam = _make_camera(coord=coord)
+
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        assert cam._refresh_inflight is False
+
+    @pytest.mark.asyncio
+    async def test_inflight_flag_cleared_after_exception(self) -> None:
+        """_refresh_inflight must be cleared even when an exception is raised
+        inside the body — otherwise all future refreshes would be suppressed."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.async_fetch_live_snapshot = AsyncMock(side_effect=RuntimeError("boom"))
+        cam = _make_camera(coord=coord)
+
+        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        assert cam._refresh_inflight is False

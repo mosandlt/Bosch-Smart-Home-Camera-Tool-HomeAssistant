@@ -2,6 +2,10 @@
 
 Recent releases. For the full changelog see [`CHANGELOG.md`](../CHANGELOG.md) at the repo root or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v13.7.0 — 2026-06-16
+
+Minor release — new opt-in **AI snapshot descriptions** (Home Assistant AI Task describes what a camera sees, on motion or via the `describe_snapshot` service; cooldown / daily-budget / time-window / presence gating; per-camera sensor; optional in notifications — off by default), plus reliability fixes: UTC-date bucketing for the events-today sensors, FCM retry only after a real fetch success, event-poll resilience (a cloud blip no longer blanks the events list or delays the next poll), the camera staying available during a known cloud maintenance window while streaming locally, a synchronous in-flight guard against double snapshot refreshes, AI-caption reappearance + volume-slider listener cleanup in the card, and AI options-flow validation (clearable entity gates, unlimited daily budget, HH:MM validation). Full suite green, mypy --strict + ruff clean, card e2e green.
+
 ## v13.5.7 — 2026-06-03
 
 Maintenance patch — no user-facing behaviour change. CI hardening ahead of GitHub's 2026-06-16 Node-24 action cutover, test-only dependency security pins, and dead-code removal in the card bundle.

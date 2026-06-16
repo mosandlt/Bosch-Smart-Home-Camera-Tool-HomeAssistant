@@ -313,32 +313,34 @@ class TestPipeStructural:
         )
 
     def test_pipe_finally_closes_src_and_dst(self):
-        """_pipe must close both src and dst in finally (lines 190-195)."""
-        assert "src.close()" in SRC, "_pipe finally must close src socket"
-        assert "dst.close()" in SRC, "_pipe finally must close dst socket"
-        # Both in try/except to handle already-closed sockets
-        close_lines = [
-            line.strip()
-            for line in SRC.splitlines()
-            if ".close()" in line and line.strip().startswith("try:")
-        ]
-        # Structural: the finally block has 2 try/except close() pairs
-        finally_idx = SRC.find(
-            "finally:\n                    try:\n                        src.close()"
+        """_pipe must close both src and dst in finally via _close_once (B05-2).
+
+        The old pattern called src.close()/dst.close() directly inside the
+        _pipe finally block.  After B05-2 the guard `_close_once(sock, flag)`
+        replaces the raw calls so each socket is only closed once even when
+        two pipe threads share the same TLS socket object.
+        """
+        # New pattern: _close_once in finally
+        assert "_close_once(src, src_flag)" in SRC, (
+            "_pipe finally must call _close_once(src, src_flag) — "
+            "the old src.close() pattern was replaced by the once-guard (B05-2)"
         )
-        assert finally_idx != -1, (
-            "_pipe finally block must use try/except around src.close() — "
-            "src may already be closed by the other pipe direction"
+        assert "_close_once(dst, dst_flag)" in SRC, (
+            "_pipe finally must call _close_once(dst, dst_flag)"
         )
 
     def test_pipe_closes_counterpart_on_exit(self):
         """When one direction dies (e.g. camera disconnects), the pipe must
         close both sockets so the other direction also terminates."""
-        # Structural: after while loop, both src and dst are closed.
+        # Structural: after while loop, both src and dst are closed via _close_once.
         # This prevents half-open sessions where FFmpeg keeps writing
         # to a TLS socket whose upstream camera has disconnected.
-        assert "src.close()" in SRC
-        assert "dst.close()" in SRC
+        assert "_close_once(src, src_flag)" in SRC, (
+            "_close_once(src) must be called in _pipe finally to close src"
+        )
+        assert "_close_once(dst, dst_flag)" in SRC, (
+            "_close_once(dst) must be called in _pipe finally to close dst"
+        )
 
     def test_debug_logging_gated(self):
         """RTP binary frames must not be logged (data[:1] != b'$' guard)."""

@@ -200,8 +200,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up switch entities for each camera."""
     opts = get_options(config_entry)
-    if not opts.get("enable_snapshot_button", True):
-        return
 
     coordinator = config_entry.runtime_data
     entities = []
@@ -1253,7 +1251,7 @@ class BoschAutoFollowSwitch(_BoschSwitchBase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschIntercomSwitch(_BoschSwitchBase):
+class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
     """Switch: ON = intercom (two-way audio) active, OFF = intercom off.
 
     When turned ON: enables speaker via PUT /v11/video_inputs/{id}/audio
@@ -1273,6 +1271,18 @@ class BoschIntercomSwitch(_BoschSwitchBase):
         self._attr_name = f"Bosch {self._cam_title} Intercom"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intercom"
         self._is_on: bool = False
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the intercom ON/OFF state from the last HA session."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in ("on", "off"):
+            self._is_on = last.state == "on"
+            _LOGGER.debug(
+                "intercom: restored %s for %s from previous state",
+                last.state,
+                self._cam_id[:8],
+            )
 
     @property
     def is_on(self) -> bool:
@@ -1633,6 +1643,7 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
                 async with session.put(url, headers=headers, json=data) as resp:
                     if resp.status in (200, 201, 204):
                         self._is_on = enabled
+                        self.coordinator._ambient_lighting_cache[self._cam_id] = data
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
         self.async_write_ha_state()
@@ -2242,11 +2253,13 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         _LOGGER.info("NVR ON for %s", self._cam_title)
+        self.coordinator._nvr_user_intent[self._cam_id] = True
         await self.coordinator.start_recorder(self._cam_id)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         _LOGGER.info("NVR OFF for %s", self._cam_title)
+        self.coordinator._nvr_user_intent[self._cam_id] = False
         await self.coordinator.stop_recorder(self._cam_id)
         self.async_write_ha_state()
 

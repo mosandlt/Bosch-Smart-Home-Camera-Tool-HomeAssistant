@@ -31,14 +31,18 @@ No HA runtime needed — SimpleNamespace + MagicMock.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
-TODAY = "2026-05-07"
+# UTC_TODAY is used to build event timestamps that match "today" per UTC bucketing.
+# Production code uses datetime.now(UTC).strftime("%Y-%m-%d"), so tests must do the same.
+UTC_TODAY = datetime.now(UTC).strftime("%Y-%m-%d")
+# Keep TODAY as an alias for tests that don't involve EventsToday sensors.
+TODAY = UTC_TODAY
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -231,28 +235,27 @@ def test_last_event_sensor_extra_attrs():
 def test_events_today_count_matching():
     from custom_components.bosch_shc_camera.sensor import BoschCameraEventsTodaySensor
 
+    # Sensor uses datetime.now(UTC) for UTC date bucketing — timestamps must
+    # carry today's UTC date to be counted. Past date (2000-01-01) is excluded.
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"timestamp": f"{TODAY}T10:00:00"},
-        {"timestamp": f"{TODAY}T11:00:00"},
-        {"timestamp": "2025-01-01T00:00:00"},
+        {"timestamp": f"{UTC_TODAY}T10:00:00.000Z"},
+        {"timestamp": f"{UTC_TODAY}T11:00:00.000Z"},
+        {"timestamp": "2000-01-01T00:00:00.000Z"},
     ]
     sw = _make_sensor(BoschCameraEventsTodaySensor, c)
-    with patch("custom_components.bosch_shc_camera.sensor.dt_util") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 5, 7)
-        result = sw.native_value
+    result = sw.native_value
     assert result == 2
 
 
 def test_events_today_extra_attrs():
     from custom_components.bosch_shc_camera.sensor import BoschCameraEventsTodaySensor
 
+    # Use UTC_TODAY so the timestamp matches datetime.now(UTC) in production code.
     c = _coord()
-    c.data[CAM_ID]["events"] = [{"timestamp": f"{TODAY}T09:00:00"}]
+    c.data[CAM_ID]["events"] = [{"timestamp": f"{UTC_TODAY}T09:00:00.000Z"}]
     sw = _make_sensor(BoschCameraEventsTodaySensor, c)
-    with patch("custom_components.bosch_shc_camera.sensor.dt_util") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 5, 7)
-        attrs = sw.extra_state_attributes
+    attrs = sw.extra_state_attributes
     assert attrs["events_in_feed"] == 1
 
 
@@ -517,16 +520,21 @@ def test_last_event_type_extra_attrs_no_events():
 def test_movement_events_today_filters_type():
     from custom_components.bosch_shc_camera.sensor import BoschMovementEventsTodaySensor
 
+    # Uses UTC_TODAY to match datetime.now(UTC) bucketing in production code.
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"eventType": "MOVEMENT", "timestamp": f"{TODAY}T10:00:00"},
-        {"eventType": "PERSON", "timestamp": f"{TODAY}T11:00:00"},  # excluded
-        {"eventType": "MOVEMENT", "timestamp": "2025-01-01T00:00:00"},  # excluded (old)
+        {"eventType": "MOVEMENT", "timestamp": f"{UTC_TODAY}T10:00:00.000Z"},
+        {
+            "eventType": "PERSON",
+            "timestamp": f"{UTC_TODAY}T11:00:00.000Z",
+        },  # excluded (wrong type)
+        {
+            "eventType": "MOVEMENT",
+            "timestamp": "2000-01-01T00:00:00.000Z",
+        },  # excluded (old date)
     ]
     sw = _make_sensor(BoschMovementEventsTodaySensor, c)
-    with patch("custom_components.bosch_shc_camera.sensor.dt_util") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 5, 7)
-        result = sw.native_value
+    result = sw.native_value
     assert result == 1
 
 
@@ -536,16 +544,18 @@ def test_movement_events_today_filters_type():
 def test_audio_events_today_count():
     from custom_components.bosch_shc_camera.sensor import BoschAudioEventsTodaySensor
 
+    # Uses UTC_TODAY to match datetime.now(UTC) bucketing in production code.
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"eventType": "AUDIO_ALARM", "timestamp": f"{TODAY}T08:00:00"},
-        {"eventType": "AUDIO_ALARM", "timestamp": f"{TODAY}T09:00:00"},
-        {"eventType": "MOVEMENT", "timestamp": f"{TODAY}T10:00:00"},  # excluded
+        {"eventType": "AUDIO_ALARM", "timestamp": f"{UTC_TODAY}T08:00:00.000Z"},
+        {"eventType": "AUDIO_ALARM", "timestamp": f"{UTC_TODAY}T09:00:00.000Z"},
+        {
+            "eventType": "MOVEMENT",
+            "timestamp": f"{UTC_TODAY}T10:00:00.000Z",
+        },  # excluded (wrong type)
     ]
     sw = _make_sensor(BoschAudioEventsTodaySensor, c)
-    with patch("custom_components.bosch_shc_camera.sensor.dt_util") as mock_dt:
-        mock_dt.now.return_value = datetime(2026, 5, 7)
-        result = sw.native_value
+    result = sw.native_value
     assert result == 2
 
 
@@ -634,7 +644,7 @@ def test_commissioned_not_connected():
         }
     )
     sw = _make_sensor(BoschCommissionedSensor, c)
-    assert sw.native_value == "Not connected"
+    assert sw.native_value == "not_connected"
 
 
 def test_commissioned_yes():
@@ -646,7 +656,7 @@ def test_commissioned_yes():
         }
     )
     sw = _make_sensor(BoschCommissionedSensor, c)
-    assert sw.native_value == "Commissioned"
+    assert sw.native_value == "commissioned"
 
 
 def test_commissioned_not_commissioned():
@@ -658,7 +668,7 @@ def test_commissioned_not_commissioned():
         }
     )
     sw = _make_sensor(BoschCommissionedSensor, c)
-    assert sw.native_value == "Not commissioned"
+    assert sw.native_value == "not_commissioned"
 
 
 def test_commissioned_extra_attrs():

@@ -228,6 +228,11 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             lower = str(val).lower()
             if lower in MOTION_SENSITIVITY_OPTIONS:
                 return lower
+            _LOGGER.warning(
+                "Unknown motion sensitivity value from API: %s — defaulting to first option",
+                val,
+            )
+            return MOTION_SENSITIVITY_OPTIONS[0]
         return None
 
     @property
@@ -461,6 +466,11 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
             lower = str(val).lower()
             if lower in DETECTION_MODE_OPTIONS:
                 return lower
+            _LOGGER.warning(
+                "Unknown detection mode value from API: %s — defaulting to first option",
+                val,
+            )
+            return DETECTION_MODE_OPTIONS[0]
         return None
 
     @property

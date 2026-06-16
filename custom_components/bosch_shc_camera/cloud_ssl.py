@@ -24,6 +24,7 @@ exception and is out of scope for this module.
 
 from __future__ import annotations
 
+import asyncio
 import ssl
 from typing import Any, cast
 
@@ -77,6 +78,7 @@ nvQ8Em1LhUA=
 """
 
 _SSL_CONTEXT: ssl.SSLContext | None = None
+_SSL_CONTEXT_LOCK: asyncio.Lock | None = None
 _SESSION_DATA_KEY = "bosch_shc_camera_cloud_session"
 
 
@@ -97,9 +99,16 @@ def _build_ssl_context() -> ssl.SSLContext:
 
 async def async_get_bosch_cloud_ssl_context(hass: HomeAssistant) -> ssl.SSLContext:
     """Return a cached SSL context for Bosch public cloud / OAuth hosts."""
-    global _SSL_CONTEXT
-    if _SSL_CONTEXT is None:
-        _SSL_CONTEXT = await hass.async_add_executor_job(_build_ssl_context)
+    global _SSL_CONTEXT, _SSL_CONTEXT_LOCK
+    if _SSL_CONTEXT is not None:
+        return _SSL_CONTEXT
+    # Lazily create the lock on first call (must be on the event loop)
+    if _SSL_CONTEXT_LOCK is None:
+        _SSL_CONTEXT_LOCK = asyncio.Lock()
+    async with _SSL_CONTEXT_LOCK:
+        # Double-check inside the lock (another coroutine may have built it)
+        if _SSL_CONTEXT is None:
+            _SSL_CONTEXT = await hass.async_add_executor_job(_build_ssl_context)
     return _SSL_CONTEXT
 
 

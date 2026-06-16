@@ -448,9 +448,15 @@ class TestDetectionModeSelect:
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "ONLY_HUMANS"}})
         assert sel.current_option == "only_humans"
 
-    def test_current_option_invalid_returns_none(self):
+    def test_current_option_invalid_returns_default(self):
+        """Bug M8 fix: unknown API value must return first option (+ warning), not None."""
+        from custom_components.bosch_shc_camera.select import DETECTION_MODE_OPTIONS
+
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "UNKNOWN_MODE"}})
-        assert sel.current_option is None
+        result = sel.current_option
+        assert result == DETECTION_MODE_OPTIONS[0], (
+            f"Unknown detectionMode should return first option, got {result!r}"
+        )
 
     def test_current_option_empty_cache_returns_none(self):
         sel = self._make()

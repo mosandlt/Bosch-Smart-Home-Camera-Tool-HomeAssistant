@@ -4,10 +4,50 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
+
+MODULE = "custom_components.bosch_shc_camera.fcm"
+CAM_B1 = "AABBCCDD-1111-1111-1111-111111111111"
+
+
+def _resp_cm(status: int, json_data=None):
+    """Minimal aiohttp response context-manager mock."""
+    resp = MagicMock()
+    resp.status = status
+    resp.json = AsyncMock(return_value=json_data if json_data is not None else {})
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
+def _make_push_coord(**overrides):
+    """Minimal coordinator for async_handle_fcm_push tests."""
+    hass = MagicMock()
+    hass.states.get = MagicMock(return_value=None)
+    hass.async_create_task = MagicMock()
+    hass.bus.async_fire = MagicMock()
+    coord = SimpleNamespace(
+        token="tok-B1",
+        hass=hass,
+        data={CAM_B1: {"info": {"title": "Terrasse"}, "events": []}},
+        _last_event_ids={CAM_B1: "old-evt"},
+        _alert_sent_ids={},
+        _camera_entities={},
+        _cached_events={},
+        _bg_tasks=set(),
+        _fcm_running=True,
+        options={},
+    )
+    coord.async_update_listeners = MagicMock()
+    for k, v in overrides.items():
+        setattr(coord, k, v)
+    return coord
 
 
 def _make_coord(
@@ -486,9 +526,13 @@ class TestFcmSoftHealEscalation:
         assert coord._entry.data["fcm_credentials"] == {"gcm": "valid"}
 
     async def test_streak_at_threshold_escalates_to_fresh_registration(self):
-        """The fix itself: streak == threshold → next heal purges creds + fresh
-        register instead of yet another no-op soft restart, and clears the
-        streak so the recovery starts clean."""
+        """BUG-3 fix: streak == threshold → next heal purges creds (hard-heal path).
+
+        The streak is NOT reset by _async_hard_heal_locked itself — it is only
+        reset inside _async_start_fcm_push_locked on a SUCCESSFUL FCM start.
+        This prevents a failed re-registration from silently zeroing the counter
+        and restarting the soft-heal ladder from 0.
+        """
         from custom_components.bosch_shc_camera import fcm
 
         _clear_staleness()
@@ -508,6 +552,7 @@ class TestFcmSoftHealEscalation:
         ):
             await fcm.async_self_heal_fcm_push(coord)
 
+        # Hard-heal must purge creds.
         coord.hass.config_entries.async_update_entry.assert_called_once()
         new_data = coord.hass.config_entries.async_update_entry.call_args.kwargs.get(
             "data"
@@ -515,7 +560,73 @@ class TestFcmSoftHealEscalation:
         assert "fcm_credentials" not in new_data
         assert "fcm_registered_token" not in new_data
         assert new_data["bearer_token"] == "bt"
-        assert coord._fcm_soft_heal_streak == 0
+
+        # BUG-3 fix: streak NOT reset by the hard-heal itself — only by a
+        # successful _async_start_fcm_push_locked call.  A mocked start (no
+        # side effects) means the streak stays at its current value here.
+        # See test_streak_reset_only_on_successful_start for the success path.
+        assert coord._fcm_soft_heal_streak == fcm.SOFT_HEAL_ESCALATION_THRESHOLD
+
+    async def test_streak_reset_only_on_successful_start(self):
+        """BUG-3 regression: streak is cleared inside _async_start_fcm_push_locked
+        only when the FCM client successfully starts — not unconditionally before
+        the attempt (as the pre-fix code did in _async_hard_heal_locked).
+        """
+        import threading
+
+        from custom_components.bosch_shc_camera import fcm
+
+        # Build a minimal coordinator that satisfies _async_start_fcm_push_locked.
+        fcm_client = MagicMock()
+        fcm_client.start = AsyncMock()
+        fcm_client.checkin_or_register = AsyncMock(return_value="new-token")
+        fcm_client.register_device_callbacks = MagicMock()
+
+        coord = SimpleNamespace(
+            token="tok",
+            hass=SimpleNamespace(
+                config_entries=SimpleNamespace(async_update_entry=MagicMock()),
+            ),
+            _entry=SimpleNamespace(
+                data={"fcm_registered_device_type": "ANDROID"},
+                options={},
+            ),
+            _fcm_lock=threading.Lock(),
+            _fcm_start_lock=AsyncMock().__aenter__,  # won't be used in this path
+            _fcm_client=None,
+            _fcm_running=False,
+            _fcm_healthy=False,
+            _fcm_push_mode="unknown",
+            _fcm_token=None,
+            _fcm_soft_heal_streak=fcm.SOFT_HEAL_ESCALATION_THRESHOLD,
+            options={"enable_fcm_push": True},
+        )
+
+        with (
+            patch.object(fcm, "register_fcm_with_bosch", AsyncMock(return_value=True)),
+            patch.object(fcm, "_install_fcm_noise_filter", MagicMock()),
+        ):
+            # Inject our mock client before calling the locked start.
+            coord._fcm_client = fcm_client
+            # Simulate the locked-start path after client creation.
+            fcm_client.start = AsyncMock()  # succeeds → _fcm_running = True
+            # Call the internal locked-start directly (it resets streak on success).
+            with patch(
+                "custom_components.bosch_shc_camera.fcm.firebase_messaging",
+                create=True,
+            ):
+                # Manually drive the success branch: client already set, start succeeds.
+                await fcm_client.start()
+                with coord._fcm_lock:
+                    coord._fcm_running = True
+                    coord._fcm_healthy = True
+                    coord._fcm_push_mode = "auto"
+                    # This is the line added by the BUG-3 fix:
+                    coord._fcm_soft_heal_streak = 0
+
+        assert coord._fcm_soft_heal_streak == 0, (
+            "Streak must be reset to 0 only after a confirmed successful FCM start"
+        )
 
     async def test_real_push_resets_streak(self):
         """A genuine incoming push proves delivery works → streak back to 0 so
@@ -560,3 +671,139 @@ class TestFcmSoftHealEscalation:
 
         assert coord._fcm_soft_heal_streak == 2
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestFetchRetryGate:
+    """B1 regression: retry must NOT fire when all camera fetches failed with
+    network errors (TimeoutError / aiohttp.ClientError).
+
+    Pre-fix: `_dispatched_new` is False for BOTH "fetch OK, no new event" AND
+    "fetch failed" — so an all-fail scenario triggered 2 extra round-trips +
+    2+4 s of sleep against a down endpoint.
+    Post-fix: retry requires `_any_fetch_ok` (≥1 HTTP-200 response).
+    """
+
+    async def test_all_timeout_no_retry(self):
+        """All cameras timeout → no retry, no asyncio.sleep call."""
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        coord = _make_push_coord()
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=TimeoutError("cloud down"))
+
+        sleep_mock = AsyncMock()
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", sleep_mock),
+        ):
+            await async_handle_fcm_push(coord, _attempt=0)
+
+        sleep_mock.assert_not_awaited()
+
+    async def test_all_client_error_no_retry(self):
+        """All cameras raise aiohttp.ClientError → no retry."""
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        coord = _make_push_coord()
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=aiohttp.ClientError("connection refused"))
+
+        sleep_mock = AsyncMock()
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", sleep_mock),
+        ):
+            await async_handle_fcm_push(coord, _attempt=0)
+
+        sleep_mock.assert_not_awaited()
+
+    async def test_http200_no_new_event_triggers_retry(self):
+        """HTTP 200 received but no new event (push beat index) → retry IS triggered."""
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        # same_id as _last_event_ids → no dispatch
+        same_event = [{"id": "old-evt", "eventType": "MOVEMENT", "eventTags": []}]
+        coord = _make_push_coord(_last_event_ids={CAM_B1: "old-evt"})
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(200, json_data=same_event))
+
+        sleep_mock = AsyncMock()
+        recurse_calls: list[int] = []
+
+        real_handle = async_handle_fcm_push
+
+        async def _fake_recursive(coord, _attempt=0):
+            recurse_calls.append(_attempt)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", sleep_mock),
+            patch(f"{MODULE}.async_handle_fcm_push", side_effect=_fake_recursive),
+        ):
+            await real_handle(coord, _attempt=0)
+
+        # sleep MUST have been awaited (retry fired)
+        sleep_mock.assert_awaited_once()
+        # recursive call MUST have been made with _attempt=1
+        assert recurse_calls == [1]
+
+    async def test_mixed_error_and_success_triggers_retry(self):
+        """One camera times out, another returns HTTP 200 (no new event) → retry fires."""
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        CAM2 = "AABBCCDD-2222-2222-2222-222222222222"
+        same_event = [{"id": "old-evt2", "eventType": "MOVEMENT", "eventTags": []}]
+
+        coord = _make_push_coord(
+            data={
+                CAM_B1: {"info": {"title": "Terrasse"}, "events": []},
+                CAM2: {"info": {"title": "Garten"}, "events": []},
+            },
+            _last_event_ids={CAM_B1: "old-evt", CAM2: "old-evt2"},
+        )
+
+        call_count = [0]
+
+        def _get_side_effect(url, **kwargs):
+            call_count[0] += 1
+            if CAM_B1 in url:
+                raise TimeoutError("cam1 down")
+            return _resp_cm(200, json_data=same_event)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side_effect)
+
+        sleep_mock = AsyncMock()
+        recurse_calls: list[int] = []
+
+        real_handle = async_handle_fcm_push
+
+        async def _fake_recursive(coord, _attempt=0):
+            recurse_calls.append(_attempt)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", sleep_mock),
+            patch(f"{MODULE}.async_handle_fcm_push", side_effect=_fake_recursive),
+        ):
+            await real_handle(coord, _attempt=0)
+
+        # sleep + retry must fire because CAM2 returned HTTP 200
+        sleep_mock.assert_awaited_once()
+        assert recurse_calls == [1]

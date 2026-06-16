@@ -38,6 +38,7 @@ def _make_coord_stub(camera_ids):
     coord._nvr_drain_task = None
     coord._token_refresh_handle = None
     coord._stream_log_listener = None
+    coord.async_load_ai_budget = AsyncMock(return_value=None)
     return coord
 
 

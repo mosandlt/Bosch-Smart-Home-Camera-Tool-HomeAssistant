@@ -40,7 +40,8 @@
     },
     "abort": {
       "already_configured": "Già configurato.",
-      "reauth_successful": "Riautenticazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate."
+      "reauth_successful": "Riautenticazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate.",
+      "reconfigure_successful": "Riconfigurazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate."
     }
   },
   "options": {
@@ -95,12 +96,15 @@
               "live_buffer_mode": "Profilo buffer player (HLS)",
               "enable_go2rtc": "go2rtc WebRTC (streaming a bassa latenza ~2 s)",
               "enable_green_it": "Green IT — termina automaticamente gli stream live inattivi (sperimentale, in sviluppo)",
+              "use_mjpeg_snapshot": "MJPEG inst=3 snapshot (Gen2, LAN)",
               "defer_diag_during_stream": "Sospendi letture diagnostiche durante lo streaming live"
             },
             "data_description": {
               "stream_connection_type": "Tipo di connessione predefinito per gli stream in diretta.\n• **auto** (consigliato): Tenta prima la rete locale LAN, passa automaticamente al proxy Bosch Cloud in caso di errore.\n• **local**: Solo LAN diretto — non richiede accesso a Internet. RTSP più veloce, ma Snapshot più lenti (~6–10 s). Sessione rinnovata automaticamente ogni 50 s.\n• **remote**: Sempre tramite proxy Bosch Cloud. Snapshot più veloci (~0,4–1,9 s). Scelta predefinita consigliata quando HA non è sulla stessa LAN.\nL'entità di selezione 'Modalità Stream' sostituisce questa impostazione in fase di esecuzione senza riavvio.",
               "live_buffer_mode": "Quanti secondi di video il player mette in buffer prima di mostrarlo. Buffer maggiore = meno interruzioni ma ritardo più elevato rispetto al tempo reale.\n• **Latenza**: buffer ridotto (~4-6 s di ritardo). Possibili interruzioni su Wi-Fi instabile.\n• **Bilanciato** (consigliato): buffer medio (~8-10 s). Robusto contro i tipici problemi Wi-Fi.\n• **Stabile**: buffer ampio (~12-15 s). Fluido anche su connessioni deboli, ma con ritardo percettibile.\nInfluisce solo sulla visualizzazione della card — nessun effetto su telecamera, registrazione o Snapshot.",
               "enable_go2rtc": "Registra automaticamente gli stream in diretta con go2rtc integrato in HA per la riproduzione WebRTC (~2 s di latenza anziché ~10 s con HLS). Consigliato. Disabilitare solo se si utilizza una configurazione go2rtc personalizzata.",
+              "use_mjpeg_snapshot": "**Solo telecamere Gen2, LAN richiesta, sperimentale.** Quando ATTIVO: le richieste di snapshot cercano di catturare un frame JPEG direttamente dalla telecamera tramite il suo stream RTSP inst=3 MJPEG usando FFmpeg. Obiettivo ~150–300 ms vs ~500 ms via proxy cloud. **Disattivo per impostazione predefinita** — lo stack TLS integrato di FFmpeg attualmente non riesce a negoziare con il server RTSPS della telecamera sulla porta 443 (errore FFmpeg 183). Ritorna automaticamente quando FFmpeg fallisce.",
+              "enable_green_it": "Termina automaticamente la sessione live di una telecamera quando nessuno la sta guardando — quando nessuna app, dashboard o Cast ha recuperato lo stream per circa 3 minuti. **Sperimentale — in sviluppo, disattivo per impostazione predefinita.** Il rilevamento degli spettatori non riesce ancora a vedere in modo affidabile un visualizzatore WebRTC live.",
               "defer_diag_during_stream": "Quando ATTIVO (consigliato): le letture diagnostiche lente vengono posticipate mentre il flusso live di una camera è attivo, prevenendo contese sul canale TLS che possono causare brevi freeze durante raffiche di movimento. Le letture posticipate vengono eseguite al prossimo ciclo di polling quando il flusso è inattivo. Disattivare solo se i sensori diagnostici devono rimanere aggiornati anche durante lo streaming."
             }
           },
@@ -208,6 +212,38 @@
             },
             "data_description": {
               "enable_ptz_controls": "Quando ATTIVO: le telecamere con supporto di rotazione ottengono un'entità di selezione della posizione predefinita (home / sinistra / destra / dietro-sinistra / dietro-destra). Solo la telecamera interna 360 supporta la rotazione. **Disattivato per impostazione predefinita** in modo che gli utenti senza telecamera 360 non vedano entità superflue."
+            }
+          },
+          "ai": {
+            "name": "Descrizione snapshot IA",
+            "description": "Lascia che l'IA di Home Assistant descriva ciò che la telecamera vede. Richiede un'integrazione AI Task configurata (es. OpenAI, Google, Anthropic o Ollama locale). Nota: a seconda del backend IA scelto, le immagini della telecamera e possibilmente i dati personali vengono inviati a un servizio cloud e potrebbero essere usati per il training. Per la massima privacy, usare un modello locale (es. Ollama).",
+            "data": {
+              "enable_ai_description": "Abilita descrizioni snapshot IA",
+              "ai_task_entity": "Entità AI Task (opzionale)",
+              "ai_describe_language": "Lingua delle risposte",
+              "ai_describe_prompt": "Prompt di descrizione",
+              "ai_describe_on_motion": "Descrivi automaticamente su eventi di movimento/persona",
+              "ai_notify_include_description": "Aggiungi descrizione IA alle notifiche evento",
+              "ai_cooldown_seconds": "Secondi minimi tra analisi automatiche (per telecamera)",
+              "ai_max_per_day": "Budget giornaliero analisi IA (0 = illimitato)",
+              "ai_active_time_start": "IA attiva dalle (HH:MM)",
+              "ai_active_time_end": "IA attiva fino alle (HH:MM)",
+              "ai_active_condition_entity": "Entità condizione (opzionale)",
+              "ai_active_condition_state": "Stato condizione richiesto"
+            },
+            "data_description": {
+              "enable_ai_description": "Se abilitato, diventano disponibili un servizio di descrizione snapshot e un sensore di descrizione IA per telecamera. Richiede Home Assistant 2025.8+ con almeno un'entità AI Task configurata.",
+              "ai_task_entity": "Selezionare un'entità AI Task specifica. Lasciare vuoto per usare il preferito predefinito di HA.",
+              "ai_describe_language": "Lingua in cui risponde l'IA. Selezionare dalla lista o digitare qualsiasi nome di lingua (es. Português, Русский). Predefinito: Deutsch.",
+              "ai_describe_prompt": "Il prompt inviato all'IA con ogni snapshot. Personalizzare per focalizzarsi su ciò che conta per questa telecamera.",
+              "ai_describe_on_motion": "Esegue una descrizione IA per ogni evento di movimento/persona e aggiorna il SENSORE di descrizione IA. NON aggiunge testo alle notifiche push. Debounce 30 secondi per telecamera.",
+              "ai_notify_include_description": "Aggiunge la descrizione IA direttamente nella notifica push dell'evento sul telefono. Richiede notifiche evento configurate. Aggiorna anche il sensore. Limitato da cooldown + budget giornaliero.",
+              "ai_cooldown_seconds": "Tempo minimo tra analisi IA automatiche per telecamera. Le chiamate manuali describe_snapshot ignorano questo. Predefinito 60 s; 0 disabilita il cooldown.",
+              "ai_max_per_day": "Numero massimo di analisi IA automatiche per tutte le telecamere al giorno (reset a mezzanotte). Predefinito 100; 0 = illimitato.",
+              "ai_active_time_start": "Inizio della finestra di attivazione IA (formato 24h, es. 08:00). Lasciare entrambi i campi vuoti per disabilitare il limite orario. Sono supportate finestre notturne (es. inizio 22:00 / fine 06:00).",
+              "ai_active_time_end": "Fine della finestra di attivazione IA (formato 24h, es. 22:00). Lasciare entrambi i campi vuoti per disabilitare il limite orario.",
+              "ai_active_condition_entity": "Entità il cui stato abilita o blocca le analisi IA automatiche. Lasciare vuoto per disabilitare. Esempio: zone.home con stato 0 significa che nessuno è a casa (la zona conta le persone, 0 = vuota). Oppure usare un'entità gruppo persone con stato not_home.",
+              "ai_active_condition_state": "Stato che l'entità condizione deve avere per consentire le analisi IA. Predefinito: not_home (IA attiva solo quando nessuno è a casa). Esempi: home, on, off, away. Per zone.home usare 0 (nessuno a casa)."
             }
           },
           "auth": {
@@ -327,9 +363,6 @@
       "pre_alarm": {
         "name": "Pre-allarme"
       },
-      "audio_alarm": {
-        "name": "Rilevamento suono"
-      },
       "panic_alarm": {
         "name": "Attiva sirena"
       },
@@ -343,9 +376,6 @@
     "number": {
       "pan_position": {
         "name": "Posizione panoramica"
-      },
-      "audio_threshold": {
-        "name": "Soglia audio"
       },
       "speaker_level": {
         "name": "Volume altoparlante"
@@ -388,9 +418,6 @@
       },
       "pre_alarm_delay": {
         "name": "Durata pre-allarme"
-      },
-      "audio_alarm_sensitivity": {
-        "name": "Sensibilità rilevamento suono"
       },
       "intrusion_sensitivity": {
         "name": "Sensibilità Rilevamento Intrusione"
@@ -495,7 +522,31 @@
           "online": "Online",
           "offline": "Offline",
           "session_limit": "Limite di sessione",
+          "updating": "Aggiornamento firmware",
           "unknown": "Sconosciuto"
+        }
+      },
+      "onvif_scopes": {
+        "name": "Ambiti ONVIF"
+      },
+      "rcp_version": {
+        "name": "Versione RCP"
+      },
+      "cloud_feature_flags": {
+        "name": "Flag funzionalità cloud"
+      },
+      "ai_description": {
+        "name": "Descrizione snapshot IA"
+      },
+      "cloud_maintenance": {
+        "name": "Manutenzione Bosch Cloud",
+        "state": {
+          "active": "Manutenzione in corso",
+          "scheduled": "Manutenzione programmata",
+          "past": "Manutenzione più recente",
+          "recent": "Annuncio recente",
+          "unknown": "Nessuna info sulla finestra temporale",
+          "idle": "Nessuna info di manutenzione"
         }
       },
       "last_event": {
@@ -521,9 +572,6 @@
       },
       "motion_sensitivity": {
         "name": "Sensibilità movimento"
-      },
-      "audio_alarm": {
-        "name": "Allarme audio"
       },
       "last_event_type": {
         "name": "Tipo ultimo evento",
@@ -713,6 +761,32 @@
           "description": "Nuovo nome visualizzato per la telecamera"
         }
       }
+    },
+    "describe_snapshot": {
+      "name": "Descrivi Snapshot",
+      "description": "Chiedi all'integrazione AI Task di HA di descrivere lo snapshot corrente della telecamera.",
+      "fields": {
+        "camera_id": {
+          "name": "ID Telecamera",
+          "description": "ID telecamera Bosch cloud (UUID). Usare camera_id o entity_id."
+        },
+        "entity_id": {
+          "name": "Entità Telecamera",
+          "description": "ID entità telecamera (es. camera.bosch_terrasse). Usare entity_id o camera_id."
+        },
+        "instructions": {
+          "name": "Istruzioni",
+          "description": "Prompt personalizzato per l'IA. Sostituisce l'opzione ai_describe_prompt per questa chiamata."
+        },
+        "language": {
+          "name": "Lingua",
+          "description": "Lingua della risposta AI. Sostituisce l'opzione ai_describe_language per questa chiamata. Predefinito: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "Entità AI Task",
+          "description": "Entità AI Task da usare. Lasciare vuoto per il preferito predefinito di HA."
+        }
+      }
     }
   },
   "exceptions": {
@@ -748,6 +822,12 @@
     },
     "unexpected_error": {
       "message": "{action} non riuscito: {error}"
+    },
+    "privacy_active": {
+      "message": "La modalità Privacy è attiva per questa telecamera — nessuna immagine live disponibile per l'analisi IA."
+    },
+    "ai_task_unavailable": {
+      "message": "Servizio AI Task non disponibile o in errore: {error}"
     }
   },
   "issues": {

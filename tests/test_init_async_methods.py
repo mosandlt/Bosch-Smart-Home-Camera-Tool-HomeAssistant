@@ -119,6 +119,7 @@ def _make_coord(**overrides):
             ),
             services=SimpleNamespace(async_call=AsyncMock()),
             config=SimpleNamespace(path=lambda *a: "/tmp/x"),
+            is_stopping=False,
         ),
         debug=False,
     )

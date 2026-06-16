@@ -108,6 +108,27 @@ async def test_overwrite_preserves_previous_on_exception(tmp_path: Path) -> None
     assert final.read_bytes() == original
 
 
+@pytest.mark.asyncio
+async def test_tmp_file_removed_when_replace_fails(tmp_path: Path) -> None:
+    """BUG-5 regression: .tmp must be deleted when Path.replace raises.
+
+    On cross-device rename (NFS / Docker bind-mounts) replace() raises OSError.
+    Without the finally-unlink the .tmp accumulates on disk across restarts.
+    """
+    from custom_components.bosch_shc_camera import snapshot_store
+
+    hass = _make_hass(tmp_path)
+    snap_dir = Path(tmp_path) / ".storage" / "bosch_shc_camera" / "snapshots"
+
+    with patch.object(Path, "replace", side_effect=OSError("cross-device rename")):
+        with pytest.raises(OSError):
+            await snapshot_store.save_snapshot(hass, VALID_CAM_ID, VALID_JPEG)
+
+    # The .tmp must have been cleaned up even though replace() raised
+    tmp_file = snap_dir / f"{VALID_CAM_ID}.jpg.tmp"
+    assert not tmp_file.exists(), ".tmp file must be removed after failed replace()"
+
+
 # --------------------------------------------------------------------------- #
 # cam_id validation (path traversal prevention)
 # --------------------------------------------------------------------------- #
@@ -148,18 +169,44 @@ async def test_path_traversal_no_file_written(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lowercase_uuid_rejected(tmp_path: Path) -> None:
-    """Lowercase UUIDs (as stored by HA entity_id slugs) are rejected.
+async def test_lowercase_uuid_accepted_and_normalised(tmp_path: Path) -> None:
+    """BUG-6 regression: lowercase UUIDs must be accepted and normalised to upper-case.
 
-    Bosch cam IDs are always upper-case hex. Lower-case means a caller
-    accidentally passed a slugified entity_id — reject early.
+    camera.py passes self._cam_id (API-sourced, upper-case) but defensive callers
+    may pass lower-case (e.g. after slug munging).  Both forms must succeed, and
+    they must resolve to the SAME on-disk file so there is no duplicate-file split.
     """
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        load_snapshot,
+        save_snapshot,
+    )
 
     hass = _make_hass(tmp_path)
     lower_id = VALID_CAM_ID.lower()
-    with pytest.raises(ValueError):
-        await save_snapshot(hass, lower_id, VALID_JPEG)
+    # Save with lower-case cam_id → must not raise
+    await save_snapshot(hass, lower_id, VALID_JPEG)
+    # Load with upper-case cam_id → must retrieve the same bytes
+    result = await load_snapshot(hass, VALID_CAM_ID)
+    assert result == VALID_JPEG, (
+        "Lowercase save must write to the same file as an uppercase load"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mixed_case_uuid_accepted(tmp_path: Path) -> None:
+    """BUG-6 regression: mixed-case UUIDs are also accepted and normalised."""
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        load_snapshot,
+        save_snapshot,
+    )
+
+    hass = _make_hass(tmp_path)
+    mixed_id = "aAbBcCdD-eEfF-1122-3344-556677889900"
+    await save_snapshot(hass, mixed_id, VALID_JPEG)
+    # Must load correctly via the normalised (upper) form
+    upper_id = mixed_id.upper()
+    result = await load_snapshot(hass, upper_id)
+    assert result == VALID_JPEG
 
 
 # --------------------------------------------------------------------------- #

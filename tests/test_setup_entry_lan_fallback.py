@@ -49,6 +49,7 @@ def _make_coord_stub(camera_ids, *, first_refresh_raises=None):
     coord._stream_log_listener = None
     coord._async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
+    coord.async_load_ai_budget = AsyncMock(return_value=None)
     return coord
 
 
@@ -191,7 +192,7 @@ class TestPersistedLanIps:
         with (
             patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
             patch(
-                "homeassistant.helpers.storage.Store",
+                "custom_components.bosch_shc_camera.Store",
                 return_value=_FakeStore(persisted),
             ),
             patch(f"{MODULE}.cf_unbuffer.register"),

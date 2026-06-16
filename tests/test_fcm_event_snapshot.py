@@ -476,13 +476,14 @@ class TestPathBPrivacyModeBlocked:
 
 
 class TestPathBDeduplication:
-    """Same byte-length in cache → no save, no notify (deduplication)."""
+    """Byte-identity dedup: same bytes → skip; different bytes → update (even same length)."""
 
     @pytest.mark.asyncio
-    async def test_path_b_skipped_on_identical_length(self) -> None:
-        # Pre-fill with same-length bytes (simulates duplicate push)
-        existing = b"\xff\xd8\xff\xe0" + b"\xaa" * 400  # same length as JPEG_BYTES
-        assert len(existing) == len(JPEG_BYTES)
+    async def test_path_b_skipped_on_byte_identical(self) -> None:
+        """Exact same bytes in cache → deduplication skips the write (BUG-1 fix)."""
+        # Pre-fill cache with the EXACT bytes that will be downloaded.
+        existing = JPEG_BYTES  # identical object, same content
+        assert existing == JPEG_BYTES
 
         cam_entity = MagicMock()
         cam_entity._cached_image = existing
@@ -510,8 +511,51 @@ class TestPathBDeduplication:
                 session_override=session,
             )
 
+        # Byte-identical → dedup must skip
         mock_save.assert_not_awaited()
         image_entity.async_notify_refreshed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_path_b_fires_on_same_length_different_content(self) -> None:
+        """Same byte-length but different content → NOT deduplicated → update fires.
+
+        This is the core BUG-1 regression: the old len() check incorrectly treated
+        same-length-different-content images as duplicates (e.g. two motion events
+        producing JPEG snapshots of the same byte-count from the same camera).
+        """
+        # JPEG_BYTES_ALT has same length as JPEG_BYTES but different payload.
+        assert len(JPEG_BYTES_ALT) == len(JPEG_BYTES)
+        assert JPEG_BYTES_ALT != JPEG_BYTES
+
+        cam_entity = MagicMock()
+        cam_entity._cached_image = JPEG_BYTES_ALT  # cached: different image, same size
+        cam_entity._last_image_fetch = time.monotonic()
+
+        image_entity = MagicMock()
+        image_entity.async_notify_refreshed = AsyncMock()
+
+        coord = _make_alert_coord(
+            _camera_entities={CAM_ID: cam_entity},
+            _image_entities={CAM_ID: image_entity},
+            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+        )
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
+
+        with patch(f"{MODULE}.save_snapshot", new_callable=AsyncMock) as mock_save:
+            await _run_alert(
+                coord,
+                event_type="MOVEMENT",
+                image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+                session_override=session,
+            )
+
+        # Different content → must NOT be skipped, even though length is equal
+        mock_save.assert_awaited_once()
+        image_entity.async_notify_refreshed.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_path_b_fires_when_length_differs(self) -> None:

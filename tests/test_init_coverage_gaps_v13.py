@@ -857,7 +857,7 @@ class TestSendEventWebhookNoLoadedEntries:
 
         captured_handler = []
 
-        def _register_service(domain, service, handler):
+        def _register_service(domain, service, handler, **kwargs):
             if service == "send_event_webhook":
                 captured_handler.append(handler)
 

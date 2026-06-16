@@ -89,8 +89,30 @@ class BoschRefreshSnapshotButton(CoordinatorEntity, ButtonEntity):  # type: igno
         # Fire coordinator refresh in background — do NOT await it.
         # async_request_refresh() awaits the full coordinator tick (can take 6-22 s);
         # blocking here makes the button feel frozen in the browser/card.
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        task = self.hass.async_create_task(self.coordinator.async_request_refresh())
+        task.add_done_callback(
+            lambda t: (
+                _LOGGER.warning(
+                    "Snapshot refresh failed for %s: %s", self._cam_title, t.exception()
+                )
+                if not t.cancelled() and t.exception()
+                else None
+            )
+        )
         # Refresh the camera image immediately (parallel, faster than coordinator tick)
         cam = self.coordinator._camera_entities.get(self._cam_id)
         if cam:
-            self.hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
+            img_task = self.hass.async_create_task(
+                cam._async_trigger_image_refresh(delay=0)
+            )
+            img_task.add_done_callback(
+                lambda t: (
+                    _LOGGER.warning(
+                        "Image refresh failed for %s: %s",
+                        self._cam_title,
+                        t.exception(),
+                    )
+                    if not t.cancelled() and t.exception()
+                    else None
+                )
+            )

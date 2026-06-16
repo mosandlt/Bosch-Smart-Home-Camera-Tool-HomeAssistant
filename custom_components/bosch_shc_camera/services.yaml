@@ -385,3 +385,58 @@ delete_event:
       example: "2026-05-06"
       selector:
         text:
+describe_snapshot:
+  name: Describe Snapshot
+  description: >
+    Ask Home Assistant's AI Task integration to describe the current camera
+    snapshot in natural language. The result is stored on the per-camera
+    sensor (sensor.<camera>_ai_description) and returned as a response.
+    Requires the ai_task integration to be configured with at least one
+    AI entity (e.g. Google AI, OpenAI).
+  fields:
+    camera_id:
+      name: Camera ID
+      description: >
+        Bosch cloud camera ID (UUID). Use either camera_id or entity_id.
+      required: false
+      example: "11111111-2222-3333-4444-555555555555"
+      selector:
+        text:
+    entity_id:
+      name: Camera Entity
+      description: >
+        Camera entity ID (e.g. camera.bosch_terrasse). Use either entity_id
+        or camera_id.
+      required: false
+      example: "camera.bosch_terrasse"
+      selector:
+        entity:
+          domain: camera
+    instructions:
+      name: Instructions
+      description: >
+        Custom prompt / instructions for the AI. Overrides the
+        ai_describe_prompt option for this call only. The language directive
+        is appended automatically unless you include your own language instruction.
+      required: false
+      selector:
+        text:
+          multiline: true
+    language:
+      name: Language
+      description: >
+        Language for the AI response. Overrides the ai_describe_language option
+        for this call only. Examples: Deutsch, English, Français, Italiano,
+        Español, Nederlands, Polski. Defaults to the option value (Deutsch).
+      required: false
+      selector:
+        text:
+    ai_task_entity:
+      name: AI Task Entity
+      description: >
+        AI Task entity to use (e.g. ai_task.google_ai). Leave empty to use
+        HA's preferred default AI entity.
+      required: false
+      selector:
+        entity:
+          domain: ai_task

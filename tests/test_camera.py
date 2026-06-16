@@ -296,3 +296,101 @@ class TestExtraStateAttributes:
         # last_event / event_type should reflect the latest
         assert "last_event" in attrs
         assert "event_type" in attrs
+
+
+# ── available during cloud-down maintenance window (2026-06-16) ──────────
+
+
+def _make_maintenance(state: str = "active", *, camera_relevant: bool = True):
+    """Duck-typed MaintenanceWindow: `available` only reads `.state()` and
+    `.camera_relevant`."""
+    return SimpleNamespace(camera_relevant=camera_relevant, state=lambda: state)
+
+
+def _set_cloud_outage(coord):
+    """Put the stub coordinator into the cloud-down-but-locally-serviceable
+    state: cloud poll failed, known active maintenance window, LAN reachable,
+    live session established (rtspsUrl present)."""
+    coord.last_update_success = False
+    coord._maintenance_cache = _make_maintenance()
+    coord.is_lan_reachable = lambda cam_id: True
+    coord._live_connections = {CAM_ID: {"rtspsUrl": "rtsps://127.0.0.1:36167/x"}}
+
+
+class TestAvailableDuringCloudOutage:
+    """Pins every guard of `_local_available_during_cloud_outage`. The camera
+    must stay available when the cloud flaps inside a known maintenance window
+    AND the local live session is up — but fall back to cloud availability
+    whenever any guard is not satisfied. Lesson 2026-06-16."""
+
+    def _cam(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        return BoschCamera(stub_coord, CAM_ID, stub_entry)
+
+    def test_local_streaming_keeps_available(self, stub_coord, stub_entry):
+        _set_cloud_outage(stub_coord)
+        assert self._cam(stub_coord, stub_entry).available is True
+
+    def test_cloud_up_short_circuits(self, stub_coord, stub_entry):
+        # last_update_success True → available True regardless of maintenance.
+        stub_coord._maintenance_cache = _make_maintenance()
+        assert self._cam(stub_coord, stub_entry).available is True
+
+    def test_no_maintenance_cache_stays_unavailable(self, stub_coord, stub_entry):
+        _set_cloud_outage(stub_coord)
+        stub_coord._maintenance_cache = None
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_maintenance_not_active_stays_unavailable(self, stub_coord, stub_entry):
+        _set_cloud_outage(stub_coord)
+        stub_coord._maintenance_cache = _make_maintenance("scheduled")
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_not_camera_relevant_stays_unavailable(self, stub_coord, stub_entry):
+        _set_cloud_outage(stub_coord)
+        stub_coord._maintenance_cache = _make_maintenance(camera_relevant=False)
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_lan_unreachable_stays_unavailable(self, stub_coord, stub_entry):
+        _set_cloud_outage(stub_coord)
+        stub_coord.is_lan_reachable = lambda cam_id: False
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_lan_reachability_unknown_stays_unavailable(self, stub_coord, stub_entry):
+        # None (unknown) must NOT be treated as reachable.
+        _set_cloud_outage(stub_coord)
+        stub_coord.is_lan_reachable = lambda cam_id: None
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_no_live_session_stays_unavailable(self, stub_coord, stub_entry):
+        # Maintenance + LAN ok but no streaming session → unavailable.
+        _set_cloud_outage(stub_coord)
+        stub_coord._live_connections = {}
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_live_connection_without_url_stays_unavailable(
+        self, stub_coord, stub_entry
+    ):
+        # _live_connections entry exists but no rtsps/rtsp URL → not streaming.
+        _set_cloud_outage(stub_coord)
+        stub_coord._live_connections = {CAM_ID: {}}
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_firmware_update_overrides_local_available(self, stub_coord, stub_entry):
+        # Firmware install must win even inside a maintenance window.
+        _set_cloud_outage(stub_coord)
+        stub_coord.is_updating = lambda cam_id: True
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_maintenance_state_raises_is_safe(self, stub_coord, stub_entry):
+        # A broken mw.state() (e.g. tz-naive compare) must not crash available.
+        _set_cloud_outage(stub_coord)
+
+        def _boom():
+            raise TypeError("naive vs aware")
+
+        stub_coord._maintenance_cache = SimpleNamespace(
+            camera_relevant=True, state=_boom
+        )
+        assert self._cam(stub_coord, stub_entry).available is False

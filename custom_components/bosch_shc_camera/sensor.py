@@ -31,7 +31,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import BoschCameraCoordinator, get_options
-from .const import DOMAIN
+from .const import CONF_ENABLE_AI_DESCRIPTION, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,6 +127,12 @@ async def async_setup_entry(
     if opts.get("enable_nvr", False):
         for cam_id in coordinator.data:
             entities.append(BoschNvrStateSensor(coordinator, cam_id, config_entry))
+    # AI Snapshot Description sensor — only when option is enabled
+    if opts.get(CONF_ENABLE_AI_DESCRIPTION, False):
+        for cam_id in coordinator.data:
+            entities.append(
+                BoschCameraAiDescriptionSensor(coordinator, cam_id, config_entry)
+            )
     # External stream URL sensors (main + sub). Per-camera, always registered
     # so the BoschExternalStreamSwitch can toggle their value without dynamic
     # entity (re-)registration. Disabled in entity registry by default;
@@ -176,6 +182,15 @@ class _BoschSensorBase(CoordinatorEntity, SensorEntity):  # type: ignore[misc]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+_STATUS_SENSOR_OPTIONS: list[str] = [
+    "online",
+    "offline",
+    "updating",
+    "session_limit",
+    "unknown",
+]
+
+
 class BoschCameraStatusSensor(_BoschSensorBase):
     """Sensor: online / offline / updating / unknown.
 
@@ -218,7 +233,7 @@ class BoschCameraStatusSensor(_BoschSensorBase):
         # session_limit: HTTP 444 — not offline, just too many concurrent sessions
         if raw == "session_limit":
             return "session_limit"
-        return raw
+        return raw if raw in _STATUS_SENSOR_OPTIONS else "unknown"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -264,13 +279,12 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
         if not ts_str:
             return None
         try:
-            # API returns e.g. "2026-03-19T09:32:08.000Z" or "2026-03-19T09:32:08"
-            # Despite the Z suffix, Bosch timestamps are in local time —
-            # treating as UTC causes a 1-hour offset in CET/CEST timezones.
+            # API returns e.g. "2026-03-19T09:32:08.000Z"
+            # Bosch timestamps use UTC (Z suffix) — parse as UTC then convert to local.
             ts_clean = ts_str[:19]  # "2026-03-19T09:32:08"
-            dt = datetime.fromisoformat(ts_clean)
-            local_tz = dt_util.get_time_zone(self.hass.config.time_zone)
-            return dt.replace(tzinfo=local_tz or UTC)
+            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=UTC)
+            result: datetime = dt_util.as_local(dt_utc)
+            return result
         except ValueError:
             return None
 
@@ -304,13 +318,21 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
     @property
     def native_value(self) -> int:
         events = self._cam_data.get("events", [])
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
+        # "today" prefix must also be UTC. Using HA-local time here mismatched
+        # the date prefix in the 1-2h window after local midnight and mis-bucketed
+        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         return sum(1 for ev in events if ev.get("timestamp", "").startswith(today))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         events = self._cam_data.get("events", [])
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
+        # "today" prefix must also be UTC. Using HA-local time here mismatched
+        # the date prefix in the 1-2h window after local midnight and mis-bucketed
+        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         today_events = [
             ev for ev in events if ev.get("timestamp", "").startswith(today)
         ]
@@ -649,7 +671,11 @@ class BoschMovementEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int:
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
+        # "today" prefix must also be UTC. Using HA-local time here mismatched
+        # the date prefix in the 1-2h window after local midnight and mis-bucketed
+        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1
@@ -679,7 +705,11 @@ class BoschAudioEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int:
-        today = dt_util.now().strftime("%Y-%m-%d")
+        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
+        # "today" prefix must also be UTC. Using HA-local time here mismatched
+        # the date prefix in the 1-2h window after local midnight and mis-bucketed
+        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1
@@ -848,7 +878,7 @@ class BoschCommissionedSensor(_BoschSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_commissioned"
         self._attr_translation_key = "commissioned"
-        self._attr_options = ["Commissioned", "Not commissioned", "Not connected"]
+        self._attr_options = ["commissioned", "not_commissioned", "not_connected"]
         self._attr_device_class = SensorDeviceClass.ENUM
 
     @property
@@ -857,10 +887,10 @@ class BoschCommissionedSensor(_BoschSensorBase):
         if data is None:
             return None
         if not data.get("connected", False):
-            return "Not connected"
+            return "not_connected"
         if data.get("commissioned", False):
-            return "Commissioned"
-        return "Not commissioned"
+            return "commissioned"
+        return "not_commissioned"
 
     @property
     def available(self) -> bool:
@@ -1069,7 +1099,10 @@ class BoschTlsCertSensor(_BoschSensorBase):
         if not cert or "not_after" not in cert:
             return None
         try:
-            return datetime.fromisoformat(cert["not_after"])
+            dt = datetime.fromisoformat(cert["not_after"])
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt
         except (ValueError, TypeError):
             return None
 
@@ -1525,6 +1558,47 @@ class BoschNvrStateSensor(_BoschSensorBase):
         }
 
 
+class BoschCameraAiDescriptionSensor(_BoschSensorBase):
+    """Sensor: last AI-generated snapshot description for this camera.
+
+    Only created when the ``enable_ai_description`` integration option is
+    enabled.  The state is the description text, truncated to 255 chars
+    (HA state hard limit).  The full text is available in
+    ``extra_state_attributes["description"]``.
+
+    Updated via coordinator push whenever :func:`handle_describe_snapshot`
+    stores a new result in ``coordinator.data[cam_id]["ai_description"]``.
+    """
+
+    _attr_icon = "mdi:image-text"
+    _attr_has_entity_name = True
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_ai_description_{cam_id.lower()}"
+        self._attr_translation_key = "ai_description"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return last description, truncated to 255 chars (HA state limit)."""
+        text: str | None = self._cam_data.get("ai_description", {}).get("text")
+        if text is None:
+            return None
+        return text[:255]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Expose full description + metadata."""
+        ai: dict[str, str | None] = self._cam_data.get("ai_description", {})
+        return {
+            "description": ai.get("text"),
+            "generated_at": ai.get("generated_at"),
+            "ai_task_entity": ai.get("ai_task_entity"),
+        }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 import re as _re_inst
 
@@ -1636,6 +1710,8 @@ class BoschOnvifScopesSensor(_BoschSensorBase):
     _attr_icon = "mdi:video-box"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    _attr_options: ClassVar[list[str]] = ["supported"]
+    _attr_device_class = SensorDeviceClass.ENUM
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -1649,7 +1725,7 @@ class BoschOnvifScopesSensor(_BoschSensorBase):
         scopes = self.coordinator._rcp_onvif_scopes_cache.get(self._cam_id)
         if not scopes:
             return None
-        return "ONVIF supported"
+        return "supported"
 
     @property
     def available(self) -> bool:
@@ -1759,7 +1835,8 @@ class BoschCloudFeatureFlagsSensor(_BoschSensorBase):
         if not flags:
             return None
         enabled = sorted(k for k, v in flags.items() if v)
-        return ", ".join(enabled) if enabled else "none"
+        result = ", ".join(enabled) if enabled else "none"
+        return result[:255]
 
     @property
     def available(self) -> bool:
