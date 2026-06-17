@@ -121,8 +121,6 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     _PLACEHOLDER_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?\x00T\xdf\xb2\x80\x01\xff\xd9"
     _attr_has_entity_name = True
 
-    _attr_supported_features = CameraEntityFeature.STREAM
-
     def __init__(
         self,
         coordinator: BoschCameraCoordinator,
@@ -396,6 +394,26 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         if not live:
             return False
         return bool(live.get("rtspsUrl") or live.get("rtspUrl"))
+
+    @property
+    def supported_features(self) -> CameraEntityFeature:
+        """Advertise STREAM unless the camera is OFFLINE.
+
+        The HA mobile app uses supported_features to decide whether to render a
+        native live-stream view (more-info dialog, picture-glance camera_view:live).
+        For an OFFLINE camera there is no stream, so the native view would show a
+        black video. Dropping STREAM while OFFLINE makes the app fall back to the
+        snapshot (entity_picture) instead. An ONLINE *idle* camera MUST keep STREAM
+        so the user can still start a live view (the stream opens on demand) — so
+        the gate is on OFFLINE status, NOT on is_streaming and NOT on `available`
+        (which stays True for an offline camera: the cloud poll succeeds, the
+        camera just reports status OFFLINE). UNKNOWN/missing status keeps STREAM
+        (only drop when definitively offline). 2026-06-17.
+        """
+        status = str(self._cam_data.get("status", "")).upper()
+        if status == "OFFLINE":
+            return CameraEntityFeature(0)
+        return CameraEntityFeature.STREAM
 
     @property
     def is_recording(self) -> bool:
@@ -1100,8 +1118,22 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         if not self.is_streaming:
             now = time.monotonic()
             cache_stale = (now - self._last_image_fetch) >= CLOUD_SNAP_CACHE_TTL
-            if not self._cached_image:
-                # First load — must wait synchronously.
+            if (
+                not self._cached_image or self._cached_image is self._PLACEHOLDER_JPEG
+            ) and cache_stale:
+                # First load — must wait synchronously. The placeholder is a real
+                # (truthy) 1×1 black JPEG, so `not self._cached_image` alone never
+                # fires while we still hold it — use the identity check too (mirror
+                # of _async_trigger_image_refresh). Without this, a cold-boot proxy
+                # request (HA Companion app on restart, before the async disk-restore
+                # in async_added_to_hass completes) was served the black placeholder
+                # instead of fetching a real frame → "black image on mobile".
+                # The `and cache_stale` gate is the backoff: a persistently-offline
+                # camera (every fetch fails, placeholder stays) would otherwise
+                # re-enter this slow RCP+REMOTE+LOCAL chain on EVERY proxy request,
+                # since the placeholder identity is true regardless of staleness.
+                # On true first load _last_image_fetch is the boot sentinel, so
+                # cache_stale is True and this still fetches immediately.
                 # For mobile/thumbnail requests (width ≤ 640): try RCP 0x099e first
                 # (320×180 JPEG, ~3 KB, ~100 ms with cached session) before the slow
                 # full proxy path (PUT /connection + snap.jpg, ~3 s cold).
@@ -1133,6 +1165,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         len(fresh),
                     )
                     return fresh
+                # Fetch failed while holding only the placeholder (camera offline /
+                # cloud blip). Stamp now so cache_stale goes False and we back off —
+                # don't re-run the slow RCP+REMOTE+LOCAL chain on every proxy request;
+                # retry after CLOUD_SNAP_CACHE_TTL. Mirrors the stale branch below.
+                # Falls through to 2b / cached / event-snapshot fallback.
+                self._last_image_fetch = now
             elif cache_stale:
                 cache_age = now - self._last_image_fetch
                 # Always fetch fresh synchronously when cache is stale.

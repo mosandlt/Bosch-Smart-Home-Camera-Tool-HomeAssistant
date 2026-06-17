@@ -12,6 +12,7 @@ import os
 import re
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -39,12 +40,33 @@ def _is_safe_bosch_url(url: str) -> bool:
     )
 
 
+_SSL_CTX: ssl.SSLContext | None = None
+_SSL_CTX_LOCK = threading.Lock()
+
+
 def _bosch_ssl_ctx() -> ssl.SSLContext:
-    """Return an SSL context that skips Bosch Cloud's private CA verification."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    """Return a verifying SSL context that pins the Bosch private cloud CA.
+
+    Cloud media downloads (imageUrl / videoClipUrl on ``*.boschsecurity.com``)
+    carry the bearer token in the Authorization header, so TLS MUST be verified
+    to prevent MITM (CWE-295 / GHSA-6qh5-x5m5-vj6v). Reuses the same pinned
+    context as cloud_ssl (system roots + Bosch intermediate via
+    VERIFY_X509_PARTIAL_CHAIN) instead of the former CERT_NONE.
+
+    Cached at module level: building loads the system CA bundle (blocking I/O),
+    and all smb callers run in an executor thread, so the one-off blocking build
+    is acceptable. The LAN/self-signed exception applies only to camera IPs,
+    never to the cloud host reached here.
+    """
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        # Imported lazily to avoid any package import-order coupling.
+        from .cloud_ssl import _build_ssl_context
+
+        with _SSL_CTX_LOCK:
+            if _SSL_CTX is None:
+                _SSL_CTX = _build_ssl_context()
+    return _SSL_CTX
 
 
 def _http_get(

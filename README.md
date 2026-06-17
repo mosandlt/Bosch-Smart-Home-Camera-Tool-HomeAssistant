@@ -50,6 +50,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Features](#features)
   - [Entities](#entities)
   - [Built-in 3-Step Alert System](#built-in-3-step-alert-system)
+  - [AI Snapshot Descriptions](#ai-snapshot-descriptions-opt-in-v1370) — AI Task describes what a camera sees + prompt tips
   - [FCM Push vs Polling](#fcm-push-vs-polling)
   - [SMB/NAS Upload](#smbnas-upload)
   - [Developer Tools — Services](#developer-tools--services)
@@ -808,6 +809,85 @@ Steps 2 and 3 also include a clickable Media Browser link to that day's event fo
 **iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are temporarily saved to `www/bosch_alerts/` (served as `/local/bosch_alerts/`) and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
 
 **Notification switch guard (v7.9.1+):** Alerts respect the notification switches — if `switch.bosch_{name}_notifications` (master) is OFF, no alerts are sent. Type-specific switches (`movement_notifications`, `person_notifications`, `audio_notifications`) are also checked. The FCM push is still received (for event tracking), but the HA notification is suppressed.
+
+### AI Snapshot Descriptions (opt-in, v13.7.0+)
+
+Let Home Assistant's **AI Task** describe what a camera sees — in plain language, in your language. A description can be generated automatically on a motion/person event, or on demand via the `describe_snapshot` service. The result is exposed as a per-camera sensor and can optionally be appended to your event notifications ("Person at the front door — *a delivery courier is placing a parcel on the doormat*").
+
+It is **off by default**. Nothing is sent to any model until you enable it, and **privacy mode always blocks analysis** (a blanked frame is never analysed).
+
+> Requires an [AI Task](https://www.home-assistant.io/integrations/ai_task/) entity in Home Assistant — e.g. Google Generative AI, OpenAI, Ollama, or any provider that exposes `ai_task.generate_data` with image support.
+
+#### How it works
+
+```mermaid
+flowchart TD
+    EV[Motion / person event] -->|ai_describe_on_motion = on| P
+    SVC["describe_snapshot service<br/>(manual / automation)"] -->|force: bypasses window + cooldown| AI
+
+    P{Privacy mode?} -->|ON| STOP[Skip — never analyse a blanked frame]
+    P -->|OFF| W{Active-time window?}
+    W -->|inside / not set| C{Presence / condition entity matches?}
+    C -->|yes / not set| R{Cooldown elapsed AND daily budget left?}
+    R -->|no| CACHE[Skip — reuse last description if fresh]
+    R -->|yes| AI
+
+    AI["ai_task.generate_data<br/>current snapshot + your prompt + language"] --> SENS["sensor.bosch_CAM_ai_description"]
+    AI --> NOTIF[Optional: appended to the event notification]
+    AI --> BUS["Event: bosch_shc_camera_ai_description"]
+```
+
+The gates exist to keep the feature **cheap and quiet**: a per-camera **cooldown**, a **daily budget**, an optional **active-time window** (e.g. only at night), and an optional **presence/condition gate** (e.g. only when `person.you` is `not_home`). Automatic calls respect all gates; a manual `describe_snapshot` call bypasses the window and cooldown but still counts toward the daily budget and is still privacy-guarded.
+
+#### Setup
+
+**Settings → Devices & Services → Bosch Smart Home Camera → Configure → AI descriptions:**
+
+| Option | Default | What it does |
+|---|---|---|
+| `enable_ai_description` | off | Master switch — creates the sensor + service |
+| `ai_task_entity` | *(empty)* | Which AI Task entity to use; empty = HA's preferred one |
+| `ai_describe_prompt` | *(security prompt)* | The instructions sent with every snapshot (see below) |
+| `ai_describe_language` | `Deutsch` | Reply language (free text, e.g. `English`, `Français`) |
+| `ai_describe_on_motion` | off | Auto-describe on each motion/person event |
+| `ai_notify_include_description` | off | Append the description to the event notification |
+| `ai_cooldown_seconds` | `60` | Minimum seconds between auto-descriptions per camera |
+| `ai_max_per_day` | `100` | Daily cap across all cameras (`0` = unlimited) |
+| `ai_active_time_start` / `_end` | *(empty)* | Only auto-describe within this `HH:MM` window (overnight ranges OK) |
+| `ai_active_condition_entity` / `_state` | *(empty)* / `not_home` | Only auto-describe while this entity is in this state |
+
+#### The `describe_snapshot` service
+
+Returns the text in the response, so you can use it anywhere (a dashboard, a TTS announcement, your own automation):
+
+```yaml
+action: bosch_shc_camera.describe_snapshot
+data:
+  camera_id: bosch_terrasse        # or: entity_id: camera.bosch_terrasse
+  # optional per-call overrides:
+  instructions: "Is a parcel visible? Answer yes or no and where."
+  language: English
+response_variable: result
+# result.description now holds the text
+```
+
+#### Optimising the prompt
+
+The prompt is the single biggest lever on quality and cost. The shipped default is tuned for **security relevance only** — it reports people/vehicles/animals/parcels and is told to ignore scenery and not to guess. Tips when writing your own:
+
+- **Say what to report AND what to ignore.** Vision models love to narrate furniture, weather and architecture. An explicit "describe ONLY …; do NOT describe the room/scenery/image quality" keeps answers short, useful and cheap (fewer output tokens).
+- **Pin the negatives.** Models guess "parcel" from doormats, floor tiles and shadows. List those explicitly as *not* a parcel.
+- **Define the empty case.** Tell it exactly what to say when nothing relevant is visible (e.g. *"Keine sicherheitsrelevanten Beobachtungen"*) so downstream automations can match on it.
+- **Keep it short.** A shorter prompt + a short-answer instruction = lower latency and lower per-call cost; auto-mode runs on a 20 s timeout.
+- **Tailor per camera via the service.** Use `instructions:` on a `describe_snapshot` call for camera-specific framing ("ignore the public street, report only the driveway and porch").
+- **Set the language explicitly** with `ai_describe_language` — the integration also appends a bilingual "answer only in <language>" directive so the model doesn't drift back to its default.
+
+<details>
+<summary>Shipped default prompt (German, security-focused)</summary>
+
+> Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen.
+
+</details>
 
 ### Mark-as-Read & Last Event Fast-Path
 

@@ -304,6 +304,38 @@ class TestHandleTriggerSnapshot:
         assert hass.async_create_task.call_count >= 2
 
     @pytest.mark.asyncio
+    async def test_entity_id_targets_single_camera(self):
+        """With entity_id, only the matching camera's image refresh runs and the
+        full coordinator tick is skipped — per-camera targeting (2026-06-17) so a
+        dashboard with N cameras doesn't refresh every camera on every tick."""
+        from custom_components.bosch_shc_camera import _register_services
+
+        cam_a = MagicMock()
+        cam_a.entity_id = "camera.bosch_a"
+        cam_a._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_b = MagicMock()
+        cam_b.entity_id = "camera.bosch_b"
+        cam_b._async_trigger_image_refresh = AsyncMock(return_value=None)
+
+        coord = MagicMock()
+        coord.async_request_refresh = AsyncMock()
+        coord._camera_entities = {"cam-a": cam_a, "cam-b": cam_b}
+        entry = MagicMock()
+        entry.runtime_data = coord
+
+        hass = _make_hass()
+        hass.config_entries.async_loaded_entries.return_value = [entry]
+        _register_services(hass)
+        handler = _get_handlers(hass)["trigger_snapshot"]
+        call_mock = MagicMock()
+        call_mock.data = {"entity_id": "camera.bosch_a"}
+        await handler(call_mock)
+
+        # Only camera A's image refresh; no full coordinator tick.
+        coord.async_request_refresh.assert_not_called()
+        assert hass.async_create_task.call_count == 1
+
+    @pytest.mark.asyncio
     async def test_no_entries_no_tasks(self):
         """With no loaded entries, async_create_task must not be called."""
         from custom_components.bosch_shc_camera import _register_services

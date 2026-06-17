@@ -5,18 +5,42 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v13.7.1] - 2026-06-17
+
+A patch focused on snapshot/image display, plus one security fix.
+
+### Security
+
+- **SMB upload now verifies the cloud-media download over TLS.** When uploading event media to an SMB share, the integration fetched the clip/snapshot from the Bosch cloud without verifying the TLS certificate (`CERT_NONE`). It now verifies against the pinned Bosch CA, the same way every other cloud call does (CWE-295). Update recommended if you use the SMB upload feature.
+
+### Bug fixes
+
+- **Black image on mobile (last snapshot not shown).** On the Home Assistant Companion app a camera — especially an offline one — could show a black frame instead of its last snapshot, while the desktop browser showed it fine. Two causes, both fixed: (1) the card refused to load the image for an offline camera, so it relied on a browser-only cache the app's webview doesn't have — it now fetches the last good frame the backend still serves; (2) the backend treated its internal 1×1 black placeholder as a valid cached image on a cold start, so a request arriving before the on-disk snapshot was restored got the placeholder — it now fetches a real frame, with a back-off so an offline camera isn't polled on every request.
+- **Fewer redundant snapshot requests.** A dashboard with several cameras no longer makes every camera refresh on every tile's timer (the refresh now targets only the relevant camera, and the per-camera timers are staggered), and the card no longer downloads each snapshot twice to cache it. This is easier on the camera's limited cloud session budget.
+- **Offline cameras showed a stuck loading spinner.** A camera reported as offline displayed the "loading image…" spinner on top of the "Camera Offline" overlay (the two messages overlapped). The spinner is now reliably suppressed while a camera is offline, no matter which path triggered it.
+- **A "refreshing" overlay could get stuck.** After a failed image refresh the semi-transparent "refreshing" overlay could remain on screen on every subsequent refresh. The pending-refresh state is now cleared on error.
+- **Live view didn't recover cleanly after a camera dropped offline.** If a camera went offline while its live stream was playing, a frozen frame lingered and the stream didn't restart cleanly once the camera came back. The live view is now torn down on the offline transition so it resumes correctly on recovery.
+- **Offline overlay is now localized.** The offline message (title, "last seen" label and the date format) was hardcoded in German for everyone — it now follows your Home Assistant language across all 11 supported languages.
+
 ## [v13.7.0] - 2026-06-16
 
-New optional **AI snapshot descriptions**, plus a round of reliability fixes from a structured bug-hunt across the backend and the card.
+A big bug-fixing round across the backend and the card, plus one new opt-in feature.
+
+### New
 
 - **AI snapshot descriptions (opt-in).** A new option lets Home Assistant's AI Task describe what a camera sees — automatically on motion/person events, or on demand through the new `describe_snapshot` service (which returns the text). You choose the AI Task entity, the prompt, and the reply language. Guardrails keep it economical: a per-camera cooldown, a daily call budget, an optional active-time window, and an optional presence/condition gate (for example, only analyse when nobody is home). The latest description is exposed as a per-camera sensor and can optionally be appended to your event notifications. **Off by default** — no AI calls happen until you enable it, and privacy mode always blocks analysis.
-- **Event-count timezone fix.** The *events today* / *movement events today* / *audio events today* sensors now bucket "today" by the event timestamps' UTC date. Previously a local-date comparison could under-count or mis-bucket events for an hour or two around midnight.
-- **Push reliability.** After an FCM push, the follow-up cloud fetch is retried only when a fetch actually succeeded — a brief cloud outage no longer triggers extra retries and waits against an unreachable endpoint.
-- **Event-poll resilience.** A transient cloud failure during an event poll no longer blanks a camera's recent-events list (and its events-today count) or defers the next poll by a full interval — the poll retries promptly on the next tick and the cached events are preserved until the cloud answers again.
-- **Availability during cloud maintenance.** While a camera is streaming locally during a known Bosch cloud maintenance window, it no longer flips to *unavailable* on every brief cloud dip — the camera and its entities stay available as long as the LAN datapath keeps serving frames. (Requires an active maintenance window, LAN reachability, and an established local live session; the firmware-update guard still takes priority.)
-- **Snapshot refresh.** A second concurrent image refresh is now skipped reliably via a synchronous in-flight guard, avoiding a redundant camera session and an extra `PUT /connection`.
-- **Card.** The on-image AI caption reappears correctly after it auto-hides, and a volume-slider listener is now cleaned up when the card is removed.
-- **Settings.** The AI entity gates can be cleared again to disable them, the daily-budget field no longer has a hidden upper limit (`0` = unlimited), and the active-time fields reject malformed values instead of silently disabling the window.
+
+### Bug fixes
+
+- **"Events today" counts drifted around midnight.** The events-today / movement / audio sensors compared a local date against the cameras' UTC event timestamps, so counts could under-count or land in the wrong day for an hour or two around midnight. Now bucketed by UTC date.
+- **A cloud blip blanked the events list and delayed detection.** A transient cloud failure during an event poll wiped a camera's recent-events list (and its events-today count) and pushed the next poll out by a full interval (up to 5 min). The poll now retries promptly and keeps the cached events until the cloud answers again.
+- **Camera flipped to *unavailable* during cloud maintenance.** While a camera was streaming locally during a known Bosch cloud maintenance window, every brief cloud dip flipped it (and its entities) to unavailable. It now stays available as long as the LAN datapath keeps serving frames (firmware-update guard still takes priority).
+- **Redundant FCM retries during a cloud outage.** After a push, the follow-up cloud fetch was retried even when every fetch had failed. It now retries only when a fetch actually succeeded.
+- **Double snapshot fetch.** Overlapping image refreshes could each open a camera session; a synchronous in-flight guard now skips the duplicate, saving a redundant `PUT /connection`.
+- **AI caption never came back after auto-hiding.** The on-image AI caption now re-appears correctly after it has auto-hidden.
+- **Volume-slider listener leak.** The card now removes the volume-slider listener when it is torn down.
+- **AI settings couldn't always be saved.** You can now clear an AI entity gate to disable it, the daily-budget field no longer has a hidden upper limit (`0` = unlimited), and malformed active-time values are rejected instead of silently disabling the window.
+- **Internal:** the daily AI-budget "limit reached" notice now re-arms in lockstep with the local-midnight reset, and the manual `describe_snapshot` call is counted toward the in-flight budget.
 
 Existing installations behave exactly as before until you turn the AI option on.
 

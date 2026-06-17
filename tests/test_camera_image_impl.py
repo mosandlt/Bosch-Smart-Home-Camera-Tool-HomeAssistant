@@ -304,6 +304,118 @@ class TestAsyncCameraImageImplLocalDigest:
         assert out == b"\xff\xd8cached"
 
 
+# ── Placeholder must not count as a cached image (mobile black-image) ────────
+
+
+class TestPlaceholderTreatedAsNoCache:
+    """2026-06-17: HA Companion app showed a BLACK image on cold start.
+
+    `_cached_image` is initialised to the truthy 1×1 black `_PLACEHOLDER_JPEG`,
+    so the first-load fetch branch `if not self._cached_image:` never fired
+    while we still held only the placeholder. With a fresh (non-stale)
+    `_last_image_fetch`, the impl skipped both the first-load AND the
+    cache-stale branches and returned the black placeholder. The desktop card
+    hid this via its localStorage cache; the mobile app (no such cache, hits
+    /api/camera_proxy directly) got the black frame. Fix: the first-load branch
+    also fires when we hold only the placeholder (identity check, mirrors
+    _async_trigger_image_refresh).
+    """
+
+    @pytest.mark.asyncio
+    async def test_placeholder_cold_boot_fetches_real_frame(self):
+        """Cold boot (only placeholder held) + stale timestamp → fetch a real
+        frame instead of serving the black placeholder. This is the mobile fix."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        real = b"\xff\xd8\xff\xe0real-snapshot-bytes"
+        coord = _make_coord(
+            _live_connections={},  # not streaming → reaches section 2
+            async_fetch_live_snapshot=AsyncMock(return_value=real),
+            async_fetch_live_snapshot_local=AsyncMock(return_value=None),
+        )
+        cam = _make_camera(
+            coord=coord,
+            _cached_image=BoschCamera._PLACEHOLDER_JPEG,
+            _last_image_fetch=time.monotonic() - 100,  # stale (TTL is 30s)
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        assert out == real, "must fetch a real frame, not serve the black placeholder"
+        assert cam._cached_image == real
+
+    @pytest.mark.asyncio
+    async def test_placeholder_offline_backs_off_no_hammer(self):
+        """Persistently-offline camera (every fetch fails, placeholder stays):
+        the placeholder fetch must be gated by cache_stale + stamped on failure,
+        so it does NOT re-run the slow RCP+REMOTE+LOCAL chain on every request."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        remote = AsyncMock(return_value=None)  # offline → fails
+        local = AsyncMock(return_value=None)
+        coord = _make_coord(
+            _live_connections={},
+            async_fetch_live_snapshot=remote,
+            async_fetch_live_snapshot_local=local,
+        )
+        cam = _make_camera(
+            coord=coord,
+            _cached_image=BoschCamera._PLACEHOLDER_JPEG,
+            _last_image_fetch=time.monotonic() - 100,  # stale → first call fetches
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            out1 = await BoschCamera._async_camera_image_impl(cam)
+            # Second call immediately after: failure stamped _last_image_fetch=now,
+            # so cache_stale is now False → must NOT fetch again (backoff).
+            out2 = await BoschCamera._async_camera_image_impl(cam)
+        assert out1 == BoschCamera._PLACEHOLDER_JPEG  # nothing better available
+        assert out2 == BoschCamera._PLACEHOLDER_JPEG
+        assert remote.call_count == 1, (
+            "REMOTE fetch must run once, not on every request"
+        )
+
+
+# ── supported_features gated on OFFLINE (mobile native-view black) ───────────
+
+
+class TestSupportedFeaturesOfflineGate:
+    """2026-06-17: the HA mobile app uses supported_features to decide whether to
+    render a native live-stream view. STREAM was advertised unconditionally, so
+    tapping an OFFLINE camera tried to play a (non-existent) stream → black video.
+    Gate STREAM off only when status==OFFLINE; online/idle/unknown keep STREAM so
+    a live view can still be started on demand."""
+
+    def test_online_idle_advertises_stream(self):
+        from homeassistant.components.camera import CameraEntityFeature
+
+        cam = _make_camera()  # coord data has no "status" → UNKNOWN
+        assert CameraEntityFeature.STREAM in cam.supported_features
+
+    def test_unknown_status_keeps_stream(self):
+        from homeassistant.components.camera import CameraEntityFeature
+
+        coord = _make_coord(
+            data={CAM_ID: {"info": {"title": "T"}, "events": [], "status": "UNKNOWN"}}
+        )
+        cam = _make_camera(coord=coord)
+        assert CameraEntityFeature.STREAM in cam.supported_features
+
+    def test_offline_drops_stream(self):
+        from homeassistant.components.camera import CameraEntityFeature
+
+        coord = _make_coord(
+            data={CAM_ID: {"info": {"title": "T"}, "events": [], "status": "OFFLINE"}}
+        )
+        cam = _make_camera(coord=coord)
+        assert CameraEntityFeature.STREAM not in cam.supported_features
+        assert cam.supported_features == CameraEntityFeature(0)
+
+
 # ── _yuv422_to_jpeg additional edge ──────────────────────────────────────
 
 

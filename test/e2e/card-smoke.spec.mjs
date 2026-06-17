@@ -1237,6 +1237,311 @@ test("privacy placeholder sits above the loading overlay (z-index)", async ({ pa
   expect(r.privacyZ > r.loadingZ, "privacy placeholder stacks above the loading overlay").toBe(true);
 });
 
+// 2026-06-17: offline card showed the "Bild wird geladen…" loading spinner ON TOP
+// of the "Kamera Offline" overlay (screenshot: spinner + text bleeding through the
+// offline message). Root cause: the "stream just stopped" transition re-raised the
+// loading overlay AFTER the offline block hid it; the spinner only cleared on the
+// 15 s safety timer. Fix: _setLoadingOverlay(true) is a hard no-op while _isOffline,
+// and the stream-stop block is skipped when offline. Also pins the offline overlay
+// is localized (title + last-seen prefix were hardcoded German for all languages).
+test("offline overlay suppresses the loading spinner and localizes its text (#offline-overlap)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status", apple_style: true });
+    card.hass = {
+      config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "Eingang" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_status": { state: "offline", attributes: {}, last_changed: "2026-06-17T06:22:00Z", last_updated: "2026-06-17T06:22:00Z" },
+      },
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    const sr = card.shadowRoot;
+    const lo = sr.getElementById("loading-overlay");
+    // Simulate a late refresh/stream-stop callback trying to raise the spinner
+    // while offline — the JS guard must keep it hidden (this is the actual bug).
+    card._setLoadingOverlay(true, "Bild wird geladen…");
+    // AND simulate the path that bypasses _setLoadingOverlay entirely
+    // (_restoreCachedImage / the template's default `visible` class): force the
+    // class on directly — the CSS :host(.cam-offline) rule must still hide it.
+    lo.classList.add("visible");
+    const forcedOpacity = getComputedStyle(lo).opacity;
+    return {
+      isOffline: card._isOffline === true,
+      offlineVisible: sr.getElementById("offline-overlay").classList.contains("visible"),
+      loadingVisibleAfterGuard: lo ? lo.classList.contains("visible") : null,
+      forcedOpacity,
+      title: sr.getElementById("offline-title")?.textContent,
+      subtitle: sr.getElementById("offline-subtitle")?.textContent,
+    };
+  });
+  expect(r.isOffline, "card detected OFFLINE status").toBe(true);
+  expect(r.offlineVisible, "offline overlay is shown").toBe(true);
+  // The JS guard blocks _setLoadingOverlay(true); but even if a bypassing path
+  // forces the .visible class, the CSS rule keeps the spinner invisible (opacity 0).
+  expect(r.forcedOpacity, "loading spinner is forced to opacity 0 while offline (CSS guard, even when .visible)").toBe("0");
+  expect(r.title, "offline title localized to active card language (en)").toBe("Camera Offline");
+  expect(r.subtitle, "offline subtitle uses localized 'Last seen:' prefix, not hardcoded German").toContain("Last seen:");
+});
+
+// Source pin: the "stream just stopped" transition block must be gated on
+// !this._isOffline so it never re-raises the refresh spinner / fires a snapshot
+// against an unreachable camera (companion to the runtime test above).
+test("stream-stop refresh block is skipped while the camera is offline (source pin)", () => {
+  const marker = 'if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming';
+  const idx = CARD_SRC.indexOf(marker);
+  expect(idx, "stream-stop transition block exists").toBeGreaterThan(-1);
+  const line = CARD_SRC.slice(idx, CARD_SRC.indexOf("\n", idx));
+  expect(line, "stream-stop block is guarded by !this._isOffline").toContain("!this._isOffline");
+});
+
+// 2026-06-17: _awaitingFresh was never cleared on an image-load error. With a
+// cached image showing, a failed fresh fetch left _awaitingFresh=true, so the
+// next cached-image load re-raised the semi-transparent "refreshing" overlay and
+// it stuck on every 60s refresh cycle. Both error terminal paths now clear it.
+test("_onImageError clears _awaitingFresh so the refreshing overlay can't stick", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    // Case A: a cached image is already showing, fresh fetch then errors.
+    card._imageLoaded = true;
+    card._awaitingFresh = true;
+    card._onImageError();
+    const clearedWithImage = card._awaitingFresh === false;
+    // Case B: cold start, exhaust the retry budget.
+    card._imageLoaded = false;
+    card._awaitingFresh = true;
+    card._loadRetries = 99; // already past MAX_RETRIES → give-up branch
+    card._onImageError();
+    const clearedOnGiveUp = card._awaitingFresh === false;
+    return { clearedWithImage, clearedOnGiveUp };
+  });
+  expect(r.clearedWithImage, "awaitingFresh cleared when error hits with an existing image").toBe(true);
+  expect(r.clearedOnGiveUp, "awaitingFresh cleared when the retry budget is exhausted").toBe(true);
+});
+
+// 2026-06-17: when a camera drops OFFLINE mid-stream, the "stream just stopped"
+// block is skipped (it is !this._isOffline-guarded), so _stopLiveVideo() was
+// never called — a frozen <video> frame lingered under the overlay and
+// _liveVideoActive stayed true, blocking the fresh start after recovery. The
+// offline block now tears the live video down itself.
+test("offline mid-stream tears down the live video so recovery isn't blocked", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status", apple_style: true });
+    const onlineHass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "streaming", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_status": { state: "online", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    card.hass = onlineHass;
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    // Pretend a live video is running, and spy on the teardown.
+    let stopCalled = false;
+    card._liveVideoActive = true;
+    const realStop = card._stopLiveVideo.bind(card);
+    card._stopLiveVideo = () => { stopCalled = true; card._liveVideoActive = false; realStop(); };
+    // Camera drops offline.
+    card.hass = { ...onlineHass, states: {
+      "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:01Z" },
+      "sensor.test_status": { state: "offline", attributes: {}, last_changed: "2026-06-17T06:22:00Z", last_updated: "2026-06-17T06:22:00Z" },
+    } };
+    await new Promise((res) => setTimeout(res, 150));
+    return { stopCalled, liveVideoActive: card._liveVideoActive, isOffline: card._isOffline === true };
+  });
+  expect(r.isOffline, "camera detected offline").toBe(true);
+  expect(r.stopCalled, "_stopLiveVideo was called when the camera dropped offline mid-stream").toBe(true);
+  expect(r.liveVideoActive, "_liveVideoActive reset so post-recovery start isn't blocked").toBe(false);
+});
+
+// 2026-06-17: mobile app showed a BLACK tile for offline cameras while the
+// desktop browser showed the last frame. Root cause: _updateImage early-returned
+// for ANY offline camera, so the only image shown came from the card's
+// localStorage cache (which the app's webview lacks). The backend still serves
+// the last good frame for an offline camera, so the card must still fetch it once
+// when it has nothing to show. It must NOT keep re-fetching once a frame is loaded.
+test("offline camera still loads the backend frame once (mobile black-image fix)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T", access_token: "TOK" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_status": { state: "offline", attributes: {}, last_changed: "2026-06-17T06:22:00Z", last_updated: "2026-06-17T06:22:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    const img = card.shadowRoot.getElementById("cam-img");
+    // App scenario: no localStorage cache → nothing loaded yet.
+    card._imageLoaded = false;
+    card._imgTimestamp = 999;
+    img.src = "";
+    card._updateImage();
+    const loadedWhenEmpty = (img.getAttribute("src") || "").includes("/api/camera_proxy/camera.test");
+    // Once a frame is loaded, an offline camera won't produce a newer one → skip.
+    card._imageLoaded = true;
+    img.src = "data:image/jpeg;base64,SENTINEL";
+    card._updateImage();
+    const skippedWhenLoaded = img.getAttribute("src") === "data:image/jpeg;base64,SENTINEL";
+    return { isOffline: card._isOffline === true, loadedWhenEmpty, skippedWhenLoaded };
+  });
+  expect(r.isOffline, "camera detected offline").toBe(true);
+  expect(r.loadedWhenEmpty, "offline + no cached frame → still fetch the backend proxy image").toBe(true);
+  expect(r.skippedWhenLoaded, "offline + already have a frame → no pointless re-fetch").toBe(true);
+});
+
+// 2026-06-17: a fresh mount with NO localStorage cache (the HA mobile app) left
+// offline AND privacy tiles BLACK/GREY because _triggerFreshSnapshot() skips the
+// image load under its privacy/connectivity guards, so #cam-img never got a src
+// and the overlay (which blurs the image behind it) had nothing to blur. The
+// offline and privacy blocks in _update() now schedule a load when !_imageLoaded.
+test("offline camera schedules a backdrop image load on mount (no localStorage)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    try { Object.keys(localStorage).forEach((k) => k.startsWith("bosch_cam_") && localStorage.removeItem(k)); } catch (_) { /* */ }
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), connected: true, connection: { connected: true },
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T", access_token: "TOK" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_status": { state: "offline", attributes: {}, last_changed: "2026-06-17T06:22:00Z", last_updated: "2026-06-17T06:22:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    const img = card.shadowRoot.getElementById("cam-img");
+    return { isOffline: card._isOffline === true, src: img?.getAttribute("src") || "" };
+  });
+  expect(r.isOffline, "camera offline").toBe(true);
+  expect(r.src.includes("/api/camera_proxy/camera.test"), "offline mount scheduled a backdrop image load").toBe(true);
+});
+
+test("privacy mode schedules a backdrop image load on mount (no localStorage)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    try { Object.keys(localStorage).forEach((k) => k.startsWith("bosch_cam_") && localStorage.removeItem(k)); } catch (_) { /* */ }
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", privacy_entity: "switch.test_privacy" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), connected: true, connection: { connected: true },
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T", access_token: "TOK" }, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_privacy": { state: "on", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    const img = card.shadowRoot.getElementById("cam-img");
+    const ph = card.shadowRoot.getElementById("privacy-placeholder");
+    return { privacyVisible: ph?.classList.contains("visible") === true, src: img?.getAttribute("src") || "" };
+  });
+  expect(r.privacyVisible, "privacy placeholder shown").toBe(true);
+  expect(r.src.includes("/api/camera_proxy/camera.test"), "privacy mount scheduled a backdrop image load").toBe(true);
+});
+
+// 2026-06-17 (Thomas: "offline fullscreen werden die icons angezeigt"): the
+// fullscreen rule force-shows .ap-pill-bar (display:flex !important, to restore it
+// on overview tiles), which overrode the cam-offline hiding (no !important) → an
+// offline camera showed its control icons in fullscreen. A higher-specificity
+// .fs-active.cam-offline rule now keeps them hidden.
+test("offline camera hides the control pill bar in fullscreen", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status", apple_style: true });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T", access_token: "TOK" }, last_updated: "2026-01-01T00:00:00Z" },
+        "sensor.test_status": { state: "offline", attributes: {}, last_changed: "2026-06-17T06:22:00Z", last_updated: "2026-06-17T06:22:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    card.classList.add("fs-active"); // simulate CSS-fullscreen
+    await new Promise((res) => setTimeout(res, 50));
+    const pill = card.shadowRoot.querySelector(".ap-pill-bar");
+    return { offline: card._isOffline === true, display: pill ? getComputedStyle(pill).display : "no-pill" };
+  });
+  expect(r.offline, "camera offline").toBe(true);
+  expect(r.display, "control pill bar is hidden in fullscreen while offline").toBe("none");
+});
+
+// 2026-06-17: WebRTC over a plain-http LAN URL is broken in the iOS Companion app
+// (WKWebView needs a secure context) and HA does NOT auto-fall-back to HLS once a
+// camera claims WebRTC. _startWebRTC must bail fast on iOS+insecure so the caller
+// drops to HLS. Desktop http keeps WebRTC (not iOS). Source pin.
+test("WebRTC bails fast on iOS over an insecure context (source pin)", () => {
+  const idx = CARD_SRC.indexOf("async _startWebRTC(");
+  expect(idx, "_startWebRTC exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(idx, idx + 1900);
+  expect(body, "guards on isSecureContext").toContain("isSecureContext");
+  expect(body, "iOS-specific guard (won't regress desktop http)").toContain("_isIOS()");
+});
+
+// 2026-06-17: trigger_snapshot fired for ALL cameras (no entity_id), so an
+// overview with N cameras refreshed every camera on every tile's tick. The card
+// now passes its own camera so the service can target just that one.
+test("the card targets its own camera in trigger_snapshot calls", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    const calls = [];
+    card._callService = (dom, svc, data) => { calls.push({ dom, svc, data }); };
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), connected: true,
+      connection: { connected: true },
+      services: { bosch_shc_camera: { trigger_snapshot: {} } },
+      states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 150));
+    card._triggerFreshSnapshot();
+    const snap = calls.find((c) => c.svc === "trigger_snapshot");
+    return { hasEntityId: !!snap && snap.data && snap.data.entity_id === "camera.test" };
+  });
+  expect(r.hasEntityId, "trigger_snapshot is called with entity_id === this card's camera").toBe(true);
+});
+
+// 2026-06-17: decoupled volume/mute were stored under global localStorage keys, so
+// muting one camera overwrote every other card's saved state. Keys are now per-camera.
+test("decoupled volume/mute localStorage keys are per-camera", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mk = (id) => { const c = document.createElement("bosch-camera-card"); c.setConfig({ camera_entity: "camera." + id }); return c; };
+    const a = mk("alpha"), b = mk("beta");
+    return {
+      volDiffer: a._cardVolKey() !== b._cardVolKey(),
+      muteDiffer: a._cardMuteKey() !== b._cardMuteKey(),
+      volHasCam: a._cardVolKey().includes("camera.alpha"),
+    };
+  });
+  expect(r.volDiffer, "two cameras have different volume keys").toBe(true);
+  expect(r.muteDiffer, "two cameras have different mute keys").toBe(true);
+  expect(r.volHasCam, "volume key includes the camera entity").toBe(true);
+});
+
 // 2026-06-15: the maintenance banner gained a × dismiss button. The dismiss key is
 // title + raw ISO window (NOT the formatted display string, NOT mState), so it
 // survives a scheduled→active flap of the same window and locale formatting, and a

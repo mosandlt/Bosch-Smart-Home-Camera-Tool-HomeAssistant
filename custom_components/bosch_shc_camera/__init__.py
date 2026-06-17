@@ -8484,16 +8484,37 @@ def _register_services(hass: HomeAssistant) -> None:
     """Register HA services (skip if already registered)."""
 
     async def handle_trigger_snapshot(call: ServiceCall) -> None:
-        """Force an immediate refresh for all cameras (data + images)."""
+        """Force an immediate refresh.
+
+        Without `entity_id`: refresh all cameras (data + images). With an
+        `entity_id`: refresh only that camera's image — and skip the full
+        coordinator tick. The Lovelace card passes its own camera on mount /
+        tab-switch / its 60 s timer, so a dashboard with N cameras would
+        otherwise fire N×(all cameras) image refreshes (and N coordinator ticks)
+        and hammer Bosch's ~3-concurrent-session budget. The periodic coordinator
+        poll keeps event/state data fresh independently.
+        """
+        target = call.data.get("entity_id")
+        # entity_id may arrive as a list (HA target selector) or a bare string.
+        if isinstance(target, list):
+            target = target[0] if target else None
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
-            if coord:
-                # Fire coordinator refresh in background — do NOT await it.
-                # async_request_refresh() awaits the full coordinator tick which can
-                # take 6-22 s; blocking here freezes the card until the tick finishes.
-                hass.async_create_task(coord.async_request_refresh())
+            if not coord:
+                continue
+            if target:
                 for _cam_id, cam in coord._camera_entities.items():
-                    hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
+                    if getattr(cam, "entity_id", None) == target:
+                        hass.async_create_task(
+                            cam._async_trigger_image_refresh(delay=0)
+                        )
+                continue
+            # Fire coordinator refresh in background — do NOT await it.
+            # async_request_refresh() awaits the full coordinator tick which can
+            # take 6-22 s; blocking here freezes the card until the tick finishes.
+            hass.async_create_task(coord.async_request_refresh())
+            for _cam_id, cam in coord._camera_entities.items():
+                hass.async_create_task(cam._async_trigger_image_refresh(delay=0))
 
     async def handle_open_live_connection(call: ServiceCall) -> None:
         """Try to open a live proxy connection for a specific camera."""

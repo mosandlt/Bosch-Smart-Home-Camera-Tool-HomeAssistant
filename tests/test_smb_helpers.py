@@ -252,3 +252,46 @@ class TestSmbSafeBoschUrl:
         from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is False
+
+
+# ── _bosch_ssl_ctx (cloud-media TLS must VERIFY, CWE-295) ────────────────
+
+
+class TestBoschSslCtxVerifies:
+    """Regression (2026-06-16, CWE-295 / GHSA-6qh5-x5m5-vj6v): smb cloud-media
+    downloads (imageUrl / videoClipUrl) send the bearer token, so _bosch_ssl_ctx
+    must VERIFY TLS against the pinned Bosch cloud CA — never the former
+    CERT_NONE / check_hostname=False which left the token MITM-exposed."""
+
+    def test_ssl_ctx_verifies_and_pins_bosch_ca(self):
+        import ssl
+
+        from custom_components.bosch_shc_camera import smb
+
+        smb._SSL_CTX = None  # reset module cache for a deterministic build
+        try:
+            ctx = smb._bosch_ssl_ctx()
+        finally:
+            smb._SSL_CTX = None
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+        # Pinned Bosch intermediate is anchored via PARTIAL_CHAIN (cloud_ssl).
+        assert ctx.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN
+
+    def test_ssl_ctx_reuses_cloud_ssl_builder_and_caches(self):
+        from custom_components.bosch_shc_camera import smb
+
+        sentinel = object()
+        smb._SSL_CTX = None
+        with patch(
+            "custom_components.bosch_shc_camera.cloud_ssl._build_ssl_context",
+            return_value=sentinel,
+        ) as mock_build:
+            try:
+                first = smb._bosch_ssl_ctx()
+                second = smb._bosch_ssl_ctx()
+            finally:
+                smb._SSL_CTX = None
+        assert first is sentinel
+        assert second is sentinel
+        mock_build.assert_called_once()  # built once, then cached

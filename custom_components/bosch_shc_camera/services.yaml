@@ -1,10 +1,23 @@
 trigger_snapshot:
   name: Trigger Snapshot Refresh
   description: >
-    Force an immediate snapshot refresh for all Bosch Smart Home cameras.
-    Useful to get an up-to-date image on demand without waiting for the next
-    scheduled poll interval.
-  fields: {}
+    Force an immediate snapshot refresh. Without arguments, refreshes all Bosch
+    Smart Home cameras; pass a camera entity to refresh only that one. Useful to
+    get an up-to-date image on demand without waiting for the next scheduled poll
+    interval.
+  fields:
+    entity_id:
+      name: Camera
+      description: >
+        Optional. Limit the refresh to a single camera entity. Omit to refresh
+        all cameras. The Lovelace card passes its own camera so a dashboard with
+        many cameras does not refresh every camera on every tile's tick.
+      required: false
+      example: camera.bosch_terrasse
+      selector:
+        entity:
+          integration: bosch_shc_camera
+          domain: camera
 
 open_live_connection:
   name: Open Live Stream Connection

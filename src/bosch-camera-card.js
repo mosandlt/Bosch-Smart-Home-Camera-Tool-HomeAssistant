@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.0";
+const CARD_VERSION = "13.7.1";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -306,6 +306,9 @@ const CARD_I18N = {
     maint_auto_return: "The cameras come back automatically once the cloud responds.",
     privacy_stale_label: "Privacy mode — last image",
     privacy_stale_prefix: "Last event:",
+    offline_title: "Camera Offline",
+    offline_no_conn: "No connection to Bosch Cloud",
+    offline_last_seen: "Last seen:",
     ai_caption_prefix: "AI:",
     multi_audio_muted: "Audio muted (another tab is playing audio for this camera)",
     // ── editor: shared ──
@@ -435,6 +438,9 @@ const CARD_I18N = {
     maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
     privacy_stale_label: "Privatmodus — letztes Bild",
     privacy_stale_prefix: "Letztes Ereignis:",
+    offline_title: "Kamera Offline",
+    offline_no_conn: "Keine Verbindung zur Bosch Cloud",
+    offline_last_seen: "Zuletzt gesehen:",
     ai_caption_prefix: "KI:",
     multi_audio_muted: "Ton stummgeschaltet (eine andere Karte gibt Ton für diese Kamera aus)",
     // ── editor: shared ──
@@ -530,6 +536,9 @@ const CARD_I18N = {
     maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
     privacy_stale_label: "Modo privacidad — última imagen",
     privacy_stale_prefix: "Último evento:",
+    offline_title: "Cámara sin conexión",
+    offline_no_conn: "Sin conexión con Bosch Cloud",
+    offline_last_seen: "Visto por última vez:",
     ai_caption_prefix: "IA:",
     multi_audio_muted: "Audio silenciado (otra tarjeta reproduce audio de esta cámara)",
     ed_cam_entity: "Entidad de cámara *",
@@ -622,6 +631,9 @@ const CARD_I18N = {
     maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
     privacy_stale_label: "Mode confidentialité — dernière image",
     privacy_stale_prefix: "Dernier événement :",
+    offline_title: "Caméra hors ligne",
+    offline_no_conn: "Pas de connexion au cloud Bosch",
+    offline_last_seen: "Vu pour la dernière fois :",
     ai_caption_prefix: "IA:",
     multi_audio_muted: "Son coupé (une autre carte diffuse le son de cette caméra)",
     ed_cam_entity: "Entité caméra *",
@@ -714,6 +726,9 @@ const CARD_I18N = {
     maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
     privacy_stale_label: "Modalità privacy — ultima immagine",
     privacy_stale_prefix: "Ultimo evento:",
+    offline_title: "Telecamera offline",
+    offline_no_conn: "Nessuna connessione al cloud Bosch",
+    offline_last_seen: "Visto l'ultima volta:",
     ai_caption_prefix: "IA:",
     multi_audio_muted: "Audio disattivato (un'altra scheda riproduce l'audio di questa telecamera)",
     ed_cam_entity: "Entità telecamera *",
@@ -806,6 +821,9 @@ const CARD_I18N = {
     maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
     privacy_stale_label: "Privacymodus — laatste afbeelding",
     privacy_stale_prefix: "Laatste gebeurtenis:",
+    offline_title: "Camera offline",
+    offline_no_conn: "Geen verbinding met Bosch Cloud",
+    offline_last_seen: "Laatst gezien:",
     ai_caption_prefix: "AI:",
     multi_audio_muted: "Geluid gedempt (een andere kaart speelt audio af voor deze camera)",
     ed_cam_entity: "Camera-entiteit *",
@@ -898,6 +916,9 @@ const CARD_I18N = {
     maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
     privacy_stale_label: "Tryb prywatności — ostatni obraz",
     privacy_stale_prefix: "Ostatnie zdarzenie:",
+    offline_title: "Kamera offline",
+    offline_no_conn: "Brak połączenia z chmurą Bosch",
+    offline_last_seen: "Ostatnio widziano:",
     ai_caption_prefix: "AI:",
     multi_audio_muted: "Dźwięk wyciszony (inna karta odtwarza dźwięk tej kamery)",
     ed_cam_entity: "Encja kamery *",
@@ -990,6 +1011,9 @@ const CARD_I18N = {
     maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
     privacy_stale_label: "Modo privacidade — última imagem",
     privacy_stale_prefix: "Último evento:",
+    offline_title: "Câmara offline",
+    offline_no_conn: "Sem ligação à Bosch Cloud",
+    offline_last_seen: "Visto pela última vez:",
     ai_caption_prefix: "IA:",
     multi_audio_muted: "Áudio desativado (outro cartão está a reproduzir áudio desta câmara)",
     ed_cam_entity: "Entidade de câmara *",
@@ -1082,6 +1106,9 @@ const CARD_I18N = {
     maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
     privacy_stale_label: "Режим приватности — последнее изображение",
     privacy_stale_prefix: "Последнее событие:",
+    offline_title: "Камера офлайн",
+    offline_no_conn: "Нет соединения с облаком Bosch",
+    offline_last_seen: "Последний раз в сети:",
     ai_caption_prefix: "ИИ:",
     multi_audio_muted: "Звук отключён (другая карточка воспроизводит звук этой камеры)",
     ed_cam_entity: "Сущность камеры *",
@@ -1174,6 +1201,9 @@ const CARD_I18N = {
     maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
     privacy_stale_label: "Режим приватності — останнє зображення",
     privacy_stale_prefix: "Остання подія:",
+    offline_title: "Камера офлайн",
+    offline_no_conn: "Немає з'єднання з хмарою Bosch",
+    offline_last_seen: "Востаннє в мережі:",
     ai_caption_prefix: "ШІ:",
     multi_audio_muted: "Звук вимкнено (інша картка відтворює звук цієї камери)",
     ed_cam_entity: "Об'єкт камери *",
@@ -1266,6 +1296,9 @@ const CARD_I18N = {
     maint_auto_return: "云端恢复后摄像头将自动重新连接。",
     privacy_stale_label: "隐私模式 — 最后一张图像",
     privacy_stale_prefix: "最近事件：",
+    offline_title: "摄像头离线",
+    offline_no_conn: "无法连接 Bosch 云",
+    offline_last_seen: "最后在线：",
     ai_caption_prefix: "AI:",
     multi_audio_muted: "已静音（另一个卡片正在播放此摄像头的音频）",
     ed_cam_entity: "摄像头实体 *",
@@ -1635,7 +1668,15 @@ class BoschCameraCard extends HTMLElement {
           : Number(config.ai_description_overlay_timeout),
     };
 
-    this._storageKey = `bosch_cam_${config.camera_entity}`;
+    const newStorageKey = `bosch_cam_${config.camera_entity}`;
+    // If the card was re-pointed at a different camera (entity rename / edited
+    // config — HA re-uses the element and calls setConfig again), drop the old
+    // camera's cached frame so it can't briefly show as this camera's image.
+    if (this._storageKey && this._storageKey !== newStorageKey) {
+      try { localStorage.removeItem(this._storageKey); } catch (_) { /* private mode */ }
+      this._imageLoaded = false;
+    }
+    this._storageKey = newStorageKey;
 
     const base = config.camera_entity.replace(/^camera\./, "");
     this._base = base;
@@ -2027,15 +2068,20 @@ class BoschCameraCard extends HTMLElement {
   _audioDecoupled() {
     return this._useCardAudio() || this._audioDefaultMode() !== "backend";
   }
+  // Per-camera localStorage keys for the decoupled volume/mute prefs. Were
+  // global ("bosch_card_volume"/"bosch_card_audio_on") → muting one camera
+  // overwrote every other card's saved state (overview with N cameras).
+  _cardVolKey()  { return `bosch_card_volume_${this._entities?.camera || ""}`; }
+  _cardMuteKey() { return `bosch_card_audio_on_${this._entities?.camera || ""}`; }
   _cardVolume() {
-    try { const v = parseFloat(localStorage.getItem("bosch_card_volume")); return v >= 0 && v <= 1 ? v : 0.5; }
+    try { const v = parseFloat(localStorage.getItem(this._cardVolKey())); return v >= 0 && v <= 1 ? v : 0.5; }
     catch (_) { return 0.5; }
   }
-  _cardSaveVolume(v) { try { localStorage.setItem("bosch_card_volume", String(v)); } catch (_) { /* private mode */ } }
+  _cardSaveVolume(v) { try { localStorage.setItem(this._cardVolKey(), String(v)); } catch (_) { /* private mode */ } }
   _cardWantUnmuted() {
-    try { return localStorage.getItem("bosch_card_audio_on") === "1"; } catch (_) { return false; }
+    try { return localStorage.getItem(this._cardMuteKey()) === "1"; } catch (_) { return false; }
   }
-  _cardSaveUnmuted(on) { try { localStorage.setItem("bosch_card_audio_on", on ? "1" : "0"); } catch (_) { /* private mode */ } }
+  _cardSaveUnmuted(on) { try { localStorage.setItem(this._cardMuteKey(), on ? "1" : "0"); } catch (_) { /* private mode */ } }
 
   // ── Audio volume — the backend number.<cam>_audio_volume entity (0-100) is the
   //    single, automatable, cross-session source of truth. _entityVolume() reads
@@ -2268,6 +2314,14 @@ class BoschCameraCard extends HTMLElement {
         this._setLoadingOverlay(true, this._t("loading_refreshing"));
       }
       this._triggerFreshSnapshot();
+      // Fallback: _triggerFreshSnapshot() returns early (no image scheduled) when
+      // the trigger_snapshot service isn't registered yet — a Companion-app startup
+      // race. Without this, a fresh mount (esp. mobile, which has no localStorage
+      // frame to fall back on) stays blank until the 60 s refresh timer. Load the
+      // proxy image directly so the snapshot appears immediately regardless.
+      if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot && !this._imageLoaded) {
+        this._scheduleImageLoad(0);
+      }
       // CARD_STALE_APP fix: pull authoritative entity states on mount so the
       // stream badge / switches reflect the backend immediately instead of
       // waiting for the WS push (which can lag a few seconds when HA's
@@ -2523,9 +2577,19 @@ class BoschCameraCard extends HTMLElement {
     } else {
       interval = 60;   // 1 min — page is visible
     }
-    this._refreshTimer = setInterval(() => {
+    // Stagger the first periodic tick by a per-card random offset (0–10s) so N
+    // cameras mounted together (e.g. an overview with 4 tiles) don't all fire
+    // trigger_snapshot on the exact same tick — that thundering herd contends
+    // with Bosch's ~3-concurrent-session / 60-min budget. Steady cadence after
+    // the first staggered tick stays at `interval`.
+    const base = interval * 1000;
+    const jitter = Math.floor(Math.random() * Math.min(10000, base));
+    this._refreshKickoff = setTimeout(() => {
       this._triggerFreshSnapshot();
-    }, interval * 1000);
+      this._refreshTimer = setInterval(() => {
+        this._triggerFreshSnapshot();
+      }, base);
+    }, base + jitter);
   }
 
   _onVisibilityChange() {
@@ -2537,7 +2601,9 @@ class BoschCameraCard extends HTMLElement {
         // show a native error popup (the `hass.connected` flag can lag the actual
         // disconnect by a few hundred ms after resume from background).
         setTimeout(() => {
-          if (document.visibilityState === "visible" && !this._liveVideoActive) {
+          // Guard against the card being removed (SPA nav) within the 500ms —
+          // fire the snapshot only if still mounted (matches the reconnect timers).
+          if (this.isConnected && document.visibilityState === "visible" && !this._liveVideoActive) {
             this._triggerFreshSnapshot();
           }
         }, 500);
@@ -2667,6 +2733,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _stopRefreshTimer() {
+    if (this._refreshKickoff) { clearTimeout(this._refreshKickoff); this._refreshKickoff = null; }
     if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
   }
 
@@ -2697,7 +2764,7 @@ class BoschCameraCard extends HTMLElement {
     // Guard 3: skip if privacy mode is on — no point fetching a snapshot that will
     // return the privacy placeholder, and it avoids wasting a Bosch session slot.
     if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
-    this._callService("bosch_shc_camera", "trigger_snapshot", {});
+    this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);
   }
@@ -2968,6 +3035,13 @@ class BoschCameraCard extends HTMLElement {
         :host(.fs-active) .ap-pill-bar,
         .img-wrapper:fullscreen .ap-pill-bar,
         .img-wrapper:-webkit-full-screen .ap-pill-bar { display: flex !important; }
+        /* …but an OFFLINE camera has no controls to offer — the rule above
+           force-shows the pill bar in fullscreen (to restore it on overview
+           tiles), which overrode the cam-offline hiding (no !important). Keep the
+           pill bar + top row hidden in fullscreen while offline. Higher
+           specificity (.fs-active.cam-offline) + !important wins. (2026-06-17) */
+        :host(.fs-active.cam-offline) .ap-pill-bar,
+        :host(.fs-active.cam-offline) .ap-top { display: none !important; }
 
         /* ── Pan edge-arrow overlay (#33) ──────────────────────────────────
            Big left/right chevrons on the video edges. Inside .img-wrapper so
@@ -3071,6 +3145,12 @@ class BoschCameraCard extends HTMLElement {
         .loading-overlay.visible { opacity: 1; pointer-events: auto; }
         /* Semi-transparent overlay when refreshing an existing image — old image stays visible, spinner on top */
         .loading-overlay.refreshing { background: rgba(0,0,0,.4); }
+        /* Camera offline → the offline-overlay (z8) owns the screen. The loading
+           spinner (z10) must NEVER appear over "Kamera Offline", regardless of
+           which path raised it: the template ships .visible by default, and
+           _restoreCachedImage adds .visible via direct DOM (bypassing the JS
+           guard in _setLoadingOverlay). This CSS wins independent of timing. */
+        :host(.cam-offline) .loading-overlay { opacity: 0 !important; pointer-events: none !important; }
         /* SVG spinner with SMIL <animateTransform> — replaces the CSS @keyframes
            div-spinner because iOS Safari + HA mobile WebView were rendering the
            CSS-animated rotation as static (animation paused on opacity:0→1
@@ -4385,7 +4465,7 @@ class BoschCameraCard extends HTMLElement {
               <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
               <line x1="12" y1="20" x2="12.01" y2="20"/>
             </svg>
-            <div class="offline-title">Kamera Offline</div>
+            <div class="offline-title" id="offline-title">Kamera Offline</div>
             <div class="offline-cam-name" id="offline-cam-name"></div>
             <div class="offline-subtitle" id="offline-subtitle">Keine Verbindung zur Bosch Cloud</div>
           </div>
@@ -5370,7 +5450,7 @@ class BoschCameraCard extends HTMLElement {
       }).then(() => {
         // Trigger backend image refresh so _cached_image is warm before card requests it
         if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-          this._callService("bosch_shc_camera", "trigger_snapshot", {});
+          this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
         // Refresh snapshot after camera has had time to move (~2s)
         this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
@@ -5466,12 +5546,18 @@ class BoschCameraCard extends HTMLElement {
   _updateImage() {
     const img = this.shadowRoot.getElementById("cam-img");
     if (!img || !this._hass) return;
-    // BUG FIX (2026-06-15): suppress image loads when camera is offline.
-    // Without this gate, img.src is set, the request fails (camera unreachable),
-    // _onImageError() shows the spinner and retries up to 5×, causing the
-    // infinite "Bild wird geladen…" spinner even though _update() correctly
-    // cleared the overlay when it detected the offline state.
-    if (this._isOffline) return;
+    // Offline cameras: still fetch ONCE if we have nothing to show yet. The
+    // backend serves the last good frame (disk-restored / cached) even for an
+    // offline camera, so this gives the mobile app — whose webview has no
+    // localStorage cache that the desktop card relies on — the same offline
+    // backdrop instead of a black tile (reported 2026-06-17: browser ok, app
+    // black). We skip only the *periodic re-fetch* once a frame is loaded, since
+    // an offline camera won't produce a newer one. The original 2026-06-15 gate
+    // existed to stop an infinite "Bild wird geladen…" spinner; that can no
+    // longer happen while offline — the spinner is CSS-suppressed
+    // (:host(.cam-offline) .loading-overlay) and _onImageError now clears
+    // _awaitingFresh and bounds retries.
+    if (this._isOffline && this._imageLoaded) return;
     const camEntity = this._entities.camera;
     const token = this._hass.states[camEntity]?.attributes?.access_token || "";
     // Request at display width — HA passes this to async_camera_image(width=).
@@ -5545,7 +5631,7 @@ class BoschCameraCard extends HTMLElement {
     // Skip during streaming — live frames change every 2s so per-frame I/O is wasteful.
     // After stream stops, _isStreaming() returns false → the post-stop refresh image
     // IS saved, keeping localStorage as fresh as possible without excess writes.
-    if (!isCache && !this._isStreaming()) this._cacheImage(src);
+    if (!isCache && !this._isStreaming()) this._cacheImage();
   }
 
   _onImageError() {
@@ -5560,16 +5646,31 @@ class BoschCameraCard extends HTMLElement {
           this._updateImage();
         }, 3000);
       } else {
-        // Gave up after 5 retries (~15s) — hide spinner and show whatever we have
+        // Gave up after the retry budget — hide spinner and show whatever we have.
+        // Clear _awaitingFresh: the fresh fetch failed, so we are no longer
+        // "awaiting" one. Leaving it true makes the next cached-image load
+        // (isCache && _awaitingFresh) re-raise the "refreshing" overlay and it
+        // sticks on every 60s refresh cycle until the 15s safety timer.
+        this._awaitingFresh = false;
         this._setLoadingOverlay(false);
       }
       return;
     }
     // If we already had an image, keep showing the old one (don't blank it).
+    // The fresh fetch failed → stop awaiting it (see above) so the cached image
+    // doesn't keep re-triggering the stuck "refreshing" overlay.
+    this._awaitingFresh = false;
     this._setLoadingOverlay(false);
   }
 
   _setLoadingOverlay(visible, text) {
+    // Camera offline → the offline-overlay (z8) is the single source of truth.
+    // Never raise the loading spinner (z10) on top of it: any late snapshot /
+    // refresh / stream-stop callback that tries to show "Bild wird geladen…"
+    // while offline must be a no-op, otherwise the spinner + its text bleed
+    // through the "Kamera Offline" message (it only cleared on the 15s safety
+    // timer before). Hiding (visible=false) is always allowed.
+    if (visible && this._isOffline) return;
     if (text === undefined) text = this._t("loading_image");
     // Suppress flicker during stream startup: if a connecting/waiting state is
     // active, snapshot-load callbacks must not hide the overlay (the spinner
@@ -5602,8 +5703,12 @@ class BoschCameraCard extends HTMLElement {
         hintEl.textContent = "";
       }
     }
-    // Only hide image on first load when there's nothing to show yet
-    if (img) img.classList.toggle("hidden", visible && !this._imageLoaded);
+    // Keep #cam-img hidden (opacity:0) until a real frame has loaded — regardless
+    // of overlay visibility. The old `visible && !_imageLoaded` un-hid the <img>
+    // whenever the overlay was hidden (visible=false) even with no frame yet, so
+    // an offline camera with no localStorage frame (mobile) flashed a blank/black
+    // <img> under the offline overlay (which then has nothing to blur → looks black).
+    if (img) img.classList.toggle("hidden", !this._imageLoaded);
 
     if (visible) {
       // Safety timeout — shorter for snapshot refreshes, longer during stream start.
@@ -5634,9 +5739,10 @@ class BoschCameraCard extends HTMLElement {
       // "refreshing" overlay and trigger a snapshot fetch.
       this._awaitingFresh = true;
       // Switch from full-black spinner to semi-transparent "refreshing" overlay
-      // so the cached image is visible underneath.
+      // so the cached image is visible underneath. Never raise it while offline
+      // (the CSS :host(.cam-offline) rule also hides it, this avoids the churn).
       const overlay = this.shadowRoot.getElementById("loading-overlay");
-      if (overlay) {
+      if (overlay && !this._isOffline) {
         overlay.classList.add("visible");
         overlay.classList.add("refreshing");
       }
@@ -5645,21 +5751,27 @@ class BoschCameraCard extends HTMLElement {
     } catch (_) {}
   }
 
-  _cacheImage(proxyUrl) {
-    // Fetch image bytes and store as dataURL in localStorage for instant restore
-    if (!this._storageKey || !proxyUrl) return;
-    fetch(proxyUrl)
-      .then(r => r.ok ? r.blob() : Promise.reject(r.status))
-      .then(blob => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      }))
-      .then(dataUrl => {
-        try { localStorage.setItem(this._storageKey, dataUrl); } catch (_) {}
-      })
-      .catch(() => {});
+  _cacheImage() {
+    // Cache the currently-displayed frame to localStorage for instant restore on
+    // next launch — WITHOUT a second network fetch. The <img> already downloaded
+    // the frame, so draw it to a canvas and read the dataURL. The camera proxy is
+    // same-origin, so the canvas is not tainted. Replaces the old fetch(proxyUrl)
+    // which (a) doubled bandwidth on every refresh and (b) could 401 if the
+    // entity access-token rotated between the <img> load and the cache fetch,
+    // silently skipping the cache.
+    if (!this._storageKey) return;
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      localStorage.setItem(this._storageKey, dataUrl);
+    } catch (_) { /* tainted canvas / quota exceeded / private mode — skip cache */ }
   }
 
   // ── Live HLS video ────────────────────────────────────────────────────────
@@ -6210,6 +6322,20 @@ class BoschCameraCard extends HTMLElement {
      * cellular clients have a public relay path. Failure is non-fatal —
      * fall back to a default STUN so LAN clients still work.
      */
+    // iOS (WKWebView / the HA Companion app) requires a SECURE context for
+    // WebRTC — over a plain http:// LAN URL `RTCPeerConnection` is unavailable or
+    // never negotiates, and HA does NOT auto-fall-back to HLS once a camera
+    // claims WebRTC. So on iOS-over-http, skip WebRTC immediately and let the
+    // caller's catch drop to HLS (which works natively on iOS, even over http)
+    // instead of stalling for the attempt timeout. Desktop browsers over http
+    // keep WebRTC (Chrome doesn't gate RTCPeerConnection on secure context), so
+    // the guard is iOS-specific and won't regress the working LAN-http desktop path.
+    if (this._isIOS() && !window.isSecureContext) {
+      throw new Error("iOS over http: WebRTC needs a secure context — skip to HLS");
+    }
+    if (typeof RTCPeerConnection === "undefined") {
+      throw new Error("RTCPeerConnection unavailable — skip to HLS");
+    }
     const entityId = this._entities.camera;
     let rtcConfig = { iceServers: [{ urls: "stun:stun.home-assistant.io:80" }] };
     try {
@@ -6543,7 +6669,7 @@ class BoschCameraCard extends HTMLElement {
     const startPoll = (prevBytes) => {
       // Fire backend refresh AFTER prevBytes capture — see above.
       if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-        this._callService("bosch_shc_camera", "trigger_snapshot", {});
+        this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = setTimeout(
@@ -6607,12 +6733,16 @@ class BoschCameraCard extends HTMLElement {
         img.src = dataUrl;
         img.classList.remove("hidden");
         this._imageLoaded = true;
+        // This IS a fresh snapshot, even though it lands as a data: URL.
+        // Clear _awaitingFresh so the img.onload (which sees isCache=true for a
+        // data: src) doesn't re-raise the "refreshing" overlay and leave it stuck.
+        this._awaitingFresh = false;
       }
       this._setLoadingOverlay(false);
       try { if (this._storageKey) localStorage.setItem(this._storageKey, dataUrl); } catch (_) {}
       this._finishSnapshot();
     };
-    reader.onerror = () => this._finishSnapshot();
+    reader.onerror = () => { this._awaitingFresh = false; this._finishSnapshot(); };
     reader.readAsDataURL(blob);
   }
 
@@ -6785,6 +6915,9 @@ class BoschCameraCard extends HTMLElement {
     if (offlineOverlay) {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {
+        // Localize the static title (template ships German default).
+        const titleEl = this.shadowRoot.getElementById("offline-title");
+        if (titleEl) titleEl.textContent = this._t("offline_title");
         // Camera unreachable → abandon any in-flight connect UI so the offline
         // overlay (z8) isn't buried under the loading spinner (z10), which would
         // otherwise hide the "Kamera Offline" message until the 15s safety timer.
@@ -6792,6 +6925,22 @@ class BoschCameraCard extends HTMLElement {
         this._streamConnecting = false;
         if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
         this._setLoadingOverlay(false);
+        // Camera dropped while a live video was playing → tear it down. The
+        // "stream just stopped" block below is skipped while offline (no refresh
+        // spinner against an unreachable camera), so without this an HLS/WebRTC
+        // <video> would keep a frozen last frame under the overlay and leave
+        // _liveVideoActive=true — which then blocks the fresh start after the
+        // camera recovers. Teardown here resets that state.
+        if (this._liveVideoActive) this._stopLiveVideo();
+        // Load the last good frame as the offline backdrop if we have nothing yet.
+        // _triggerFreshSnapshot() (the normal mount load) early-returns under its
+        // privacy/connectivity guards, so an offline camera with no localStorage
+        // cache (the HA mobile app) was left with an empty <img> → black under the
+        // overlay. _updateImage() fetches even while offline when !_imageLoaded,
+        // and the backend still serves the last cached/disk frame for an offline
+        // camera. Verified live: desktop with cleared localStorage previously left
+        // offline tiles black; this loads them. (2026-06-17)
+        if (!this._imageLoaded) this._scheduleImageLoad(0);
         const lastChanged = hass.states[ents.status]?.last_changed;
         // Populate the offline-overlay's camera name line (apple-style only —
         // legacy mode hides .offline-cam-name via the base display:none rule).
@@ -6802,11 +6951,20 @@ class BoschCameraCard extends HTMLElement {
             || ents.camera;
         }
         const sub = this.shadowRoot.getElementById("offline-subtitle");
-        if (sub && lastChanged) {
-          try {
-            const d = new Date(lastChanged);
-            sub.textContent = `Zuletzt gesehen: ${d.toLocaleString("de-DE", {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"})}`;
-          } catch { /* fall back to default text */ }
+        if (sub) {
+          // Default subtitle = localized "no connection"; upgrade to a
+          // localized "last seen: <date>" when we know last_changed. Both the
+          // prefix and the date locale follow the active card language (was
+          // hardcoded German "Zuletzt gesehen:" + "de-DE" for all users).
+          let txt = this._t("offline_no_conn");
+          if (lastChanged) {
+            try {
+              const d = new Date(lastChanged);
+              const loc = cardLang(this._hass);
+              txt = `${this._t("offline_last_seen")} ${d.toLocaleString(loc, {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"})}`;
+            } catch { /* keep no-connection fallback */ }
+          }
+          sub.textContent = txt;
         }
       }
     }
@@ -7003,11 +7161,14 @@ class BoschCameraCard extends HTMLElement {
     const shouldVideo = isStreaming;
 
     // Stream just stopped → stop video, fetch fresh snapshot for current + next session.
-    if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
+    // Skip entirely when the camera is offline: re-showing the refresh spinner
+    // would bury the offline-overlay, and triggering a snapshot / refresh timer
+    // against an unreachable camera only wastes the Bosch session budget.
+    if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming && !this._isOffline) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
       if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-        this._callService("bosch_shc_camera", "trigger_snapshot", {});
+        this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
@@ -7494,6 +7655,15 @@ class BoschCameraCard extends HTMLElement {
     const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
     if (placeholder) placeholder.classList.toggle("visible", privacyOn);
 
+    // Load the last good frame behind the privacy overlay if we have nothing yet.
+    // The privacy-placeholder is a translucent blur over the image (the "stale
+    // snapshot" look, with a "Letztes Ereignis/Snapshot" badge); the backend still
+    // serves the last pre-privacy cached/disk frame. _triggerFreshSnapshot() skips
+    // privacy (its Guard 3), so on mobile (no localStorage cache) the <img> stayed
+    // empty → the blur had nothing to blur → grey tile. Match the desktop look by
+    // loading the frame once. Same class of fix as the offline backdrop. (2026-06-17)
+    if (privacyOn && !this._imageLoaded) this._scheduleImageLoad(0);
+
     // Privacy stale-image badge: when privacy=ON, show a small glass pill
     // below the lock label with the last-event timestamp so a days-old snapshot
     // behind the overlay is clearly identified as stale — not a live frame.
@@ -7919,7 +8089,7 @@ class BoschCameraCard extends HTMLElement {
 
     const services = [
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
-        label: "Snapshot", svc: "trigger_snapshot", data: {} },
+        label: "Snapshot", svc: "trigger_snapshot", data: () => ({ entity_id: this._entities.camera }) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
         label: "Zonen lesen", svc: "get_motion_zones", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',

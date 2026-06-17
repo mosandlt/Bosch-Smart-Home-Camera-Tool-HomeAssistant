@@ -145,7 +145,10 @@ def test_pull_fresh_states_includes_camera_entity(card_source: str) -> None:
     # Window widened to 2500: v13.3.1 added a set-hass diff-guard whose own
     # `if (firstHass) {` is now the FIRST match, sitting ~1.7 kB before the
     # bootstrap firstHass block that calls _pullFreshSwitchStates.
-    first_hass_body = card_source[first_hass_idx : first_hass_idx + 2500]
+    # Widened to 3400 for v13.7.1: the bootstrap firstHass block gained a
+    # trigger_snapshot-service-absent fallback `_scheduleImageLoad(0)` (mobile
+    # cold-start), pushing _pullFreshSwitchStates further down.
+    first_hass_body = card_source[first_hass_idx : first_hass_idx + 3400]
     assert "_pullFreshSwitchStates" in first_hass_body, (
         "firstHass branch in `set hass()` must call _pullFreshSwitchStates "
         "so the initial mount has authoritative state — otherwise the "
