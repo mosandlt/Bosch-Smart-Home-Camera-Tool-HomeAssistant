@@ -436,24 +436,28 @@ class TestNvrSection:
 class TestAiSection:
     """Tests for AI options schema validation (E-P1 / E-P2 / E-P3)."""
 
-    # ── E-P1: EntitySelector fields accept empty string (gate-disable) ──────────
+    # ── E-P1: entity fields are nullable selectors (gate-disable via clear) ─────
+    # The fields use the serializer-supported nullable shape
+    # ``vol.Any(None, EntitySelector(...))`` (issue #35). The frontend submits
+    # ``None`` (allow_none) — NOT ""  — when an entity picker is cleared, so the
+    # disable-the-gate path is None here, not "".
 
-    def test_ai_task_entity_empty_string_allowed(self) -> None:
-        """Clearing the ai_task entity selector must NOT raise (E-P1)."""
+    def test_ai_task_entity_none_allowed(self) -> None:
+        """Clearing the ai_task entity selector submits None — must NOT raise."""
         schema = _get_section_schema("ai")
-        result = schema({CONF_AI_TASK_ENTITY: ""})
-        assert result[CONF_AI_TASK_ENTITY] == ""
+        result = schema({CONF_AI_TASK_ENTITY: None})
+        assert result[CONF_AI_TASK_ENTITY] is None
 
     def test_ai_task_entity_valid_entity_id_allowed(self) -> None:
         schema = _get_section_schema("ai")
         result = schema({CONF_AI_TASK_ENTITY: "ai_task.my_llm"})
         assert result[CONF_AI_TASK_ENTITY] == "ai_task.my_llm"
 
-    def test_ai_active_condition_entity_empty_string_allowed(self) -> None:
-        """Clearing the condition entity selector must NOT raise (E-P1)."""
+    def test_ai_active_condition_entity_none_allowed(self) -> None:
+        """Clearing the condition entity selector submits None — must NOT raise."""
         schema = _get_section_schema("ai")
-        result = schema({CONF_AI_ACTIVE_CONDITION_ENTITY: ""})
-        assert result[CONF_AI_ACTIVE_CONDITION_ENTITY] == ""
+        result = schema({CONF_AI_ACTIVE_CONDITION_ENTITY: None})
+        assert result[CONF_AI_ACTIVE_CONDITION_ENTITY] is None
 
     def test_ai_active_condition_entity_valid_entity_id_allowed(self) -> None:
         schema = _get_section_schema("ai")
@@ -505,35 +509,32 @@ class TestAiSection:
         result = schema({CONF_AI_ACTIVE_TIME_END: "22:30:00"})
         assert result[CONF_AI_ACTIVE_TIME_END] == "22:30:00"
 
-    def test_ai_active_time_start_garbage_rejected(self) -> None:
-        """'midnight' and other prose values must be rejected (E-P3)."""
-        import voluptuous as vol
+    # NOTE (issue #35): the time fields are plain TextSelectors now — the old
+    # ``vol.Any("", vol.All(..., vol.Match(HH:MM)))`` schema-level regex could
+    # not be serialised by the frontend and 500'd the options dialog. Format
+    # validation therefore lives in the backend window parser
+    # (_ai_window_allowed), which treats any unparseable value as "no time gate"
+    # (see test_ai_window_* for that behaviour). The schema now accepts any
+    # string so the dialog stays serialisable; these tests pin that contract.
 
+    def test_ai_active_time_start_garbage_accepted_at_schema_level(self) -> None:
+        """Prose values are accepted by the schema (validated at runtime)."""
         schema = _get_section_schema("ai")
-        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
-            schema({CONF_AI_ACTIVE_TIME_START: "midnight"})
+        result = schema({CONF_AI_ACTIVE_TIME_START: "midnight"})
+        assert result[CONF_AI_ACTIVE_TIME_START] == "midnight"
 
-    def test_ai_active_time_end_out_of_range_rejected(self) -> None:
-        """25:00 is not a valid time."""
-        import voluptuous as vol
-
+    def test_ai_active_time_end_out_of_range_accepted_at_schema_level(self) -> None:
+        """'25:00' passes the schema; the runtime gate rejects it as malformed."""
         schema = _get_section_schema("ai")
-        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
-            schema({CONF_AI_ACTIVE_TIME_END: "25:00"})
-
-    def test_ai_active_time_start_invalid_minutes_rejected(self) -> None:
-        """08:60 has invalid minutes."""
-        import voluptuous as vol
-
-        schema = _get_section_schema("ai")
-        with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
-            schema({CONF_AI_ACTIVE_TIME_START: "08:60"})
+        result = schema({CONF_AI_ACTIVE_TIME_END: "25:00"})
+        assert result[CONF_AI_ACTIVE_TIME_END] == "25:00"
 
     # ── E-P1 + round-trip: submit AI section with entity cleared ────────────────
 
     @pytest.mark.asyncio
-    async def test_ai_entity_fields_cleared_saves_empty_string(self) -> None:
-        """Submitting empty entity fields (gate disabled) must persist '' (E-P1)."""
+    async def test_ai_entity_fields_cleared_saves_none(self) -> None:
+        """Clearing the nullable entity pickers submits None (allow_none) and
+        must persist None — disabling the respective gate (issue #35, E-P1)."""
         flow = BoschCameraOptionsFlow(
             _make_entry(
                 options={
@@ -546,15 +547,15 @@ class TestAiSection:
             flow,
             {
                 "ai": {
-                    CONF_AI_TASK_ENTITY: "",
-                    CONF_AI_ACTIVE_CONDITION_ENTITY: "",
+                    CONF_AI_TASK_ENTITY: None,
+                    CONF_AI_ACTIVE_CONDITION_ENTITY: None,
                     CONF_AI_ACTIVE_TIME_START: "",
                     CONF_AI_ACTIVE_TIME_END: "",
                 }
             },
         )
-        assert data[CONF_AI_TASK_ENTITY] == ""
-        assert data[CONF_AI_ACTIVE_CONDITION_ENTITY] == ""
+        assert data[CONF_AI_TASK_ENTITY] is None
+        assert data[CONF_AI_ACTIVE_CONDITION_ENTITY] is None
 
     @pytest.mark.asyncio
     async def test_ai_time_gate_with_valid_times_saves(self) -> None:

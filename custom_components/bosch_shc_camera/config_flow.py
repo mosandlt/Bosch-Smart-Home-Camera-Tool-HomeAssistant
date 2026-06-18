@@ -1103,14 +1103,24 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         CONF_ENABLE_AI_DESCRIPTION,
                         default=bool(opts.get(CONF_ENABLE_AI_DESCRIPTION, False)),
                     ): bool,
+                    # Nullable entity picker. The ONLY vol.Any shape HA's
+                    # frontend serializer (voluptuous_serialize) accepts is
+                    # ``vol.Any(None, <selector>)`` — it emits ``allow_none:
+                    # true`` so the frontend submits ``null`` (not ``""``) when
+                    # the picker is cleared, and the validator then accepts both
+                    # None and a valid entity. The previous ``vol.Any("",
+                    # EntitySelector(...))`` ("" first, no None) did NOT match
+                    # that shape → "Unable to convert schema: Any(...)" → the
+                    # options dialog 500'd on open (issue #35). suggested_value
+                    # must be the value or None (never "") so an unset field
+                    # round-trips through the nullable contract.
                     vol.Optional(
                         CONF_AI_TASK_ENTITY,
                         description={
-                            "suggested_value": opts.get(CONF_AI_TASK_ENTITY, "")
+                            "suggested_value": opts.get(CONF_AI_TASK_ENTITY) or None
                         },
                     ): vol.Any(
-                        "",
-                        EntitySelector(EntitySelectorConfig(domain="ai_task")),
+                        None, EntitySelector(EntitySelectorConfig(domain="ai_task"))
                     ),
                     vol.Optional(
                         CONF_AI_DESCRIBE_LANGUAGE,
@@ -1163,49 +1173,36 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         vol.Coerce(int),
                         vol.Range(min=0),  # 0 = unlimited; no upper cap
                     ),
+                    # Plain text input (HH:MM / HH:MM:SS, empty = disabled). The
+                    # backend window parser (_ai_window_allowed) tolerates a
+                    # malformed value by disabling the time gate, so format
+                    # validation lives there rather than in the schema — a
+                    # vol.Any/vol.All wrapper here would break frontend schema
+                    # serialization and 500 the options dialog (issue #35).
                     vol.Optional(
                         CONF_AI_ACTIVE_TIME_START,
                         description={
                             "suggested_value": opts.get(CONF_AI_ACTIVE_TIME_START, "")
                         },
-                    ): vol.Any(
-                        "",
-                        vol.All(
-                            str,
-                            vol.Match(
-                                r"^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$",
-                                msg="Use HH:MM or HH:MM:SS format, or leave empty to disable",
-                            ),
-                            TextSelector(TextSelectorConfig()),
-                        ),
-                    ),
+                    ): TextSelector(TextSelectorConfig()),
+                    # See CONF_AI_ACTIVE_TIME_START above — plain text, validated
+                    # by the backend window parser, never wrapped in vol.Any.
                     vol.Optional(
                         CONF_AI_ACTIVE_TIME_END,
                         description={
                             "suggested_value": opts.get(CONF_AI_ACTIVE_TIME_END, "")
                         },
-                    ): vol.Any(
-                        "",
-                        vol.All(
-                            str,
-                            vol.Match(
-                                r"^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$",
-                                msg="Use HH:MM or HH:MM:SS format, or leave empty to disable",
-                            ),
-                            TextSelector(TextSelectorConfig()),
-                        ),
-                    ),
+                    ): TextSelector(TextSelectorConfig()),
+                    # Nullable entity picker (empty = no condition gate). Same
+                    # ``vol.Any(None, <selector>)`` nullable shape as
+                    # CONF_AI_TASK_ENTITY above — see that comment for why.
                     vol.Optional(
                         CONF_AI_ACTIVE_CONDITION_ENTITY,
                         description={
-                            "suggested_value": opts.get(
-                                CONF_AI_ACTIVE_CONDITION_ENTITY, ""
-                            )
+                            "suggested_value": opts.get(CONF_AI_ACTIVE_CONDITION_ENTITY)
+                            or None
                         },
-                    ): vol.Any(
-                        "",
-                        EntitySelector(EntitySelectorConfig()),
-                    ),
+                    ): vol.Any(None, EntitySelector(EntitySelectorConfig())),
                     vol.Optional(
                         CONF_AI_ACTIVE_CONDITION_STATE,
                         description={
