@@ -27,6 +27,19 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.util import dt as dt_util
+
+
+def _today_local_ts(hour: int = 12) -> str:
+    """A Bosch-style timestamp on today's LOCAL date (offset honored).
+
+    Buckets are by local calendar date (see time_utils / issue #34), so build
+    the fixture from local now to stay tz-robust under any test timezone.
+    """
+    return (
+        dt_util.now().replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
+    )
+
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -317,14 +330,13 @@ class TestEventsTodaySensors:
             BoschMovementEventsTodaySensor,
         )
 
-        # Production code uses datetime.now(UTC) for date bucketing — use UTC date here.
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        # Buckets use the event's LOCAL calendar date (issue #34).
         events = [
-            {"eventType": "MOVEMENT", "timestamp": f"{today}T10:00:00.000Z"},
-            {"eventType": "MOVEMENT", "timestamp": f"{today}T11:00:00.000Z"},
+            {"eventType": "MOVEMENT", "timestamp": _today_local_ts(10)},
+            {"eventType": "MOVEMENT", "timestamp": _today_local_ts(11)},
             {
                 "eventType": "AUDIO_ALARM",
-                "timestamp": f"{today}T12:00:00.000Z",
+                "timestamp": _today_local_ts(12),
             },  # wrong type
             {
                 "eventType": "MOVEMENT",
@@ -348,13 +360,12 @@ class TestEventsTodaySensors:
             BoschAudioEventsTodaySensor,
         )
 
-        # Production code uses datetime.now(UTC) for date bucketing — use UTC date here.
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        # Buckets use the event's LOCAL calendar date (issue #34).
         events = [
-            {"eventType": "AUDIO_ALARM", "timestamp": f"{today}T05:00:00.000Z"},
+            {"eventType": "AUDIO_ALARM", "timestamp": _today_local_ts(5)},
             {
                 "eventType": "MOVEMENT",
-                "timestamp": f"{today}T05:00:00.000Z",
+                "timestamp": _today_local_ts(5),
             },  # wrong type
         ]
         coord = self._coord_with_events(events)

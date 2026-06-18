@@ -354,6 +354,10 @@ class TestAutoRenewHeartbeat:
             patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
@@ -381,6 +385,10 @@ class TestAutoRenewHeartbeat:
             patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
@@ -407,6 +415,10 @@ class TestAutoRenewHeartbeat:
             patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
@@ -442,6 +454,10 @@ class TestAutoRenewHeartbeat:
             patch("asyncio.sleep", side_effect=self._one_shot_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=bad_session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=bad_session_cm,
+            ),
         ):
             # Must not propagate the ClientConnectionError
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
@@ -491,6 +507,10 @@ class TestAutoRenewForceRenewal:
             patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
 
@@ -520,6 +540,10 @@ class TestAutoRenewForceRenewal:
             patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             # Must not raise — renewal failure is handled gracefully
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
@@ -548,6 +572,10 @@ class TestAutoRenewForceRenewal:
             patch("asyncio.sleep", side_effect=self._three_fail_sleep(coord)),
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_cm),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_cm,
+            ),
         ):
             # Must not propagate the OSError
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)

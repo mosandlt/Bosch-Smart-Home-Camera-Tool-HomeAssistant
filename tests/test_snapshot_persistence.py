@@ -249,12 +249,15 @@ async def test_load_oserror_returns_none_and_warns(
 async def test_too_small_skipped(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Bytes < 100 are silently skipped (WARNING logged, no file written)."""
+    """Bytes < 100 are silently skipped (DEBUG logged, no file written)."""
+    import logging
+
     from custom_components.bosch_shc_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
 
+    caplog.set_level(logging.DEBUG)
     hass = _make_hass(tmp_path)
     await save_snapshot(hass, VALID_CAM_ID, b"\xff\xd8\xff" + b"\x00" * 10)  # 13 B
     result = await load_snapshot(hass, VALID_CAM_ID)

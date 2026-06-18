@@ -105,9 +105,10 @@ def _sync_load(hass: HomeAssistant, cam_id: str) -> bytes | None:
 async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     """Async: validate and atomically persist *jpeg* for *cam_id*.
 
-    Silently skips (with WARNING) when:
-    - *jpeg* is smaller than 100 bytes (corrupt / not a real snapshot)
-    - *jpeg* is larger than 10 MiB (unexpected; would waste disk I/O)
+    Silently skips when:
+    - *jpeg* is smaller than 100 bytes (corrupt / placeholder; benign cold-boot
+      transient → DEBUG)
+    - *jpeg* is larger than 10 MiB (unexpected; would waste disk I/O → WARNING)
 
     Raises ValueError when *cam_id* is not a valid UUID — callers must ensure
     only real Bosch camera IDs are passed (prevents path traversal).
@@ -115,7 +116,10 @@ async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     cam_id = _validate_cam_id(cam_id)
     n = len(jpeg)
     if n < _MIN_JPEG_BYTES:
-        _LOGGER.warning(
+        # Benign on cold boot: the camera entity persists its ~180 B
+        # _PLACEHOLDER_JPEG before the first real frame arrives. A normal
+        # transient, not an anomaly → DEBUG.
+        _LOGGER.debug(
             "bosch_shc_camera: snapshot for %s too small (%d B) — skipping persist",
             cam_id,
             n,

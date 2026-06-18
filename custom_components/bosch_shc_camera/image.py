@@ -96,6 +96,13 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
 
         self._attr_unique_id = f"{cam_id}_last_snapshot"
 
+        # In-RAM copy of the last-served JPEG. async_notify_refreshed()
+        # invalidates it on every persisted snapshot, so it stays fresh while
+        # turning the per-request disk read into a per-refresh one (perf
+        # 2026-06-18 — every dashboard client and the iOS app re-fetch the
+        # same signed URL repeatedly between refreshes).
+        self._cached_bytes: bytes | None = None
+
         # Register ourselves with the coordinator's camera entity so
         # BoschCamera can call async_notify_refreshed() after persisting.
         coordinator._image_entities[cam_id] = self
@@ -124,10 +131,18 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
         Returns None only when both sources are empty (very first startup
         before any snapshot has been fetched).
         """
+        # Serve the in-RAM copy if we already loaded it since the last
+        # refresh — avoids a disk read on every /api/image_proxy request.
+        # async_notify_refreshed() clears it when a new snapshot is persisted.
+        if self._cached_bytes is not None:
+            return self._cached_bytes
         disk_bytes = await load_snapshot(self.hass, self._cam_id)
         if disk_bytes:
+            self._cached_bytes = disk_bytes
             return disk_bytes
-        # Fallback to RAM cache from the camera entity
+        # Fallback to RAM cache from the camera entity. Do NOT store it as our
+        # own cache: it's a transient cold-start fallback that the next disk
+        # write supersedes, and caching it would shadow the disk snapshot.
         cam = self._coordinator._camera_entities.get(self._cam_id)
         if cam is not None:
             cached = cam._cached_image
@@ -143,6 +158,10 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
         The frontend's signed URL changes (new access token) — WKWebView
         cannot re-use its cached entry and must fetch fresh bytes.
         """
+        # Invalidate the in-RAM copy: a new snapshot was just persisted, so
+        # the next async_image() reloads the fresh bytes from disk exactly
+        # once and serves that copy to all subsequent requests.
+        self._cached_bytes = None
         self._attr_image_last_updated = dt_util.utcnow()
         self.async_update_token()
         self.async_write_ha_state()

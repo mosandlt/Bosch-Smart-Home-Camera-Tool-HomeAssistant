@@ -214,11 +214,14 @@ class TestTlsCertSensor:
 
 
 class TestEventsTodaySensor:
-    """BUG-3: all three today sensors must use UTC date bucketing (datetime.now(UTC)).
+    """BUG-3: today sensors bucket events by the event's LOCAL calendar date.
 
-    Bosch event timestamps are Z-suffix UTC strings. Production code uses
-    datetime.now(UTC).strftime("%Y-%m-%d") so the "today" prefix is always UTC.
-    Tests use real UTC date strings — no patching of dt_util.now needed.
+    Bosch timestamps carry an explicit offset; production code parses it and
+    buckets by the local date of the true instant (see time_utils / issue #34).
+    These tests use ``Z`` timestamps which, under the default UTC test
+    timezone, fall on the same local date — so basic counting still holds.
+    Boundary-crossing behavior is pinned in
+    test_event_timestamp_offset.TestTodayBucketsLocalDate.
     """
 
     def test_events_today_uses_utc_date(self) -> None:

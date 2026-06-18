@@ -71,6 +71,9 @@ def _put_resp(status: int, body: str):
     r = MagicMock()
     r.status = status
     r.text = AsyncMock(return_value=body)
+    # The RCP /connection 200 path parses via resp.json(content_type=None);
+    # mirror the same body so both .text() and .json() consumers work.
+    r.json = AsyncMock(return_value=json.loads(body) if body else {})
     r.__aenter__ = AsyncMock(return_value=r)
     r.__aexit__ = AsyncMock(return_value=None)
     return r
@@ -825,6 +828,10 @@ class TestStreamUpdateSourceSuccess:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
         ):
             result = await BoschCameraCoordinator._try_live_connection_inner(
@@ -905,6 +912,10 @@ class TestFetchLiveSnapshotRcpUnavailable:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
@@ -951,6 +962,10 @@ class TestFetchLiveSnapshotRcpException:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
@@ -1007,6 +1022,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
@@ -1072,6 +1091,10 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A

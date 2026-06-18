@@ -30,6 +30,25 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .time_utils import parse_bosch_timestamp
+
+
+def _event_is_today_local(ts_str: str | None) -> bool:
+    """True if a Bosch event timestamp falls on today's *local* calendar date.
+
+    Buckets by the local date of the event's true instant (offset honored),
+    not by a naive string prefix — see time_utils / issue #34. A Bosch
+    timestamp already carries the local offset, so its instant maps to the
+    correct local day even across the UTC midnight boundary.
+    """
+    dt_utc = parse_bosch_timestamp(ts_str)
+    if dt_utc is None:
+        return False
+    local_dt: datetime = dt_util.as_local(dt_utc)
+    now_local: datetime = dt_util.now()
+    return local_dt.date() == now_local.date()
+
+
 from . import BoschCameraCoordinator, get_options
 from .const import CONF_ENABLE_AI_DESCRIPTION, DOMAIN
 
@@ -278,15 +297,13 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
         ts_str = events[0].get("timestamp", "")
         if not ts_str:
             return None
-        try:
-            # API returns e.g. "2026-03-19T09:32:08.000Z"
-            # Bosch timestamps use UTC (Z suffix) — parse as UTC then convert to local.
-            ts_clean = ts_str[:19]  # "2026-03-19T09:32:08"
-            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=UTC)
-            result: datetime = dt_util.as_local(dt_utc)
-            return result
-        except ValueError:
+        # Honor the offset Bosch sends ("+02:00" or "Z"); do NOT truncate it
+        # away and re-label as UTC — that shifted the value +2h in CEST (#34).
+        dt_utc = parse_bosch_timestamp(ts_str)
+        if dt_utc is None:
             return None
+        local_dt: datetime = dt_util.as_local(dt_utc)
+        return local_dt
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -318,23 +335,13 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
     @property
     def native_value(self) -> int:
         events = self._cam_data.get("events", [])
-        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
-        # "today" prefix must also be UTC. Using HA-local time here mismatched
-        # the date prefix in the 1-2h window after local midnight and mis-bucketed
-        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
-        return sum(1 for ev in events if ev.get("timestamp", "").startswith(today))
+        return sum(1 for ev in events if _event_is_today_local(ev.get("timestamp")))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         events = self._cam_data.get("events", [])
-        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
-        # "today" prefix must also be UTC. Using HA-local time here mismatched
-        # the date prefix in the 1-2h window after local midnight and mis-bucketed
-        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
         today_events = [
-            ev for ev in events if ev.get("timestamp", "").startswith(today)
+            ev for ev in events if _event_is_today_local(ev.get("timestamp"))
         ]
         return {
             "events_in_feed": len(events),
@@ -671,17 +678,12 @@ class BoschMovementEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int:
-        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
-        # "today" prefix must also be UTC. Using HA-local time here mismatched
-        # the date prefix in the 1-2h window after local midnight and mis-bucketed
-        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1
             for e in events
             if e.get("eventType") == "MOVEMENT"
-            and (e.get("timestamp") or "").startswith(today)
+            and _event_is_today_local(e.get("timestamp"))
         )
 
 
@@ -705,17 +707,12 @@ class BoschAudioEventsTodaySensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int:
-        # UTC bucket: Bosch event timestamps are Z-suffix UTC strings, so the
-        # "today" prefix must also be UTC. Using HA-local time here mismatched
-        # the date prefix in the 1-2h window after local midnight and mis-bucketed
-        # events around the UTC boundary. (regression: test_events_today_*_utc_date)
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
         events = self.coordinator.data.get(self._cam_id, {}).get("events", [])
         return sum(
             1
             for e in events
             if e.get("eventType") == "AUDIO_ALARM"
-            and (e.get("timestamp") or "").startswith(today)
+            and _event_is_today_local(e.get("timestamp"))
         )
 
 

@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.7.1";
+const CARD_VERSION = "13.7.2";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -1233,6 +1233,7 @@ class BoschCameraCard extends HTMLElement {
     this._hls = null;
     this._staleSourceSeen = false;
     this._lastRewarmAt = 0;
+    this._streamDropCount = 0;
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
       const isCompanion = /Home\s?Assistant/i.test(ua);
@@ -2698,6 +2699,7 @@ class BoschCameraCard extends HTMLElement {
         }
         this._staleSourceSeen = false;
         this._lastRewarmAt = 0;
+        this._streamDropCount = 0;
         this._markLiveBadge();
         video.removeEventListener("playing", clearOverlay);
       };
@@ -2743,11 +2745,8 @@ class BoschCameraCard extends HTMLElement {
           clearInterval(this._stallChecker);
           return;
         }
-        if (document.visibilityState === "hidden") {
-          const ownsPip = document.pictureInPictureElement === video || _boschPipActive === this;
-          if (ownsPip && video.paused && !this._stoppingLiveVideo) {
-            Promise.resolve(video.play()).catch(() => {});
-          }
+        const ownsPip = document.pictureInPictureElement === video || _boschPipActive === this;
+        if (document.visibilityState === "hidden" && !ownsPip) {
           lastTime = video.currentTime;
           stallCount = 0;
           return;
@@ -3083,6 +3082,11 @@ class BoschCameraCard extends HTMLElement {
   }
   _reconnectAfterStreamDrop() {
     if (!this._isStreaming()) return;
+    this._streamDropCount = (this._streamDropCount || 0) + 1;
+    if (this._streamDropCount >= 2 && this._maybeForceBackendRewarm()) {
+      this._streamDropCount = 0;
+      return;
+    }
     const cam = this._hass?.states[this._entities.camera];
     if (cam?.state === "streaming") {
       this._startLiveVideo();

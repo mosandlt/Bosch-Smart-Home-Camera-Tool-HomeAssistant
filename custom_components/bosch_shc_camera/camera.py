@@ -46,7 +46,13 @@ from . import (
 )
 from .auth_utils import async_digest_request
 from .cloud_ssl import async_get_bosch_cloud_session
-from .const import AUTO_PLAY_DEFAULT_VALUES, DOMAIN, LIVE_SESSION_TTL, TIMEOUT_SNAP
+from .const import (
+    AUTO_PLAY_DEFAULT_VALUES,
+    DOMAIN,
+    LIVE_SESSION_TTL,
+    STREAM_START_SKIPPED,
+    TIMEOUT_SNAP,
+)
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .snapshot_store import load_snapshot, save_snapshot
 from .switch import _redact_rtsp_creds
@@ -136,7 +142,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._entry = entry
         self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
-        self._last_image_fetch: float = -86400.0  # monotonic timestamp of last *successful* fetch (large-negative = never fetched)
+        self._last_image_fetch: float = float(
+            "-inf"
+        )  # monotonic timestamp of last *successful* fetch (-inf = never fetched; SENTINEL_RULE — CI VMs boot at ~200s monotonic so a finite large-negative can read as "recent")
         self._last_failed_fetch: float = float(
             "-inf"
         )  # monotonic timestamp of last *failed* fetch; separate so successes always update the cache window
@@ -682,12 +690,21 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 "%s: play_stream — auto-opening live connection", self._display_name
             )
             result = await self.coordinator.try_live_connection(self._cam_id)
-            if not result:
+            if result is STREAM_START_SKIPPED:
+                # Another start for this camera is already in flight — it will
+                # populate the session. Don't warn (not a failure); fall through
+                # to the pre-warm wait below, which polls until rtspsUrl is set.
+                _LOGGER.debug(
+                    "%s: play_stream — coalescing into an in-progress start",
+                    self._display_name,
+                )
+            elif not result:
                 _LOGGER.warning(
                     "%s: play_stream — live connection failed", self._display_name
                 )
                 return None
-            self.coordinator.async_update_listeners()
+            else:
+                self.coordinator.async_update_listeners()
         # Pre-warm race (observed 2026-05-17 05:16:14 UTC for bosch_innenbereich):
         # coordinator sets _live_connections[cam_id] BEFORE the LOCAL pre-warm
         # populates rtspsUrl. During that window stream_source() intentionally

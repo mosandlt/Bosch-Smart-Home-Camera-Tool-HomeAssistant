@@ -718,11 +718,20 @@ class TestTryLiveConnection:
         )
 
     @pytest.mark.asyncio
-    async def test_lock_already_locked_not_renewal_returns_none(self, caplog):
-        """When the per-cam lock is already held and is_renewal=False, skip and return None."""
+    async def test_lock_already_locked_not_renewal_returns_skip_sentinel(self, caplog):
+        """When the per-cam lock is held and is_renewal=False, skip and return the
+        STREAM_START_SKIPPED sentinel (NOT None) at DEBUG level.
+
+        Updated 2026-06-18: the skip used to return None and log a WARNING, which
+        the switch consumer mistook for a real failure ("Live stream failed" +
+        intent revert + false stream-error). The skip is a benign de-dup, so it
+        now returns a falsy sentinel and logs at DEBUG. See
+        test_stream_start_in_progress.py for the consumer-side contract.
+        """
         import logging
 
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
 
         # Create a real lock and acquire it to simulate in-progress setup
         busy_lock = asyncio.Lock()
@@ -734,7 +743,7 @@ class TestTryLiveConnection:
         )
 
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.bosch_shc_camera"
+            logging.DEBUG, logger="custom_components.bosch_shc_camera"
         ):
             result = await BoschCameraCoordinator.try_live_connection(
                 coord, CAM_A, is_renewal=False
@@ -742,10 +751,16 @@ class TestTryLiveConnection:
 
         busy_lock.release()
 
-        assert result is None
+        assert result is STREAM_START_SKIPPED
+        assert not result  # falsy → existing `if result:` consumers no-op as before
+        # The de-dup skip must NOT be a WARNING anymore (that was the false alarm).
         warn_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        assert any("already in progress" in m for m in warn_msgs), (
-            f"Expected WARNING about already in progress, got: {warn_msgs}"
+        assert not any("already in progress" in m for m in warn_msgs), (
+            f"Skip must not log a WARNING (false alarm), got: {warn_msgs}"
+        )
+        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        assert any("already in progress" in m for m in debug_msgs), (
+            f"Expected a DEBUG note about the in-progress skip, got: {debug_msgs}"
         )
 
     @pytest.mark.asyncio

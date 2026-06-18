@@ -52,7 +52,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
-from .const import CLOUD_API, DOMAIN
+from .const import CLOUD_API, DOMAIN, STREAM_START_SKIPPED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -406,6 +406,20 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         # No explicit cleanup needed — try_live_connection() sends a new
         # PUT /connection which automatically replaces any stale session.
         result = await self.coordinator.try_live_connection(self._cam_id)
+        if result is STREAM_START_SKIPPED:
+            # A start for this camera is already in flight (second card, a
+            # Lovelace auto-open, or a play_stream racing this user toggle).
+            # That start will publish the session — this is NOT a failure.
+            # Keep the user intent we set above, do NOT log a failure or
+            # record a (false) stream error, and reflect the optimistic
+            # "on" state. (Fixes the spurious "Live stream failed" warning
+            # seen on concurrent starts, 2026-06-18.)
+            _LOGGER.debug(
+                "Live stream start for %s coalesced into an in-progress start",
+                self._cam_title,
+            )
+            self.async_write_ha_state()
+            return
         if result:
             conn_type = result.get("_connection_type", "REMOTE")
             _LOGGER.info(

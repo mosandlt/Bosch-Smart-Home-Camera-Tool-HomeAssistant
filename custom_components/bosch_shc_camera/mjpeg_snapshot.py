@@ -109,11 +109,20 @@ async def fetch_mjpeg_snapshot(
 
         elapsed_ms = (time.monotonic() - t0) * 1000
 
-        if proc.returncode != 0:
+        rc = proc.returncode
+        if rc != 0:
             err_text = err.decode(errors="replace")[:200] if err else "(no stderr)"
-            _LOGGER.warning(
-                "fetch_mjpeg_snapshot: FFmpeg exited with code %d for %s — %s",
-                proc.returncode,
+            # A negative return code means FFmpeg was killed by a signal
+            # (e.g. -9 SIGKILL / -15 SIGTERM). That is the normal teardown
+            # path when the caller kills FFmpeg right after grabbing the one
+            # frame it asked for, so it is expected → DEBUG. A positive
+            # non-zero exit code is a genuine FFmpeg failure → WARNING.
+            # (rc is None only when the process is still running, which can't
+            # happen after communicate() returned — treat that as anomalous.)
+            log = _LOGGER.debug if (rc is not None and rc < 0) else _LOGGER.warning
+            log(
+                "fetch_mjpeg_snapshot: FFmpeg exited with code %s for %s — %s",
+                rc,
                 cam_host,
                 err_text,
             )

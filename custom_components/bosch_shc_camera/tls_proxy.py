@@ -114,7 +114,11 @@ def start_tls_proxy(
                 if fail_count[0] == 0:
                     first_fail_at[0] = now
                 fail_count[0] += 1
-                _LOGGER.warning(
+                # Per-attempt failure is benign during a brief camera WLAN
+                # dropout — it auto-recovers and only the burst/circuit-breaker
+                # below (≥_MAX_BURST in _BURST_WINDOW) signals a real outage.
+                # → DEBUG here; the threshold log stays WARNING.
+                _LOGGER.debug(
                     "TLS proxy %s: failed to connect to %s:%d — %s",
                     cam_id[:8],
                     cam_host,
@@ -561,7 +565,10 @@ async def pre_warm_rtsp(
                     "Pre-warm RTSP complete (DESCRIBE 200 OK) on port %d", proxy_port
                 )
             else:
-                _LOGGER.warning(
+                # Non-200 DESCRIBE during creds rotation is recoverable — the
+                # caller falls back gracefully (FFmpeg retries the connect).
+                # → DEBUG, not WARNING.
+                _LOGGER.debug(
                     "Pre-warm RTSP: unexpected response on port %d: %.200s",
                     proxy_port,
                     resp2_str,

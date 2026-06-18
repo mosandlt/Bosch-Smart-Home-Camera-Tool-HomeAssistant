@@ -282,9 +282,9 @@ async def async_shc_set_camera_light(
     """Turn the camera indicator LED on (True) or off (False) via SHC API."""
     device_id = coordinator._shc_state_cache.get(cam_id, {}).get("device_id")
     if not device_id:
-        _LOGGER.warning(
-            "SHC: no device_id cached for %s -- cannot control light", cam_id
-        )
+        # Expected on cold start before the first SHC poll populates the cache;
+        # the next coordinator tick fixes it → DEBUG, not WARNING.
+        _LOGGER.debug("SHC: no device_id cached for %s -- cannot control light", cam_id)
         return False
     result = await async_shc_request(
         coordinator,
@@ -310,7 +310,9 @@ async def async_shc_set_privacy_mode(
     """Enable (True) or disable (False) privacy mode via SHC API (legacy fallback)."""
     device_id = coordinator._shc_state_cache.get(cam_id, {}).get("device_id")
     if not device_id:
-        _LOGGER.warning(
+        # Expected on cold start before the first SHC poll populates the cache;
+        # the next coordinator tick fixes it → DEBUG, not WARNING.
+        _LOGGER.debug(
             "SHC: no device_id cached for %s -- cannot set privacy mode", cam_id
         )
         return False

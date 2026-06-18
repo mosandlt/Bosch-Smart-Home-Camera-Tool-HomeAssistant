@@ -72,6 +72,7 @@ from . import recorder as nvr_recorder
 from . import shc as shc_mod
 from .auth_utils import async_digest_request
 from .cloud_ssl import (
+    async_bosch_cloud_session_cm,
     async_get_bosch_cloud_session,
     async_get_bosch_cloud_ssl_context,
 )
@@ -476,6 +477,7 @@ from .const import (
     STREAM_HLS_FRESH_SEC,
     STREAM_IDLE_REAP_CHECK_SEC,
     STREAM_IDLE_REAP_SEC,
+    STREAM_START_SKIPPED,
     TIMEOUT_PUT_CONNECTION,
     TIMEOUT_SNAP,
 )
@@ -586,9 +588,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # each disk-persist so WKWebView gets a fresh signed URL.
         self._image_entities: dict[str, Any] = {}
         # Per-type last-fetched timestamps (-inf = never → always fetch on first tick)
-        self._last_status: float = -86400.0  # force status check on first tick
-        self._last_events: float = -86400.0  # force event check on first tick
-        self._last_slow: float = -86400.0  # force slow check on first tick
+        self._last_status: float = float("-inf")  # force status check on first tick
+        self._last_events: float = float("-inf")  # force event check on first tick
+        self._last_slow: float = float("-inf")  # force slow check on first tick
         # Per-camera set of cam_ids whose slow-tier diagnostic fetch was deferred
         # because a live stream was active on that tick.  When the stream goes idle
         # the next coordinator tick picks these up (do_slow_cam becomes True even
@@ -886,7 +888,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._user_token_cache: dict[str, str] = {}
         # Separate timer for lighting/switch — polled every tick (60s) instead of slow tier (300s)
         # Bosch app polls this every ~40s; slow tier (300s) is too slow for responsive light state
-        self._last_lighting_switch: float = -86400.0
+        self._last_lighting_switch: float = float("-inf")
         # Write-lock timestamps — prevent coordinator from overwriting optimistic state
         # with stale cloud data in the seconds after a successful API write.
         # Keyed by cam_id, value is monotonic time of last successful write.
@@ -2300,7 +2302,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         to advance every tick, making (now - _last_status) always < interval_status
         and status checks never firing after the first tick.
         """
-        per_cam_last = self._per_cam_status_at.get(cam_id, -86400.0)
+        per_cam_last = self._per_cam_status_at.get(cam_id, float("-inf"))
         offline_since = self._offline_since.get(cam_id)
         if offline_since and (now - offline_since) > self._OFFLINE_EXTENDED_INTERVAL:
             # Camera has been offline for a while — use extended interval
@@ -2362,9 +2364,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     fcm_dead = False
             if fcm_dead:
                 self._fcm_healthy = False
-                _LOGGER.warning(
+                # The soft self-heal right below normally restarts the listener
+                # on this same tick, so a single dead-listener detection is a
+                # benign, auto-recovering condition → INFO. Only escalate to
+                # WARNING once self-heal has already failed repeatedly (the
+                # outage is no longer transient and the operator should know).
+                _LOGGER.log(
+                    logging.WARNING
+                    if getattr(self, "_fcm_self_heal_failures", 0) >= 2
+                    else logging.INFO,
                     "FCM push watchdog: FcmPushClient.is_started()=False — "
-                    "listener terminated, flagging unhealthy (polling tempo resumes)"
+                    "listener terminated, flagging unhealthy (polling tempo resumes)",
                 )
             # Self-heal: three triggers share one ladder of cool-downs (see
             # SELF_HEAL_COOLDOWNS_SEC). Failure index advances per heal attempt
@@ -2609,6 +2619,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # waiting for the user to re-toggle. Cooldown 5 min
                     # prevents ping-pong if LAN flaps in/out.
                     if self._stream_fell_back.get(cam_id):
+                        # Read options fresh here: this branch only runs for a
+                        # camera that has fallen back to REMOTE (rare), so the
+                        # cost is negligible, and reading `self._entry.options`
+                        # directly avoids coupling to the enclosing-scope `opts`
+                        # snapshot (which a caller/test may set independently of
+                        # the entry). Reverted a micro-opt that broke that
+                        # contract. 2026-06-18.
                         _check_opts = get_options(self._entry)
                         if _check_opts.get("stream_connection_type", "local") == "auto":
                             err_count_was = self._stream_error_count.get(cam_id, 0)
@@ -2875,12 +2892,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # than 2× the 60s dedup window.
                             if len(self._alert_sent_ids) > 64:
                                 _cutoff = _now_mono - 120.0
-                                for _k in [
-                                    k
+                                self._alert_sent_ids = {
+                                    k: v
                                     for k, v in self._alert_sent_ids.items()
-                                    if v < _cutoff
-                                ]:
-                                    self._alert_sent_ids.pop(_k, None)
+                                    if v >= _cutoff
+                                }
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
                                 cam_id,
@@ -3406,11 +3422,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             self._motion_light_cache[cam_id_key] = (
                                 ep_data if isinstance(ep_data, dict) else {}
                             )
-                            # Update MotionLightSwitch state
-                            for _ent in self.hass.data.get("entity_platform", {}).get(
-                                f"{DOMAIN}.switch", []
-                            ):
-                                pass  # State synced via switch._is_on in next update
+                            # MotionLightSwitch state is synced via switch._is_on
+                            # on its next update — nothing to do here.
                         elif ep == "lighting/ambient":
                             self._ambient_lighting_cache[cam_id_key] = (
                                 ep_data if isinstance(ep_data, dict) else {}
@@ -3553,10 +3566,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                         headers=rcp_headers,
                                     ) as conn_resp:
                                         if conn_resp.status in (200, 201):
-                                            import json as _json
-
-                                            conn_data = _json.loads(
-                                                await conn_resp.text()
+                                            conn_data = await conn_resp.json(
+                                                content_type=None
                                             )
                                             urls = conn_data.get("urls", [])
                                             if urls:
@@ -4315,10 +4326,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # publish Stream/go2rtc against a port the recovery is about to kill.
         # is_renewal already waits. Only opportunistic (non-recovery) calls skip.
         if lock.locked() and not is_renewal and not force_reset:
-            _LOGGER.warning(
-                "try_live_connection: already in progress for %s — skipping", cam_id[:8]
+            # Opportunistic de-dup: a non-renewal start for this camera is
+            # already in flight (e.g. a second card, a Lovelace auto-open, or
+            # the user toggling the switch while a play_stream is mid-setup).
+            # Return the dedicated STREAM_START_SKIPPED sentinel — NOT None —
+            # so the switch consumer does not mistake the skip for a real
+            # failure and log "Live stream failed", drop the user's stream
+            # intent, or record a (false) stream error that would wrongly
+            # nudge the camera toward REMOTE fallback. The in-flight start
+            # publishes the session. (Demoted to debug: this is normal under
+            # concurrent access and was previously a spurious WARNING.)
+            _LOGGER.debug(
+                "try_live_connection: start already in progress for %s — "
+                "coalescing into it",
+                cam_id[:8],
             )
-            return None
+            return STREAM_START_SKIPPED
         # Pre-emptive: if go2rtc's `_supported_schemes` is stale (HA Core bug),
         # the post-stream watchdog reload would race against the card's caps
         # query and the card chooses HLS forever. Reload BEFORE pre-warm so by
@@ -5139,10 +5162,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._shc_state_cache.get(cam_id, {}).get("privacy_mode"):
             return None
 
-        connector = aiohttp.TCPConnector(
-            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
-        )
-        async with aiohttp.ClientSession(connector=connector) as session:
+        # Reuse the pooled, application-lifetime Bosch cloud session instead of
+        # opening a fresh TCP+TLS connection on every snapshot poll (~5–8 calls/
+        # min across 4 cameras). Connection pooling removes a full TLS handshake
+        # per tick. The CM does NOT close the shared session. 2026-06-18 (perf).
+        async with async_bosch_cloud_session_cm(self.hass) as session:
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -6486,12 +6510,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     token = self.token
                     if not token:
                         continue
-                    async with aiohttp.ClientSession(
-                        connector=aiohttp.TCPConnector(
-                            ssl=await async_get_bosch_cloud_ssl_context(self.hass)
-                        ),
-                        connector_owner=True,
-                    ) as session:
+                    # Pooled shared session — a heartbeat fires every ~30 s per
+                    # camera; a fresh TCP+TLS handshake each time was pure
+                    # overhead. The CM does NOT close the shared session.
+                    # 2026-06-18 (perf).
+                    async with async_bosch_cloud_session_cm(self.hass) as session:
                         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
                         async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
                             async with session.put(

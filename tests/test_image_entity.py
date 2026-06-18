@@ -369,3 +369,86 @@ def test_entity_registers_with_coordinator(tmp_path: Path) -> None:
     entity = _build_image_entity(hass, coordinator=coordinator)
 
     assert coordinator._image_entities.get(CAM_ID) is entity
+
+
+# --------------------------------------------------------------------------- #
+# In-RAM cache (perf 2026-06-18) — disk read only once per refresh
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_async_image_caches_bytes_no_second_disk_read(tmp_path: Path) -> None:
+    """Perf pin: repeated async_image() calls between refreshes must hit disk
+    only once. Every /api/image_proxy request used to re-read the file."""
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+
+    calls: list[str] = []
+
+    async def _counting_load(_hass: Any, _cam_id: str) -> bytes:
+        calls.append(_cam_id)
+        return DISK_JPEG
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.load_snapshot",
+        side_effect=_counting_load,
+    ):
+        first = await entity.async_image()
+        second = await entity.async_image()
+        third = await entity.async_image()
+
+    assert first == DISK_JPEG and second == DISK_JPEG and third == DISK_JPEG
+    assert len(calls) == 1, (
+        f"REGRESSION: async_image read disk {len(calls)}× for 3 requests — "
+        "the in-RAM cache is not serving repeated requests."
+    )
+
+
+@pytest.mark.asyncio
+async def test_notify_refreshed_invalidates_cache(tmp_path: Path) -> None:
+    """A persisted refresh must invalidate the cache so the next request
+    reloads the fresh frame from disk exactly once more."""
+    hass = _make_hass(tmp_path)
+    entity = _build_image_entity(hass)
+    entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]
+    entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+    calls: list[str] = []
+
+    async def _counting_load(_hass: Any, _cam_id: str) -> bytes:
+        calls.append(_cam_id)
+        return DISK_JPEG
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.load_snapshot",
+        side_effect=_counting_load,
+    ):
+        await entity.async_image()  # disk read #1 → cached
+        await entity.async_image()  # served from cache
+        assert len(calls) == 1
+        await entity.async_notify_refreshed()  # invalidate
+        await entity.async_image()  # disk read #2 (fresh frame)
+        await entity.async_image()  # served from cache again
+
+    assert len(calls) == 2, (
+        "REGRESSION: async_notify_refreshed did not invalidate the cache — "
+        "stale frame would be served after a refresh."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ram_fallback_not_cached(tmp_path: Path) -> None:
+    """The camera RAM-cache fallback (cold start, no disk file) must NOT be
+    stored as our own cache — otherwise it would shadow the disk snapshot
+    once it lands."""
+    hass = _make_hass(tmp_path)
+    coordinator = _make_coordinator()
+    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
+    coordinator._camera_entities[CAM_ID] = cam_stub
+    entity = _build_image_entity(hass, coordinator=coordinator)
+
+    # No disk file → fallback to RAM, but cache stays None.
+    assert await entity.async_image() == RAM_JPEG
+    assert entity._cached_bytes is None, (
+        "RAM fallback must not populate the disk-snapshot cache."
+    )

@@ -136,6 +136,12 @@ async def test_opportunistic_call_still_skips_when_locked():
         _try_live_connection_inner=AsyncMock(return_value={"x": 1}),
     )
     result = await BoschCameraCoordinator.try_live_connection(c, CAM_ID)
-    assert result is None  # skipped
+    # Skipped — returns the falsy STREAM_START_SKIPPED sentinel (not None) since
+    # 2026-06-18 so the switch consumer can tell a benign de-dup from a real
+    # failure. Still skips the inner setup (the behavior this test pins).
+    from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+
+    assert result is STREAM_START_SKIPPED
+    assert not result
     c._try_live_connection_inner.assert_not_awaited()
     lock.release()

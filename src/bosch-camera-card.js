@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.1";
+const CARD_VERSION = "13.7.2";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1410,6 +1410,7 @@ class BoschCameraCard extends HTMLElement {
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
     this._staleSourceSeen   = false; // true when WebRTC failed on a dead go2rtc source (rotated creds / dead proxy port)
     this._lastRewarmAt      = 0;     // ts of last forced backend stream rebuild (cooldown guard)
+    this._streamDropCount   = 0;     // consecutive HLS-stall/fatal reconnect cycles with no healthy frame → escalates to backend rewarm
     // Skip WebRTC + show HLS banner when:
     //   (a) HA Companion App reaches us through an external endpoint
     //       (Cloudflare Tunnel / Nabu Casa) — UDP can't ride the tunnel,
@@ -5866,6 +5867,10 @@ class BoschCameraCard extends HTMLElement {
         // can recover immediately. (live fix 2026-05-31)
         this._staleSourceSeen = false;
         this._lastRewarmAt    = 0;
+        // A real frame rendered → the reconnect chain succeeded. Reset the
+        // consecutive-drop counter so only genuinely repeated failures escalate
+        // to a backend rewarm. 2026-06-18 (HLS-reconnect-loop fix).
+        this._streamDropCount = 0;
         // Flip the badge to Live now — the first frame is on screen. Don't wait
         // for the next hass push (stream_status sensor can lag 10s+). 2026-05-30.
         this._markLiveBadge();
@@ -5947,26 +5952,28 @@ class BoschCameraCard extends HTMLElement {
           clearInterval(this._stallChecker);
           return;
         }
-        // While the tab is hidden, do NOT escalate to a _stopLiveVideo()+reconnect:
-        // a reconnect started in a background tab cannot render and would FREEZE a
-        // Picture-in-Picture window the user is actively watching in the foreground
-        // (the symptom: PiP element still there but the picture stops being live).
-        // Instead just keep the element playing — Chrome 145+ pauses a muted
-        // background <video>, so a cheap resume keeps the PiP feed live. Genuine
-        // teardown recovery is left to the visibilitychange→visible path
-        // (_resumeLiveStreamIfNeeded) when the user returns. 2026-06-16
-        // (PiP-stays-live-on-tab-switch fix).
-        if (document.visibilityState === "hidden") {
-          // Only resume when THIS card owns the active PiP element: a PiP video
-          // is foregrounded so play() sticks and keeps the feed live. On a plain
-          // hidden tab (no PiP) a muted <video> is re-paused by Chrome 145+ the
-          // instant we play() it, which would fight the pause-guard in a loop —
-          // so skip it there and let visibilitychange→visible recover. 2026-06-16.
-          const ownsPip = document.pictureInPictureElement === video
-            || _boschPipActive === this;
-          if (ownsPip && video.paused && !this._stoppingLiveVideo) {
-            Promise.resolve(video.play()).catch(() => {});
-          }
+        // Tab hidden: suppress reconnect-escalation ONLY when no PiP is active.
+        // A plain hidden tab means nobody is watching — a reconnect there cannot
+        // render and would only burn the scarce Bosch session, so we defer real
+        // recovery to the visibilitychange→visible path (_resumeLiveStreamIfNeeded)
+        // and just leave a muted-background-paused element alone (Chrome 145+
+        // re-pauses it the instant we play() it, which would fight the pause-guard
+        // in a loop). 2026-06-16.
+        //
+        // BUT when THIS card owns the active PiP element the user IS watching in
+        // the floating window, so we MUST keep recovering. Fall through to the
+        // normal stall detection below: a cheap resume handles a muted-background
+        // pause, and a genuine data-stall (currentTime frozen while the element is
+        // NOT "paused" — a dead go2rtc track or an expired/rotated 60-min Bosch
+        // session) escalates to a reconnect. That reconnect is PiP-safe: it sets
+        // _reconnectingLiveVideo so _stopLiveVideo keeps the PiP window, and the
+        // new WebRTC track renders into it even while the tab is hidden (WebRTC
+        // negotiation is not tab-throttled). The previous code took the early
+        // return for PiP too, so a frozen-but-not-paused PiP stream stayed frozen
+        // until the user switched back to the tab. 2026-06-18 (PiP freeze fix).
+        const ownsPip = document.pictureInPictureElement === video
+          || _boschPipActive === this;
+        if (document.visibilityState === "hidden" && !ownsPip) {
           lastTime = video.currentTime;
           stallCount = 0;
           return;
@@ -6462,6 +6469,22 @@ class BoschCameraCard extends HTMLElement {
     // camera/stream WS immediately produces "does not support play stream
     // service" errors. Use _waitForStreamReady() to wait for the backend.
     if (!this._isStreaming()) return;
+    // A plain _startLiveVideo() re-attaches to the SAME go2rtc source — useless
+    // when that source is dead (Bosch session expired / proxy port rotated /
+    // dead upstream): the HLS loader shows "HLS wird geladen…" then stalls
+    // again, looping until a full browser reload re-triggers stream_source().
+    // Count consecutive reconnect cycles and, after 2 fruitless ones, escalate
+    // to a backend rewarm (switch off→on → fresh PUT /connection + new TLS proxy
+    // + go2rtc re-registration) — the same recovery the reload achieves, with no
+    // user action. Resets on the next healthy frame (activateVideo). This does
+    // NOT depend on the fragile _isStaleSourceError substring match, so it also
+    // catches a dead HLS source the WebRTC stale-source latch never flagged.
+    // 2026-06-18 (HLS-reconnect-loop / "only a reload fixes it" fix).
+    this._streamDropCount = (this._streamDropCount || 0) + 1;
+    if (this._streamDropCount >= 2 && this._maybeForceBackendRewarm()) {
+      this._streamDropCount = 0;
+      return;
+    }
     const cam = this._hass?.states[this._entities.camera];
     if (cam?.state === "streaming") {
       this._startLiveVideo();

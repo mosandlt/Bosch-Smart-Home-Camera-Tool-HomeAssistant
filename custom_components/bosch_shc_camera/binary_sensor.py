@@ -40,6 +40,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
 )
+from .time_utils import parse_bosch_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -151,30 +152,25 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
     def _event_within_window(self, event: dict[str, Any]) -> bool:
         """Return True if the event timestamp is within the active window seconds of now.
 
-        Bosch /v11/events returns timestamps in **UTC** (the API string ends
-        with `Z`, e.g. `"2026-03-22T14:30:00.000Z"`). Stripping the suffix
-        and treating the remaining naive datetime as local time would shift
-        the event back/forward by the local UTC offset — in summer-time
-        Europe/Berlin (UTC+2) every event would appear ~2 hours older than
-        it really is, far outside the 90-second window. Fix: parse as
-        explicit UTC and compare both sides in UTC. Reported via simon42
-        forum (geotie) as 'Motion-Sensor wird oft nicht ausgelöst'.
+        Bosch /v11/events timestamps carry an explicit timezone designator —
+        currently an offset, e.g. ``"2026-06-18T06:06:30.499+02:00[Europe/Berlin]"``,
+        historically a ``Z`` suffix. The instant MUST be derived by honoring
+        that designator (`parse_bosch_timestamp`), never by truncating it away:
+        ``ts_str[:19]`` + ``replace(tzinfo=UTC)`` re-labelled the local
+        wall-clock reading as UTC, so a fresh event appeared ~2h in the future
+        (negative age → window stuck on) in CEST. Parsing the offset restores
+        the true instant. (Originally reported via simon42 forum (geotie) as
+        'Motion-Sensor wird oft nicht ausgelöst'; see issue #34.)
 
         The window duration is taken from `_motion_active_window` which reads
         the `motion_active_window` config-entry option (default 90 s, range
         10-300 s, configurable via Settings → Integrations → Configure).
         """
-        ts_str = event.get("timestamp", "")
-        if not ts_str:
+        dt_utc = parse_bosch_timestamp(event.get("timestamp"))
+        if dt_utc is None:
             return False
-        try:
-            # Strip to 19 chars: "2026-03-22T14:30:00" (drop the ".000Z" suffix)
-            ts_clean = ts_str[:19]
-            dt_utc = datetime.fromisoformat(ts_clean).replace(tzinfo=UTC)
-            now_utc = datetime.now(tz=UTC)
-            return (now_utc - dt_utc) <= timedelta(seconds=self._motion_active_window)
-        except (ValueError, TypeError):
-            return False
+        age = datetime.now(tz=UTC) - dt_utc
+        return age <= timedelta(seconds=self._motion_active_window)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

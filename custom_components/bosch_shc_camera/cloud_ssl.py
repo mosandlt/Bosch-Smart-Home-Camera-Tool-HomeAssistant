@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import aiohttp
@@ -135,3 +137,21 @@ async def async_get_bosch_cloud_session(hass: HomeAssistant) -> aiohttp.ClientSe
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _close_session)
     return session
+
+
+@asynccontextmanager
+async def async_bosch_cloud_session_cm(
+    hass: HomeAssistant,
+) -> AsyncIterator[aiohttp.ClientSession]:
+    """Yield the shared Bosch cloud session as an async CM that does NOT close it.
+
+    The session from :func:`async_get_bosch_cloud_session` is process-wide and
+    closed once on ``EVENT_HOMEASSISTANT_STOP``. Hot paths that used to do
+    ``async with aiohttp.ClientSession(connector=TCPConnector(ssl=...)) as
+    session:`` — opening a fresh TCP+TLS connection on every poll/heartbeat —
+    switch to ``async with async_bosch_cloud_session_cm(hass) as session:`` with
+    a one-line change (no large de-indent) and gain connection pooling. Per the
+    aiohttp docs a single application-lifetime session is the recommended
+    pattern; per-request sessions defeat pooling and add handshake latency.
+    """
+    yield await async_get_bosch_cloud_session(hass)

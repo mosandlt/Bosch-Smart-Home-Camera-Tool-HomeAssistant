@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "13.7.1"
+CARD_VERSION = "13.7.2"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 ALL_PLATFORMS = [
@@ -22,6 +22,40 @@ ALL_PLATFORMS = [
 ]
 
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
+
+
+class _StreamStartSkipped(dict):  # type: ignore[type-arg]
+    """Sentinel returned by ``try_live_connection`` when it declined to open a
+    new session because a non-renewal start for the same camera was already in
+    flight (opportunistic de-dup: ``lock.locked() and not is_renewal and not
+    force_reset``).
+
+    This is **not** a failure — the in-flight start will publish the session.
+
+    It subclasses ``dict`` (and stays empty) on purpose:
+      * it is **falsy**, so the many existing ``if result:`` / ``if not
+        result:`` consumers keep treating it exactly like the old ``None``
+        return — no behaviour change for them;
+      * it is structurally a ``dict[str, Any]``, so ``try_live_connection``
+        keeps its ``dict | None`` return type and the renewal/recovery
+        callers that do ``result.get(...)`` stay type-safe (and would no-op
+        rather than crash even in the impossible case they received it).
+
+    Only consumers that would otherwise emit a *false* failure side-effect
+    (log "Live stream failed", discard the user's stream intent, or record a
+    stream error that wrongly nudges the camera to REMOTE) compare with
+    ``is STREAM_START_SKIPPED`` and treat it as a benign no-op. Never mutate
+    the singleton — ``__bool__`` is pinned False as a belt-and-braces guard.
+    """
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return False
+
+
+# Singleton instance — compare with ``is STREAM_START_SKIPPED``.
+STREAM_START_SKIPPED = _StreamStartSkipped()
 
 # ── Network timeouts (seconds) ────────────────────────────────────────────────
 # Centralised so snap + PUT /connection paths stay consistent across the

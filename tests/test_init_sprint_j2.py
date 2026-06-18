@@ -118,6 +118,10 @@ class TestFetchDigestClosure:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
             patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+            patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=client_session,
             ),
@@ -173,6 +177,10 @@ class TestFetchDigestClosure:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
             patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+            patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=client_session,
             ),
@@ -217,6 +225,10 @@ class TestFetchDigestClosure:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
             patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=client_session,
@@ -263,6 +275,10 @@ class TestFetchDigestClosure:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
             patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+            patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=client_session,
             ),
@@ -300,6 +316,10 @@ class TestFetchDigestClosure:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
             patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=client_session,
@@ -366,6 +386,10 @@ class TestFetchDigestClosure:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
                 coord, CAM_A
@@ -972,6 +996,10 @@ class TestProxyCacheEviction:
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
                 coord, CAM_A
@@ -1052,6 +1080,10 @@ class TestRegisterGo2rtcStream:
         with (
             patch("aiohttp.UnixConnector", side_effect=OSError("no socket")),
             patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
         ):
             await BoschCameraCoordinator._register_go2rtc_stream(
                 coord, CAM_A, "rtsps://host/stream"

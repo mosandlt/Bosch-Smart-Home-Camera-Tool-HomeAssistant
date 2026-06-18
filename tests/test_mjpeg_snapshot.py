@@ -42,6 +42,32 @@ def _mock_proc(
     return proc
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def self_caplog():
+    """Capture log records from the mjpeg_snapshot module logger at DEBUG."""
+    import logging
+
+    logger = logging.getLogger("custom_components.bosch_shc_camera.mjpeg_snapshot")
+    records: list[logging.LogRecord] = []
+
+    class _H(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _H()
+    prev_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
+
+
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
 
@@ -133,6 +159,51 @@ class TestFetchMjpegSnapshot:
 
             result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_negative_returncode_logs_debug_not_warning(self):
+        """Signal-kill (negative returncode, normal teardown) logs DEBUG, not WARNING.
+
+        Source: when the caller kills FFmpeg after grabbing the one frame it asked
+        for, communicate() reports a negative returncode (-9 SIGKILL / -15 SIGTERM).
+        That is expected teardown and must not spam WARNING on every snapshot.
+        A positive non-zero exit code remains a genuine failure → WARNING.
+        """
+        import logging
+
+        proc = _mock_proc(returncode=-9, stdout=b"", stderr=b"")
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            with self_caplog() as records:
+                result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
+        assert result is None
+        exit_recs = [r for r in records if "FFmpeg exited with code" in r.getMessage()]
+        assert exit_recs, "expected an 'FFmpeg exited' log record"
+        assert all(r.levelno == logging.DEBUG for r in exit_recs), (
+            "signal-kill teardown must be DEBUG, not WARNING"
+        )
+
+    @pytest.mark.asyncio
+    async def test_positive_returncode_logs_warning(self):
+        """Positive non-zero exit (genuine FFmpeg failure) stays WARNING."""
+        import logging
+
+        proc = _mock_proc(returncode=1, stdout=b"", stderr=b"boom")
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+                fetch_mjpeg_snapshot,
+            )
+
+            with self_caplog() as records:
+                result = await fetch_mjpeg_snapshot(CAM_HOST, CAM_PORT, USER, PASS)
+        assert result is None
+        exit_recs = [r for r in records if "FFmpeg exited with code" in r.getMessage()]
+        assert exit_recs and all(r.levelno == logging.WARNING for r in exit_recs), (
+            "genuine non-zero exit must stay WARNING"
+        )
 
     @pytest.mark.asyncio
     async def test_empty_stdout_returns_none(self):

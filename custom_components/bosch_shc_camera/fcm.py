@@ -29,6 +29,14 @@ from .snapshot_store import save_snapshot
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
 _SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
 
+# Event types that carry image data and warrant a live-snapshot refresh (Path A).
+# Status-only types (connectivity events) are excluded — they carry no image
+# data and the camera view hasn't changed. Hoisted to module level so it isn't
+# rebuilt on every event-fetch pass.
+_SNAP_EVENT_TYPES = frozenset(
+    {"MOVEMENT", "PERSON", "VEHICLE", "ANIMAL", "AUDIO_ALARM", "BABY_CRY"}
+)
+
 
 def _is_safe_bosch_url(url: str) -> bool:
     """Validate that a URL points to a known Bosch domain (HTTPS only)."""
@@ -647,7 +655,13 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
     # automatically falls back to standard polling (no extra code path needed —
     # async_get_events_polling runs unconditionally on the coordinator tick).
     if not await _try_fcm():
-        _LOGGER.warning("FCM registration failed — falling back to standard polling")
+        # Healthy degradation: standard API polling runs unconditionally on the
+        # coordinator tick, and the FCM watchdog keeps retrying registration in
+        # the background → INFO, not WARNING.
+        _LOGGER.info(
+            "FCM registration failed — falling back to standard polling "
+            "(the watchdog will keep retrying FCM in the background)"
+        )
 
 
 async def register_fcm_with_bosch(coordinator: Any) -> bool:
@@ -1057,9 +1071,14 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
             # nothing to evict, so it grows unbounded). Plain age-based
             # cleanup on every call has O(len) cost which is fine — len
             # stays small.
+            # NOTE: _sent aliases coordinator._alert_sent_ids — must mutate it
+            # IN PLACE (a dict-comprehension rebind would detach the alias and
+            # lose every later write at `_sent[newest_id] = _now`). Single-pass
+            # collect-then-pop keeps the shared dict intact.
             if _sent:
-                for _k in [k for k, v in _sent.items() if v < _now - 120.0]:
-                    _sent.pop(_k, None)
+                _cutoff = _now - 120.0
+                for _k in [k for k, v in _sent.items() if v < _cutoff]:
+                    del _sent[_k]
 
             if prev_id is not None and newest_id and newest_id != prev_id:
                 _dispatched_new = True
@@ -1194,21 +1213,10 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
 
                 # Path A — live-snap refresh: fire immediately on every real event so
                 # the frontend gets a fresh camera frame within ~1-2 s of the event.
-                # Status-only types (connectivity events) are excluded — they carry no
-                # image data and the camera view hasn't changed.
+                # _SNAP_EVENT_TYPES (module-level) excludes status-only types.
                 # WHY tracked: fire-and-forget tasks get GC-collected on HA shutdown
                 # mid-flight, leaving half-written temp files. Strong reference +
                 # discard callback allows async_unload_entry to cancel+await cleanly.
-                _SNAP_EVENT_TYPES = frozenset(
-                    {
-                        "MOVEMENT",
-                        "PERSON",
-                        "VEHICLE",
-                        "ANIMAL",
-                        "AUDIO_ALARM",
-                        "BABY_CRY",
-                    }
-                )
                 cam_entity = coordinator._camera_entities.get(cam_id)
                 if cam_entity and event_type in _SNAP_EVENT_TYPES:
                     # Stream-contention guard: while the RTSP live-stream is active,
@@ -1287,9 +1295,10 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 coordinator._last_event_ids[cam_id] = newest_id
 
         except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning(
-                "FCM push event fetch network error for %s: %s", cam_id, err
-            )
+            # Transient cloud hiccup — the retry/backoff loop below (and the
+            # 300 s safety poll) recover from it without operator action.
+            # → DEBUG, not WARNING.
+            _LOGGER.debug("FCM push event fetch network error for %s: %s", cam_id, err)
         except Exception as err:
             _LOGGER.debug("FCM push event fetch error for %s: %s", cam_id, err)
 
