@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.2";
+const CARD_VERSION = "13.7.4";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1457,6 +1457,7 @@ class BoschCameraCard extends HTMLElement {
     this._lastVolumeState    = null;  // last backend volume-entity state (live-sync edge detect)
     this._stoppingLiveVideo  = false; // true only during _stopLiveVideo() so the pause-guard doesn't fight our own teardown
     this._reconnectingLiveVideo = false; // true when _stopLiveVideo() is called as part of an auto-reconnect; suppresses PiP exit so the floating window survives the reconnect cycle
+    this._trackMuteTimer     = null;  // debounce timer for WebRTC remote-track `mute` → PiP-safe reconnect (PiP-freeze fix 2026-06-19)
     this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
@@ -5927,6 +5928,31 @@ class BoschCameraCard extends HTMLElement {
         };
         video.addEventListener("pause", video._boschPauseGuardFn);
       }
+
+      // rVFC liveness heartbeat (PiP-freeze fix 2026-06-19). A hidden tab
+      // throttles our 5s setInterval stall checker to ~1×/min, so a frozen PiP
+      // stream the user is watching in the floating window is detected far too
+      // late (only on tab-return — leaving the PiP frozen). requestVideoFrameCallback
+      // fires once per frame PRESENTED to the compositor, and a PiP window keeps
+      // compositing while the tab is hidden — so _boschLastFrameAt is a reliable,
+      // un-throttled "last real frame" timestamp the stall checker reads to catch a
+      // freeze even in the background. Re-arms itself; cancelled in _stopLiveVideo.
+      if (typeof video.requestVideoFrameCallback === "function") {
+        if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+          try { video.cancelVideoFrameCallback(video._boschRvfcHandle); } catch {}
+        }
+        video._boschLastFrameAt = performance.now();
+        const onFrame = () => {
+          video._boschLastFrameAt = performance.now();
+          if (this._liveVideoActive && video.srcObject) {
+            video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+          } else {
+            video._boschRvfcHandle = null;
+          }
+        };
+        video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+      }
+
       // Safety timeout: if video never plays after 120s, hide overlay but
       // keep snapshot visible (don't call clearOverlay which hides the image).
       // Outdoor camera can take 80s+ for first HLS frame.
@@ -5984,28 +6010,38 @@ class BoschCameraCard extends HTMLElement {
         // Chrome 145+ muted-background-pause or Android/iOS doze was NEVER seen as
         // a stall and never recovered. Treat a paused-while-live element as a stall
         // too, and try a cheap resume before escalating to a reconnect. 2026-06-15.
+        // Presented-frame freeze (rVFC): currentTime polling is unreliable for a
+        // MediaStream <video> and the poll itself is throttled in a hidden tab —
+        // but _boschLastFrameAt comes from requestVideoFrameCallback, which keeps
+        // firing for a PiP window in the background and STOPS the instant frames
+        // freeze. >10s without a presented frame on a live stream = real freeze.
+        // 2026-06-19 (PiP-freeze fix).
+        const frameFrozen = video._boschLastFrameAt != null
+          && (performance.now() - video._boschLastFrameAt) > 10000;
         const frozen        = video.currentTime === lastTime;
         const pausedWhileLive = video.paused && !this._stoppingLiveVideo;
-        if (frozen || pausedWhileLive) {
+        if (frozen || pausedWhileLive || frameFrozen) {
           if (video.paused) Promise.resolve(video.play()).catch(() => {});
           stallCount++;
-          if (stallCount >= 3) { // ~15s (3 × 5s)
-            console.warn("bosch-camera-card: live video stalled/paused for ~15s, recovering");
+          // A presented-frame freeze is already a hard signal (rVFC went silent
+          // for >10s) — escalate immediately instead of waiting out 3 polls that
+          // a hidden tab would stretch to minutes. iOS EXCEPTION: iOS can suspend
+          // the JS thread for a hidden-tab webkit-PiP, so _boschLastFrameAt can go
+          // stale on a perfectly healthy stream and look "frozen" on thaw — a false
+          // positive. On iOS don't fast-escalate on rVFC alone (it still counts
+          // toward the normal 3-poll stall, and a genuinely dead track is caught by
+          // the track.onmute / connectionState="failed" event paths). 2026-06-19.
+          const frameFrozenEscalate = frameFrozen && !this._isIOS();
+          if (stallCount >= 3 || frameFrozenEscalate) { // ~15s (3 × 5s), or rVFC-silent now
+            console.warn("bosch-camera-card: live video stalled/paused/frozen, recovering");
             stallCount = 0;
-            if (this._hls && this._hls.liveSyncPosition && !video.paused) {
+            // HLS cheap-seek to live edge only helps a buffering HLS element that
+            // is still presenting frames — useless for an rVFC-silent element or a
+            // dead WebRTC track, which need a full PiP-safe reconnect.
+            if (this._hls && this._hls.liveSyncPosition && !video.paused && !frameFrozen) {
               video.currentTime = this._hls.liveSyncPosition;
             } else {
-              // Full restart — flag as reconnect so PiP survives the cycle
-              this._reconnectingLiveVideo = true;
-              this._stopLiveVideo();
-              if (this.isConnected && this._isStreaming && this._isStreaming()) {
-                setTimeout(() => {
-                  this._reconnectingLiveVideo = false;
-                  if (this.isConnected) this._startLiveVideo();
-                }, 2000);
-              } else {
-                this._reconnectingLiveVideo = false;
-              }
+              this._scheduleLiveRecovery(frameFrozen ? "no presented frame >10s" : "stall checker ~15s");
             }
           }
         } else {
@@ -6357,6 +6393,20 @@ class BoschCameraCard extends HTMLElement {
     const pc = new RTCPeerConnection(rtcConfig);
     this._webrtcPc = pc;
 
+    // Live-phase transport-failure recovery (separate from the connect-phase ICE
+    // listener inside the offer Promise below, which only settles the INITIAL
+    // attempt). Once the stream is live, a `failed` aggregate connection state =
+    // the WebRTC transport died (e.g. NAT rebinding after the tab slept); recover
+    // PiP-safely. `disconnected` is transient and left to the track-mute debounce.
+    // 2026-06-19 (PiP-freeze fix).
+    pc.addEventListener("connectionstatechange", () => {
+      if (this._webrtcPc !== pc) return;   // stale handler after a reconnect swapped pc
+      if (!this._liveVideoActive) return;  // connect phase handled by the offer Promise
+      if (pc.connectionState === "failed") {
+        this._scheduleLiveRecovery("webrtc connectionState failed");
+      }
+    });
+
     pc.addTransceiver("video", { direction: "recvonly" });
     pc.addTransceiver("audio", { direction: "recvonly" });
 
@@ -6374,6 +6424,28 @@ class BoschCameraCard extends HTMLElement {
     let webrtcTimeout = null;
     pc.ontrack = (ev) => {
       remoteStream.addTrack(ev.track);
+      // Video-track liveness (PiP-freeze fix 2026-06-19): when go2rtc stops
+      // delivering media (the AlexxIT/WebRTC#121 background-tab WebSocket i/o
+      // timeout) Chrome fires `mute` on the remote track — an EVENT, so it
+      // arrives even while the tab is hidden and our stall-checker setInterval is
+      // throttled to ~1×/min. Debounce 6s (a transient keyframe gap mutes briefly
+      // then unmutes) then recover if still muted. This is what brings a frozen
+      // PiP window back without waiting for the user to switch back to the tab.
+      if (ev.track.kind === "video") {
+        ev.track.onunmute = () => {
+          if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
+        };
+        ev.track.onmute = () => {
+          if (!this._liveVideoActive) return;
+          if (this._trackMuteTimer) clearTimeout(this._trackMuteTimer);
+          this._trackMuteTimer = setTimeout(() => {
+            this._trackMuteTimer = null;
+            if (ev.track.muted && this._liveVideoActive) {
+              this._scheduleLiveRecovery("webrtc video track muted >6s");
+            }
+          }, 6000);
+        };
+      }
       if (video.srcObject !== remoteStream) {
         this._streamTransport = "webrtc";
         video.srcObject = remoteStream;
@@ -6541,6 +6613,32 @@ class BoschCameraCard extends HTMLElement {
     return true;
   }
 
+  // Centralised PiP-safe live-stream recovery. Called by the stall checker AND by
+  // the WebRTC track-`mute` / connection-`failed` handlers — the latter fire even
+  // while the tab is hidden (events, not throttled timers), so a frozen PiP window
+  // recovers without the user switching back to the tab. Idempotent via
+  // _reconnectingLiveVideo so the event path and the throttled stall checker can't
+  // double-reconnect. _reconnectingLiveVideo=true makes _stopLiveVideo keep the
+  // floating PiP window, and _startLiveVideo re-attaches the fresh srcObject to the
+  // SAME <video>, so the PiP surface picks up the new stream with no user gesture.
+  // Mirrors the start gate in _resumeLiveStreamIfNeeded. 2026-06-19 (PiP-freeze fix).
+  _scheduleLiveRecovery(reason) {
+    if (!this.isConnected) return;
+    if (!this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    console.warn("bosch-camera-card: live recovery (" + reason + ")");
+    this._reconnectingLiveVideo = true;
+    this._stopLiveVideo();
+    if (this.isConnected && this._isStreaming && this._isStreaming()) {
+      setTimeout(() => {
+        this._reconnectingLiveVideo = false;
+        if (this.isConnected && !this._liveVideoActive) this._startLiveVideo();
+      }, 2000);
+    } else {
+      this._reconnectingLiveVideo = false;
+    }
+  }
+
   _stopLiveVideo() {
     // Mark teardown so the <video> pause-guard (added in activateVideo) doesn't
     // auto-resume the stream we are intentionally stopping here. 2026-06-03.
@@ -6548,6 +6646,7 @@ class BoschCameraCard extends HTMLElement {
     this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
+    if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
     // Stop the uptime-badge interval and the stream-ready poll chain on teardown.
@@ -6586,6 +6685,14 @@ class BoschCameraCard extends HTMLElement {
       if (document.pictureInPictureElement === video && !this._reconnectingLiveVideo) {
         document.exitPictureInPicture().catch(() => {});
       }
+      // Cancel the rVFC liveness heartbeat — re-armed by activateVideo on the next
+      // start. Leaving it running against a src-cleared element is harmless (it
+      // self-stops when srcObject is null) but tidy up the handle. 2026-06-19.
+      if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+        try { video.cancelVideoFrameCallback(video._boschRvfcHandle); } catch {}
+      }
+      video._boschRvfcHandle = null;
+      video._boschLastFrameAt = null;
       video.pause();
       video.srcObject = null;
       video.removeAttribute("src");

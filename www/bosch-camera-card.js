@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.7.2";
+const CARD_VERSION = "13.7.4";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -1256,6 +1256,7 @@ class BoschCameraCard extends HTMLElement {
     this._lastVolumeState = null;
     this._stoppingLiveVideo = false;
     this._reconnectingLiveVideo = false;
+    this._trackMuteTimer = null;
     this._streamTransport = null;
     this._timerStreaming = false;
     this._optimistic = {};
@@ -2728,6 +2729,23 @@ class BoschCameraCard extends HTMLElement {
         };
         video.addEventListener("pause", video._boschPauseGuardFn);
       }
+      if (typeof video.requestVideoFrameCallback === "function") {
+        if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+          try {
+            video.cancelVideoFrameCallback(video._boschRvfcHandle);
+          } catch {}
+        }
+        video._boschLastFrameAt = performance.now();
+        const onFrame = () => {
+          video._boschLastFrameAt = performance.now();
+          if (this._liveVideoActive && video.srcObject) {
+            video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+          } else {
+            video._boschRvfcHandle = null;
+          }
+        };
+        video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+      }
       if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
       this._activateSafetyTimer = setTimeout(() => {
         if (!this.isConnected) return;
@@ -2751,27 +2769,20 @@ class BoschCameraCard extends HTMLElement {
           stallCount = 0;
           return;
         }
+        const frameFrozen = video._boschLastFrameAt != null && performance.now() - video._boschLastFrameAt > 1e4;
         const frozen = video.currentTime === lastTime;
         const pausedWhileLive = video.paused && !this._stoppingLiveVideo;
-        if (frozen || pausedWhileLive) {
+        if (frozen || pausedWhileLive || frameFrozen) {
           if (video.paused) Promise.resolve(video.play()).catch(() => {});
           stallCount++;
-          if (stallCount >= 3) {
-            console.warn("bosch-camera-card: live video stalled/paused for ~15s, recovering");
+          const frameFrozenEscalate = frameFrozen && !this._isIOS();
+          if (stallCount >= 3 || frameFrozenEscalate) {
+            console.warn("bosch-camera-card: live video stalled/paused/frozen, recovering");
             stallCount = 0;
-            if (this._hls && this._hls.liveSyncPosition && !video.paused) {
+            if (this._hls && this._hls.liveSyncPosition && !video.paused && !frameFrozen) {
               video.currentTime = this._hls.liveSyncPosition;
             } else {
-              this._reconnectingLiveVideo = true;
-              this._stopLiveVideo();
-              if (this.isConnected && this._isStreaming && this._isStreaming()) {
-                setTimeout(() => {
-                  this._reconnectingLiveVideo = false;
-                  if (this.isConnected) this._startLiveVideo();
-                }, 2e3);
-              } else {
-                this._reconnectingLiveVideo = false;
-              }
+              this._scheduleLiveRecovery(frameFrozen ? "no presented frame >10s" : "stall checker ~15s");
             }
           }
         } else {
@@ -3004,6 +3015,13 @@ class BoschCameraCard extends HTMLElement {
     }
     const pc = new RTCPeerConnection(rtcConfig);
     this._webrtcPc = pc;
+    pc.addEventListener("connectionstatechange", () => {
+      if (this._webrtcPc !== pc) return;
+      if (!this._liveVideoActive) return;
+      if (pc.connectionState === "failed") {
+        this._scheduleLiveRecovery("webrtc connectionState failed");
+      }
+    });
     pc.addTransceiver("video", {
       direction: "recvonly"
     });
@@ -3016,6 +3034,24 @@ class BoschCameraCard extends HTMLElement {
     let webrtcTimeout = null;
     pc.ontrack = ev => {
       remoteStream.addTrack(ev.track);
+      if (ev.track.kind === "video") {
+        ev.track.onunmute = () => {
+          if (this._trackMuteTimer) {
+            clearTimeout(this._trackMuteTimer);
+            this._trackMuteTimer = null;
+          }
+        };
+        ev.track.onmute = () => {
+          if (!this._liveVideoActive) return;
+          if (this._trackMuteTimer) clearTimeout(this._trackMuteTimer);
+          this._trackMuteTimer = setTimeout(() => {
+            this._trackMuteTimer = null;
+            if (ev.track.muted && this._liveVideoActive) {
+              this._scheduleLiveRecovery("webrtc video track muted >6s");
+            }
+          }, 6e3);
+        };
+      }
       if (video.srcObject !== remoteStream) {
         this._streamTransport = "webrtc";
         video.srcObject = remoteStream;
@@ -3124,6 +3160,22 @@ class BoschCameraCard extends HTMLElement {
     }, 1500);
     return true;
   }
+  _scheduleLiveRecovery(reason) {
+    if (!this.isConnected) return;
+    if (!this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    console.warn("bosch-camera-card: live recovery (" + reason + ")");
+    this._reconnectingLiveVideo = true;
+    this._stopLiveVideo();
+    if (this.isConnected && this._isStreaming && this._isStreaming()) {
+      setTimeout(() => {
+        this._reconnectingLiveVideo = false;
+        if (this.isConnected && !this._liveVideoActive) this._startLiveVideo();
+      }, 2e3);
+    } else {
+      this._reconnectingLiveVideo = false;
+    }
+  }
   _stopLiveVideo() {
     this._stoppingLiveVideo = true;
     this._disarmAutoUnmute();
@@ -3134,6 +3186,10 @@ class BoschCameraCard extends HTMLElement {
     if (this._stallChecker) {
       clearInterval(this._stallChecker);
       this._stallChecker = null;
+    }
+    if (this._trackMuteTimer) {
+      clearTimeout(this._trackMuteTimer);
+      this._trackMuteTimer = null;
     }
     if (this._hlsKeepaliveTimer) {
       clearInterval(this._hlsKeepaliveTimer);
@@ -3169,6 +3225,13 @@ class BoschCameraCard extends HTMLElement {
       if (document.pictureInPictureElement === video && !this._reconnectingLiveVideo) {
         document.exitPictureInPicture().catch(() => {});
       }
+      if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+        try {
+          video.cancelVideoFrameCallback(video._boschRvfcHandle);
+        } catch {}
+      }
+      video._boschRvfcHandle = null;
+      video._boschLastFrameAt = null;
       video.pause();
       video.srcObject = null;
       video.removeAttribute("src");

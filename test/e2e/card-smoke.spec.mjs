@@ -1123,6 +1123,98 @@ test("secondary-audio status re-evaluates after the primary card is removed", as
 // stream that was torn down while hidden, but ONLY when the backend stream switch
 // is still on, the card is connected, and nothing is already starting. It never
 // auto-starts a stream the user stopped.
+
+// 2026-06-19 PiP-freeze-on-tab-switch fix (Thomas: pip mac chrome — switch tab,
+// video freezes after a while, return to tab resumes the page video but the PiP
+// window stays frozen). Root cause: the 5s stall-checker setInterval is throttled
+// to ~1×/min in a hidden tab, so a dead go2rtc track (AlexxIT/WebRTC#121 WS i/o
+// timeout) is only recovered on tab-return — leaving PiP frozen. _scheduleLiveRecovery
+// centralises a PiP-safe reconnect that the unthrottled WebRTC `mute` / connection-
+// `failed` EVENTS can fire while hidden. These tests pin its gating + idempotency.
+test("_scheduleLiveRecovery reconnects PiP-safely only when live+streaming+connected, and is idempotent", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    // Stub teardown so we don't touch a real <video>/hls; mimic the real one's
+    // side effect of clearing _liveVideoActive, and capture the reconnect flag
+    // value AT teardown time (must be true so _stopLiveVideo keeps the PiP window).
+    const install = () => {
+      let stopCount = 0, startCount = 0, flagAtStop = null;
+      card._stopLiveVideo = () => { stopCount++; flagAtStop = card._reconnectingLiveVideo; card._liveVideoActive = false; };
+      card._startLiveVideo = () => { startCount++; };
+      return { stops: () => stopCount, starts: () => startCount, flagAtStop: () => flagAtStop };
+    };
+
+    // Case 1: live + streaming + connected → PiP-safe reconnect.
+    let c1 = install();
+    card._isStreaming = () => true;
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("test");
+    const flagAtStop = c1.flagAtStop();          // expect true (PiP survives)
+    await new Promise((res) => setTimeout(res, 2100));
+    const restarted = c1.starts();               // expect 1 (after the 2s defer)
+    const flagCleared = card._reconnectingLiveVideo; // expect false (cleared after restart)
+
+    // Case 2: backend stream switch OFF → tears down but never restarts.
+    let c2 = install();
+    card._isStreaming = () => false;
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false;
+    card._scheduleLiveRecovery("test");
+    await new Promise((res) => setTimeout(res, 2100));
+    const stoppedWhenNotStreaming = c2.stops();  // expect 1
+    const restartedWhenNotStreaming = c2.starts(); // expect 0
+
+    // Case 3: already reconnecting → idempotent no-op (no double teardown/reconnect).
+    let c3 = install();
+    card._isStreaming = () => true;
+    card._liveVideoActive = true; card._reconnectingLiveVideo = true;
+    card._scheduleLiveRecovery("test");
+    const stoppedWhenAlreadyReconnecting = c3.stops(); // expect 0
+
+    // Case 4: not live → no-op.
+    let c4 = install();
+    card._isStreaming = () => true;
+    card._liveVideoActive = false; card._reconnectingLiveVideo = false;
+    card._scheduleLiveRecovery("test");
+    const stoppedWhenNotLive = c4.stops();       // expect 0
+
+    return { flagAtStop, restarted, flagCleared, stoppedWhenNotStreaming,
+      restartedWhenNotStreaming, stoppedWhenAlreadyReconnecting, stoppedWhenNotLive };
+  });
+  expect(r.flagAtStop, "_reconnectingLiveVideo is true at teardown so PiP survives the reconnect").toBe(true);
+  expect(r.restarted, "restarts the stream after the 2s reconnect defer").toBe(1);
+  expect(r.flagCleared, "clears the reconnect flag once the new stream is started").toBe(false);
+  expect(r.stoppedWhenNotStreaming, "still tears the dead stream down even when the switch is off").toBe(1);
+  expect(r.restartedWhenNotStreaming, "never restarts when the backend stream switch is off").toBe(0);
+  expect(r.stoppedWhenAlreadyReconnecting, "idempotent: no second teardown while a reconnect is in flight").toBe(0);
+  expect(r.stoppedWhenNotLive, "no-op when no live stream is active").toBe(0);
+});
+
+// Source pins for the un-throttled freeze-detection wiring (these survive in src
+// even though the runtime paths need a real PiP window + go2rtc to exercise).
+test("PiP-freeze fix is wired: rVFC heartbeat, track-mute + connection-failed recovery, frameFrozen escalation (source pin)", () => {
+  // rVFC liveness heartbeat re-arms itself and stamps _boschLastFrameAt.
+  expect(CARD_SRC).toMatch(/requestVideoFrameCallback/);
+  expect(CARD_SRC).toMatch(/_boschLastFrameAt\s*=\s*performance\.now\(\)/);
+  // The stall checker escalates on a presented-frame freeze, not only currentTime.
+  expect(CARD_SRC).toMatch(/const\s+frameFrozen\s*=/);
+  expect(CARD_SRC).toMatch(/frozen\s*\|\|\s*pausedWhileLive\s*\|\|\s*frameFrozen/);
+  // WebRTC remote video-track `mute` → debounced PiP-safe recovery.
+  expect(CARD_SRC).toMatch(/ev\.track\.onmute\s*=/);
+  expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("webrtc video track muted/);
+  // Persistent connection-state `failed` → recovery (live phase, not connect).
+  expect(CARD_SRC).toMatch(/connectionstatechange/);
+  expect(CARD_SRC).toMatch(/connectionState\s*===\s*"failed"/);
+  // Teardown cancels the rVFC heartbeat and the track-mute debounce timer.
+  expect(CARD_SRC).toMatch(/cancelVideoFrameCallback/);
+  expect(CARD_SRC).toMatch(/this\._trackMuteTimer\s*\)\s*\{\s*clearTimeout/);
+});
+
 test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+connected", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });

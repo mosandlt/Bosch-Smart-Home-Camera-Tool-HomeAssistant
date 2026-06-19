@@ -721,11 +721,17 @@ async def test_invite_friend_does_not_log_full_email(caplog):
         await handlers["invite_friend"](_call({"email": test_email}))
 
     log_text = " ".join(r.message for r in caplog.records)
-    assert "thomas@example.com" not in log_text, (
+    assert test_email not in log_text, (
         "Full email address must not appear in logs (PII)"
     )
-    # Domain part should still be traceable
-    assert "example.com" in log_text, (
+    # Domain part should still be traceable. Assert against the domain derived
+    # from the input rather than a bare hostname literal: the literal form
+    # ("example.com" in <str>) tripped CodeQL's URL-substring-sanitization
+    # heuristic (py/incomplete-url-substring-sanitization). This is a
+    # log-content assertion, not URL validation — a false positive — so we
+    # avoid the flagged shape instead of carrying a dismissed alert.
+    expected_domain = test_email.split("@", 1)[1]
+    assert expected_domain in log_text, (
         "Domain part of email must appear in log for traceability"
     )
 

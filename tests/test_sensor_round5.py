@@ -232,30 +232,54 @@ def test_last_event_sensor_extra_attrs():
 # ── BoschCameraEventsTodaySensor ─────────────────────────────────────────────
 
 
+def _freeze_today():
+    """Freeze the sensor clock so fixture dates and local-date bucketing agree.
+
+    The default test timezone is US/Pacific, so a real "UTC today" event can
+    fall on the previous *local* day during the UTC-morning boundary window —
+    which made these counts flaky by time-of-day. Freeze now + force
+    as_local→UTC for determinism. Returns (now-patch, as_local-patch, day-str).
+    """
+    fixed_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
+    return (
+        patch(
+            "custom_components.bosch_shc_camera.sensor.dt_util.now",
+            return_value=fixed_now,
+        ),
+        patch(
+            "custom_components.bosch_shc_camera.sensor.dt_util.as_local",
+            side_effect=lambda dt: dt.astimezone(UTC),
+        ),
+        fixed_now.strftime("%Y-%m-%d"),
+    )
+
+
 def test_events_today_count_matching():
     from custom_components.bosch_shc_camera.sensor import BoschCameraEventsTodaySensor
 
-    # Sensor uses datetime.now(UTC) for UTC date bucketing — timestamps must
-    # carry today's UTC date to be counted. Past date (2000-01-01) is excluded.
+    # Events on today's local date are counted; a past date (2000-01-01) excluded.
+    p_now, p_local, day = _freeze_today()
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"timestamp": f"{UTC_TODAY}T10:00:00.000Z"},
-        {"timestamp": f"{UTC_TODAY}T11:00:00.000Z"},
+        {"timestamp": f"{day}T10:00:00.000Z"},
+        {"timestamp": f"{day}T11:00:00.000Z"},
         {"timestamp": "2000-01-01T00:00:00.000Z"},
     ]
     sw = _make_sensor(BoschCameraEventsTodaySensor, c)
-    result = sw.native_value
+    with p_now, p_local:
+        result = sw.native_value
     assert result == 2
 
 
 def test_events_today_extra_attrs():
     from custom_components.bosch_shc_camera.sensor import BoschCameraEventsTodaySensor
 
-    # Use UTC_TODAY so the timestamp matches datetime.now(UTC) in production code.
+    p_now, p_local, day = _freeze_today()
     c = _coord()
-    c.data[CAM_ID]["events"] = [{"timestamp": f"{UTC_TODAY}T09:00:00.000Z"}]
+    c.data[CAM_ID]["events"] = [{"timestamp": f"{day}T09:00:00.000Z"}]
     sw = _make_sensor(BoschCameraEventsTodaySensor, c)
-    attrs = sw.extra_state_attributes
+    with p_now, p_local:
+        attrs = sw.extra_state_attributes
     assert attrs["events_in_feed"] == 1
 
 
@@ -520,13 +544,15 @@ def test_last_event_type_extra_attrs_no_events():
 def test_movement_events_today_filters_type():
     from custom_components.bosch_shc_camera.sensor import BoschMovementEventsTodaySensor
 
-    # Uses UTC_TODAY to match datetime.now(UTC) bucketing in production code.
+    # Clock frozen so today's local date and the fixture date agree (see
+    # _freeze_today — avoids US/Pacific UTC-boundary flakiness).
+    p_now, p_local, day = _freeze_today()
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"eventType": "MOVEMENT", "timestamp": f"{UTC_TODAY}T10:00:00.000Z"},
+        {"eventType": "MOVEMENT", "timestamp": f"{day}T10:00:00.000Z"},
         {
             "eventType": "PERSON",
-            "timestamp": f"{UTC_TODAY}T11:00:00.000Z",
+            "timestamp": f"{day}T11:00:00.000Z",
         },  # excluded (wrong type)
         {
             "eventType": "MOVEMENT",
@@ -534,7 +560,8 @@ def test_movement_events_today_filters_type():
         },  # excluded (old date)
     ]
     sw = _make_sensor(BoschMovementEventsTodaySensor, c)
-    result = sw.native_value
+    with p_now, p_local:
+        result = sw.native_value
     assert result == 1
 
 
@@ -544,18 +571,20 @@ def test_movement_events_today_filters_type():
 def test_audio_events_today_count():
     from custom_components.bosch_shc_camera.sensor import BoschAudioEventsTodaySensor
 
-    # Uses UTC_TODAY to match datetime.now(UTC) bucketing in production code.
+    # Clock frozen (see _freeze_today) for deterministic local-date bucketing.
+    p_now, p_local, day = _freeze_today()
     c = _coord()
     c.data[CAM_ID]["events"] = [
-        {"eventType": "AUDIO_ALARM", "timestamp": f"{UTC_TODAY}T08:00:00.000Z"},
-        {"eventType": "AUDIO_ALARM", "timestamp": f"{UTC_TODAY}T09:00:00.000Z"},
+        {"eventType": "AUDIO_ALARM", "timestamp": f"{day}T08:00:00.000Z"},
+        {"eventType": "AUDIO_ALARM", "timestamp": f"{day}T09:00:00.000Z"},
         {
             "eventType": "MOVEMENT",
-            "timestamp": f"{UTC_TODAY}T10:00:00.000Z",
+            "timestamp": f"{day}T10:00:00.000Z",
         },  # excluded (wrong type)
     ]
     sw = _make_sensor(BoschAudioEventsTodaySensor, c)
-    result = sw.native_value
+    with p_now, p_local:
+        result = sw.native_value
     assert result == 2
 
 

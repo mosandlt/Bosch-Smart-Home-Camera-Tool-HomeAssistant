@@ -9734,8 +9734,10 @@ def _register_services(hass: HomeAssistant) -> None:
                         target.unlink()
                         count += 1
                     return count
-                # camera + optional date filter
-                if not camera:
+                # camera + optional date filter. Unreachable defensively: the
+                # service raises argument_required when file_path AND camera are
+                # both empty, so with file_path empty here camera is always set.
+                if not camera:  # pragma: no cover
                     return 0
                 cam_dir = (base / camera).resolve()
                 try:

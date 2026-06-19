@@ -225,18 +225,36 @@ class TestEventsTodaySensor:
     """
 
     def test_events_today_uses_utc_date(self) -> None:
-        """Event with UTC timestamp matching today's UTC date is counted."""
+        """Event whose instant falls on today's local date is counted.
+
+        The clock is frozen so the fixture date and the sensor's local-date
+        bucketing always agree: the default test timezone is US/Pacific, so a
+        real "UTC today" timestamp can land on the previous *local* day during
+        the UTC-morning boundary window — which made this test flaky by
+        time-of-day. Freeze now + force as_local→UTC so it is deterministic.
+        """
         from custom_components.bosch_shc_camera.sensor import (
             BoschCameraEventsTodaySensor,
         )
 
         coord = _stub_coord()
-        utc_today = datetime.now(UTC).strftime("%Y-%m-%d")
+        fixed_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
+        day = fixed_now.strftime("%Y-%m-%d")
         coord.data[CAM_ID]["events"] = [
-            {"eventType": "MOVEMENT", "timestamp": f"{utc_today}T10:00:00.000Z"},
+            {"eventType": "MOVEMENT", "timestamp": f"{day}T10:00:00.000Z"},
         ]
         s = BoschCameraEventsTodaySensor(coord, CAM_ID, _stub_entry())
-        assert s.native_value == 1
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.sensor.dt_util.now",
+                return_value=fixed_now,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.sensor.dt_util.as_local",
+                side_effect=lambda dt: dt.astimezone(UTC),
+            ),
+        ):
+            assert s.native_value == 1
 
     def test_events_today_zero_when_no_matching_day(self) -> None:
         """Event with a past UTC date (2000-01-01) must yield 0."""
@@ -252,19 +270,33 @@ class TestEventsTodaySensor:
         assert s.native_value == 0
 
     def test_events_today_extra_attrs_consistent_day(self) -> None:
-        """extra_state_attributes lists all events from today's UTC date."""
+        """extra_state_attributes lists all events from today's local date.
+
+        Clock frozen for determinism — see test_events_today_uses_utc_date.
+        """
         from custom_components.bosch_shc_camera.sensor import (
             BoschCameraEventsTodaySensor,
         )
 
         coord = _stub_coord()
-        utc_today = datetime.now(UTC).strftime("%Y-%m-%d")
+        fixed_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
+        day = fixed_now.strftime("%Y-%m-%d")
         coord.data[CAM_ID]["events"] = [
-            {"eventType": "MOVEMENT", "timestamp": f"{utc_today}T10:00:00.000Z"},
-            {"eventType": "MOVEMENT", "timestamp": f"{utc_today}T09:00:00.000Z"},
+            {"eventType": "MOVEMENT", "timestamp": f"{day}T10:00:00.000Z"},
+            {"eventType": "MOVEMENT", "timestamp": f"{day}T09:00:00.000Z"},
         ]
         s = BoschCameraEventsTodaySensor(coord, CAM_ID, _stub_entry())
-        attrs = s.extra_state_attributes
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.sensor.dt_util.now",
+                return_value=fixed_now,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.sensor.dt_util.as_local",
+                side_effect=lambda dt: dt.astimezone(UTC),
+            ),
+        ):
+            attrs = s.extra_state_attributes
         assert attrs["events_in_feed"] == 2
         assert len(attrs["latest_timestamps"]) == 2
 
