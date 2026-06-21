@@ -1215,6 +1215,26 @@ test("PiP-freeze fix is wired: rVFC heartbeat, track-mute + connection-failed re
   expect(CARD_SRC).toMatch(/this\._trackMuteTimer\s*\)\s*\{\s*clearTimeout/);
 });
 
+test("background-freeze fix is wired: un-throttled Web Worker stall heartbeat (source pin)", () => {
+  // A Web Worker timer is NOT subject to Chrome's hidden-tab intensive
+  // throttling, so it reads the un-throttled rVFC freeze signal every 5s even in
+  // the background → PiP freeze caught in ~10s instead of ~60s. 2026-06-21.
+  // Worker created from an inline Blob URL (no extra file, CSP worker-src blob:).
+  expect(CARD_SRC).toMatch(/_startLiveStallWorker\s*\(\)/);
+  expect(CARD_SRC).toMatch(/new\s+Worker\(/);
+  expect(CARD_SRC).toMatch(/URL\.createObjectURL\(/);
+  expect(CARD_SRC).toMatch(/this\._stallWorker\.onmessage\s*=\s*\(\)\s*=>\s*this\._liveStallTickFromWorker\(\)/);
+  // The worker tick only acts while hidden + this card owns the PiP element, and
+  // only on a real rVFC presented-frame freeze (iOS excepted), via the idempotent
+  // _scheduleLiveRecovery — so it never double-fires with the setInterval checker.
+  expect(CARD_SRC).toMatch(/_liveStallTickFromWorker\s*\(\)\s*\{/);
+  expect(CARD_SRC).toMatch(/document\.visibilityState\s*!==\s*"hidden"/);
+  expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("no presented frame >10s \(bg worker\)"\)/);
+  // Teardown terminates the worker so it can't outlive the stream.
+  expect(CARD_SRC).toMatch(/_stopLiveStallWorker\s*\(\)/);
+  expect(CARD_SRC).toMatch(/this\._stallWorker\.terminate\(\)/);
+});
+
 test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+connected", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });

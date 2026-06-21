@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.4";
+const CARD_VERSION = "13.7.5";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1458,6 +1458,7 @@ class BoschCameraCard extends HTMLElement {
     this._stoppingLiveVideo  = false; // true only during _stopLiveVideo() so the pause-guard doesn't fight our own teardown
     this._reconnectingLiveVideo = false; // true when _stopLiveVideo() is called as part of an auto-reconnect; suppresses PiP exit so the floating window survives the reconnect cycle
     this._trackMuteTimer     = null;  // debounce timer for WebRTC remote-track `mute` → PiP-safe reconnect (PiP-freeze fix 2026-06-19)
+    this._stallWorker        = null;  // Web Worker emitting an un-throttled 5s heartbeat so a frozen PiP window is detected in the background in ~10s, not ~60s (the main-thread setInterval stall checker is throttled to ~1×/min in a hidden tab). 2026-06-21
     this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
@@ -5941,7 +5942,14 @@ class BoschCameraCard extends HTMLElement {
         if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
           try { video.cancelVideoFrameCallback(video._boschRvfcHandle); } catch {}
         }
-        video._boschLastFrameAt = performance.now();
+        // Leave null until the FIRST frame is actually presented — do NOT seed
+        // with performance.now(). The `frameFrozen` checks guard on `!= null`, so
+        // a null value means "no frame yet" (false, not frozen). Seeding it at
+        // activate made a reconnect whose first WebRTC frame takes >10s look
+        // "frozen" and trigger another recovery — a loop in the background worker
+        // path. Only a stream that presented ≥1 frame and then stopped is a real
+        // freeze. 2026-06-21 (bg-worker false-positive fix).
+        video._boschLastFrameAt = null;
         const onFrame = () => {
           video._boschLastFrameAt = performance.now();
           if (this._liveVideoActive && video.srcObject) {
@@ -6049,6 +6057,14 @@ class BoschCameraCard extends HTMLElement {
         }
         lastTime = video.currentTime;
       }, 5000);
+
+      // Un-throttled background heartbeat. The setInterval stall checker above is
+      // clamped to ~1×/min by Chrome's intensive throttling once the tab is hidden,
+      // so a PiP window the user is watching freezes for up to a minute before the
+      // rVFC `_boschLastFrameAt` signal is read. A Web Worker timer runs on its own
+      // thread and is NOT throttled, so it reads the same un-throttled rVFC signal
+      // every 5s even in the background → PiP freeze caught in ~10s. 2026-06-21.
+      this._startLiveStallWorker();
     };
 
     // ── WebRTC (always attempt; HLS is the fallback) ──────────────────
@@ -6613,6 +6629,71 @@ class BoschCameraCard extends HTMLElement {
     return true;
   }
 
+  // Un-throttled background stall heartbeat. Chrome clamps main-thread
+  // setInterval/setTimeout to ~1×/min in a hidden tab (intensive throttling,
+  // Chrome 88+), but a Web Worker timer runs on a separate thread that is NOT
+  // throttled. We use it ONLY as a wakeup source: the worker posts every 5s, the
+  // main thread does the actual DOM-touching check + PiP-safe recovery. Created
+  // from an inline Blob URL (no extra file — same pattern hls.js already uses
+  // under HA's CSP, so worker-src blob: is permitted). 2026-06-21.
+  _startLiveStallWorker() {
+    this._stopLiveStallWorker();
+    if (typeof Worker !== "function") return;
+    try {
+      const src = "let t=setInterval(function(){postMessage(0);},5000);"
+        + "onmessage=function(e){if(e.data==='stop'){clearInterval(t);close();}};";
+      const blob = new Blob([src], { type: "application/javascript" });
+      const url  = URL.createObjectURL(blob);
+      this._stallWorker = new Worker(url);
+      URL.revokeObjectURL(url);
+      this._stallWorker.onmessage = () => this._liveStallTickFromWorker();
+      // Some browsers (Firefox, and future Chrome) report a blocked worker
+      // ASYNChronously via onerror rather than throwing from the constructor —
+      // the try/catch wouldn't catch that, leaving a dead worker object. Null it
+      // out here; the always-running setInterval stall checker remains the
+      // baseline, so nothing breaks either way. 2026-06-21.
+      this._stallWorker.onerror = () => this._stopLiveStallWorker();
+    } catch {
+      this._stallWorker = null; // CSP/blocked synchronously → degrade to the throttled setInterval
+    }
+  }
+
+  _stopLiveStallWorker() {
+    if (this._stallWorker) {
+      try { this._stallWorker.postMessage("stop"); } catch {}
+      try { this._stallWorker.terminate(); } catch {}
+      this._stallWorker = null;
+    }
+  }
+
+  // Worker-driven tick. Only does the ONE thing the throttled setInterval cannot
+  // do in the background: catch a frozen PiP surface the user is actively
+  // watching. When the tab is VISIBLE the normal setInterval stall checker runs
+  // un-throttled and owns all recovery, so we early-return to avoid double work.
+  _liveStallTickFromWorker() {
+    if (document.visibilityState !== "hidden") return; // visible → setInterval handles it
+    if (!this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    const video = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+    if (!video) return;
+    // Only a PiP window the user is watching matters while hidden. A plain hidden
+    // tab means nobody is looking — recovery there would only burn the scarce
+    // Bosch session, so we defer it to the visibilitychange→visible path.
+    const ownsPip = document.pictureInPictureElement === video || _boschPipActive === this;
+    if (!ownsPip) return;
+    // rVFC presented-frame freeze: _boschLastFrameAt keeps updating for a PiP
+    // surface compositing in the background and stops the instant frames freeze.
+    // >10s without a presented frame on a live stream = real freeze. iOS excepted
+    // (thread-suspend false positive — covered by the track.onmute /
+    // connectionState="failed" event paths). Mirrors the setInterval escalate
+    // condition; _scheduleLiveRecovery is idempotent so the two can't double-fire.
+    const frameFrozen = video._boschLastFrameAt != null
+      && (performance.now() - video._boschLastFrameAt) > 10000;
+    if (frameFrozen && !this._isIOS()) {
+      this._scheduleLiveRecovery("no presented frame >10s (bg worker)");
+    }
+  }
+
   // Centralised PiP-safe live-stream recovery. Called by the stall checker AND by
   // the WebRTC track-`mute` / connection-`failed` handlers — the latter fire even
   // while the tab is hidden (events, not throttled timers), so a frozen PiP window
@@ -6646,6 +6727,7 @@ class BoschCameraCard extends HTMLElement {
     this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
+    this._stopLiveStallWorker();
     if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
