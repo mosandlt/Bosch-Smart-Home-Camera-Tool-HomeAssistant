@@ -842,6 +842,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Kamera — Entity-IDs umbenannt",
       "description": "**{count}** Bosch-Kamera-Entity-IDs hatten einen doppelten `bosch_NAME_bosch_NAME_`-Prefix (Bug aus v11.0.0–v12.2.1) und wurden korrigiert.\n\nBeispiele: {examples}\n\n**Bitte aktualisiere alle Automationen, Skripte, Szenen und Lovelace-Karten, die die alten IDs referenzieren.** Home Assistant ersetzt YAML-Dateien und Lovelace-Karten nicht automatisch. Verlauf und Statistik werden automatisch übernommen.\n\nVollständige Liste in den v12.3.0 Release-Notes."
+    },
+    "notifications_disabled": {
+      "title": "Bosch Kamera — Benachrichtigungen deaktiviert",
+      "description": "Die **{types}** Cloud-Benachrichtigung(en) sind für Kamera **{camera}** deaktiviert.\n\nOhne diese Benachrichtigungen sendet Bosch keine Bewegungs- oder Personenereignisse, sodass die entsprechenden Binärsensoren dauerhaft **Klar** anzeigen — auch wenn tatsächlich Bewegung erkannt wird.\n\n**Lösung:** Aktiviere den/die **{types}** Benachrichtigungs-Schalter für diese Kamera in Home Assistant (Einstellungen → Geräte & Dienste → Bosch Smart Home Camera → das Kamera-Gerät) oder in der Bosch Smart Home App unter den Benachrichtigungseinstellungen der Kamera."
     }
   },
   "system_health": {

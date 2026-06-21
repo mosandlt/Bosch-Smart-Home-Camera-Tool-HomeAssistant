@@ -166,6 +166,16 @@ FCM_DOWN_EVENT_POLL_SEC = 60.0
 # suppresses a false positive.
 FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
 
+# Grace before a camera's online→offline transition is ANNOUNCED (push/notify).
+# Cameras on a Wi-Fi repeater/mesh briefly drop during a repeater restart or a
+# DFS channel change and recover within a minute or two; firing an "offline /
+# live + snapshots unavailable" notification on the first failed status check is
+# noise. Only announce offline once the camera has stayed offline continuously
+# for this long. A recovery within the window produces no notification at all.
+# The camera ENTITY availability still flips immediately — only the notification
+# is debounced.
+CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC = 300.0  # 5 min
+
 # Bounded slow-tier defer (stream-contention gate, see the slow-tier block in
 # _async_update_data): while a live stream is active the slow-tier diagnostic
 # read is deferred to avoid TLS-channel contention.  On a *continuously* active
@@ -933,6 +943,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._notif_set_at: dict[
             str, float
         ] = {}  # enable_notifications write timestamp
+        # Tracks cam_ids for which a "notifications disabled" WARN has been logged.
+        # Cleared when the camera re-enables notifications so the WARN re-fires if
+        # they are disabled again later.
+        self._notif_disabled_logged: set[str] = set()
         self._privacy_set_at: dict[str, float] = {}  # privacy write timestamp
         self._privacy_sound_set_at: dict[
             str, float
@@ -1056,6 +1070,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # "unknown" are also silent — those are coordinator transient flaps,
         # not real availability changes.
         self._last_camera_status: dict[str, str] = {}
+        # Monotonic ts a camera was first observed offline (for the announce
+        # grace window — CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC). Cleared as soon as
+        # the camera is seen online again, so a brief repeater/Wi-Fi blip never
+        # produces an offline notification.
+        self._offline_seen_at: dict[str, float] = {}
         # Bosch cloud reachability tracker. Fires user notifications on the
         # transitions (healthy → outage) and (outage → recovered). One-tick
         # blips are suppressed by requiring _CLOUD_OUTAGE_NOTIFY_AFTER_S of
@@ -3863,6 +3882,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if _cloud_alert is not None:
                 self.hass.async_create_task(_cloud_alert(True))
 
+            # Raise a Repairs issue when movement/person notifications are
+            # disabled on a camera — without them the binary sensors are
+            # permanently "Clear" with no error shown to the user.
+            try:
+                self._refresh_notifications_disabled_issues()
+            except Exception:
+                _LOGGER.debug(
+                    "Notifications-disabled Repairs check failed (non-fatal)",
+                    exc_info=True,
+                )
+
             return data
 
         except UpdateFailed:
@@ -3888,6 +3918,63 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if _cloud_alert is not None:
                 self.hass.async_create_task(_cloud_alert(False))
             raise UpdateFailed(f"Network error: {err}") from err
+
+    def _refresh_notifications_disabled_issues(self) -> None:
+        """Create or clear Repairs issues for cameras with disabled movement/person notifications.
+
+        Called once per coordinator tick (inside _async_update_data) AFTER data is
+        built.  Idempotent — safe to call every tick.
+
+        A camera is only processed when its notifications dict is non-empty
+        (i.e. the endpoint has been fetched at least once).  Cameras with no
+        notification data yet are skipped entirely to avoid false-positive
+        issues on startup.
+        """
+        for cam_id, notif in self._notifications_cache.items():
+            if not notif:
+                # No data fetched yet — skip to avoid false positives.
+                continue
+
+            disabled = [t for t in ("movement", "person") if notif.get(t) is False]
+
+            if disabled:
+                cam_title: str = (
+                    (self.data or {})
+                    .get(cam_id, {})
+                    .get("info", {})
+                    .get("title", cam_id)
+                )
+                types_str = " + ".join(t.capitalize() for t in disabled)
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    f"notifications_disabled_{cam_id}",
+                    is_fixable=False,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="notifications_disabled",
+                    translation_placeholders={
+                        "camera": cam_title,
+                        "types": types_str,
+                    },
+                )
+                if cam_id not in self._notif_disabled_logged:
+                    self._notif_disabled_logged.add(cam_id)
+                    _LOGGER.warning(
+                        "Camera %r has %s cloud notification(s) disabled — "
+                        "the corresponding binary sensor(s) will stay 'Clear'. "
+                        "Enable the notification switch(es) in Home Assistant or "
+                        "the Bosch Smart Home app.",
+                        cam_title,
+                        types_str,
+                    )
+            else:
+                ir.async_delete_issue(
+                    self.hass,
+                    DOMAIN,
+                    f"notifications_disabled_{cam_id}",
+                )
+                self._notif_disabled_logged.discard(cam_id)
 
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
         """Fetch the Bosch community maintenance announcement in the background.
@@ -4056,11 +4143,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         Routing matches the maintenance path: `alert_notify_system` falls
         back to `alert_notify_service`. Notify failures are swallowed.
         """
+        # Lazy-init for SimpleNamespace test stubs that bypass __init__.
+        if not hasattr(self, "_offline_seen_at"):
+            self._offline_seen_at = {}
         last = self._last_camera_status.get(cam_id)
         if last is None:
             # First tick after startup — record baseline silently.
             self._last_camera_status[cam_id] = new_status
             return
+        # Whenever the camera is currently online, drop any pending offline-grace
+        # timer (covers recovery within the grace window AND the no-op
+        # online→online tick below).
+        if new_status == "online":
+            self._offline_seen_at.pop(cam_id, None)
         if new_status == last:
             return
         # Skip transitions involving "unknown" — coordinator hickups can flap
@@ -4069,6 +4164,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if new_status == "unknown" or last == "unknown":
             self._last_camera_status[cam_id] = new_status
             return
+        # Offline-announce grace: a camera on a Wi-Fi repeater/mesh briefly drops
+        # during a repeater restart or DFS channel change and recovers within a
+        # minute or two. Only announce offline once it has stayed offline for
+        # CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC; a recovery within the window is
+        # silent. We hold the baseline at "online" (don't commit the flip) until
+        # the grace elapses, so the eventual recovery doesn't emit a spurious
+        # "online" notification either.
+        if new_status == "offline":
+            seen = self._offline_seen_at.get(cam_id)
+            now_mono = time.monotonic()
+            if seen is None:
+                self._offline_seen_at[cam_id] = now_mono
+                return
+            if (now_mono - seen) < CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC:
+                return
         self._last_camera_status[cam_id] = new_status
         from .fcm import build_notify_data, get_alert_services
 

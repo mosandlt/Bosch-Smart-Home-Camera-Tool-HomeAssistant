@@ -22,6 +22,11 @@ def _make_coord(notify_service: str = "thomas") -> SimpleNamespace:
     coord = SimpleNamespace()
     coord.options = {"alert_notify_service": notify_service}
     coord._last_camera_status = {}
+    # Pre-elapse the offline-announce grace by default so the existing
+    # transition tests see an immediate announce. The grace itself (a brief
+    # repeater blip must NOT announce) is covered by TestOfflineAnnounceGrace,
+    # which resets this to an empty dict.
+    coord._offline_seen_at = {CAM_A: float("-inf"), CAM_B: float("-inf")}
     coord.data = {
         CAM_A: {"info": {"title": "Terrasse"}, "status": "ONLINE", "events": []},
         CAM_B: {"info": {"title": "Innenbereich"}, "status": "ONLINE", "events": []},
@@ -185,3 +190,79 @@ class TestCameraStatusAnnounce:
         )
         title = coord.hass.services.async_call.await_args.args[2]["title"]
         assert CAM_A[:8] in title
+
+
+@pytest.mark.asyncio
+class TestOfflineAnnounceGrace:
+    """Issue #36 follow-up: a brief repeater/Wi-Fi blip must NOT fire an offline
+    notification. Offline is announced only after the camera has stayed offline
+    for CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC; a recovery within the window is silent.
+    """
+
+    async def test_first_offline_observation_defers(self):
+        coord = _make_coord()
+        coord._last_camera_status[CAM_A] = "online"
+        coord._offline_seen_at = {}  # fresh — grace starts now
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "offline"
+        )
+        coord.hass.services.async_call.assert_not_called()
+        # Baseline stays "online" so a recovery within grace stays silent too.
+        assert coord._last_camera_status[CAM_A] == "online"
+        assert CAM_A in coord._offline_seen_at
+
+    async def test_recovery_within_grace_is_silent(self):
+        coord = _make_coord()
+        coord._last_camera_status[CAM_A] = "online"
+        coord._offline_seen_at = {}
+        # blip: offline then back online, both within the grace window
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "offline"
+        )
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "online"
+        )
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._last_camera_status[CAM_A] == "online"
+        assert CAM_A not in coord._offline_seen_at  # grace timer cleared
+
+    async def test_still_offline_past_grace_announces(self):
+        import time as _t
+
+        from custom_components.bosch_shc_camera import (
+            CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC,
+        )
+
+        coord = _make_coord()
+        coord._last_camera_status[CAM_A] = "online"
+        # Offline since longer than the grace window → announce now.
+        coord._offline_seen_at = {
+            CAM_A: _t.monotonic() - CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC - 1.0
+        }
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "offline"
+        )
+        coord.hass.services.async_call.assert_called_once()
+        assert coord._last_camera_status[CAM_A] == "offline"
+
+    async def test_within_grace_still_defers(self):
+        import time as _t
+
+        coord = _make_coord()
+        coord._last_camera_status[CAM_A] = "online"
+        coord._offline_seen_at = {CAM_A: _t.monotonic()}  # just went offline
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "offline"
+        )
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._last_camera_status[CAM_A] == "online"
+
+    async def test_lazy_inits_offline_seen_at_for_stub_coordinator(self):
+        """A SimpleNamespace stub that bypasses __init__ has no _offline_seen_at;
+        the method must lazy-create it instead of raising AttributeError."""
+        coord = _make_coord()
+        del coord._offline_seen_at
+        await BoschCameraCoordinator._async_maybe_announce_camera_status(
+            coord, CAM_A, "online"
+        )
+        assert coord._offline_seen_at == {}
