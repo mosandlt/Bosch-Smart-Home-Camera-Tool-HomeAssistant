@@ -142,6 +142,30 @@ SELF_HEAL_JITTER_FRACTION = 0.2
 # next heal, and long enough to weed out flaky 1-2 min connections.
 SELF_HEAL_SUCCESS_WINDOW_SEC = 600.0
 
+# Event-poll cadence while FCM push is NOT delivering (disabled, or watchdog
+# flagged unhealthy). The relaxed `interval_events` (default 300 s) assumes
+# push carries the near-instant detection and the poll is only a safety net —
+# but with push dead the poll IS the detection path, and a 300 s poll behind a
+# 90 s motion window means a polled event is already older than the window the
+# moment it lands, so the binary sensor can never turn ON (issue #36). When
+# push is not delivering we therefore poll at this fast cadence instead — bounded
+# below the smallest motion window (MOTION_ACTIVE_WINDOW_MIN/DEFAULT) so a
+# polled event is always seen while still "fresh". A user who explicitly set a
+# lower `interval_events` keeps it (min() below).
+FCM_DOWN_EVENT_POLL_SEC = 60.0
+
+# Delivery-death detection (issue #36). When the periodic /v11/events poll finds
+# a genuinely NEW event while FCM is enabled+running+"healthy" yet no real push
+# has arrived in this window, push delivery is dead at the cloud/Google layer
+# even though the socket reports is_started()=True (the exact silent-death case
+# the fcm.py module docstring describes). The poll is ground truth that push
+# missed a real event, so we flip _fcm_healthy=False and force a HARD heal
+# (purge + fresh registration) — which also re-POSTs to Bosch /v11/devices,
+# healing a server-side-dropped device registration. 10 min is wide enough that
+# a push arriving just before the poll (race) keeps _fcm_last_push recent and
+# suppresses a false positive.
+FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
+
 # Bounded slow-tier defer (stream-contention gate, see the slow-tier block in
 # _async_update_data): while a live stream is active the slow-tier diagnostic
 # read is deferred to avoid TLS-channel contention.  On a *continuously* active
@@ -736,6 +760,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._fcm_last_push: float = float(
             "-inf"
         )  # monotonic time of last received push
+        # Monotonic time the FCM listener last started successfully. Used by the
+        # delivery-death watchdog (issue #36) as the grace reference when no push
+        # has ever arrived: push delivery is only judged "dead" once the listener
+        # has been up for FCM_DELIVERY_DEAD_AFTER_SEC, so a still-warming-up start
+        # is never falsely condemned, while a genuinely dead-from-start Bosch
+        # registration is still caught once the grace elapses.
+        self._fcm_started_at: float = float("-inf")
         self._fcm_healthy: bool = False  # True when FCM is connected and receiving
         self._fcm_last_self_heal: float = float(
             "-inf"
@@ -757,6 +788,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # fresh registration — the programmatic equivalent of the HA reboot that
         # field reports needed (2026-06-09). See fcm.async_self_heal_fcm_push.
         self._fcm_soft_heal_streak: int = 0
+        # Set True by the event-poll path when it detects a new event that FCM
+        # push never delivered (issue #36 silent-delivery-death). The watchdog
+        # routes this straight to a HARD heal (purge + re-register) — the only
+        # path that re-POSTs to Bosch /v11/devices and so heals a server-side
+        # dropped device registration. Cleared by async_self_heal_fcm_push.
+        self._fcm_force_hard_heal: bool = False
         # Serialises every FCM start/stop/self-heal so the setup-time start
         # and the watchdog's self-heal can't run concurrently. Live bug
         # 2026-05-21: without the lock the initial async_start_fcm_push from
@@ -2417,6 +2454,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 failures = 0
 
             if opts.get("enable_fcm_push", False):
+                # Delivery-death override (issue #36): polling proved push is
+                # dead. A fresh re-registration is the ONLY recovery, so it must
+                # not be blocked by an exhausted retry ladder (the exact
+                # "paused until HA restart" trap #36 is meant to break). Reset
+                # the ladder so the heal can run; normal cool-down (step 0,
+                # 30 min) still throttles it to avoid hammering.
+                if getattr(self, "_fcm_force_hard_heal", False) and failures >= len(
+                    SELF_HEAL_COOLDOWNS_SEC
+                ):
+                    self._fcm_self_heal_failures = 0
+                    self._fcm_self_heal_paused_logged = False
+                    failures = 0
                 if failures >= len(SELF_HEAL_COOLDOWNS_SEC):
                     # Ladder exhausted — pause heal until HA restart; polling
                     # fallback carries the integration. Log once so the operator
@@ -2442,7 +2491,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     cool_down_ok = (now - last_heal) > effective
 
                 if cool_down_ok:
-                    if fcm_dead:
+                    if getattr(self, "_fcm_force_hard_heal", False):
+                        # Polling proved push delivery is dead (issue #36) — heal
+                        # regardless of socket liveness; async_self_heal_fcm_push
+                        # short-circuits to a hard re-registration.
+                        heal_needed = True
+                    elif fcm_dead:
                         heal_needed = True
                     elif self._fcm_running and self._fcm_healthy:
                         from .fcm import get_recent_fcm_error_count
@@ -2451,7 +2505,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             heal_needed = True
                     elif not self._fcm_running:
                         # FCM enabled but not running — previous heal failed.
-                        heal_needed = True
+                        # Startup-race guard (issue #36): the setup-time
+                        # async_start_fcm_push may still be inside
+                        # checkin_or_register() while this first watchdog tick
+                        # runs, so _fcm_running is briefly False. Firing here
+                        # burns a heal slot and logs a misleading "listener died"
+                        # on every cold start. Skip while a start/heal already
+                        # holds the lock.
+                        start_lock = getattr(self, "_fcm_start_lock", None)
+                        if start_lock is None or not start_lock.locked():
+                            heal_needed = True
             _fcm_healthy = self._fcm_healthy
         if heal_needed:
             self._fcm_last_self_heal = now
@@ -2464,7 +2527,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if _fcm_healthy:
             event_interval = int(opts.get("interval_events", 300))
         else:
-            event_interval = int(opts.get("interval_events", 60))
+            # FCM is not delivering (disabled or flagged unhealthy): the poll IS
+            # the detection path now, so it must run faster than the motion
+            # window or polled events age out before the binary sensor can see
+            # them (issue #36). Cap at FCM_DOWN_EVENT_POLL_SEC; honour a user's
+            # explicitly-lower interval_events via min().
+            event_interval = min(
+                int(opts.get("interval_events", 300)), int(FCM_DOWN_EVENT_POLL_SEC)
+            )
         do_events = (now - self._last_events) >= event_interval
         do_slow = (now - self._last_slow) >= int(opts.get("interval_slow", 300))
 
@@ -2872,6 +2942,50 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # Guards against a polling tick firing an alert that the
                         # FCM handler already dispatched for the same event ID.
                         _now_mono = time.monotonic()
+                        # Delivery-death detection (issue #36): this poll found a
+                        # genuinely new event. If FCM push is enabled+running+
+                        # "healthy" yet no real push has arrived in the last
+                        # FCM_DELIVERY_DEAD_AFTER_SEC, push delivery is dead at the
+                        # cloud/Google layer even though the socket reports
+                        # is_started()=True — the poll just proved push missed a
+                        # real event. Flag unhealthy + force a HARD heal (purge +
+                        # fresh registration, which re-POSTs to Bosch /v11/devices).
+                        # A push arriving just before this poll keeps _fcm_last_push
+                        # recent → no false positive.
+                        with self._fcm_lock:
+                            _last_push = getattr(self, "_fcm_last_push", float("-inf"))
+                            _started_at = getattr(
+                                self, "_fcm_started_at", float("-inf")
+                            )
+                            # Grace reference: the later of "last real push" and
+                            # "listener start". A still-warming-up listener (no
+                            # push yet, started <window ago) is never condemned;
+                            # a dead-from-start registration IS caught once the
+                            # listener has been up for the window with no push.
+                            _ref = max(_last_push, _started_at)
+                            _push_age = _now_mono - _ref
+                            if (
+                                self.options.get("enable_fcm_push", False)
+                                and getattr(self, "_fcm_running", False)
+                                and getattr(self, "_fcm_healthy", False)
+                                and _ref != float("-inf")
+                                and _push_age > FCM_DELIVERY_DEAD_AFTER_SEC
+                            ):
+                                self._fcm_healthy = False
+                                self._fcm_force_hard_heal = True
+                                _ago = (
+                                    "never"
+                                    if _last_push == float("-inf")
+                                    else f"{_push_age / 60.0:.0f} min ago"
+                                )
+                                _LOGGER.warning(
+                                    "FCM delivery watchdog: polling found a new event "
+                                    "(%s) that push never delivered (last push %s) — "
+                                    "delivery is dead despite a live socket; forcing "
+                                    "fresh registration with Bosch CBS",
+                                    newest_id,
+                                    _ago,
+                                )
                         _dedup_skip = (
                             self._alert_sent_ids.get(newest_id, float("-inf"))
                             > _now_mono - 60.0

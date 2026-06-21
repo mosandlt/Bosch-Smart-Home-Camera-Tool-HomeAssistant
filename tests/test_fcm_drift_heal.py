@@ -159,13 +159,19 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
 
     The fast-path must be preserved for the steady-state case: after a
     successful registration (drift healed or fresh install), every subsequent
-    HA restart must skip the POST. This keeps the Bosch CBS call count at 1 per
-    token lifetime, not 1 per restart.
+    HA restart must skip the POST — as long as the registration is still FRESH
+    (younger than FCM_REREGISTER_INTERVAL_SEC). Issue #36 added a periodic
+    re-POST: a registration older than the interval (or one with no
+    `fcm_registered_at` stamp) re-announces to heal a server-side-dropped Bosch
+    registration. Here we stamp it now so the steady-state skip still holds.
     """
+    import time
+
     coord = _make_coord(
         data={
             "fcm_registered_token": "fcm-tok-new",  # same as _fcm_token
             "fcm_registered_device_type": "ANDROID",
+            "fcm_registered_at": time.time(),  # fresh → fast-path skip
         }
     )
 

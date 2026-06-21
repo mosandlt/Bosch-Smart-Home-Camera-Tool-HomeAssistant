@@ -78,6 +78,15 @@ CLOUD_API = "https://residential.cbs.boschsecurity.com"
 # (_on_fcm_push) or a hard-heal completes.
 SOFT_HEAL_ESCALATION_THRESHOLD = 3
 
+# Proactive Bosch-CBS re-registration cadence (issue #36). The integration used
+# to skip the POST /v11/devices forever as long as the FCM token was unchanged.
+# If Bosch drops the device registration server-side (FW upgrade, re-pair, or an
+# undocumented TTL) while our token stays the same, push delivery silently dies
+# and nothing ever re-announces us. A real phone app re-registers on every
+# launch; we re-POST at least this often (wall-clock, persisted in
+# `fcm_registered_at`) even when the token is unchanged, matching that behaviour.
+FCM_REREGISTER_INTERVAL_SEC = 7 * 24 * 3600  # 7 days
+
 
 class _FCMNoiseFilter(logging.Filter):
     """Tame the firebase_messaging FCM client log noise during WAN outages.
@@ -626,6 +635,7 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
             with coordinator._fcm_lock:
                 coordinator._fcm_running = True
                 coordinator._fcm_healthy = True
+                coordinator._fcm_started_at = time.monotonic()
                 coordinator._fcm_push_mode = "auto"
                 # BUG-3 fix: reset soft-heal streak ONLY on confirmed successful
                 # start.  Resetting before the attempt (old code in
@@ -689,11 +699,36 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     stored_device_type: str | None = coordinator._entry.data.get(
         "fcm_registered_device_type"
     )
-    if stored_token == coordinator._fcm_token and stored_device_type == "ANDROID":
+    # Proactive re-registration (issue #36): even when the token is unchanged,
+    # re-POST if the last successful registration is older than
+    # FCM_REREGISTER_INTERVAL_SEC so a server-side-dropped Bosch device
+    # registration self-heals without needing a token change or a hard-heal.
+    registered_at_raw = coordinator._entry.data.get("fcm_registered_at")
+    try:
+        registered_at = float(registered_at_raw) if registered_at_raw else 0.0
+    except (TypeError, ValueError):
+        registered_at = 0.0
+    registration_stale = (time.time() - registered_at) > FCM_REREGISTER_INTERVAL_SEC
+    if (
+        stored_token == coordinator._fcm_token
+        and stored_device_type == "ANDROID"
+        and not registration_stale
+    ):
         _LOGGER.debug(
-            "FCM: token unchanged + deviceType=ANDROID verified — skipping re-registration"
+            "FCM: token unchanged + deviceType=ANDROID verified + registration "
+            "fresh — skipping re-registration"
         )
         return True
+    if (
+        stored_token == coordinator._fcm_token
+        and stored_device_type == "ANDROID"
+        and registration_stale
+    ):
+        _LOGGER.info(
+            "FCM: Bosch CBS registration older than %d days — re-POSTing to keep "
+            "push delivery alive (token unchanged)",
+            FCM_REREGISTER_INTERVAL_SEC // 86400,
+        )
     if stored_token == coordinator._fcm_token and stored_device_type != "ANDROID":
         _LOGGER.info(
             "FCM CBS heal: token unchanged but deviceType marker is %r (not ANDROID) — "
@@ -720,6 +755,7 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
                             **coordinator._entry.data,
                             "fcm_registered_token": coordinator._fcm_token,
                             "fcm_registered_device_type": "ANDROID",
+                            "fcm_registered_at": time.time(),
                         },
                     )
                     _LOGGER.info(
@@ -738,6 +774,7 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
                             **coordinator._entry.data,
                             "fcm_registered_token": coordinator._fcm_token,
                             "fcm_registered_device_type": "ANDROID",
+                            "fcm_registered_at": time.time(),
                         },
                     )
                     _LOGGER.debug(
@@ -853,6 +890,19 @@ async def async_self_heal_fcm_push(coordinator: Any) -> None:
         lock = asyncio.Lock()
         coordinator._fcm_start_lock = lock
     async with lock:
+        # Delivery-death override (issue #36): the event-poll path proved push
+        # is not delivering even though the socket looked alive. A soft-heal
+        # (socket reconnect) cannot fix that — only a fresh registration +
+        # re-POST to Bosch /v11/devices can. Go straight to hard-heal.
+        if getattr(coordinator, "_fcm_force_hard_heal", False):
+            coordinator._fcm_force_hard_heal = False
+            _LOGGER.warning(
+                "FCM self-heal (hard): push delivery confirmed dead by polling — "
+                "purging credentials and re-registering with Bosch CBS"
+            )
+            await _async_hard_heal_locked(coordinator)
+            return
+
         creds_stale_count = get_recent_fcm_creds_staleness_count(600.0)
         has_creds = bool(coordinator._entry.data.get("fcm_credentials"))
 

@@ -894,3 +894,146 @@ class TestShcStatesUpdate:
             coord._async_update_shc_states.assert_not_called(),
             ("_async_update_shc_states must NOT be called when shc_ready=False"),
         )
+
+
+class TestFcmDeliveryDeathWatchdog:
+    """Issue #36 — the event-poll path is ground truth for FCM push delivery.
+
+    A genuinely new /v11/events event found while FCM is enabled+running+healthy
+    yet no real push arrived in FCM_DELIVERY_DEAD_AFTER_SEC proves push delivery
+    is dead despite a live socket. The poll flags `_fcm_force_hard_heal` and the
+    watchdog routes it to a hard re-registration on the next tick.
+    """
+
+    @pytest.mark.asyncio
+    async def test_poll_detects_missed_push_and_flags_hard_heal(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        events = [
+            {
+                "id": "EVT-NEW",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
+        cam_entry = _make_cam_entry(CAM_A)
+        coord = _make_coord_full(
+            options={"enable_fcm_push": True},
+            _fcm_running=True,
+            _fcm_healthy=True,  # socket "alive" — but no push ever arrived
+            _fcm_force_hard_heal=False,
+            _fcm_last_push=float("-inf"),  # never delivered
+            _fcm_started_at=time_mod.monotonic() - 7200,  # up 2h → past the grace
+            _last_events=float("-inf"),
+            _cached_events={},
+            _last_event_ids={CAM_A: "OLD-ID"},
+            _alert_sent_ids={},
+        )
+        session = _session_for_cam(cam_entry, events=events)
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_force_hard_heal is True, (
+            "polling a push-missed event must flag a forced hard heal (#36)"
+        )
+        assert coord._fcm_healthy is False, "delivery-dead must flip _fcm_healthy off"
+
+    @pytest.mark.asyncio
+    async def test_warming_up_listener_not_condemned(self):
+        """Cold-start grace: a listener that started < FCM_DELIVERY_DEAD_AFTER_SEC
+        ago with no push yet must NOT be flagged dead just because a polled event
+        arrived (push may still be warming up)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        events = [
+            {
+                "id": "EVT-NEW",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
+        coord = _make_coord_full(
+            options={"enable_fcm_push": True},
+            _fcm_running=True,
+            _fcm_healthy=True,
+            _fcm_force_hard_heal=False,
+            _fcm_last_push=float("-inf"),
+            _fcm_started_at=time_mod.monotonic() - 5,  # just started → within grace
+            _last_events=float("-inf"),
+            _cached_events={},
+            _last_event_ids={CAM_A: "OLD-ID"},
+            _alert_sent_ids={},
+        )
+        session = _session_for_cam(_make_cam_entry(CAM_A), events=events)
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_force_hard_heal is False, (
+            "a warming-up listener must not be condemned (no false positive)"
+        )
+        assert coord._fcm_healthy is True
+
+    @pytest.mark.asyncio
+    async def test_watchdog_routes_force_flag_to_heal(self):
+        """A preset `_fcm_force_hard_heal` makes the watchdog schedule a self-heal
+        regardless of socket liveness (covers the force-hard watchdog branch)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_full(
+            options={"enable_fcm_push": True},
+            _fcm_running=True,
+            _fcm_healthy=True,
+            _fcm_force_hard_heal=True,  # preset — watchdog must act on it
+            _fcm_last_self_heal=float("-inf"),  # cooldown satisfied
+            _fcm_self_heal_failures=0,
+            _last_events=time_mod.monotonic(),  # skip the event poll → isolate watchdog
+        )
+        session = _session_for_cam(_make_cam_entry(CAM_A), events=[])
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_last_self_heal != float("-inf"), (
+            "force-hard flag must trigger heal_needed → schedules async_self_heal"
+        )
+
+    @pytest.mark.asyncio
+    async def test_force_hard_overrides_exhausted_ladder(self):
+        """Issue #36 core: when the self-heal ladder is exhausted (paused until
+        restart), a delivery-death force-hard flag must RESET the ladder and heal
+        anyway — otherwise the integration stays dead exactly as #36 reported."""
+        from custom_components.bosch_shc_camera import (
+            SELF_HEAL_COOLDOWNS_SEC,
+            BoschCameraCoordinator,
+        )
+
+        coord = _make_coord_full(
+            options={"enable_fcm_push": True},
+            _fcm_running=True,
+            _fcm_healthy=True,
+            _fcm_force_hard_heal=True,
+            _fcm_last_self_heal=float("-inf"),  # cooldown satisfied
+            _fcm_self_heal_failures=len(SELF_HEAL_COOLDOWNS_SEC),  # ladder exhausted
+            _fcm_self_heal_paused_logged=True,
+            _last_events=time_mod.monotonic(),  # skip event poll → isolate watchdog
+        )
+        session = _session_for_cam(_make_cam_entry(CAM_A), events=[])
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert coord._fcm_last_self_heal != float("-inf"), (
+            "force-hard must break the exhausted-ladder pause and schedule a heal"
+        )

@@ -437,11 +437,15 @@ class TestRegisterFcmWithBosch:
 
         session = MagicMock()
         session.post = _post
+        import time as _time
+
         coord = _stub_coord(
             _entry=SimpleNamespace(
                 data={
                     "fcm_registered_token": "fcm-token-xyz",
                     "fcm_registered_device_type": "ANDROID",  # both conditions must hold
+                    # issue #36: skip requires a FRESH registration too — stamp now.
+                    "fcm_registered_at": _time.time(),
                 }
             ),
         )

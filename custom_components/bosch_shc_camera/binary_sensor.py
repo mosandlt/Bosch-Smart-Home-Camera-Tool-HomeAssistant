@@ -1,16 +1,16 @@
 """Bosch Smart Home Camera — Binary Sensor Platform.
 
 Creates binary sensor entities per camera:
-  • {Name} Motion           — ON when a MOVEMENT event was detected within the last 30 seconds
-  • {Name} Audio Alarm      — ON when an AUDIO_ALARM event was detected within the last 30 seconds
-  • {Name} Person Detected  — ON when a PERSON event was detected within the last 30 seconds
+  • {Name} Motion           — ON when a MOVEMENT event was detected within the configurable active window (default 90 s)
+  • {Name} Audio Alarm      — ON when an AUDIO_ALARM event was detected within the configurable active window (default 90 s)
+  • {Name} Person Detected  — ON when a PERSON event was detected within the configurable active window (default 90 s)
 
 All sensors are disabled by default (entity_registry_enabled_default = False).
 Enable them in Settings → Entities if you want to trigger automations from motion/audio/person events.
 
 Event data is read from coordinator.data[cam_id]["events"] (the most recent event list).
 The sensors go ON when the most-recent event matches the type AND its timestamp is within
-the last 30 seconds; otherwise they are OFF.
+the configurable active window (default 90 s); otherwise they are OFF.
 
 Device class:
   motion binary sensor  → BinarySensorDeviceClass.MOTION
@@ -129,6 +129,27 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
                 return ev  # type: ignore[no-any-return]
         return None
 
+    def _get_latest_person_event(self) -> dict[str, Any] | None:
+        """Return the most recent event that represents a detected person.
+
+        Gen2 cameras (Outdoor II / Indoor II, DualRadar) report a human as
+        ``eventType="MOVEMENT"`` with ``eventTags=["PERSON"]`` rather than a bare
+        ``PERSON`` type. The coordinator only upgrades a *local* variable to
+        PERSON when firing the HA bus event — the raw event dict kept in
+        ``coordinator.data[...]["events"]`` is never rewritten, so matching on
+        ``eventType=="PERSON"`` alone left the Person sensor stuck OFF on Gen2
+        (issue #36). Accept either the explicit PERSON type or a MOVEMENT event
+        tagged PERSON, whichever is newer in the (newest-first) event list.
+        """
+        events = self._cam_data.get("events", [])
+        for ev in events:
+            event_type = ev.get("eventType", "")
+            if event_type == "PERSON":
+                return ev  # type: ignore[no-any-return]
+            if event_type == "MOVEMENT" and "PERSON" in (ev.get("eventTags") or []):
+                return ev  # type: ignore[no-any-return]
+        return None
+
     @property
     def _motion_active_window(self) -> int:
         """Return the configured active-window duration in seconds.
@@ -175,7 +196,7 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschMotionBinarySensor(_BoschBinarySensorBase):
-    """Binary sensor: ON when a MOVEMENT event occurred within the last 30 seconds."""
+    """Binary sensor: ON when a MOVEMENT event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.MOTION
     _attr_icon = "mdi:motion-sensor"
@@ -211,7 +232,7 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
-    """Binary sensor: ON when an AUDIO_ALARM event occurred within the last 30 seconds."""
+    """Binary sensor: ON when an AUDIO_ALARM event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.SOUND
     _attr_icon = "mdi:volume-high"
@@ -247,7 +268,7 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
 
 # ─────────────────────────────────────────────────────────────────────────────
 class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
-    """Binary sensor: ON when a PERSON event occurred within the last 30 seconds."""
+    """Binary sensor: ON when a PERSON event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
     _attr_icon = "mdi:account-alert"
@@ -265,14 +286,14 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
 
     @property
     def is_on(self) -> bool:
-        event = self._get_latest_event_of_type("PERSON")
+        event = self._get_latest_person_event()
         if event is None:
             return False
         return self._event_within_window(event)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        event = self._get_latest_event_of_type("PERSON")
+        event = self._get_latest_person_event()
         if not event:
             return {}
         return {
