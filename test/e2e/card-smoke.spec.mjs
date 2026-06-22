@@ -1281,6 +1281,199 @@ test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+
   expect(r.restartedWhenDetached, "never restarts on a disconnected card").toBe(0);
 });
 
+// 2026-06-22 background-tab freeze: a plain hidden (non-PiP) tab whose go2rtc
+// signaling WS times out leaves the <video> on a frozen still with paused===false,
+// which the resume path missed → "showed Live but was a standbild, only a browser
+// reload fixed it". Like HA core's ha-web-rtc-player + AlexxIT/go2rtc, tear an
+// unwatched hidden stream down after a grace and rebuild it fresh on return.
+test("hidden non-PiP live stream schedules a teardown; tab-return cancels it (teardown-on-hidden)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    card._isStreaming = () => false; // keep the visible-branch resume a no-op
+
+    // Case A: nothing live → no teardown scheduled.
+    card._liveVideoActive = false;
+    card._scheduleHiddenTeardown();
+    const armedWhenIdle = !!card._hiddenTeardownTimer;
+
+    // Case B: a live hidden stream → teardown scheduled.
+    card._liveVideoActive = true;
+    card._scheduleHiddenTeardown();
+    const armedWhenLive = !!card._hiddenTeardownTimer;
+
+    // Case C: a second schedule is idempotent (no stacked timers).
+    const t1 = card._hiddenTeardownTimer;
+    card._scheduleHiddenTeardown();
+    const sameTimer = card._hiddenTeardownTimer === t1;
+
+    // Case D: a visible tab cancels the pending teardown (the test page is visible).
+    card._onVisibilityChange();
+    const cancelledOnReturn = !card._hiddenTeardownTimer;
+
+    card.remove();
+    return { armedWhenIdle, armedWhenLive, sameTimer, cancelledOnReturn };
+  });
+  expect(r.armedWhenIdle, "no teardown is scheduled when nothing is live").toBe(false);
+  expect(r.armedWhenLive, "a live hidden stream schedules a teardown").toBe(true);
+  expect(r.sameTimer, "a second schedule call is idempotent (no stacked timers)").toBe(true);
+  expect(r.cancelledOnReturn, "returning to the tab before the grace cancels the teardown").toBe(true);
+});
+
+// 2026-06-22 badge decoupling: "Live" must track REAL frame liveness, not just
+// "a peer connection once existed". A frozen still (_liveStreamStalled) shows
+// "Verbinde", never a lying "Live".
+test("stream badge is decoupled from liveness: a stalled live stream shows connecting, not Live", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "streaming", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    const badge = () => card.shadowRoot.getElementById("stream-badge");
+
+    // Live + fresh frames → "streaming".
+    card._liveVideoActive = true;
+    card._liveStreamStalled = false;
+    card._update();
+    const liveClass = badge().className;
+
+    // Same live flag but frames frozen → must NOT be "streaming".
+    card._liveStreamStalled = true;
+    card._update();
+    const stalledClass = badge().className;
+
+    // A fresh frame clears the stall flag and re-renders while visible.
+    card._setLiveStalled(false);
+    const clearedClass = badge().className;
+
+    card.remove();
+    return { liveClass, stalledClass, clearedClass };
+  });
+  expect(r.liveClass, "a truly live stream shows the streaming badge").toContain("streaming");
+  expect(r.stalledClass, "a frozen (stalled) stream is NOT shown as Live").not.toContain("streaming");
+  expect(r.stalledClass, "a frozen stream shows the connecting badge instead").toContain("connecting");
+  expect(r.clearedClass, "a fresh frame restores the streaming badge").toContain("streaming");
+});
+
+// Source pins for the background-tab freeze wiring (the runtime paths need a real
+// hidden tab + go2rtc transport to fully exercise, so pin the structure in src).
+test("background-tab freeze fix is wired: teardown-on-hidden, freeze-on-return, badge decoupling (source pin)", () => {
+  // visibilitychange→hidden schedules a teardown of the unwatched stream.
+  expect(CARD_SRC).toMatch(/document\.visibilityState\s*===\s*"hidden"/);
+  expect(CARD_SRC).toMatch(/this\._scheduleHiddenTeardown\(\)/);
+  expect(CARD_SRC).toMatch(/const\s+BACKGROUND_TEARDOWN_GRACE_MS\s*=\s*\d+/);
+  // The teardown fires only while still hidden and exempts a watched PiP window.
+  expect(CARD_SRC).toMatch(/if\s*\(document\.visibilityState\s*!==\s*"hidden"\)\s*return;\s*\/\/ came back during grace/);
+  expect(CARD_SRC).toMatch(/if\s*\(ownsPip\)\s*return;\s*\/\/ PiP IS being watched/);
+  // Freeze-on-return safety net: no fresh frame within 3s of return → reconnect.
+  expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("no fresh frame within 3s of tab-return"\)/);
+  expect(CARD_SRC).toMatch(/const\s+freshFrame\s*=/);
+  expect(CARD_SRC).toMatch(/const\s+timeAdvanced\s*=/);
+  // Badge decoupled from a bare live flag — a stalled still falls through to connecting.
+  expect(CARD_SRC).toMatch(/this\._liveVideoActive\s*&&\s*!this\._liveStreamStalled/);
+  expect(CARD_SRC).toMatch(/_setLiveStalled\s*\(\s*true\s*\)/);
+  expect(CARD_SRC).toMatch(/_setLiveStalled\s*\(\s*false\s*\)/);
+});
+
+// 2026-06-22 bug hunt — PiP-freeze + livestream-stop fixes (source pins; the
+// runtime paths need a real go2rtc transport + hidden tab to fully exercise).
+test("2026-06-22 bug-hunt fixes are wired: stale-pc guard, getStats oracle, HLS escalate, B5/B6 (source pin)", () => {
+  // B1: ev.track.onmute/onunmute must guard on pc identity so a CLOSED old pc's
+  // late `mute` can't recover (= tear down) the healthy NEW stream. The guard must
+  // appear in the onmute path AND inside its 6s debounce callback.
+  expect(CARD_SRC).toMatch(/ev\.track\.onmute\s*=\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
+  expect(CARD_SRC).toMatch(/ev\.track\.onunmute\s*=\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
+  // The pc-identity guard must also be re-checked INSIDE the 6s mute debounce.
+  const onmuteIdx = CARD_SRC.indexOf("ev.track.onmute =");
+  const debounceSlice = CARD_SRC.slice(onmuteIdx, onmuteIdx + 1200);
+  expect(debounceSlice).toMatch(/_trackMuteTimer\s*=\s*setTimeout\([\s\S]*?if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
+
+  // getStats() framesDecoded freeze oracle — the cross-browser decoder-level signal.
+  expect(CARD_SRC).toMatch(/async\s+_checkWebrtcFreeze\s*\(\)\s*\{/);
+  expect(CARD_SRC).toMatch(/pc\.getStats\(\)/);
+  expect(CARD_SRC).toMatch(/r\.type\s*===\s*"inbound-rtp"/);
+  expect(CARD_SRC).toMatch(/framesDecoded/);
+  expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("webrtc framesDecoded frozen >10s"\)/);
+  expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("webrtc framesDecoded frozen >10s \(bg worker\)"\)/);
+  // Oracle is iOS-excepted (thread-suspend false positive) and single-flight.
+  expect(CARD_SRC).toMatch(/this\._statsCheckInFlight/);
+
+  // B3: fatal HLS NETWORK_ERROR retries a few times then ESCALATES (no infinite loop).
+  expect(CARD_SRC).toMatch(/this\._hlsNetworkErrorCount\s*=\s*\(this\._hlsNetworkErrorCount\s*\|\|\s*0\)\s*\+\s*1/);
+  expect(CARD_SRC).toMatch(/_hlsNetworkErrorCount\s*<=\s*3/);
+
+  // B5: WebRTC liveness on tab-return must NOT trust audio-clock currentTime on
+  // iOS (HLS path may; non-iOS WebRTC-without-rVFC may as a last resort).
+  expect(CARD_SRC).toMatch(/const\s+liveProof\s*=\s*freshFrame[\s\S]{0,80}?timeAdvanced\s*&&\s*\(!!this\._hls\s*\|\|\s*\(!rvfcSupported\s*&&\s*!this\._isIOS\(\)\)\)/);
+
+  // B6: _waitForStreamReady must NOT dead-end at 90s — it re-arms a delayed re-poll.
+  const wfsIdx = CARD_SRC.indexOf("if (attempt > 90)");
+  const wfsSlice = CARD_SRC.slice(wfsIdx, wfsIdx + 1500);
+  expect(wfsSlice).toMatch(/this\._waitingForStream\s*=\s*true;\s*\n\s*this\._waitForStreamReady\(\);/);
+});
+
+// 2026-06-22 runtime: the getStats() oracle returns "frozen" only when
+// framesDecoded stops advancing for >10s on a live WebRTC stream, and resets its
+// baseline as soon as frames advance again.
+test("_checkWebrtcFreeze flags a decoder freeze and clears when frames advance", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    if (card._stopRefreshTimer) card._stopRefreshTimer();   // no timer can reset _streamTransport mid-await
+    // Controllable clock so a ">10s ago" baseline stays a POSITIVE timestamp
+    // (performance.now() is tiny in a fresh page → real-minus-11000 would go
+    // negative and trip the code's `seenAt > 0` baseline guard).
+    const realNow = performance.now.bind(performance);
+    let clock = 1_000_000;
+    performance.now = () => clock;
+    let frames = 100;
+    card._webrtcPc = {
+      getStats: async () => new Map([
+        ["a", { type: "inbound-rtp", kind: "video", framesDecoded: frames, bytesReceived: 9999 }],
+      ]),
+    };
+    // First call: establishes the baseline at clock → never "frozen".
+    card._streamTransport = "webrtc";
+    const first = await card._checkWebrtcFreeze();
+    // Advance the clock 11s with frames flat → frozen.
+    clock += 11_000;
+    card._streamTransport = "webrtc";
+    const frozen = await card._checkWebrtcFreeze();
+    // Frames advance → healthy again, baseline resets.
+    card._streamTransport = "webrtc";
+    frames = 130;
+    const healthyAgain = await card._checkWebrtcFreeze();
+    // HLS transport must never use this oracle, even with a stale baseline.
+    clock += 11_000;
+    card._streamTransport = "hls";
+    const hlsNever = await card._checkWebrtcFreeze();
+    performance.now = realNow;
+    return { first, frozen, healthyAgain, hlsNever };
+  });
+  expect(r.first).toBe(false);
+  expect(r.frozen).toBe(true);
+  expect(r.healthyAgain).toBe(false);
+  expect(r.hlsNever).toBe(false);
+});
+
 // 2026-06-15: the bfcache `pageshow` handler only acts on a real bfcache restore
 // (event.persisted === true), not a normal load.
 test("pageshow restarts the stream only when restored from bfcache (persisted)", async ({ page }) => {

@@ -533,6 +533,28 @@ class TestRefreshLocalCredsFromHeartbeat:
     heartbeat must keep going regardless.
     """
 
+    @staticmethod
+    async def _fake_register_go2rtc(cam_id: str, url: str) -> bool:
+        """Stub coroutine for _register_go2rtc_stream — returns True (success)."""
+        return True
+
+    @staticmethod
+    def _make_task_mock() -> MagicMock:
+        """Return a MagicMock for hass.async_create_task that closes passed
+        coroutines so the test does not emit RuntimeWarning about unawaited
+        coroutines (the real HA method schedules them; our stub discards them)."""
+
+        def _create_task(coro, *, name: str = "") -> MagicMock:
+            # Close the coroutine so Python doesn't warn about it being unawaited.
+            if hasattr(coro, "close"):
+                coro.close()
+            task = MagicMock()
+            task.add_done_callback = MagicMock()
+            return task
+
+        mock = MagicMock(side_effect=_create_task)
+        return mock
+
     def _coord(self, **overrides):
         cam_entity = SimpleNamespace(stream=None)
         base = dict(
@@ -552,7 +574,11 @@ class TestRefreshLocalCredsFromHeartbeat:
             _camera_entities={CAM_A: cam_entity},
             _nvr_processes={},
             _nvr_user_intent={},
-            hass=SimpleNamespace(async_create_task=MagicMock()),
+            # _bg_tasks: set used by go2rtc re-register task lifecycle tracking.
+            _bg_tasks=set(),
+            # _register_go2rtc_stream: stub coroutine (B2 fix — now called unconditionally).
+            _register_go2rtc_stream=self._fake_register_go2rtc,
+            hass=SimpleNamespace(async_create_task=self._make_task_mock()),
             debug=False,
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
         )
@@ -766,7 +792,9 @@ class TestRefreshLocalCredsFromHeartbeat:
         """When the NVR is recording for this cam, the cred change
         kills the ffmpeg sidecar within ~60 s. Re-spawn it now (with
         the new URL) — the ~1-2 s gap is documented in mini-nvr-concept.
-        Pin so a refactor of the NVR teardown can't silently drop this."""
+        Pin so a refactor of the NVR teardown can't silently drop this.
+        Note: async_create_task is now called twice per creds-rotation —
+        once for go2rtc re-register (always) and once for the NVR restart."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(
@@ -781,7 +809,44 @@ class TestRefreshLocalCredsFromHeartbeat:
             generation=1,
             elapsed=10.0,
         )
+        # 2 tasks: (1) go2rtc re-register (unconditional), (2) NVR restart
+        assert coord.hass.async_create_task.call_count == 2
+
+    def test_go2rtc_reregister_without_hls_stream(self):
+        """B2 regression: go2rtc re-registration must fire even when the
+        camera entity has stream=None (WebRTC-only viewer, no HLS stream
+        opened). Before the fix the go2rtc PUT was gated on `stream is not
+        None`, leaving WebRTC-only viewers with stale Digest creds after the
+        Bosch ~60 s rotation — 401 → silent video freeze with no client
+        event to trigger recovery.
+
+        Pin: creds-change + stream=None → async_create_task called exactly
+        once (go2rtc reregister). stream.update_source must NOT be called."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        # Default _coord() already sets cam_entity.stream = None
+        coord, cam_entity = self._coord()
+        assert cam_entity.stream is None  # pre-condition
+
+        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+            coord,
+            CAM_A,
+            '{"user": "webrtc-user", "password": "webrtc-pass"}',
+            generation=1,
+            elapsed=10.0,
+        )
+
+        # go2rtc re-register task must have been scheduled despite stream=None
         coord.hass.async_create_task.assert_called_once()
+        task_coroutine_name = coord.hass.async_create_task.call_args.kwargs.get(
+            "name", ""
+        ) or coord.hass.async_create_task.call_args[1].get("name", "")
+        assert "go2rtc_reregister" in task_coroutine_name
+
+        # Creds and URL must still be updated in the live dict
+        live = coord._live_connections[CAM_A]
+        assert live["_local_user"] == "webrtc-user"
+        assert "webrtc-user" in live["rtspsUrl"]
 
 
 # ── _FCMNoiseFilter (in fcm.py) ────────────────────────────────────────────

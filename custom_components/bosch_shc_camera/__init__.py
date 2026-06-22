@@ -1339,17 +1339,21 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         cam_id[:8],
                         err,
                     )
-                # go2rtc (WebRTC) holds the proxy URL with the OLD embedded creds
-                # too. HA Stream (HLS) was just updated above; re-register go2rtc
-                # with the same fresh URL so WebRTC viewers don't 401 → freeze once
-                # the camera rotates the old creds out (~60 s grace). Tracked bg
-                # task (sync method — can't await). 2026-06-01.
-                go2rtc_task = self.hass.async_create_task(
-                    self._register_go2rtc_stream(cam_id, new_url),
-                    name=f"bosch_go2rtc_reregister_{cam_id[:8]}",
-                )
-                self._bg_tasks.add(go2rtc_task)
-                go2rtc_task.add_done_callback(self._bg_tasks.discard)
+            # go2rtc (WebRTC) holds the proxy URL with the OLD embedded creds
+            # too. Re-register go2rtc with the fresh URL so WebRTC-only viewers
+            # (those never opening an HLS stream) don't 401 → silent video freeze
+            # once the camera rotates the old creds out (~60 s grace). This must
+            # run UNCONDITIONALLY — i.e. regardless of whether an HA HLS stream
+            # object exists — because a pure WebRTC viewer never opens one.
+            # HA Stream (HLS) was updated above (stream is not None path); go2rtc
+            # is always updated here. Tracked bg task (sync method — can't await).
+            # 2026-06-01, decoupled 2026-06-22 (B2 fix: WebRTC-only stale creds).
+            go2rtc_task = self.hass.async_create_task(
+                self._register_go2rtc_stream(cam_id, new_url),
+                name=f"bosch_go2rtc_reregister_{cam_id[:8]}",
+            )
+            self._bg_tasks.add(go2rtc_task)
+            go2rtc_task.add_done_callback(self._bg_tasks.discard)
             # NVR sidecar: ffmpeg holds the OLD creds — once the camera rotates
             # them out (~60 s grace per Bosch session), reconnects 401 and the
             # recording dies. Re-spawning ffmpeg now (with the new URL) costs
