@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.7.8";
+const CARD_VERSION = "13.7.9";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -1268,6 +1268,12 @@ class BoschCameraCard extends HTMLElement {
     this._hlsNetworkErrorCount = 0;
     this._waitForStreamRetryTimer = null;
     this._streamTransport = null;
+    this._preferHlsThisSession = false;
+    this._webrtcFirstFrameTimer = null;
+    this._nativeHlsLoadTimer = null;
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
+    this._webrtcRecoveryStreak = 0;
     this._timerStreaming = false;
     this._optimistic = {};
     this._optimisticTimers = {};
@@ -1308,6 +1314,8 @@ class BoschCameraCard extends HTMLElement {
   }
   connectedCallback() {
     _boschPipCards.add(this);
+    this._preferHlsThisSession = false;
+    this._webrtcRecoveryStreak = 0;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     this._pagehideHandler = () => this._stopLiveVideo();
@@ -1571,6 +1579,11 @@ class BoschCameraCard extends HTMLElement {
   _isIOS() {
     const ua = navigator.userAgent || "";
     return /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  }
+  _isMobileClient() {
+    const ua = navigator.userAgent || "";
+    const isCompanion = /Home\s?Assistant\//i.test(ua) || typeof location !== "undefined" && (location.search || "").includes("external_auth=1") || !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.getExternalAuth) || !!window.externalApp;
+    return isCompanion || this._isIOS() || /Android/i.test(ua);
   }
   _hasHover() {
     try {
@@ -2731,7 +2744,7 @@ class BoschCameraCard extends HTMLElement {
       this._reflectPipState();
       this._refreshAudioPill();
       this._refreshAudioToggle();
-      if (this._remoteSkipWebRTC && this._streamTransport === "hls") {
+      if ((this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient()) && this._streamTransport === "hls") {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) {
           const bt = banner.querySelector("#ios-hls-banner-text");
@@ -2795,6 +2808,7 @@ class BoschCameraCard extends HTMLElement {
         video._boschLastFrameAt = null;
         const onFrame = () => {
           video._boschLastFrameAt = performance.now();
+          this._webrtcRecoveryStreak = 0;
           if (this._liveStreamStalled) this._setLiveStalled(false);
           if (this._liveVideoActive && video.srcObject) {
             video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
@@ -2803,6 +2817,9 @@ class BoschCameraCard extends HTMLElement {
           }
         };
         video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+      }
+      if (this._streamTransport === "webrtc") {
+        this._armWebrtcDeadTrackWatchdog(video);
       }
       if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
       this._activateSafetyTimer = setTimeout(() => {
@@ -2862,7 +2879,9 @@ class BoschCameraCard extends HTMLElement {
     if (this._remoteSkipWebRTC) {
       console.debug("bosch-camera-card: remote endpoint — short WebRTC attempt, HLS fallback if it doesn't connect fast");
     }
-    try {
+    if (this._preferHlsThisSession) {
+      console.debug("bosch-camera-card: sticky HLS this session — skipping WebRTC, going straight to HLS");
+    } else try {
       try {
         await this._startWebRTC(video, activateVideo);
         return;
@@ -3054,6 +3073,7 @@ class BoschCameraCard extends HTMLElement {
       } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
         video.src = result.url;
         startPlay();
+        this._armNativeHlsLoadWatchdog(video, result.url);
       } else {
         throw new Error("HLS not supported");
       }
@@ -3344,10 +3364,136 @@ class BoschCameraCard extends HTMLElement {
       this._statsCheckInFlight = false;
     }
   }
+  async _webrtcStatsSnapshot() {
+    const pc = this._webrtcPc;
+    if (!pc || typeof pc.getStats !== "function") return null;
+    try {
+      const stats = await pc.getStats();
+      let frames = null, bytes = 0;
+      stats.forEach(r => {
+        if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video") && typeof r.framesDecoded === "number" && (frames == null || r.framesDecoded > frames)) {
+          frames = r.framesDecoded;
+          bytes = typeof r.bytesReceived === "number" ? r.bytesReceived : 0;
+        }
+      });
+      if (frames == null) return null;
+      return {
+        frames: frames,
+        bytes: bytes
+      };
+    } catch {
+      return null;
+    }
+  }
+  _armWebrtcDeadTrackWatchdog(video) {
+    if (this._webrtcFirstFrameTimer) {
+      clearTimeout(this._webrtcFirstFrameTimer);
+      this._webrtcFirstFrameTimer = null;
+    }
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
+    const FIRST_POLL_MS = 2500;
+    const POLL_MS = 2e3;
+    const MAX_MS = 9e3;
+    const startedAt = performance.now();
+    const poll = async () => {
+      this._webrtcFirstFrameTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._streamTransport !== "webrtc") return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      if (document.visibilityState !== "visible") {
+        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        return;
+      }
+      if (video._boschLastFrameAt != null) {
+        this._webrtcRecoveryStreak = 0;
+        return;
+      }
+      const snap = await this._webrtcStatsSnapshot();
+      if (!this.isConnected || !this._liveVideoActive || this._streamTransport !== "webrtc") return;
+      const pastDeadline = performance.now() - startedAt >= MAX_MS;
+      if (snap == null) {
+        if (pastDeadline) return;
+        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        return;
+      }
+      if (snap.frames > 0) {
+        this._webrtcRecoveryStreak = 0;
+        return;
+      }
+      if (this._webrtcStatsPrev != null) {
+        const dBytes = snap.bytes - this._webrtcStatsPrev.bytes;
+        if (dBytes <= 0) {
+          this._forceHlsFallback("no RTP bytes (CGNAT cut)");
+          return;
+        }
+        this._webrtcDeadPolls++;
+        if (this._webrtcDeadPolls >= 2) {
+          this._forceHlsFallback("bytes flowing but 0 frames decoded");
+          return;
+        }
+      }
+      this._webrtcStatsPrev = snap;
+      if (pastDeadline) {
+        this._forceHlsFallback("0 frames decoded within deadline");
+        return;
+      }
+      this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+    };
+    this._webrtcFirstFrameTimer = setTimeout(poll, FIRST_POLL_MS);
+  }
+  _forceHlsFallback(reason) {
+    if (!this.isConnected || !this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    if (this._preferHlsThisSession) return;
+    console.warn("bosch-camera-card: WebRTC dead — switching to HLS (" + reason + ")");
+    this._preferHlsThisSession = true;
+    this._scheduleLiveRecovery("dead webrtc track → HLS");
+  }
+  _armNativeHlsLoadWatchdog(video, url) {
+    if (this._nativeHlsLoadTimer) {
+      clearTimeout(this._nativeHlsLoadTimer);
+      this._nativeHlsLoadTimer = null;
+    }
+    const onPlaying = () => {
+      if (this._nativeHlsLoadTimer) {
+        clearTimeout(this._nativeHlsLoadTimer);
+        this._nativeHlsLoadTimer = null;
+      }
+    };
+    video.addEventListener("playing", onPlaying, {
+      once: true
+    });
+    this._nativeHlsLoadTimer = setTimeout(() => {
+      this._nativeHlsLoadTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      if (!v) return;
+      if (!v.paused && v.currentTime > 0) return;
+      console.warn("bosch-camera-card: native HLS stalled at load (>8s) — hard reload");
+      try {
+        v.removeAttribute("src");
+        v.load();
+        v.src = url;
+        v.load();
+        Promise.resolve(v.play()).catch(() => {});
+      } catch {}
+    }, 8e3);
+  }
   _scheduleLiveRecovery(reason) {
     if (!this.isConnected) return;
     if (!this._liveVideoActive) return;
     if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null;
+    if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
+      this._webrtcRecoveryStreak = (this._webrtcRecoveryStreak || 0) + 1;
+      if (this._webrtcRecoveryStreak >= 2) {
+        console.warn("bosch-camera-card: repeated WebRTC recovery with no rendered frame — switching to HLS for this session");
+        this._preferHlsThisSession = true;
+      }
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true);
@@ -3376,6 +3522,14 @@ class BoschCameraCard extends HTMLElement {
     if (this._trackMuteTimer) {
       clearTimeout(this._trackMuteTimer);
       this._trackMuteTimer = null;
+    }
+    if (this._webrtcFirstFrameTimer) {
+      clearTimeout(this._webrtcFirstFrameTimer);
+      this._webrtcFirstFrameTimer = null;
+    }
+    if (this._nativeHlsLoadTimer) {
+      clearTimeout(this._nativeHlsLoadTimer);
+      this._nativeHlsLoadTimer = null;
     }
     if (this._hlsKeepaliveTimer) {
       clearInterval(this._hlsKeepaliveTimer);
@@ -3430,6 +3584,8 @@ class BoschCameraCard extends HTMLElement {
     this._prevFramesDecoded = null;
     this._framesDecodedSeenAt = 0;
     this._statsCheckInFlight = false;
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
     this._hlsNetworkErrorCount = 0;
     if (this._waitForStreamRetryTimer) {
       clearTimeout(this._waitForStreamRetryTimer);
@@ -3589,7 +3745,7 @@ class BoschCameraCard extends HTMLElement {
     {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) {
-        const showHls = this._remoteSkipWebRTC && this._streamTransport === "hls" && !!this._liveVideoActive;
+        const showHls = (this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient()) && this._streamTransport === "hls" && !!this._liveVideoActive;
         if (showHls) {
           const bt = banner.querySelector("#ios-hls-banner-text");
           if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;

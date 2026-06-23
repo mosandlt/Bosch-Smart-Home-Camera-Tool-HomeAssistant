@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.8";
+const CARD_VERSION = "13.7.9";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1472,6 +1472,12 @@ class BoschCameraCard extends HTMLElement {
     this._hlsNetworkErrorCount = 0;    // consecutive fatal HLS NETWORK_ERROR retries before escalating to a reconnect (B3 fix)
     this._waitForStreamRetryTimer = null; // tracked 30s re-poll timer after _waitForStreamReady gives up (B6 fix) — prevents stacked chains
     this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
+    this._preferHlsThisSession = false; // sticky: once a WebRTC probe connected but delivered ZERO frames (the iOS/CGNAT "VERBINDE" hang — track present, framesDecoded stays 0, HA-core #158178), re-attempting WebRTC just loops the same dark transport. Skip WebRTC → HLS for the rest of this mount. Reset in connectedCallback. 2026-06-23
+    this._webrtcFirstFrameTimer = null; // dead-track watchdog timer (getStats poll after a WebRTC track activates). 2026-06-23
+    this._nativeHlsLoadTimer = null;  // iOS native-HLS load watchdog (AVPlayer can hang at load with no `playing`). 2026-06-23
+    this._webrtcStatsPrev    = null;  // {frames,bytes} baseline for the dead-track watchdog. 2026-06-23
+    this._webrtcDeadPolls    = 0;     // consecutive getStats polls with bytes flowing but framesDecoded flat (decoder stall). 2026-06-23
+    this._webrtcRecoveryStreak = 0;   // consecutive live WebRTC recoveries with no healthy frame in between → escalate to sticky HLS. Reset by the rVFC onFrame. 2026-06-23
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -1523,6 +1529,11 @@ class BoschCameraCard extends HTMLElement {
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   connectedCallback() {
     _boschPipCards.add(this); // join the cross-card single-PiP greying group
+    // Fresh mount → re-probe WebRTC. A previous mount may have stuck on sticky-HLS
+    // after a dead-track fallback; a new page load deserves a clean WebRTC attempt
+    // (the user may have moved back onto a WebRTC-capable LAN). 2026-06-23.
+    this._preferHlsThisSession = false;
+    this._webrtcRecoveryStreak = 0;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     // Mobile reload fix: iOS Safari + HA Companion App (WKWebView) do NOT
@@ -2010,6 +2021,21 @@ class BoschCameraCard extends HTMLElement {
   _isIOS() {
     const ua = navigator.userAgent || "";
     return /iPhone|iPod|iPad/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+  }
+
+  // True in the HA Companion app (iOS/Android) or a mobile browser — the clients
+  // where WebRTC media (UDP) is least likely over a remote tunnel / cellular CGNAT,
+  // so an HLS fallback is the expected steady state and its banner should show.
+  // `external_auth=1` in the URL + the iOS webkit `getExternalAuth` bridge are the
+  // authoritative Companion signals (HA iOS source); `window.externalApp` is
+  // Android-Companion-only; UA covers plain mobile browsers. 2026-06-23.
+  _isMobileClient() {
+    const ua = navigator.userAgent || "";
+    const isCompanion = /Home\s?Assistant\//i.test(ua)
+      || (typeof location !== "undefined" && (location.search || "").includes("external_auth=1"))
+      || !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.getExternalAuth)
+      || !!window.externalApp;
+    return isCompanion || this._isIOS() || /Android/i.test(ua);
   }
 
   // Pointer with true hover (desktop mouse/trackpad) — gates the volume slider.
@@ -5934,9 +5960,12 @@ class BoschCameraCard extends HTMLElement {
       this._reflectPipState();
       this._refreshAudioPill();
       this._refreshAudioToggle();
-      // Show the HLS-mode banner ONLY when the remote/mobile path actually fell
-      // back to HLS — not when the short WebRTC attempt succeeded (e.g. on VPN).
-      if (this._remoteSkipWebRTC && this._streamTransport === "hls") {
+      // Show the HLS-mode banner whenever a mobile/remote client is running on HLS
+      // — the short-WebRTC remote case, a mobile client, OR a dead-track fallback
+      // (sticky HLS). Not shown when the WebRTC attempt actually delivered frames.
+      // 2026-06-23.
+      if ((this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient())
+          && this._streamTransport === "hls") {
         const banner = this.shadowRoot?.getElementById("ios-hls-banner");
         if (banner) {
           const bt = banner.querySelector("#ios-hls-banner-text");
@@ -6061,6 +6090,10 @@ class BoschCameraCard extends HTMLElement {
         video._boschLastFrameAt = null;
         const onFrame = () => {
           video._boschLastFrameAt = performance.now();
+          // A real presented frame proves the transport is healthy → reset the
+          // WebRTC-recovery escalation streak so a one-off blip never trips the
+          // sticky-HLS fallback. 2026-06-23.
+          this._webrtcRecoveryStreak = 0;
           // A presented frame means the stream is REALLY live again — clear any
           // "stalled" badge state (decouples "Live" from "a PC once existed").
           // _setLiveStalled no-ops when already false, so this is cheap per-frame.
@@ -6073,6 +6106,21 @@ class BoschCameraCard extends HTMLElement {
           }
         };
         video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+      }
+
+      // Dead-track watchdog (HA-core #158178 / iOS-CGNAT): a WebRTC track can
+      // ARRIVE (ontrack fires, badge flips "Live") yet never decode a frame — ICE
+      // forms a candidate pair that silently goes dark over CGNAT/5G,
+      // connectionState stays "connected", no track event fires. The no-track
+      // connect timeout can't catch it (a track IS present) and every recovery path
+      // just re-tries WebRTC into the same dark transport → the endless
+      // "VERBINDE↔LIVE" flip, HLS never reached, banner never shown. getStats
+      // (framesDecoded + bytesReceived — both reliable on iOS WKWebView since iOS
+      // 13) is the only signal that distinguishes this. Foreground-only (the
+      // connect happens while visible, so no iOS thread-suspend false positive). The
+      // HLS path sets _streamTransport="hls", so this arms only for WebRTC. 2026-06-23.
+      if (this._streamTransport === "webrtc") {
+        this._armWebrtcDeadTrackWatchdog(video);
       }
 
       // Safety timeout: if video never plays after 120s, hide overlay but
@@ -6231,7 +6279,13 @@ class BoschCameraCard extends HTMLElement {
     if (this._remoteSkipWebRTC) {
       console.debug("bosch-camera-card: remote endpoint — short WebRTC attempt, HLS fallback if it doesn't connect fast");
     }
-    try {
+    // Sticky-HLS gate: a prior WebRTC probe on this mount connected but delivered
+    // ZERO frames (the dead-track watchdog tripped — iOS/CGNAT, HA-core #158178).
+    // Re-attempting WebRTC just loops the same dark transport, so skip straight to
+    // HLS for the rest of this mount. Reset on a fresh connectedCallback. 2026-06-23.
+    if (this._preferHlsThisSession) {
+      console.debug("bosch-camera-card: sticky HLS this session — skipping WebRTC, going straight to HLS");
+    } else try {
       try {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
@@ -6466,8 +6520,13 @@ class BoschCameraCard extends HTMLElement {
           }
         }, 20000); // every 20s, well within 30s timeout
       } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+        // Native HLS (iOS Safari / WKWebView). This is where the WebRTC dead-track
+        // fallback LANDS on iOS, so it must itself be robust: AVPlayer can hang at
+        // load (no `playing` event, readyState stuck) and does not self-recover —
+        // arm an 8s load watchdog that hard-reloads once. 2026-06-23.
         video.src = result.url;
         startPlay();
+        this._armNativeHlsLoadWatchdog(video, result.url);
       } else {
         throw new Error("HLS not supported");
       }
@@ -6949,11 +7008,159 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
+  // One getStats snapshot for the dead-track watchdog: highest framesDecoded with
+  // its matching bytesReceived across video inbound-rtp reports (skip an RTX report
+  // pegged at framesDecoded:0). null = no video inbound-rtp report yet. framesDecoded
+  // + bytesReceived are present+correct on iOS WKWebView since iOS 13; framesReceived
+  // is NOT reliable (single impl in the W3C interop report) so we never key off it. 2026-06-23.
+  async _webrtcStatsSnapshot() {
+    const pc = this._webrtcPc;
+    if (!pc || typeof pc.getStats !== "function") return null;
+    try {
+      const stats = await pc.getStats();
+      let frames = null, bytes = 0;
+      stats.forEach((r) => {
+        if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")
+            && typeof r.framesDecoded === "number"
+            && (frames == null || r.framesDecoded > frames)) {
+          frames = r.framesDecoded;
+          bytes  = typeof r.bytesReceived === "number" ? r.bytesReceived : 0;
+        }
+      });
+      if (frames == null) return null;
+      return { frames, bytes };
+    } catch {
+      return null;
+    }
+  }
+
+  // Watchdog for the connected-but-zero-frames WebRTC failure (the iOS/CGNAT
+  // "VERBINDE" hang). Polls getStats a few times after a track activates; if RTP
+  // never arrives (bytesReceived flat = CGNAT cut) or arrives but never decodes
+  // (framesDecoded flat = decoder stall) AND no real frame was ever presented
+  // (rVFC), the transport is dead → escalate straight to HLS (sticky) instead of
+  // looping WebRTC. Cancelled the instant a real frame is seen or frames decode.
+  // Visible-only (re-arms while hidden so an alt-tab mid-connect can't false-fire,
+  // matching the iOS thread-suspend caveat). 2026-06-23.
+  _armWebrtcDeadTrackWatchdog(video) {
+    if (this._webrtcFirstFrameTimer) { clearTimeout(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null; }
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
+    const FIRST_POLL_MS = 2500;  // give ICE + the first keyframe a head start
+    const POLL_MS       = 2000;
+    const MAX_MS        = 9000;  // hard deadline: no verdict + no frame by here → HLS
+    const startedAt = performance.now();
+    const poll = async () => {
+      this._webrtcFirstFrameTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._streamTransport !== "webrtc") return;            // already switched to HLS
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      // Backgrounded mid-connect: don't risk a thread-suspend false positive — just
+      // keep re-arming until the user returns or a real frame lands.
+      if (document.visibilityState !== "visible") {
+        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        return;
+      }
+      // A real presented frame = unambiguously alive.
+      if (video._boschLastFrameAt != null) { this._webrtcRecoveryStreak = 0; return; }
+      const snap = await this._webrtcStatsSnapshot();
+      if (!this.isConnected || !this._liveVideoActive || this._streamTransport !== "webrtc") return; // raced
+      const pastDeadline = performance.now() - startedAt >= MAX_MS;
+      if (snap == null) {
+        // No video inbound-rtp report yet — AMBIGUOUS: a getStats-less browser on a
+        // perfectly healthy stream looks identical to a dead one here. Never fall
+        // back on this alone (would wrongly drop a working WebRTC stream to HLS).
+        // Keep polling; at the deadline give up SILENTLY — the stall checker /
+        // freeze oracle still cover a genuinely stuck stream. 2026-06-23 (verify-agent: no false-positive).
+        if (pastDeadline) return;
+        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        return;
+      }
+      if (snap.frames > 0) { this._webrtcRecoveryStreak = 0; return; } // decoder is producing frames → alive
+      if (this._webrtcStatsPrev != null) {
+        const dBytes = snap.bytes - this._webrtcStatsPrev.bytes;
+        if (dBytes <= 0) { this._forceHlsFallback("no RTP bytes (CGNAT cut)"); return; } // RTP not arriving at all → dead now
+        this._webrtcDeadPolls++;                                  // bytes flow but 0 frames decoded = decoder stall
+        if (this._webrtcDeadPolls >= 2) { this._forceHlsFallback("bytes flowing but 0 frames decoded"); return; }
+      }
+      this._webrtcStatsPrev = snap;
+      // Deadline with a REAL report still showing 0 frames decoded = positive
+      // evidence the decoder never produced a frame → dead. (The null-report case
+      // above is excluded, so a getStats-less healthy stream is never touched.) 2026-06-23.
+      if (pastDeadline) { this._forceHlsFallback("0 frames decoded within deadline"); return; }
+      this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+    };
+    this._webrtcFirstFrameTimer = setTimeout(poll, FIRST_POLL_MS);
+  }
+
+  // Escalate a dead WebRTC transport to HLS for the rest of this mount (sticky),
+  // then rebuild PiP-safely. Mirrors _scheduleLiveRecovery but flips the transport
+  // preference so the rebuild skips WebRTC and the HLS-mode banner shows. The
+  // sticky flag is what stops the "keeps re-trying WebRTC" loop. 2026-06-23.
+  _forceHlsFallback(reason) {
+    if (!this.isConnected || !this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    if (this._preferHlsThisSession) return;                       // already escalated
+    console.warn("bosch-camera-card: WebRTC dead — switching to HLS (" + reason + ")");
+    this._preferHlsThisSession = true;
+    this._scheduleLiveRecovery("dead webrtc track → HLS");
+  }
+
+  // Native iOS HLS (Safari / WKWebView) load watchdog. iOS AVPlayer can hang in
+  // loadstart/waiting on a poor tunnel — no `playing` event, readyState stuck at
+  // HAVE_NOTHING/HAVE_METADATA — and does NOT self-recover (unlike Android / hls.js,
+  // which retry internally). Since this native path is exactly where the WebRTC
+  // dead-track fallback lands on iOS, a hang here would make the whole fix
+  // ineffective. If no `playing` fires within 8s, hard-reload the element once
+  // (removeAttribute+load resets AVPlayer, then re-assign). 2026-06-23 (verify-agent /
+  // Apple Dev Forums #739368).
+  _armNativeHlsLoadWatchdog(video, url) {
+    if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
+    const onPlaying = () => {
+      if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
+    };
+    video.addEventListener("playing", onPlaying, { once: true });
+    this._nativeHlsLoadTimer = setTimeout(() => {
+      this._nativeHlsLoadTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      if (!v) return;
+      if (!v.paused && v.currentTime > 0) return;     // actually playing → nothing to do
+      console.warn("bosch-camera-card: native HLS stalled at load (>8s) — hard reload");
+      try {
+        v.removeAttribute("src");
+        v.load();
+        v.src = url;
+        v.load();
+        Promise.resolve(v.play()).catch(() => {});
+      } catch { /* element raced away */ }
+    }, 8000);
+  }
+
   // Mirrors the start gate in _resumeLiveStreamIfNeeded. 2026-06-19 (PiP-freeze fix).
   _scheduleLiveRecovery(reason) {
     if (!this.isConnected) return;
     if (!this._liveVideoActive) return;
     if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    // If WebRTC keeps needing recovery while NEVER rendering a frame, the transport
+    // is unreliable on this network — stop looping WebRTC and fall back to HLS for
+    // the rest of this mount. CRITICAL: only count a recovery when the dying stream
+    // never presented a frame (_boschLastFrameAt == null). A healthy stream that
+    // rendered fine and then died (60-min Bosch session rotation, a transient blip)
+    // must NOT be pushed onto HLS — that would regress a working WebRTC client. The
+    // rVFC onFrame also resets the streak whenever a real frame flows. The forced
+    // dead-track path sets the sticky flag itself, so it's excluded here. 2026-06-23
+    // (verify-agent: isolate the genuine "reconnect → never renders → reconnect" loop).
+    const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null;
+    if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
+      this._webrtcRecoveryStreak = (this._webrtcRecoveryStreak || 0) + 1;
+      if (this._webrtcRecoveryStreak >= 2) {
+        console.warn("bosch-camera-card: repeated WebRTC recovery with no rendered frame — switching to HLS for this session");
+        this._preferHlsThisSession = true;
+      }
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true); // badge → "connecting" for the rebuild window
@@ -6983,6 +7190,8 @@ class BoschCameraCard extends HTMLElement {
     if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
     this._stopLiveStallWorker();
     if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
+    if (this._webrtcFirstFrameTimer) { clearTimeout(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null; }
+    if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
     if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
     if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
     // Stop the uptime-badge interval and the stream-ready poll chain on teardown.
@@ -7043,6 +7252,10 @@ class BoschCameraCard extends HTMLElement {
     this._prevFramesDecoded   = null;
     this._framesDecodedSeenAt = 0;
     this._statsCheckInFlight  = false; // a stale in-flight from the old pc must not block the new stream's first check
+    // Reset the dead-track watchdog baseline too — a stale snapshot from the old pc
+    // must not look "frozen" or "byte-flat" to the next stream's first poll. 2026-06-23.
+    this._webrtcStatsPrev     = null;
+    this._webrtcDeadPolls     = 0;
     this._hlsNetworkErrorCount = 0;
     if (this._waitForStreamRetryTimer) { clearTimeout(this._waitForStreamRetryTimer); this._waitForStreamRetryTimer = null; }
     if (this._hiddenTeardownTimer) { clearTimeout(this._hiddenTeardownTimer); this._hiddenTeardownTimer = null; }
@@ -7259,7 +7472,7 @@ class BoschCameraCard extends HTMLElement {
     {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) {
-        const showHls = this._remoteSkipWebRTC
+        const showHls = (this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient())
           && this._streamTransport === "hls"
           && !!this._liveVideoActive;
         if (showHls) {

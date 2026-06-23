@@ -1933,3 +1933,159 @@ test("privacy badge: last-snapshot by default, last-event when configured", asyn
   expect(r.snapText, "default badge uses the last-snapshot prefix").toContain("Last snapshot:");
   expect(r.eventText, "privacy_stale_source:event uses the last-event prefix").toContain("Last event:");
 });
+
+// ── Dead-WebRTC-track → sticky HLS fallback (2026-06-23) ───────────────────────
+// Regression for the "VERBINDE↔LIVE" flip on the iOS Companion app / cellular
+// CGNAT: a WebRTC track arrives (ontrack fires, badge "Live") but never decodes a
+// frame; every recovery path re-tried WebRTC into the same dark transport → HLS
+// never reached, banner never shown (HA-core #158178). The dead-track watchdog
+// (getStats framesDecoded + bytesReceived) must escalate to a STICKY HLS fallback.
+
+test("dead-track watchdog: _startLiveVideo skips WebRTC when sticky HLS is set", () => {
+  const start = CARD_SRC.indexOf("async _startLiveVideo(");
+  expect(start, "_startLiveVideo exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("async _startWebRTC(", start));
+  const gateIdx = body.indexOf("if (this._preferHlsThisSession) {");
+  const webrtcIdx = body.indexOf("await this._startWebRTC(");
+  expect(gateIdx, "sticky-HLS gate present in _startLiveVideo").toBeGreaterThan(-1);
+  expect(webrtcIdx, "WebRTC attempt present").toBeGreaterThan(-1);
+  // The gate must come BEFORE the WebRTC attempt so the attempt is skipped.
+  expect(gateIdx, "sticky gate precedes the WebRTC attempt").toBeLessThan(webrtcIdx);
+  // The skip is implemented as `else try` so the existing try/catch is gated.
+  expect(body.includes("} else try {"), "WebRTC attempt is gated behind the sticky check").toBe(true);
+});
+
+test("dead-track watchdog: armed only on the WebRTC transport", () => {
+  expect(CARD_SRC.includes("_armWebrtcDeadTrackWatchdog(video)"), "watchdog is armed").toBe(true);
+  const armIdx = CARD_SRC.indexOf("this._armWebrtcDeadTrackWatchdog(video);");
+  expect(armIdx, "watchdog arm call exists").toBeGreaterThan(-1);
+  // The arm site is gated on the WebRTC transport (HLS sets _streamTransport="hls").
+  const guard = CARD_SRC.slice(CARD_SRC.lastIndexOf("if (", armIdx), armIdx);
+  expect(guard.includes('this._streamTransport === "webrtc"'),
+    "watchdog only arms for WebRTC").toBe(true);
+});
+
+test("dead-track watchdog: getStats snapshot keys off framesDecoded + bytesReceived, never framesReceived", () => {
+  const start = CARD_SRC.indexOf("async _webrtcStatsSnapshot()");
+  expect(start, "_webrtcStatsSnapshot exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_armWebrtcDeadTrackWatchdog", start));
+  expect(body.includes("framesDecoded"), "uses framesDecoded").toBe(true);
+  expect(body.includes("bytesReceived"), "uses bytesReceived").toBe(true);
+  // framesReceived is FAIL on iOS WKWebView (single impl) — must NOT be used.
+  expect(body.includes("framesReceived"), "never keys off framesReceived").toBe(false);
+  expect(body.includes('r.type === "inbound-rtp"'), "reads inbound-rtp reports").toBe(true);
+});
+
+test("dead-track watchdog: zero-byte poll = immediate HLS, byte-flow-zero-frame = HLS after 2 polls", () => {
+  const start = CARD_SRC.indexOf("_armWebrtcDeadTrackWatchdog(video) {");
+  expect(start, "watchdog body exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_forceHlsFallback(reason)", start));
+  // bytesReceived delta <= 0 → CGNAT cut → fall back now.
+  expect(body.includes("CGNAT cut"), "CGNAT byte-flat path forces HLS").toBe(true);
+  expect(body.includes("dBytes <= 0"), "byte delta <=0 is the trigger").toBe(true);
+  // bytes flowing but 0 frames decoded → decoder stall after 2 polls.
+  expect(body.includes("this._webrtcDeadPolls >= 2"), "decoder-stall needs 2 polls").toBe(true);
+  // Visible-only: never false-positives on a hidden tab (iOS thread suspend).
+  expect(body.includes('document.visibilityState !== "visible"'),
+    "watchdog re-arms instead of firing while hidden").toBe(true);
+  // A real presented frame cancels the watchdog.
+  expect(body.includes("video._boschLastFrameAt != null"), "rVFC frame cancels the watchdog").toBe(true);
+});
+
+test("dead-track watchdog: _forceHlsFallback sets sticky HLS then recovers", () => {
+  const start = CARD_SRC.indexOf("_forceHlsFallback(reason) {");
+  expect(start, "_forceHlsFallback exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_scheduleLiveRecovery(reason) {", start));
+  const stickyIdx = body.indexOf("this._preferHlsThisSession = true;");
+  const recoverIdx = body.indexOf("this._scheduleLiveRecovery(");
+  expect(stickyIdx, "sets sticky HLS").toBeGreaterThan(-1);
+  expect(recoverIdx, "triggers a PiP-safe recovery").toBeGreaterThan(-1);
+  // Must set the sticky flag BEFORE the recovery so the rebuild skips WebRTC.
+  expect(stickyIdx, "sticky flag set before recovery rebuild").toBeLessThan(recoverIdx);
+  // Idempotent: bails if already escalated.
+  expect(body.includes("if (this._preferHlsThisSession) return;"), "idempotent guard").toBe(true);
+});
+
+test("repeated WebRTC recovery escalates to sticky HLS; a presented frame resets the streak", () => {
+  const recStart = CARD_SRC.indexOf("_scheduleLiveRecovery(reason) {");
+  const recBody = CARD_SRC.slice(recStart, CARD_SRC.indexOf("_stopLiveVideo() {", recStart));
+  expect(recBody.includes("this._webrtcRecoveryStreak"), "recovery streak counted").toBe(true);
+  expect(recBody.includes("this._webrtcRecoveryStreak >= 2"), "escalates at 2 recoveries").toBe(true);
+  expect(recBody.includes("this._preferHlsThisSession = true"), "escalation sets sticky HLS").toBe(true);
+  // rVFC onFrame resets the streak so a one-off blip never trips it.
+  const onFrameIdx = CARD_SRC.indexOf("video._boschLastFrameAt = performance.now();");
+  const onFrameBody = CARD_SRC.slice(onFrameIdx, onFrameIdx + 400);
+  expect(onFrameBody.includes("this._webrtcRecoveryStreak = 0;"),
+    "a presented frame resets the recovery streak").toBe(true);
+});
+
+test("sticky HLS is reset on a fresh mount (connectedCallback)", () => {
+  const idx = CARD_SRC.indexOf("connectedCallback() {");
+  const body = CARD_SRC.slice(idx, idx + 600);
+  expect(body.includes("this._preferHlsThisSession = false;"),
+    "fresh mount re-probes WebRTC").toBe(true);
+  expect(body.includes("this._webrtcRecoveryStreak = 0;"), "streak reset on mount").toBe(true);
+});
+
+test("HLS-mode banner shows for a mobile client on HLS (not just the remote-skip case)", () => {
+  // _update() banner gate + activateVideo banner — both must include the mobile +
+  // sticky-HLS conditions, not only _remoteSkipWebRTC.
+  const showHlsIdx = CARD_SRC.indexOf("const showHls = ");
+  const showHlsBody = CARD_SRC.slice(showHlsIdx, showHlsIdx + 220);
+  expect(showHlsBody.includes("this._preferHlsThisSession"), "banner respects sticky HLS").toBe(true);
+  expect(showHlsBody.includes("this._isMobileClient()"), "banner shows for mobile clients").toBe(true);
+  expect(showHlsBody.includes('this._streamTransport === "hls"'), "banner only on HLS transport").toBe(true);
+  // _isMobileClient must detect the Companion app + iOS + Android.
+  const mc = CARD_SRC.slice(CARD_SRC.indexOf("_isMobileClient() {"), CARD_SRC.indexOf("_isMobileClient() {") + 600);
+  expect(mc.includes("external_auth=1"), "detects Companion via external_auth").toBe(true);
+  expect(mc.includes("getExternalAuth"), "detects iOS Companion via webkit bridge").toBe(true);
+});
+
+test("_stopLiveVideo clears the dead-track watchdog timer + resets its baseline", () => {
+  const start = CARD_SRC.indexOf("_stopLiveVideo() {");
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_onSnapshotClick()", start));
+  expect(body.includes("clearTimeout(this._webrtcFirstFrameTimer)"),
+    "watchdog timer cleared on teardown").toBe(true);
+  expect(body.includes("this._webrtcStatsPrev     = null;") || body.includes("this._webrtcStatsPrev = null;"),
+    "stats baseline reset").toBe(true);
+});
+
+// ── Dead-track watchdog hardening (verify-agent findings, 2026-06-23) ──────────
+
+test("watchdog never forces HLS on a null getStats report (no false-positive)", () => {
+  const start = CARD_SRC.indexOf("_armWebrtcDeadTrackWatchdog(video) {");
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_forceHlsFallback(reason) {", start));
+  // The null-report branch at the deadline must `return` (give up), NOT force HLS —
+  // a getStats-less browser on a healthy stream looks identical to a dead one.
+  const nullIdx = body.indexOf("if (snap == null) {");
+  expect(nullIdx, "null-report branch exists").toBeGreaterThan(-1);
+  const nullBlock = body.slice(nullIdx, body.indexOf("if (snap.frames > 0)", nullIdx));
+  expect(nullBlock.includes("if (pastDeadline) return;"), "null report at deadline gives up silently").toBe(true);
+  expect(nullBlock.includes("_forceHlsFallback"), "null report NEVER forces HLS").toBe(false);
+  // The deadline fallback only fires with a REAL report still at 0 frames.
+  expect(body.includes('"0 frames decoded within deadline"'), "deadline fallback needs frame evidence").toBe(true);
+});
+
+test("recovery streak only counts when the dying stream never rendered (no 60-min-rotation false-positive)", () => {
+  const recStart = CARD_SRC.indexOf("_scheduleLiveRecovery(reason) {");
+  const recBody = CARD_SRC.slice(recStart, CARD_SRC.indexOf("_stopLiveVideo() {", recStart));
+  expect(recBody.includes("const neverRendered"), "streak gated on neverRendered").toBe(true);
+  expect(recBody.includes("_boschLastFrameAt == null"), "neverRendered keys off the rVFC frame timestamp").toBe(true);
+  expect(recBody.includes("&& neverRendered"), "streak increment requires neverRendered").toBe(true);
+});
+
+test("native iOS HLS load watchdog: armed on the native path, cleared on teardown", () => {
+  expect(CARD_SRC.includes("this._armNativeHlsLoadWatchdog(video, result.url);"),
+    "native HLS watchdog armed on the canPlayType path").toBe(true);
+  const m = CARD_SRC.indexOf("_armNativeHlsLoadWatchdog(video, url) {");
+  expect(m, "watchdog method exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(m, m + 1600);
+  expect(body.includes('addEventListener("playing"'), "cancels on playing").toBe(true);
+  expect(body.includes("v.removeAttribute(\"src\")") && body.includes("v.src = url"),
+    "hard-reloads the element once").toBe(true);
+  expect(body.includes("8000"), "8s load deadline").toBe(true);
+  // Cleared in _stopLiveVideo.
+  const stop = CARD_SRC.indexOf("_stopLiveVideo() {");
+  const stopBody = CARD_SRC.slice(stop, CARD_SRC.indexOf("_onSnapshotClick()", stop));
+  expect(stopBody.includes("clearTimeout(this._nativeHlsLoadTimer)"), "timer cleared on teardown").toBe(true);
+});
