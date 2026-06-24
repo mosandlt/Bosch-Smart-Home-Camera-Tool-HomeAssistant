@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "13.7.9";
+const CARD_VERSION = "14.0.0";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -51,7 +51,7 @@ function _boschPipSetActive(card) {
 
 const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
-const BACKGROUND_TEARDOWN_GRACE_MS = 8e3;
+const BACKGROUND_TEARDOWN_GRACE_MS = 6e4;
 
 const CARD_I18N = {
   en: {
@@ -1318,7 +1318,12 @@ class BoschCameraCard extends HTMLElement {
     this._webrtcRecoveryStreak = 0;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
-    this._pagehideHandler = () => this._stopLiveVideo();
+    this._pagehideHandler = () => {
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
+      if (ownsPip) return;
+      this._stopLiveVideo();
+    };
     window.addEventListener("pagehide", this._pagehideHandler);
     this._pageshowHandler = e => {
       if (e.persisted) this._resumeLiveStreamIfNeeded();
@@ -1897,6 +1902,7 @@ class BoschCameraCard extends HTMLElement {
   }
   disconnectedCallback() {
     _boschPipCards.delete(this);
+    if (_boschPipActive === this) this._setBackgroundKeepAlive(false);
     if (_boschPipActive === this) _boschPipSetActive(null);
     this._stopRefreshTimer();
     if (this._aiCaptionTimer) {
@@ -2028,6 +2034,7 @@ class BoschCameraCard extends HTMLElement {
   _resumeLiveStreamIfNeeded() {
     if (!this.isConnected || !this._hass) return;
     if (!this._isStreaming()) return;
+    if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
     if (!this._liveVideoActive) {
       if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       this._reconnectingLiveVideo = true;
@@ -2161,10 +2168,13 @@ class BoschCameraCard extends HTMLElement {
     vid.addEventListener("click", () => this._requestFullscreen());
     vid.addEventListener("enterpictureinpicture", () => {
       _boschPipSetActive(this);
+      this._setBackgroundKeepAlive(true);
       this._setPipMetadata();
     });
     vid.addEventListener("leavepictureinpicture", () => {
       if (_boschPipActive === this) _boschPipSetActive(null);
+      this._setBackgroundKeepAlive(false);
+      this._resumeLiveStreamIfNeeded();
       this._clearPipMetadata();
       this._refreshAudioToggle();
       this._refreshAudioPill();
@@ -2173,9 +2183,12 @@ class BoschCameraCard extends HTMLElement {
       const mode = vid.webkitPresentationMode;
       if (mode === "picture-in-picture") {
         _boschPipSetActive(this);
+        this._setBackgroundKeepAlive(true);
         this._setPipMetadata();
       } else if (_boschPipActive === this) {
         _boschPipSetActive(null);
+        this._setBackgroundKeepAlive(false);
+        this._resumeLiveStreamIfNeeded();
         this._clearPipMetadata();
         this._refreshAudioToggle();
         this._refreshAudioPill();
@@ -3485,6 +3498,12 @@ class BoschCameraCard extends HTMLElement {
     if (!this.isConnected) return;
     if (!this._liveVideoActive) return;
     if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    {
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
+      if (ownsPip) return;
+      if (document.visibilityState === "hidden") return;
+    }
     const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
     const neverRendered = !recVideo || recVideo._boschLastFrameAt == null;
     if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
@@ -5271,6 +5290,17 @@ class BoschCameraCard extends HTMLElement {
     btn.setAttribute("aria-pressed", String(mine));
     btn.disabled = blocked;
     btn.title = blocked ? "Bild-im-Bild läuft für eine andere Kamera" : "Bild-im-Bild";
+  }
+  _setBackgroundKeepAlive(on) {
+    if (on) this._prevSuspendWhenHidden = this._hass?.suspendWhenHidden;
+    if (!on && this._prevSuspendWhenHidden === false) return;
+    this.dispatchEvent(new CustomEvent("hass-suspend-when-hidden", {
+      detail: {
+        suspend: !on
+      },
+      bubbles: true,
+      composed: true
+    }));
   }
   _setPipMetadata() {
     if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;

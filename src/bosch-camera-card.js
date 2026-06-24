@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "13.7.9";
+const CARD_VERSION = "14.0.0";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -228,9 +228,16 @@ function _boschPipSetActive(card) {
 const AUTO_PLAY_MODES = ["lan", "always", "never"];
 
 // Grace before a hidden, non-PiP live stream is torn down (community
-// teardown-on-hidden pattern). Long enough to ignore quick alt-tab, short
-// enough that an unwatched stream never sits frozen for long. 2026-06-22.
-const BACKGROUND_TEARDOWN_GRACE_MS = 8000;
+// teardown-on-hidden pattern). WebRTC media (DTLS/SRTP over UDP) runs in
+// Chrome's network process and is NOT subject to background-tab timer
+// throttling, so the PeerConnection genuinely survives a short backgrounding;
+// only after a longer suspension does go2rtc's signaling time out
+// (AlexxIT/WebRTC#121). So keep the stream ALIVE across an ordinary tab switch
+// (return = an instant play()-nudge, no renegotiation, and a PiP window keeps
+// compositing the same live stream with no freeze) and only tear down a truly
+// abandoned hidden tab. 8s→60s makes the common "switch tab, read, come back"
+// case static instead of a visible reconnect. 2026-06-24 (was 8000, 2026-06-22).
+const BACKGROUND_TEARDOWN_GRACE_MS = 60000;
 
 // Card-side i18n. Language is taken from hass.language: "de*" → German,
 // everything else → English (the universal fallback). To add a locale, add a
@@ -1545,7 +1552,23 @@ class BoschCameraCard extends HTMLElement {
     // many seconds". `pagehide` fires reliably on iOS / WKWebView right
     // before unload — calling _stopLiveVideo() flushes pc.close() and the
     // WS-unsubscribe so go2rtc frees the consumer immediately.
-    this._pagehideHandler = () => this._stopLiveVideo();
+    this._pagehideHandler = () => {
+      // `pagehide` fires on a real unload AND when Chrome freezes/bfcaches a tab
+      // that has been hidden ~5 min (Page Lifecycle). If this card owns a PiP
+      // window the user is actively watching it — tearing the stream down here
+      // (pc.close ends the remote track) freezes the floating window, and the
+      // pageshow/resume rebuild does NOT re-wire the PiP surface. PROVEN by a live
+      // getStats trace (2026-06-24): a healthy stream, frames flowing the entire
+      // time it was hidden in PiP, was killed by THIS handler exactly at the 5-min
+      // mark. An active PiP + PeerConnection keeps the media flowing across a
+      // freeze, so just leave it alone. A real unload while NOT in PiP still tears
+      // down to free the go2rtc consumer immediately (the iOS/WKWebView
+      // stale-consumer fix this handler was originally added for). 2026-06-24.
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
+      if (ownsPip) return;
+      this._stopLiveVideo();
+    };
     window.addEventListener("pagehide", this._pagehideHandler);
     // bfcache / Page-Lifecycle recovery: `pagehide` tears the stream down, but
     // when the page is restored from bfcache (`pageshow` persisted=true — Safari
@@ -2533,6 +2556,12 @@ class BoschCameraCard extends HTMLElement {
     // Leave the PiP greying group; if we were the floating owner, release the
     // hold so the remaining cards re-enable their PiP buttons.
     _boschPipCards.delete(this);
+    // If this card is removed while it owns PiP (SPA nav / view re-render, NOT the
+    // normal leavepictureinpicture path), restore HA's hidden-tab suspend so we
+    // don't leave the dashboard pinned awake for the rest of the session. The
+    // bubbling `composed` event still reaches the app shell during removal.
+    // 2026-06-24 (verify-agent: missing restore on card removal while PiP open).
+    if (_boschPipActive === this) this._setBackgroundKeepAlive(false);
     if (_boschPipActive === this) _boschPipSetActive(null);
     this._stopRefreshTimer();
     if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
@@ -2694,6 +2723,13 @@ class BoschCameraCard extends HTMLElement {
   _resumeLiveStreamIfNeeded() {
     if (!this.isConnected || !this._hass) return;
     if (!this._isStreaming()) return;          // backend stream switch is off → leave it
+    // Never auto-(re)start live video while privacy mode is ON. Privacy is a
+    // SEPARATE switch from the live-stream switch, so _isStreaming() can still
+    // read "on" under privacy — reviving here (e.g. from the leavepictureinpicture
+    // hook when privacy ON closed the PiP window, or a tab-return under privacy)
+    // would fight the privacy teardown and waste a Bosch session. The shutter is
+    // closed; there is nothing to resume. 2026-06-24 (kill-zombies-on-stop).
+    if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
     if (!this._liveVideoActive) {
       if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       // Defer so the Companion App's WebSocket finishes reconnecting first, then
@@ -5153,6 +5189,10 @@ class BoschCameraCard extends HTMLElement {
     // on the next render; the wiring re-applies state via _reflectPipState().
     vid.addEventListener("enterpictureinpicture", () => {
       _boschPipSetActive(this);
+      // Keep HA from suspending+unmounting the dashboard while the floating window
+      // is open (see _setBackgroundKeepAlive). Without this, HA tears the panel
+      // out of the DOM after 5 min hidden → disconnectedCallback → the PiP dies.
+      this._setBackgroundKeepAlive(true);
       // Re-assert the media session NOW the floating window exists — Chrome reads
       // the caption from it at this point; setting it only before
       // requestPictureInPicture() was too early and left the origin showing.
@@ -5160,6 +5200,12 @@ class BoschCameraCard extends HTMLElement {
     });
     vid.addEventListener("leavepictureinpicture", () => {
       if (_boschPipActive === this) _boschPipSetActive(null);
+      // PiP closed → restore HA's normal hidden-tab suspend behavior.
+      this._setBackgroundKeepAlive(false);
+      // PiP closed → recovery is safe again (no floating surface to freeze). If the
+      // stream died/froze while floating, recover it now the user is back on the
+      // in-page tile. 2026-06-24.
+      this._resumeLiveStreamIfNeeded();
       this._clearPipMetadata();
       // The user may have toggled mute via the PiP window's native media controls
       // while floating; resync the card's audio toggle + pill so they reflect the
@@ -5175,9 +5221,12 @@ class BoschCameraCard extends HTMLElement {
       const mode = vid.webkitPresentationMode;
       if (mode === "picture-in-picture") {
         _boschPipSetActive(this);
+        this._setBackgroundKeepAlive(true);
         this._setPipMetadata();
       } else if (_boschPipActive === this) {
         _boschPipSetActive(null);
+        this._setBackgroundKeepAlive(false);
+        this._resumeLiveStreamIfNeeded();
         this._clearPipMetadata();
         this._refreshAudioToggle();
         this._refreshAudioPill();
@@ -7143,6 +7192,25 @@ class BoschCameraCard extends HTMLElement {
     if (!this.isConnected) return;
     if (!this._liveVideoActive) return;
     if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    // Auto-recovery runs ONLY when the tab is VISIBLE and this card does NOT own
+    // a PiP window:
+    //  (1) Hidden + non-PiP: nobody is watching the in-page tile. A background
+    //      track-mute / connectionState blip would otherwise thrash a stream that
+    //      survives the backgrounding and resumes fine on return (extended
+    //      teardown grace); the visibilitychange→visible path recovers it then.
+    //  (2) PiP-owned: our recovery does srcObject=null + video.load(), which tears
+    //      Chrome's PiP compositor link (crbug 894317) and freezes the floating
+    //      window. HA core ha-web-rtc-player does the same — it never recovers
+    //      while PiP is open. Recovery resumes on leavepictureinpicture / tab-return.
+    //  `ownsPip` is a live read (browser-authoritative pictureInPictureElement +
+    //  the iOS-webkit `_boschPipActive` mirror), so no extra state to manage.
+    //  2026-06-24.
+    {
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
+      if (ownsPip) return;
+      if (document.visibilityState === "hidden") return;
+    }
     // If WebRTC keeps needing recovery while NEVER rendering a frame, the transport
     // is unreliable on this network — stop looping WebRTC and fall back to HLS for
     // the rest of this mount. CRITICAL: only count a recovery when the dying stream
@@ -9568,6 +9636,31 @@ class BoschCameraCard extends HTMLElement {
   // must also declare playbackState AND own the transport handlers. Without that
   // it shows the origin. So set all three. Re-asserted on `enterpictureinpicture`
   // (the window is created then) and cleared on leave. 2026-06-15.
+  // Keep HA's frontend from suspending the WebSocket and UNMOUNTING the Lovelace
+  // panel while a PiP window is open. HA arms two 5-minute timers on tab-hide:
+  // `home-assistant.ts` `_suspendApp()` closes the WebSocket, and
+  // `partial-panel-resolver.ts` `_onHidden()` physically `removeChild()`s the
+  // Lovelace panel — which fires `disconnectedCallback` on every card → our
+  // `_stopLiveVideo()` → the floating PiP video element is detached and the PiP
+  // session dies (only a full page reload recovers). PROVEN via a live
+  // `disconnectedCallback` stack trace at exactly the 5-min hidden mark
+  // (conn=false, susp=1). HA exposes the same control its Profile → "Keep running
+  // in background" toggle uses: a bubbling `hass-suspend-when-hidden` event. We
+  // turn suspend OFF on PiP-enter so the panel stays mounted and the floating
+  // stream keeps playing in the background, and restore the user's prior setting
+  // on PiP-exit (never re-enabling suspend for someone who deliberately disabled
+  // it in their profile). 2026-06-24.
+  _setBackgroundKeepAlive(on) {
+    if (on) this._prevSuspendWhenHidden = this._hass?.suspendWhenHidden;
+    // Turning keep-alive OFF: respect a user who already had suspend disabled.
+    if (!on && this._prevSuspendWhenHidden === false) return;
+    this.dispatchEvent(new CustomEvent("hass-suspend-when-hidden", {
+      detail: { suspend: !on },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   _setPipMetadata() {
     if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
     try {

@@ -48,18 +48,23 @@ def test_pagehide_listener_wired(card_source: str) -> None:
 
 def test_pagehide_calls_stop_live_video(card_source: str) -> None:
     """Pin the handler body: must call `_stopLiveVideo()` so the
-    RTCPeerConnection + WS subscription are torn down before unload."""
-    # Find the pagehide handler assignment line and check it stops the video.
-    # Anchored to `_pagehideHandler` so an unrelated `pagehide` listener
-    # elsewhere wouldn't pass this test.
+    RTCPeerConnection + WS subscription are torn down before unload —
+    EXCEPT when this card owns the PiP window, in which case it must NOT
+    tear down (Chrome fires `pagehide` when it freezes a long-hidden tab;
+    tearing down then kills a watched floating stream — v14.0.0 fix)."""
     assert "_pagehideHandler" in card_source
-    # Locate the handler body — single-line arrow function is fine
     handler_idx = card_source.find("_pagehideHandler =")
     assert handler_idx > 0, "_pagehideHandler assignment missing"
-    handler_window = card_source[handler_idx : handler_idx + 200]
+    # Widened window: the handler now carries a PiP-guard (comment + ownsPip).
+    handler_window = card_source[handler_idx : handler_idx + 1200]
     assert "_stopLiveVideo()" in handler_window, (
-        "pagehide handler must call this._stopLiveVideo() to flush "
-        "pc.close() + WS-unsubscribe before page unloads."
+        "pagehide handler must still call this._stopLiveVideo() to flush "
+        "pc.close() + WS-unsubscribe before a real unload."
+    )
+    # The v14 guard: a PiP-owned stream is NOT torn down on pagehide.
+    assert "ownsPip" in handler_window and "if (ownsPip) return;" in handler_window, (
+        "pagehide handler must skip teardown when this card owns the PiP "
+        "window (else a tab-freeze kills the floating stream)."
     )
 
 

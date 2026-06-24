@@ -1195,6 +1195,189 @@ test("_scheduleLiveRecovery reconnects PiP-safely only when live+streaming+conne
   expect(r.stoppedWhenNotLive, "no-op when no live stream is active").toBe(0);
 });
 
+test("_scheduleLiveRecovery is a no-op while the tab is hidden and not PiP-owned, but runs when visible (keep-stream-alive fix)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    let stopCount = 0;
+    card._stopLiveVideo = () => { stopCount++; card._liveVideoActive = false; };
+    card._startLiveVideo = () => {};
+    card._isStreaming = () => true;
+
+    const setVis = (state) => Object.defineProperty(document, "visibilityState",
+      { configurable: true, get: () => state });
+    const origDesc = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+
+    // Hidden + not PiP-owned → suppressed (no teardown; the stream stays alive and
+    // resumes on return). This is the whole point of the keep-alive change.
+    setVis("hidden");
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("background blip");
+    const stoppedWhileHidden = stopCount; // expect 0
+
+    // Visible → recovery proceeds (someone is watching).
+    setVis("visible");
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("real freeze on return");
+    const stoppedWhileVisible = stopCount; // expect 1
+
+    if (origDesc) Object.defineProperty(document, "visibilityState", origDesc);
+    return { stoppedWhileHidden, stoppedWhileVisible };
+  });
+  expect(r.stoppedWhileHidden, "hidden non-PiP tab does NOT tear down the kept-alive stream").toBe(0);
+  expect(r.stoppedWhileVisible, "a visible tab still recovers a genuinely frozen stream").toBe(1);
+});
+
+// Source pin: the teardown grace is long enough to keep the stream alive across an
+// ordinary tab switch (no visible reconnect) — bumped 8s→60s on 2026-06-24.
+test("background teardown grace keeps a quick tab switch static (source pin)", () => {
+  expect(CARD_SRC).toMatch(/const BACKGROUND_TEARDOWN_GRACE_MS = 60000;/);
+  // _scheduleLiveRecovery runs only when visible AND not PiP-owned.
+  expect(CARD_SRC).toMatch(/if \(ownsPip\) return;\s*\n\s*if \(document\.visibilityState === "hidden"\) return;/);
+});
+
+// Source pin: the REAL freeze fix — `pagehide` (Chrome freezes a tab hidden ~5 min and
+// fires it) must NOT tear down a stream this card is showing in a PiP window. Proven by
+// a live getStats trace: a healthy stream was killed by the pagehide handler at the
+// 5-min hidden mark. Real PiP can't be tested headless, so pin the guard. 2026-06-24.
+test("pagehide does not tear down a PiP-owned stream (source pin)", () => {
+  expect(CARD_SRC).toMatch(/_pagehideHandler = \(\) => \{[\s\S]*?const ownsPip = v && \(document\.pictureInPictureElement === v \|\| _boschPipActive === this\);[\s\S]*?if \(ownsPip\) return;[\s\S]*?this\._stopLiveVideo\(\);/);
+});
+
+// Behavioral: the PRIMARY PiP fix — while PiP is open the card dispatches HA's
+// `hass-suspend-when-hidden` event with suspend:false so HA does NOT unmount the
+// Lovelace panel after 5 min hidden (which was killing the stream + PiP). On PiP
+// exit it restores, but never re-enables suspend for a user who had it off.
+// LIVE-CONFIRMED: suspendWhenHidden flips true→false on PiP open. 2026-06-24.
+test("_setBackgroundKeepAlive dispatches hass-suspend-when-hidden and restores correctly", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    const events = [];
+    card.addEventListener("hass-suspend-when-hidden", (e) => events.push(e.detail.suspend));
+
+    // Case A: prior setting = suspend ON (default) → keep-alive on fires false, off restores true.
+    card._hass = { suspendWhenHidden: true };
+    card._setBackgroundKeepAlive(true);
+    const onFiredFalse = events[events.length - 1]; // expect false
+    card._setBackgroundKeepAlive(false);
+    const offRestoredTrue = events[events.length - 1]; // expect true (restore default)
+
+    // Case B: user had suspend OFF in their profile → keep-alive on fires false,
+    // off must NOT re-enable (no event fired by the off-call).
+    card._hass = { suspendWhenHidden: false };
+    const before = events.length;
+    card._setBackgroundKeepAlive(true);   // fires false
+    const onCount = events.length - before; // expect 1
+    card._setBackgroundKeepAlive(false);  // must NOT fire (respect user's off)
+    const offCount = events.length - before - 1; // expect 0
+
+    return { onFiredFalse, offRestoredTrue, onCount, offCount, total: events.length };
+  });
+  expect(r.onFiredFalse, "keep-alive ON dispatches suspend:false").toBe(false);
+  expect(r.offRestoredTrue, "keep-alive OFF restores suspend:true when default").toBe(true);
+  expect(r.onCount, "keep-alive ON always dispatches once").toBe(1);
+  expect(r.offCount, "keep-alive OFF does NOT re-enable suspend for a user who had it off").toBe(0);
+});
+
+// Source pin: keep-alive is wired into both PiP enter paths (W3C + webkit) and restored
+// on both exit paths. 2026-06-24.
+test("background keep-alive is wired on PiP enter/exit (source pin)", () => {
+  expect(CARD_SRC).toMatch(/_setBackgroundKeepAlive\(on\) \{[\s\S]*?hass-suspend-when-hidden[\s\S]*?suspend: !on/);
+  expect(CARD_SRC).toMatch(/enterpictureinpicture[\s\S]*?_setBackgroundKeepAlive\(true\)/);
+  expect(CARD_SRC).toMatch(/leavepictureinpicture[\s\S]*?_setBackgroundKeepAlive\(false\)/);
+});
+
+// Regression: an intentional stop / privacy-ON must NOT be revived by the resume
+// path. _resumeLiveStreamIfNeeded bails when privacy is ON even though the live
+// stream switch (a SEPARATE entity) still reads "on". 2026-06-24 (kill-zombies).
+test("_resumeLiveStreamIfNeeded does not revive the stream while privacy mode is ON", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    let startCount = 0;
+    card._hass = {};                       // _resumeLiveStreamIfNeeded bails on !_hass otherwise
+    card._startLiveVideo = () => { startCount++; };
+    card._isStreaming = () => true;        // stream switch still "on"
+    card._liveVideoActive = false;
+    card._startingLiveVideo = false; card._waitingForStream = false; card._reconnectingLiveVideo = false;
+
+    // privacy ON → must bail before _startLiveVideo, even with _isStreaming()=true.
+    card._getEffectiveState = (id) => (id === card._entities.privacy ? "on" : "off");
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 700)); // outlast the 500ms defer
+    const startedUnderPrivacy = startCount; // expect 0
+
+    // privacy OFF → resume is allowed again.
+    card._getEffectiveState = () => "off";
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 700));
+    const startedWithoutPrivacy = startCount; // expect 1
+
+    return { startedUnderPrivacy, startedWithoutPrivacy };
+  });
+  expect(r.startedUnderPrivacy, "privacy ON suppresses any live-video revival").toBe(0);
+  expect(r.startedWithoutPrivacy, "privacy OFF allows the normal resume").toBe(1);
+});
+
+// Behavioral: with PiP simulated (document.pictureInPictureElement === cam-video),
+// _scheduleLiveRecovery is a no-op (its null+load rebuild would freeze the PiP
+// window); once PiP is gone it recovers normally. Matches HA core ha-web-rtc-player.
+// 2026-06-24.
+test("_scheduleLiveRecovery is suppressed while PiP-owned, runs once PiP is gone", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    let stopCount = 0;
+    card._stopLiveVideo = () => { stopCount++; card._liveVideoActive = false; };
+    card._startLiveVideo = () => {};
+    card._isStreaming = () => true;
+
+    const v = card.shadowRoot && card.shadowRoot.getElementById("cam-video");
+    if (!v) return { skipped: true };
+    // Simulate this card owning the PiP window (browser-authoritative path).
+    Object.defineProperty(document, "pictureInPictureElement",
+      { configurable: true, get: () => v });
+
+    // PiP-owned → suppressed even though visible.
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("pip blip");
+    const stoppedWhilePip = stopCount; // expect 0
+
+    // PiP gone → recovery runs again.
+    Object.defineProperty(document, "pictureInPictureElement",
+      { configurable: true, get: () => null });
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("blip after pip closed");
+    const stoppedAfterPip = stopCount; // expect 1
+
+    return { stoppedWhilePip, stoppedAfterPip };
+  });
+  if (r.skipped) return; // cam-video not rendered in this harness build — source pins cover the wiring
+  expect(r.stoppedWhilePip, "PiP-owned → no teardown (would freeze the floating window)").toBe(0);
+  expect(r.stoppedAfterPip, "once PiP is gone, recovery runs normally").toBe(1);
+});
+
 // Source pins for the un-throttled freeze-detection wiring (these survive in src
 // even though the runtime paths need a real PiP window + go2rtc to exercise).
 test("PiP-freeze fix is wired: rVFC heartbeat, track-mute + connection-failed recovery, frameFrozen escalation (source pin)", () => {
